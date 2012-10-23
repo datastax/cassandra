@@ -199,8 +199,13 @@ public abstract class SSTable
             catch (FileNotFoundException e)
             {
                 Set<Component> components = discoverComponentsFor(desc);
+
+                if (components.isEmpty())
+                    return components; // sstable doesn't exist yet
+
                 if (!components.contains(Component.TOC))
                     components.add(Component.TOC);
+
                 appendTOC(desc, components);
                 return components;
             }
