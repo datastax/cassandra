@@ -38,8 +38,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TProtocol;
-import org.apache.thrift.transport.TFramedTransport;
-import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
 
 public class BulkLoader
@@ -55,6 +53,7 @@ public class BulkLoader
     private static final String USER_OPTION = "username";
     private static final String PASSWD_OPTION = "password";
     private static final String THROTTLE_MBITS = "throttle";
+    private static final String TRANSPORT_FACTORY_OPTION = "transport";
 
     public static void main(String args[]) throws IOException
     {
@@ -62,7 +61,7 @@ public class BulkLoader
         try
         {
             OutputHandler handler = new OutputHandler.SystemOutput(options.verbose, options.debug);
-            SSTableLoader loader = new SSTableLoader(options.directory, new ExternalClient(handler, options.hosts, options.rpcPort, options.user, options.passwd), handler);
+            SSTableLoader loader = new SSTableLoader(options.directory, new ExternalClient(handler, options.hosts, options.rpcPort, options.user, options.passwd, options.transportFactory), handler);
             DatabaseDescriptor.setStreamThroughputOutboundMegabitsPerSec(options.throttle);
             SSTableLoader.LoaderFuture future = loader.stream(options.ignores);
 
@@ -185,14 +184,16 @@ public class BulkLoader
         private final int rpcPort;
         private final String user;
         private final String passwd;
+        private TClientTransportFactory transportFactory;
 
-        public ExternalClient(OutputHandler outputHandler, Set<InetAddress> hosts, int port, String user, String passwd)
+        public ExternalClient(OutputHandler outputHandler, Set<InetAddress> hosts, int port, String user, String passwd, TClientTransportFactory transportFactory)
         {
             super();
             this.hosts = hosts;
             this.rpcPort = port;
             this.user = user;
             this.passwd = passwd;
+            this.transportFactory = transportFactory;
         }
 
         public void init(String keyspace)
@@ -204,8 +205,7 @@ public class BulkLoader
                 {
                     // Query endpoint to ranges map and schemas from thrift
                     InetAddress host = hostiter.next();
-                    Cassandra.Client client = createThriftClient(host.getHostAddress(), rpcPort, this.user, this.passwd);
-
+                    Cassandra.Client client = createThriftClient(host.getHostAddress(), rpcPort, this.user, this.passwd, this.transportFactory);
                     setPartitioner(client.describe_partitioner());
                     Token.TokenFactory tkFactory = getPartitioner().getTokenFactory();
 
@@ -240,11 +240,11 @@ public class BulkLoader
             return knownCfs.contains(cfName);
         }
 
-        private static Cassandra.Client createThriftClient(String host, int port, String user, String passwd) throws Exception
+        private static Cassandra.Client createThriftClient(String host, int port, String user, String passwd, TClientTransportFactory transportFactory) throws Exception
         {
-            TSocket socket = new TSocket(host, port);
-            TTransport trans = new TFramedTransport(socket);
-            trans.open();
+            TTransport trans = transportFactory.openTransport(host, port);
+            if (! trans.isOpen())
+                trans.open();
             TProtocol protocol = new TBinaryProtocol(trans);
             Cassandra.Client client = new Cassandra.Client(protocol);
             if (user != null && passwd != null)
@@ -270,6 +270,7 @@ public class BulkLoader
         public String user;
         public String passwd;
         public int throttle = 0;
+        public TClientTransportFactory transportFactory;
 
         public final Set<InetAddress> hosts = new HashSet<InetAddress>();
         public final Set<InetAddress> ignores = new HashSet<InetAddress>();
@@ -374,6 +375,32 @@ public class BulkLoader
                     }
                 }
 
+                if (cmd.hasOption(TRANSPORT_FACTORY_OPTION))
+                {
+                    String transportFactoryClassName = cmd.getOptionValue(TRANSPORT_FACTORY_OPTION);
+                    if (transportFactoryClassName != null) 
+                    {
+                        try
+                        {
+                            opts.transportFactory = (TClientTransportFactory) Class.forName(transportFactoryClassName).newInstance();
+                        }
+                        catch (ClassNotFoundException e) 
+                        {
+                            System.err.println("Transport factory class not found: " + transportFactoryClassName);
+                            System.exit(1);
+                        }
+                        catch (Exception e)
+                        {
+                            System.err.println("Error initialising Thrift transport factory: " + e.getMessage());
+                            System.exit(1);
+                        }
+                    }
+                    else
+                    {
+                        opts.transportFactory = new TFramedTransportFactory();
+                    }         
+                }
+                
                 return opts;
             }
             catch (ParseException e)
@@ -402,6 +429,7 @@ public class BulkLoader
             options.addOption("t",  THROTTLE_MBITS, "throttle", "throttle speed in Mbits (default unlimited)");
             options.addOption("u",  USER_OPTION, "username", "username for cassandra authentication");
             options.addOption("pw", PASSWD_OPTION, "password", "password for cassandra authentication");
+            options.addOption("tf", TRANSPORT_FACTORY_OPTION, "transport factory", "fully qualified classname of the TClientTransportFactory to use when connecting to nodes");
             return options;
         }
 
