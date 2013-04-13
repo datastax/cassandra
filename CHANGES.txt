@@ -22,7 +22,6 @@
  * Add require_client_auth option to internode ssl configuration (CASSANDRA-5120)
  * Fix possible assertion triggered in SliceFromReadCommand (CASSANDRA-5284)
 
-
 1.1.9
  * Simplify CompressedRandomAccessReader to work around JDK FD bug (CASSANDRA-5088)
  * Improve handling a changing target throttle rate mid-compaction (CASSANDRA-5087)
