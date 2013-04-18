@@ -25,6 +25,7 @@ import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -71,7 +72,7 @@ public class OutboundTcpConnection extends Thread
         expireMessages();
         try
         {
-            backlog.put(new Entry(message, id, System.currentTimeMillis()));
+            backlog.put(new Entry(message, id));
         }
         catch (InterruptedException e)
         {
@@ -123,7 +124,7 @@ public class OutboundTcpConnection extends Thread
             if (entry.timestamp < System.currentTimeMillis() - DatabaseDescriptor.getRpcTimeout())
                 dropped.incrementAndGet();
             else if (socket != null || connect())
-                writeConnected(m, id);
+                writeConnected(entry, id);
             else
                 // clear out the queue, else gossip messages back up.
                 active.clear();
@@ -145,8 +146,9 @@ public class OutboundTcpConnection extends Thread
         return dropped.get();
     }
 
-    private void writeConnected(Message message, String id)
+    private void writeConnected(Entry entry, String id)
     {
+        Message message = entry.message;
         try
         {
             write(message, id, out);
@@ -158,12 +160,32 @@ public class OutboundTcpConnection extends Thread
         }
         catch (Exception e)
         {
-            // Non IO exceptions is likely a programming error so let's not silence it
-            if (!(e instanceof IOException))
-                logger.error("error writing to " + poolReference.endPoint(), e);
-            else if (logger.isDebugEnabled())
-                logger.debug("error writing to " + poolReference.endPoint(), e);
             disconnect();
+
+            if (e instanceof IOException)
+            {
+                if (logger.isDebugEnabled())
+                    logger.debug("error writing to " + poolReference.endPoint(), e);
+
+                // if the message was important, such as a repair acknowledgement, put it back on the queue
+                // to retry after re-connecting.  See CASSANDRA-5393
+                if (e instanceof SocketException && entry.shouldRetry())
+                {
+                    try
+                    {
+                        backlog.put(new RetriedEntry(entry));
+                    }
+                    catch (InterruptedException e1)
+                    {
+                        throw new AssertionError(e1);
+                    }
+                }
+            }
+            else
+            {
+                // Non IO exceptions are likely a programming error so let's not silence them
+                logger.error("error writing to " + poolReference.endPoint(), e);
+            }
         }
     }
 
@@ -279,17 +301,36 @@ public class OutboundTcpConnection extends Thread
         }
     }
 
+    /** messages that have not been retried yet */
     private static class Entry
     {
         final Message message;
         final String id;
         final long timestamp;
 
-        Entry(Message message, String id, long timestamp)
+        Entry(Message message, String id)
         {
             this.message = message;
             this.id = id;
-            this.timestamp = timestamp;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        boolean shouldRetry()
+        {
+            return !MessagingService.DROPPABLE_VERBS.contains(message.getVerb());
+        }
+    }
+
+    private static class RetriedEntry extends Entry
+    {
+        RetriedEntry(Entry e)
+        {
+            super(e.message, e.id);
+        }
+
+        boolean shouldRetry()
+        {
+            return false;
         }
     }
 }
