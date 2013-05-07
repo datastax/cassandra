@@ -3,6 +3,8 @@ DSE backports/cherry-picks
  * NONE
 
 1.2.5
+ * fix compaction throttling bursty-ness (CASSANDRA-4316)
+ * reduce memory consumption of IndexSummary (CASSANDRA-5506)
  * remove per-row column name bloom filters (CASSANDRA-5492)
  * Include fatal errors in trace events (CASSANDRA-5447)
  * Ensure that PerRowSecondaryIndex is notified of row-level deletes
@@ -14,12 +16,22 @@ DSE backports/cherry-picks
  * Don't provide oldCfId for post-1.1 system cfs (CASSANDRA-5490)
  * Fix primary range ignores replication strategy (CASSANDRA-5424)
  * Fix shutdown of binary protocol server (CASSANDRA-5507)
+ * Fix repair -snapshot not working (CASSANDRA-5512)
+ * Set isRunning flag later in binary protocol server (CASSANDRA-5467)
+ * Fix use of CQL3 functions with descending clustering order (CASSANDRA-5472)
+ * Prevent repair when protocol version does not match (CASSANDRA-5523)
+ * Disallow renaming columns one at a time for thrift table in CQL3
+   (CASSANDRA-5531)
+ * cqlsh: add CLUSTERING ORDER BY support to DESCRIBE (CASSANDRA-5528)
+ * Add custom secondary index support to CQL3 (CASSANDRA-5484)
+ * Fix repair hanging silently on unexpected error (CASSANDRA-5229)
+ * Fix Ec2Snitch regression introduced by CASSANDRA-5171 (CASSANDRA-5432)
 Merged from 1.1
  * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
- * Use allocator information to improve memtable memory usage estimate 
+ * Use allocator information to improve memtable memory usage estimate
    (CASSANDRA-5497)
  * Fix trying to load deleted row into row cache on startup (CASSANDRA-4463)
-
+ * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
 
 1.2.4
  * Ensure that PerRowSecondaryIndex updates see the most recent values
@@ -179,7 +191,14 @@ Merged from 1.1:
  * Adds E notation for floating point numbers (CASSANDRA-4927)
  * Detect (and warn) unintentional use of the cql2 thrift methods when cql3 was
    intended (CASSANDRA-5172)
-Merged from 1.1:
+ * cli: Quote ks and cf names in schema output when needed (CASSANDRA-5052)
+ * Fix bad default for min/max timestamp in SSTableMetadata (CASSANDRA-5372)
+ * Fix cf name extraction from manifest in Directories.migrateFile() (CASSANDRA-5242)
+ * Support pluggable internode authentication (CASSANDRA-5401)
+ * Replace mistaken usage of commons-logging with slf4j (CASSANDRA-5464)
+
+
+1.1.10
  * fix saved key cache not loading at startup (CASSANDRA-5166)
  * fix ConcurrentModificationException in getBootstrapSource (CASSANDRA-5170)
  * fix sstable maxtimestamp for row deletes and pre-1.1.1 sstables (CASSANDRA-5153)
