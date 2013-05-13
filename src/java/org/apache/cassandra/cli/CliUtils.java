@@ -46,6 +46,12 @@ public class CliUtils
         // single quotes are not escaped in java, need to be for cli
         return StringEscapeUtils.escapeJava(b).replace("\'", "\\'");
     }
+
+    public static String maybeEscapeName(String name)
+    {
+        return Character.isLetter(name.charAt(0)) ? name : "\'" + name + "\'";
+    }
+
     /**
      * Returns IndexOperator from string representation
      * @param operator - string representing IndexOperator (=, >=, >, <, <=)

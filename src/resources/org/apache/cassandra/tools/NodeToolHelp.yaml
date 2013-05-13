@@ -49,6 +49,15 @@ commands:
   - name: compactionstats
     help: |
       Print statistics on compactions
+  - name: disablebinary
+    help: |
+      Disable native transport (binary protocol)
+  - name: enablebinary
+    help: |
+      Reenable native transport (binary protocol)
+  - name: statusbinary
+    help: |
+      Status of native transport (binary protocol)
   - name: disablehandoff
     help: |
       Disable the future hints storing on the current node
@@ -63,7 +72,7 @@ commands:
       Pause hints delivery process
   - name: disablegossip
     help: |
-      Disable gossip (effectively marking the node dead)
+      Disable gossip (effectively marking the node down)
   - name: enablegossip
     help: |
       Reenable gossip
@@ -136,15 +145,19 @@ commands:
   - name: scrub [keyspace] [cfnames]
     help: |
       Scrub (rebuild sstables for) one or more column families
-  - name: upgradesstables [keyspace] [cfnames]
+  - name: upgradesstables [-a|--include-all-sstables] [keyspace] [cfnames]
     help: |
-      Scrub (rebuild sstables for) one or more column families
+      Rewrite sstables (for the requested column families) that are not on the current version (thus upgrading them to said current version).
+      Use -a to include all sstables, even those already on the current version.
   - name: setcompactionthreshold <keyspace> <cfname>
     help: |
       Set min and max compaction thresholds for a given column family
   - name: getcompactionthreshold <keyspace> <cfname>
     help: |
       Print min and max compaction thresholds for a given column family
+  - name: stop <compaction_type>
+    help: |
+      Supported types are COMPACTION, VALIDATION, CLEANUP, SCRUB, INDEX_BUILD
   - name: cfhistograms <keyspace> <cfname>
     help: |
       Print statistic histograms for a given column family

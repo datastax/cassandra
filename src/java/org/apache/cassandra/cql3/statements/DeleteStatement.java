@@ -29,7 +29,6 @@ import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.thrift.ThriftValidation;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * A <code>DELETE</code> parsed from a CQL query statement.
@@ -74,7 +73,7 @@ public class DeleteStatement extends ModificationStatement
         boolean isRange = cfDef.isCompact ? !fullKey : (!fullKey || toRemove.isEmpty());
 
         if (!toRemove.isEmpty() && isRange)
-            throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s since %s specified", firstEmpty, toRemove.iterator().next().columnName));
+            throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s since %s specified", firstEmpty, toRemove.get(0).columnName));
 
         Set<ByteBuffer> toRead = null;
         for (Operation op : toRemove)
@@ -150,7 +149,7 @@ public class DeleteStatement extends ModificationStatement
         {
             CFDefinition.Name name = cfDef.get(deletion.affectedColumn());
             if (name == null)
-                throw new InvalidRequestException(String.format("Unknown identifier %s", name));
+                throw new InvalidRequestException(String.format("Unknown identifier %s", deletion.affectedColumn()));
 
             // For compact, we only have one value except the key, so the only form of DELETE that make sense is without a column
             // list. However, we support having the value name for coherence with the static/sparse case

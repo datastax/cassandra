@@ -66,6 +66,7 @@ public class DatabaseDescriptor
     private static InetAddress broadcastAddress;
     private static InetAddress rpcAddress;
     private static SeedProvider seedProvider;
+    private static IInternodeAuthenticator internodeAuthenticator;
 
     /* Hashing strategy Random or OPHF */
     private static IPartitioner<?> partitioner;
@@ -146,8 +147,8 @@ public class DatabaseDescriptor
             Yaml yaml = new Yaml(new Loader(constructor));
             conf = (Config)yaml.load(input);
 
-            if (!System.getProperty("os.arch").contains("64"))
-                logger.info("32bit JVM detected.  It is recommended to run Cassandra on a 64bit JVM for better performance.");
+            logger.info("Data files directories: " + Arrays.toString(conf.data_file_directories));
+            logger.info("Commit log directory: " + conf.commitlog_directory);
 
             if (conf.commitlog_sync == null)
             {
@@ -218,14 +219,21 @@ public class DatabaseDescriptor
             if (conf.authorizer != null)
                 authorizer = FBUtilities.construct(conf.authorizer, "authorizer");
 
+            if (conf.internode_authenticator != null)
+                internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
+            else
+                internodeAuthenticator = new AllowAllInternodeAuthenticator();
+
             authenticator.validateConfiguration();
             authorizer.validateConfiguration();
+            internodeAuthenticator.validateConfiguration();
 
             /* Hashing strategy */
             if (conf.partitioner == null)
             {
                 throw new ConfigurationException("Missing directive: partitioner");
             }
+
             try
             {
                 partitioner = FBUtilities.newPartitioner(System.getProperty("cassandra.partitioner", conf.partitioner));
@@ -393,7 +401,9 @@ public class DatabaseDescriptor
                 logger.debug("setting auto_bootstrap to " + conf.auto_bootstrap);
             }
 
-           if (conf.in_memory_compaction_limit_in_mb != null && conf.in_memory_compaction_limit_in_mb <= 0)
+            logger.info((conf.multithreaded_compaction ? "" : "Not ") + "using multi-threaded compaction");
+
+            if (conf.in_memory_compaction_limit_in_mb != null && conf.in_memory_compaction_limit_in_mb <= 0)
             {
                 throw new ConfigurationException("in_memory_compaction_limit_in_mb must be a positive integer");
             }
@@ -403,18 +413,6 @@ public class DatabaseDescriptor
 
             if (conf.concurrent_compactors <= 0)
                 throw new ConfigurationException("concurrent_compactors should be strictly greater than 0");
-
-            if (conf.compaction_throughput_mb_per_sec == null)
-                conf.compaction_throughput_mb_per_sec = 16;
-
-            if (conf.stream_throughput_outbound_megabits_per_sec == null)
-                conf.stream_throughput_outbound_megabits_per_sec = 400;
-
-            if (conf.rpc_min_threads == null)
-                conf.rpc_min_threads = 16;
-
-            if (conf.rpc_max_threads == null)
-                conf.rpc_max_threads = Integer.MAX_VALUE;
 
             /* data file and commit log directories. they get created later, when they're needed. */
             if (conf.commitlog_directory != null && conf.data_file_directories != null && conf.saved_caches_directory != null)
@@ -580,7 +578,7 @@ public class DatabaseDescriptor
                 {
                     public boolean accept(File pathname)
                     {
-                        return pathname.isDirectory();
+                        return (pathname.isDirectory() && !Schema.systemKeyspaceNames.contains(pathname.getName()));
                     }
                 }).length;
 
@@ -940,6 +938,11 @@ public class DatabaseDescriptor
         return broadcastAddress;
     }
 
+    public static IInternodeAuthenticator getInternodeAuthenticator()
+    {
+        return internodeAuthenticator;
+    }
+
     public static void setBroadcastAddress(InetAddress broadcastAdd)
     {
         broadcastAddress = broadcastAdd;
@@ -1164,20 +1167,6 @@ public class DatabaseDescriptor
     public static boolean getPreheatKeyCache()
     {
         return conf.compaction_preheat_key_cache;
-    }
-
-    public static void validateMemtableThroughput(int sizeInMB) throws ConfigurationException
-    {
-        if (sizeInMB <= 0)
-            throw new ConfigurationException("memtable_throughput_in_mb must be greater than 0.");
-    }
-
-    public static void validateMemtableOperations(double operationsInMillions) throws ConfigurationException
-    {
-        if (operationsInMillions <= 0)
-            throw new ConfigurationException("memtable_operations_in_millions must be greater than 0.0.");
-        if (operationsInMillions > Long.MAX_VALUE / 1024 * 1024)
-            throw new ConfigurationException("memtable_operations_in_millions must be less than " + Long.MAX_VALUE / 1024 * 1024);
     }
 
     public static boolean isIncrementalBackupsEnabled()

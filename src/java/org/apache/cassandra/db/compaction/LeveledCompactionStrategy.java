@@ -24,6 +24,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.*;
 import com.google.common.primitives.Doubles;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +35,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableReader;
-import org.apache.cassandra.io.sstable.SSTableScanner;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -179,7 +179,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy implem
             {
                 // L0 makes no guarantees about overlapping-ness.  Just create a direct scanner for each
                 for (SSTableReader sstable : byLevel.get(level))
-                    scanners.add(sstable.getDirectScanner(range));
+                    scanners.add(sstable.getDirectScanner(range, CompactionManager.instance.getRateLimiter()));
             }
             else
             {
@@ -200,7 +200,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy implem
         private final Iterator<SSTableReader> sstableIterator;
         private final long totalLength;
 
-        private SSTableScanner currentScanner;
+        private ICompactionScanner currentScanner;
         private long positionOffset;
 
         public LeveledScanner(Collection<SSTableReader> sstables, Range<Token> range)
@@ -209,7 +209,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy implem
             this.sstables = new ArrayList<SSTableReader>(sstables);
             Collections.sort(this.sstables, SSTable.sstableComparator);
             sstableIterator = this.sstables.iterator();
-            currentScanner = sstableIterator.next().getDirectScanner(range);
+            currentScanner = sstableIterator.next().getDirectScanner(range, CompactionManager.instance.getRateLimiter());
 
             long length = 0;
             for (SSTableReader sstable : sstables)
@@ -234,7 +234,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy implem
                         currentScanner = null;
                         return endOfData();
                     }
-                    currentScanner = sstableIterator.next().getDirectScanner(range);
+                    currentScanner = sstableIterator.next().getDirectScanner(range, CompactionManager.instance.getRateLimiter());
                 }
             }
             catch (IOException e)

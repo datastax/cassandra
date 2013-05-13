@@ -80,12 +80,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public static final ExecutorService postFlushExecutor = new JMXEnabledThreadPoolExecutor("MemtablePostFlusher");
 
-    static
-    {
-        // (can block if flush queue fills up, so don't put on scheduledTasks)
-        StorageService.optionalTasks.scheduleWithFixedDelay(new MeteredFlusher(), 1000, 1000, TimeUnit.MILLISECONDS);
-    }
-
     public final Table table;
     public final String columnFamily;
     public final CFMetaData metadata;
@@ -981,9 +975,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         CompactionManager.instance.performScrub(ColumnFamilyStore.this);
     }
 
-    public void sstablesRewrite() throws ExecutionException, InterruptedException
+    public void sstablesRewrite(boolean excludeCurrentVersion) throws ExecutionException, InterruptedException
     {
-        CompactionManager.instance.performSSTableRewrite(ColumnFamilyStore.this);
+        CompactionManager.instance.performSSTableRewrite(ColumnFamilyStore.this, excludeCurrentVersion);
     }
 
     public void markCompacted(Collection<SSTableReader> sstables, OperationType compactionType)
@@ -1945,8 +1939,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // and adds generation of live ancestors
         for (SSTableReader sstable : sstables)
         {
-            sstableMetadataCollector.updateMinTimestamp(sstable.getMinTimestamp());
-            sstableMetadataCollector.updateMaxTimestamp(sstable.getMaxTimestamp());
             sstableMetadataCollector.addAncestor(sstable.descriptor.generation);
             for (Integer i : sstable.getAncestors())
             {

@@ -1,11 +1,116 @@
 
 DSE backports/cherry-picks
- * remove the index entry on oldColumn when new column is a tombstone
-   (CASSANDRA-5395)
- * Ensure that PerRowSecondaryIndex updates see the most recent values
-   (CASSANDRA-5397)
+ * NONE
+
+1.2.5
+ * fix compaction throttling bursty-ness (CASSANDRA-4316)
+ * reduce memory consumption of IndexSummary (CASSANDRA-5506)
+ * remove per-row column name bloom filters (CASSANDRA-5492)
+ * Include fatal errors in trace events (CASSANDRA-5447)
  * Ensure that PerRowSecondaryIndex is notified of row-level deletes
    (CASSANDRA-5445)
+ * Allow empty blob literals in CQL3 (CASSANDRA-5452)
+ * Fix streaming RangeTombstones at column index boundary (CASSANDRA-5418)
+ * Fix preparing statements when current keyspace is not set (CASSANDRA-5468)
+ * Fix SemanticVersion.isSupportedBy minor/patch handling (CASSANDRA-5496)
+ * Don't provide oldCfId for post-1.1 system cfs (CASSANDRA-5490)
+ * Fix primary range ignores replication strategy (CASSANDRA-5424)
+ * Fix shutdown of binary protocol server (CASSANDRA-5507)
+ * Fix repair -snapshot not working (CASSANDRA-5512)
+ * Set isRunning flag later in binary protocol server (CASSANDRA-5467)
+ * Fix use of CQL3 functions with descending clustering order (CASSANDRA-5472)
+ * Prevent repair when protocol version does not match (CASSANDRA-5523)
+ * Disallow renaming columns one at a time for thrift table in CQL3
+   (CASSANDRA-5531)
+ * cqlsh: add CLUSTERING ORDER BY support to DESCRIBE (CASSANDRA-5528)
+ * Add custom secondary index support to CQL3 (CASSANDRA-5484)
+ * Fix repair hanging silently on unexpected error (CASSANDRA-5229)
+ * Fix Ec2Snitch regression introduced by CASSANDRA-5171 (CASSANDRA-5432)
+Merged from 1.1
+ * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
+ * Use allocator information to improve memtable memory usage estimate
+   (CASSANDRA-5497)
+ * Fix trying to load deleted row into row cache on startup (CASSANDRA-4463)
+ * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
+
+1.2.4
+ * Ensure that PerRowSecondaryIndex updates see the most recent values
+   (CASSANDRA-5397)
+ * avoid duplicate index entries ind PrecompactedRow and 
+   ParallelCompactionIterable (CASSANDRA-5395)
+ * remove the index entry on oldColumn when new column is a tombstone 
+   (CASSANDRA-5395)
+ * Change default stream throughput from 400 to 200 mbps (CASSANDRA-5036)
+ * Gossiper logs DOWN for symmetry with UP (CASSANDRA-5187)
+ * Fix mixing prepared statements between keyspaces (CASSANDRA-5352)
+ * Fix consistency level during bootstrap - strike 3 (CASSANDRA-5354)
+ * Fix transposed arguments in AlreadyExistsException (CASSANDRA-5362)
+ * Improve asynchronous hint delivery (CASSANDRA-5179)
+ * Fix Guava dependency version (12.0 -> 13.0.1) for Maven (CASSANDRA-5364)
+ * Validate that provided CQL3 collection value are < 64K (CASSANDRA-5355)
+ * Make upgradeSSTable skip current version sstables by default (CASSANDRA-5366)
+ * Optimize min/max timestamp collection (CASSANDRA-5373)
+ * Invalid streamId in cql binary protocol when using invalid CL 
+   (CASSANDRA-5164)
+ * Fix validation for IN where clauses with collections (CASSANDRA-5376)
+ * Copy resultSet on count query to avoid ConcurrentModificationException 
+   (CASSANDRA-5382)
+ * Correctly typecheck in CQL3 even with ReversedType (CASSANDRA-5386)
+ * Fix streaming compressed files when using encryption (CASSANDRA-5391)
+ * cassandra-all 1.2.0 pom missing netty dependency (CASSANDRA-5392)
+ * Fix writetime/ttl functions on null values (CASSANDRA-5341)
+ * Fix NPE during cql3 select with token() (CASSANDRA-5404)
+ * IndexHelper.skipBloomFilters won't skip non-SHA filters (CASSANDRA-5385)
+ * cqlsh: Print maps ordered by key, sort sets (CASSANDRA-5413)
+ * Add null syntax support in CQL3 for inserts (CASSANDRA-3783)
+ * Allow unauthenticated set_keyspace() calls (CASSANDRA-5423)
+ * Fix potential incremental backups race (CASSANDRA-5410)
+ * Fix prepared BATCH statements with batch-level timestamps (CASSANDRA-5415)
+ * Allow overriding superuser setup delay (CASSANDRA-5430)
+ * cassandra-shuffle with JMX usernames and passwords (CASSANDRA-5431)
+Merged from 1.1:
+ * cli: Quote ks and cf names in schema output when needed (CASSANDRA-5052)
+ * Fix bad default for min/max timestamp in SSTableMetadata (CASSANDRA-5372)
+ * Fix cf name extraction from manifest in Directories.migrateFile() 
+   (CASSANDRA-5242)
+ * Support pluggable internode authentication (CASSANDRA-5401)
+
+
+1.2.3
+ * add check for sstable overlap within a level on startup (CASSANDRA-5327)
+ * replace ipv6 colons in jmx object names (CASSANDRA-5298, 5328)
+ * Avoid allocating SSTableBoundedScanner during repair when the range does 
+   not intersect the sstable (CASSANDRA-5249)
+ * Don't lowercase property map keys (this breaks NTS) (CASSANDRA-5292)
+ * Fix composite comparator with super columns (CASSANDRA-5287)
+ * Fix insufficient validation of UPDATE queries against counter cfs
+   (CASSANDRA-5300)
+ * Fix PropertyFileSnitch default DC/Rack behavior (CASSANDRA-5285)
+ * Handle null values when executing prepared statement (CASSANDRA-5081)
+ * Add netty to pom dependencies (CASSANDRA-5181)
+ * Include type arguments in Thrift CQLPreparedResult (CASSANDRA-5311)
+ * Fix compaction not removing columns when bf_fp_ratio is 1 (CASSANDRA-5182)
+ * cli: Warn about missing CQL3 tables in schema descriptions (CASSANDRA-5309)
+ * Re-enable unknown option in replication/compaction strategies option for
+   backward compatibility (CASSANDRA-4795)
+ * Add binary protocol support to stress (CASSANDRA-4993)
+ * cqlsh: Fix COPY FROM value quoting and null handling (CASSANDRA-5305)
+ * Fix repair -pr for vnodes (CASSANDRA-5329)
+ * Relax CL for auth queries for non-default users (CASSANDRA-5310)
+ * Fix AssertionError during repair (CASSANDRA-5245)
+ * Don't announce migrations to pre-1.2 nodes (CASSANDRA-5334)
+Merged from 1.1:
+ * Update offline scrub for 1.0 -> 1.1 directory structure (CASSANDRA-5195)
+ * add tmp flag to Descriptor hashcode (CASSANDRA-4021)
+ * fix logging of "Found table data in data directories" when only system tables
+   are present (CASSANDRA-5289)
+ * cli: Add JMX authentication support (CASSANDRA-5080)
+ * nodetool: ability to repair specific range (CASSANDRA-5280)
+ * Fix possible assertion triggered in SliceFromReadCommand (CASSANDRA-5284)
+ * cqlsh: Add inet type support on Windows (ipv4-only) (CASSANDRA-4801)
+ * Fix race when initializing ColumnFamilyStore (CASSANDRA-5350)
+ * Add UseTLAB JVM flag (CASSANDRA-5361)
+
 
 1.2.2
  * fix potential for multiple concurrent compactions of the same sstables
@@ -86,7 +191,14 @@ DSE backports/cherry-picks
  * Adds E notation for floating point numbers (CASSANDRA-4927)
  * Detect (and warn) unintentional use of the cql2 thrift methods when cql3 was
    intended (CASSANDRA-5172)
-Merged from 1.1:
+ * cli: Quote ks and cf names in schema output when needed (CASSANDRA-5052)
+ * Fix bad default for min/max timestamp in SSTableMetadata (CASSANDRA-5372)
+ * Fix cf name extraction from manifest in Directories.migrateFile() (CASSANDRA-5242)
+ * Support pluggable internode authentication (CASSANDRA-5401)
+ * Replace mistaken usage of commons-logging with slf4j (CASSANDRA-5464)
+
+
+1.1.10
  * fix saved key cache not loading at startup (CASSANDRA-5166)
  * fix ConcurrentModificationException in getBootstrapSource (CASSANDRA-5170)
  * fix sstable maxtimestamp for row deletes and pre-1.1.1 sstables (CASSANDRA-5153)
@@ -383,7 +495,6 @@ Merged from 1.1:
 Merged from 1.0:
  * Switch from NBHM to CHM in MessagingService's callback map, which
    prevents OOM in long-running instances (CASSANDRA-4708)
- * Pluggable Thrift transport factories for CLI (CASSANDRA-4609)
 
 
 1.1.5

@@ -28,10 +28,11 @@ import java.util.HashMap;
 import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
+import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Table;
@@ -46,6 +47,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.*;
 
+@RunWith(OrderedJUnit4ClassRunner.class)
 public class BootStrapperTest extends SchemaLoader
 {
     @Test

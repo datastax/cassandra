@@ -19,12 +19,12 @@ package org.apache.cassandra.locator;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.cassandra.db.Table;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.Token;
 
@@ -69,10 +69,14 @@ public class SimpleStrategy extends AbstractReplicationStrategy
 
     public void validateOptions() throws ConfigurationException
     {
-        validateExpectedOptions(Arrays.<String>asList("replication_factor"));
         String rf = configOptions.get("replication_factor");
         if (rf == null)
             throw new ConfigurationException("SimpleStrategy requires a replication_factor strategy option.");
         validateReplicationFactor(rf);
+    }
+
+    public Collection<String> recognizedOptions()
+    {
+        return Collections.<String>singleton("replication_factor");
     }
 }

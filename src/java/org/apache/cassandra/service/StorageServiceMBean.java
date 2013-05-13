@@ -242,7 +242,7 @@ public interface StorageServiceMBean extends NotificationEmitter
      * Rewrite all sstables to the latest version.
      * Unlike scrub, it doesn't skip bad rows and do not snapshot sstables first.
      */
-    public void upgradeSSTables(String tableName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
+    public void upgradeSSTables(String tableName, boolean excludeCurrentVersion, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
 
     /**
      * Flush all memtables for the given column families, or all columnfamilies for the given table
@@ -264,6 +264,11 @@ public interface StorageServiceMBean extends NotificationEmitter
      * @see #forceTableRepair(String, boolean, boolean, String...)
      */
     public int forceRepairAsync(String keyspace, boolean isSequential, boolean isLocal, boolean primaryRange, String... columnFamilies);
+
+    /**
+     * Same as forceRepairAsync, but handles a specified range
+     */
+    public int forceRepairRangeAsync(String beginToken, String endToken, final String tableName, boolean isSequential, boolean isLocal, final String... columnFamilies);
 
     /**
      * Triggers proactive repair for given column families, or all columnfamilies for the given table

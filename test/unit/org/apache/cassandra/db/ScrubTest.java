@@ -80,34 +80,6 @@ public class ScrubTest extends SchemaLoader
     }
 
     @Test
-    public void testScrubFile() throws Exception
-    {
-        copySSTables(CF2);
-
-        Table table = Table.open(TABLE);
-        ColumnFamilyStore cfs = table.getColumnFamilyStore(CF2);
-        cfs.loadNewSSTables();
-        assert cfs.getSSTables().size() > 0;
-
-        List<Row> rows;
-        boolean caught = false;
-        try
-        {
-             rows = cfs.getRangeSlice(ByteBufferUtil.bytes("1"), Util.range("", ""), 1000, new IdentityQueryFilter(), null);
-             fail("This slice should fail");
-        }
-        catch (NegativeArraySizeException e)
-        {
-            caught = true;
-        }
-        assert caught : "'corrupt' test file actually was not";
-
-        CompactionManager.instance.performScrub(cfs);
-        rows = cfs.getRangeSlice(ByteBufferUtil.bytes("1"), Util.range("", ""), 1000, new IdentityQueryFilter(), null);
-        assertEquals(100, rows.size());
-    }
-
-    @Test
     public void testScrubOneRow() throws IOException, ExecutionException, InterruptedException, ConfigurationException
     {
         CompactionManager.instance.disableAutoCompaction();
@@ -236,8 +208,4 @@ public class ScrubTest extends SchemaLoader
 
         cfs.forceBlockingFlush();
     }
-
-
-
-
 }

@@ -33,7 +33,6 @@ import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.IReadCommand;
 import org.apache.cassandra.service.RowDataResolver;
-import org.apache.cassandra.utils.IFilter;
 
 
 public abstract class ReadCommand implements IReadCommand
@@ -79,7 +78,7 @@ public abstract class ReadCommand implements IReadCommand
 
     public abstract ReadCommand copy();
 
-    public abstract Row getRow(Table table) throws IOException;
+    public abstract Row getRow(Table table);
 
     public abstract IDiskAtomFilter filter();
 

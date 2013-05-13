@@ -21,9 +21,11 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.io.ISerializer;
+import org.apache.cassandra.utils.ObjectSizes;
 
 public class DeletionTime implements Comparable<DeletionTime>
 {
@@ -34,7 +36,8 @@ public class DeletionTime implements Comparable<DeletionTime>
 
     public static final ISerializer<DeletionTime> serializer = new Serializer();
 
-    DeletionTime(long markedForDeleteAt, int localDeletionTime)
+    @VisibleForTesting
+    public DeletionTime(long markedForDeleteAt, int localDeletionTime)
     {
         this.markedForDeleteAt = markedForDeleteAt;
         this.localDeletionTime = localDeletionTime;
@@ -83,6 +86,12 @@ public class DeletionTime implements Comparable<DeletionTime>
     public boolean isDeleted(IColumn column)
     {
         return column.isMarkedForDelete() && column.getMarkedForDeleteAt() <= markedForDeleteAt;
+    }
+
+    public long memorySize()
+    {
+        long fields = TypeSizes.NATIVE.sizeof(markedForDeleteAt) + TypeSizes.NATIVE.sizeof(localDeletionTime);
+        return ObjectSizes.getFieldSize(fields);
     }
 
     private static class Serializer implements ISerializer<DeletionTime>

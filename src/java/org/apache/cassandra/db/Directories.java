@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.primitives.Longs;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -101,13 +100,13 @@ public class Directories
 
         if (!StorageService.instance.isClientMode())
         {
-            for (File dir : sstableDirectories) 
+            for (File dir : sstableDirectories)
             {
-                try 
+                try
                 {
                     FileUtils.createDirectory(dir);
                 }
-                catch (FSError e) 
+                catch (FSError e)
                 {
                     // don't just let the default exception handler do this, we need the create loop to continue
                     logger.error("Failed to create {} directory", dir);
@@ -651,7 +650,7 @@ public class Directories
             if (isManifest || (separatorIndex >= 0))
             {
                 String cfname = isManifest
-                              ? name.substring(0, name.length() - LeveledManifest.EXTENSION.length())
+                              ? getCfNameFromManifest(name)
                               : name.substring(0, separatorIndex);
 
                 int idx = cfname.indexOf(SECONDARY_INDEX_NAME_SEPARATOR); // idx > 0 => secondary index
@@ -671,6 +670,14 @@ public class Directories
         {
             throw new RuntimeException(String.format("Failed migrating file %s from pre 1.1 format.", file.getPath()), e);
         }
+    }
+
+    private static String getCfNameFromManifest(String name)
+    {
+        String withoutExt = name.substring(0, name.length() - LeveledManifest.EXTENSION.length());
+        return withoutExt.endsWith("-old") || withoutExt.endsWith("-tmp")
+                ? withoutExt.substring(0, withoutExt.length() - 4)
+                : withoutExt;
     }
 
     // Hack for tests, don't use otherwise

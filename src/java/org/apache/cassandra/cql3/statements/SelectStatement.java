@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
@@ -31,12 +30,8 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.index.SecondaryIndex;
-import org.apache.cassandra.db.index.SecondaryIndexManager;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.*;
@@ -52,7 +47,6 @@ import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.UUIDGen;
 
 /**
  * Encapsulates a completely parsed SELECT query, including the target
@@ -127,18 +121,11 @@ public class SelectStatement implements CQLStatement
 
         cl.validateForRead(keyspace());
 
-        try
-        {
-            List<Row> rows = isKeyRange
-                           ? StorageProxy.getRangeSlice(getRangeCommand(variables), cl)
-                           : StorageProxy.read(getSliceCommands(variables), cl);
+        List<Row> rows = isKeyRange
+                       ? StorageProxy.getRangeSlice(getRangeCommand(variables), cl)
+                       : StorageProxy.read(getSliceCommands(variables), cl);
 
-            return processResults(rows, variables);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return processResults(rows, variables);
     }
 
     private ResultMessage.Rows processResults(List<Row> rows, List<ByteBuffer> variables) throws RequestValidationException
@@ -149,7 +136,7 @@ public class SelectStatement implements CQLStatement
         return new ResultMessage.Rows(rset);
     }
 
-    static List<Row> readLocally(String keyspace, List<ReadCommand> cmds) throws IOException
+    static List<Row> readLocally(String keyspace, List<ReadCommand> cmds)
     {
         Table table = Table.open(keyspace);
         List<Row> rows = new ArrayList(cmds.size());
@@ -167,10 +154,6 @@ public class SelectStatement implements CQLStatement
                            : readLocally(keyspace(), getSliceCommands(Collections.<ByteBuffer>emptyList()));
 
             return processResults(rows, Collections.<ByteBuffer>emptyList());
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
         }
         catch (ExecutionException e)
         {
@@ -343,13 +326,21 @@ public class SelectStatement implements CQLStatement
             if (builder.remainingCount() == 1)
             {
                 for (Term t : r.eqValues)
-                    keys.add(builder.copy().add(t.bindAndGet(variables)).build());
+                {
+                    ByteBuffer val = t.bindAndGet(variables);
+                    if (val == null)
+                        throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", name));
+                    keys.add(builder.copy().add(val).build());
+                }
             }
             else
             {
                 if (r.eqValues.size() > 1)
                     throw new InvalidRequestException("IN is only supported on the last column of the partition key");
-                builder.add(r.eqValues.get(0).bindAndGet(variables));
+                ByteBuffer val = r.eqValues.get(0).bindAndGet(variables);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", name));
+                builder.add(val);
             }
         }
         return keys;
@@ -373,6 +364,8 @@ public class SelectStatement implements CQLStatement
             return p.getMinimumToken();
 
         ByteBuffer value = t.bindAndGet(variables);
+        if (value == null)
+            throw new InvalidRequestException("Invalid null token value");
         return p.getTokenFactory().fromByteArray(value);
     }
 
@@ -396,7 +389,7 @@ public class SelectStatement implements CQLStatement
             return false;
 
         // However, collections always entails one
-        if (cfDef.hasCollections)
+        if (selectACollection())
             return true;
 
         // Otherwise, it is a range query if it has at least one the column alias
@@ -414,8 +407,10 @@ public class SelectStatement implements CQLStatement
         assert !isColumnRange();
 
         ColumnNameBuilder builder = cfDef.getColumnNameBuilder();
+        Iterator<ColumnIdentifier> idIter = cfDef.columns.keySet().iterator();
         for (Restriction r : columnRestrictions)
         {
+            ColumnIdentifier id = idIter.next();
             assert r != null && r.isEquality();
             if (r.eqValues.size() > 1)
             {
@@ -428,7 +423,10 @@ public class SelectStatement implements CQLStatement
                 {
                     Term v = iter.next();
                     ColumnNameBuilder b = iter.hasNext() ? builder.copy() : builder;
-                    b.add(v.bindAndGet(variables));
+                    ByteBuffer val = v.bindAndGet(variables);
+                    if (val == null)
+                        throw new InvalidRequestException(String.format("Invalid null value for clustering key part %s", id));
+                    b.add(val);
                     if (cfDef.isCompact)
                         columns.add(b.build());
                     else
@@ -438,7 +436,10 @@ public class SelectStatement implements CQLStatement
             }
             else
             {
-                builder.add(r.eqValues.get(0).bindAndGet(variables));
+                ByteBuffer val = r.eqValues.get(0).bindAndGet(variables);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null value for clustering key part %s", id));
+                builder.add(val);
             }
         }
 
@@ -455,7 +456,7 @@ public class SelectStatement implements CQLStatement
         {
             // Collections require doing a slice query because a given collection is a
             // non-know set of columns, so we shouldn't get there
-            assert !cfDef.hasCollections;
+            assert !selectACollection();
 
             SortedSet<ByteBuffer> columns = new TreeSet<ByteBuffer>(cfDef.cfm.comparator);
 
@@ -485,6 +486,20 @@ public class SelectStatement implements CQLStatement
             }
             return columns;
         }
+    }
+
+    private boolean selectACollection()
+    {
+        if (!cfDef.hasCollections)
+            return false;
+
+        for (CFDefinition.Name name : selection.getColumnsList())
+        {
+            if (name.type instanceof CollectionType)
+                return true;
+        }
+
+        return false;
     }
 
     private static ByteBuffer buildBound(Bound bound,
@@ -520,13 +535,19 @@ public class SelectStatement implements CQLStatement
             if (r.isEquality())
             {
                 assert r.eqValues.size() == 1;
-                builder.add(r.eqValues.get(0).bindAndGet(variables));
+                ByteBuffer val = r.eqValues.get(0).bindAndGet(variables);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null clustering key part %s", name));
+                builder.add(val);
             }
             else
             {
                 Term t = r.bound(b);
                 assert t != null;
-                return builder.add(t.bindAndGet(variables), r.getRelation(eocBound, b)).build();
+                ByteBuffer val = t.bindAndGet(variables);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null clustering key part %s", name));
+                return builder.add(val, r.getRelation(eocBound, b)).build();
             }
         }
         // Means no relation at all or everything was an equal
@@ -559,6 +580,8 @@ public class SelectStatement implements CQLStatement
                 for (Term t : restriction.eqValues)
                 {
                     ByteBuffer value = t.bindAndGet(variables);
+                    if (value == null)
+                        throw new InvalidRequestException(String.format("Unsupported null value for indexed column %s", name));
                     if (value.remaining() > 0xFFFF)
                         throw new InvalidRequestException("Index expression values may not be larger than 64K");
                     expressions.add(new IndexExpression(name.name.key, IndexOperator.EQ, value));
@@ -571,6 +594,8 @@ public class SelectStatement implements CQLStatement
                     if (restriction.bound(b) != null)
                     {
                         ByteBuffer value = restriction.bound(b).bindAndGet(variables);
+                        if (value == null)
+                            throw new InvalidRequestException(String.format("Unsupported null value for indexed column %s", name));
                         if (value.remaining() > 0xFFFF)
                             throw new InvalidRequestException("Index expression values may not be larger than 64K");
                         expressions.add(new IndexExpression(name.name.key, restriction.getIndexOperator(b), value));
@@ -958,9 +983,12 @@ public class SelectStatement implements CQLStatement
                 }
                 // We only support IN for the last name so far
                 // TODO: #3885 allows us to extend to other parts (cf. #4762)
-                else if (restriction.eqValues.size() > 1 && i != stmt.columnRestrictions.length - 1)
+                else if (restriction.eqValues.size() > 1)
                 {
-                    throw new InvalidRequestException(String.format("PRIMARY KEY part %s cannot be restricted by IN relation", cname));
+                    if (i != stmt.columnRestrictions.length - 1)
+                        throw new InvalidRequestException(String.format("PRIMARY KEY part %s cannot be restricted by IN relation", cname));
+                    else if (stmt.selectACollection())
+                        throw new InvalidRequestException(String.format("Cannot restrict PRIMARY KEY part %s by IN relation as a collection is selected by the query", cname));
                 }
 
                 previous = cname;
@@ -1032,12 +1060,13 @@ public class SelectStatement implements CQLStatement
             {
                 stmt.isKeyRange = true;
                 boolean hasEq = false;
-                SecondaryIndexManager idxManager = Table.open(keyspace()).getColumnFamilyStore(columnFamily()).indexManager;
                 Set<ByteBuffer> indexedNames = new HashSet<ByteBuffer>();
-                for (SecondaryIndex index : idxManager.getIndexes())
+                for (ColumnDefinition cfdef : cfm.getColumn_metadata().values())
                 {
-                    for (ColumnDefinition cdef : index.getColumnDefs())
-                        indexedNames.add(cdef.name);
+                    if (cfdef.getIndexType() != null)
+                    {
+                        indexedNames.add(cfdef.name);
+                    }
                 }
 
                 // Note: we cannot use idxManager.indexes() methods because we don't have a complete column name at this point, we only

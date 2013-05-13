@@ -117,6 +117,9 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
         if (MessagingService.instance().getVersion(endpoint) < MessagingService.VERSION_117)
             return;
 
+        if (Gossiper.instance.isFatClient(endpoint))
+            return;
+
         if (Schema.instance.getVersion().equals(theirVersion))
             return;
 
@@ -220,7 +223,7 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
         if (ksm == null)
             throw new ConfigurationException(String.format("Cannot add column family '%s' to non existing keyspace '%s'.", cfm.cfName, cfm.ksName));
         else if (ksm.cfMetaData().containsKey(cfm.cfName))
-            throw new AlreadyExistsException(cfm.cfName, cfm.ksName);
+            throw new AlreadyExistsException(cfm.ksName, cfm.cfName);
 
         logger.info(String.format("Create new ColumnFamily: %s", cfm));
         announce(cfm.toSchema(FBUtilities.timestampMicros()));
@@ -305,8 +308,8 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
             if (endpoint.equals(FBUtilities.getBroadcastAddress()))
                 continue; // we've delt with localhost already
 
-            // don't send migrations to the nodes with the versions older than < 1.1
-            if (MessagingService.instance().getVersion(endpoint) < MessagingService.VERSION_11)
+            // don't send migrations to the nodes with the versions older than < 1.2
+            if (MessagingService.instance().getVersion(endpoint) < MessagingService.VERSION_12)
                 continue;
 
             pushSchemaMutation(endpoint, schema);
@@ -322,7 +325,6 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
      */
     public static void passiveAnnounce(UUID version)
     {
-        assert Gossiper.instance.isEnabled();
         Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
         logger.debug("Gossiping my schema version " + version);
     }

@@ -104,7 +104,7 @@ public class SSTableWriter extends SSTable
         {
             dbuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
             dataFile = SequentialWriter.open(new File(getFilename()),
-			                      !metadata.populateIoCacheOnFlush());
+                                             !metadata.populateIoCacheOnFlush());
             dataFile.setComputeDigest();
         }
 
@@ -143,7 +143,8 @@ public class SSTableWriter extends SSTable
 
         if (logger.isTraceEnabled())
             logger.trace("wrote " + decoratedKey + " at " + dataPosition);
-        RowIndexEntry entry = RowIndexEntry.create(dataPosition, delInfo, index);
+        // range tombstones are part of the Atoms we write as the row contents, so RIE only gets row-level tombstones
+        RowIndexEntry entry = RowIndexEntry.create(dataPosition, delInfo.getTopLevelDeletion(), index);
         iwriter.append(decoratedKey, entry);
         dbuilder.addPotentialBoundary(dataPosition);
         return entry;
@@ -180,7 +181,7 @@ public class SSTableWriter extends SSTable
             DataOutputBuffer buffer = new DataOutputBuffer();
 
             // build column index && write columns
-            ColumnIndex.Builder builder = new ColumnIndex.Builder(cf, decoratedKey.key, cf.getColumnCount(), buffer);
+            ColumnIndex.Builder builder = new ColumnIndex.Builder(cf, decoratedKey.key, buffer);
             ColumnIndex index = builder.build(cf);
 
             TypeSizes typeSizes = TypeSizes.NATIVE;
@@ -240,7 +241,7 @@ public class SSTableWriter extends SSTable
         ColumnFamily cf = ColumnFamily.create(metadata, ArrayBackedSortedColumns.factory());
         cf.delete(deletionInfo);
 
-        ColumnIndex.Builder columnIndexer = new ColumnIndex.Builder(cf, key.key, columnCount, dataFile.stream);
+        ColumnIndex.Builder columnIndexer = new ColumnIndex.Builder(cf, key.key, dataFile.stream, true);
         OnDiskAtom.Serializer atomSerializer = cf.getOnDiskSerializer();
         for (int i = 0; i < columnCount; i++)
         {
@@ -345,7 +346,7 @@ public class SSTableWriter extends SSTable
                                                            partitioner,
                                                            ifile,
                                                            dfile,
-                                                           iwriter.summary,
+                                                           iwriter.summary.build(partitioner),
                                                            iwriter.bf,
                                                            maxDataAge,
                                                            sstableMetadata);
@@ -432,7 +433,7 @@ public class SSTableWriter extends SSTable
     {
         private final SequentialWriter indexFile;
         public final SegmentedFile.Builder builder;
-        public final IndexSummary summary;
+        public final IndexSummaryBuilder summary;
         public final IFilter bf;
         private FileMark mark;
 
@@ -441,7 +442,7 @@ public class SSTableWriter extends SSTable
             indexFile = SequentialWriter.open(new File(descriptor.filenameFor(SSTable.COMPONENT_INDEX)),
                                               !metadata.populateIoCacheOnFlush());
             builder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
-            summary = new IndexSummary(keyCount);
+            summary = new IndexSummaryBuilder(keyCount);
             bf = FilterFactory.getFilter(keyCount, metadata.getBloomFilterFpChance(), true);
         }
 
@@ -494,9 +495,6 @@ public class SSTableWriter extends SSTable
             long position = indexFile.getFilePointer();
             indexFile.close(); // calls force
             FileUtils.truncate(indexFile.getPath(), position);
-
-            // finalize in-memory index state
-            summary.complete();
         }
 
         public void mark()

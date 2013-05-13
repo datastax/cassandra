@@ -77,6 +77,9 @@ public class CompressedFileStreamTask extends FileStreamTask
             // stream each of the required sections of the file
             for (Pair<Long, Long> section : sections)
             {
+                // seek to the beginning of the section when socket channel is not available
+                if (sc == null)
+                    file.seek(section.left);
                 // length of the section to stream
                 long length = section.right - section.left;
                 // tracks write progress
@@ -105,6 +108,9 @@ public class CompressedFileStreamTask extends FileStreamTask
                     bytesTransferred += lastWrite;
                     header.file.progress += lastWrite;
                 }
+
+                if (sc == null)
+                    socket.getOutputStream().flush();
 
                 logger.debug("Bytes transferred " + bytesTransferred + "/" + header.file.size);
             }

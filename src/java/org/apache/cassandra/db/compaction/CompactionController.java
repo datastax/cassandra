@@ -22,6 +22,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import com.google.common.primitives.Ints;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +35,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.AlwaysPresentFilter;
+import org.apache.cassandra.utils.Throttle;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throttle;
 
@@ -49,20 +54,6 @@ public class CompactionController
 
     public final int gcBefore;
     public final int mergeShardBefore;
-    private final Throttle throttle = new Throttle("Cassandra_Throttle", new Throttle.ThroughputFunction()
-    {
-        /** @return Instantaneous throughput target in bytes per millisecond. */
-        public int targetThroughput()
-        {
-            if (DatabaseDescriptor.getCompactionThroughputMbPerSec() < 1 || StorageService.instance.isBootstrapMode())
-                // throttling disabled
-                return 0;
-            // total throughput
-            int totalBytesPerMS = DatabaseDescriptor.getCompactionThroughputMbPerSec() * 1024 * 1024 / 1000;
-            // per stream throughput (target bytes per MS)
-            return totalBytesPerMS / Math.max(1, CompactionManager.instance.getActiveCompactions());
-        }
-    });
 
     public CompactionController(ColumnFamilyStore cfs, Collection<SSTableReader> sstables, int gcBefore)
     {
@@ -114,8 +105,15 @@ public class CompactionController
         List<SSTableReader> filteredSSTables = overlappingTree.search(key);
         for (SSTableReader sstable : filteredSSTables)
         {
-            if (sstable.getBloomFilter().isPresent(key.key) && sstable.getMinTimestamp() <= maxDeletionTimestamp)
-                return false;
+            if (sstable.getMinTimestamp() <= maxDeletionTimestamp)
+            {
+                // if we don't have bloom filter(bf_fp_chance=1.0 or filter file is missing),
+                // we check index file instead.
+                if (sstable.getBloomFilter() instanceof AlwaysPresentFilter && sstable.getPosition(key, SSTableReader.Operator.EQ) != null)
+                    return false;
+                else if (sstable.getBloomFilter().isPresent(key.key))
+                    return false;
+            }
         }
         return true;
     }
@@ -166,11 +164,6 @@ public class CompactionController
     public AbstractCompactedRow getCompactedRow(SSTableIdentityIterator row)
     {
         return getCompactedRow(Collections.singletonList(row));
-    }
-
-    public void mayThrottle(long currentBytes)
-    {
-        throttle.throttle(currentBytes);
     }
 
     public void close()

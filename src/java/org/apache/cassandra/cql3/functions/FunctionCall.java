@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Lists;
@@ -61,7 +60,14 @@ public class FunctionCall extends Term.NonTerminal
     {
         List<ByteBuffer> buffers = new ArrayList<ByteBuffer>(terms.size());
         for (Term t : terms)
-            buffers.add(t.bindAndGet(values));
+        {
+            // For now, we don't allow nulls as argument as no existing function needs it and it
+            // simplify things.
+            ByteBuffer val = t.bindAndGet(values);
+            if (val == null)
+                throw new InvalidRequestException(String.format("Invalid null value for argument to %s", fun));
+            buffers.add(val);
+        }
 
         return fun.execute(buffers);
     }
@@ -125,7 +131,11 @@ public class FunctionCall extends Term.NonTerminal
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
             AbstractType<?> returnType = Functions.getReturnType(functionName, receiver.ksName, receiver.cfName);
-            return receiver.type.equals(returnType);
+            // Note: if returnType == null, it means the function doesn't exist. We may get this if an undefined function
+            // is used as argument of another, existing, function. In that case, we return true here because we'll catch
+            // the fact that the method is undefined latter anyway and with a more helpful error message that if we were
+            // to return false here.
+            return returnType == null || receiver.type.asCQL3Type().equals(returnType.asCQL3Type());
         }
 
         @Override

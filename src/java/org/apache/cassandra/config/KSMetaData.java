@@ -78,7 +78,7 @@ public final class KSMetaData
 
     public static KSMetaData systemKeyspace()
     {
-        List<CFMetaData> cfDefs = Arrays.asList(CFMetaData.BatchlogCF,
+        List<CFMetaData> cfDefs = Arrays.asList(CFMetaData.BatchlogCf,
                                                 CFMetaData.RangeXfersCf,
                                                 CFMetaData.LocalCf,
                                                 CFMetaData.PeersCf,
@@ -206,7 +206,7 @@ public final class KSMetaData
         // Attempt to instantiate the ARS, which will throw a ConfigException if the strategy_options aren't fully formed
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
         IEndpointSnitch eps = DatabaseDescriptor.getEndpointSnitch();
-        AbstractReplicationStrategy.createReplicationStrategy(name, strategyClass, tmd, eps, strategyOptions);
+        AbstractReplicationStrategy.validateReplicationStrategyIgnoreUnexpected(name, strategyClass, tmd, eps, strategyOptions);
 
         for (CFMetaData cfm : cfMetaData.values())
             cfm.validate();

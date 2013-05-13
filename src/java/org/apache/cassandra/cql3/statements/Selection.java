@@ -92,7 +92,7 @@ public abstract class Selection
                 throw new InvalidRequestException(String.format("Undefined name %s in selection clause", raw));
             if (metadata != null)
                 metadata.add(name);
-            return new SimpleSelector(addAndGetIndex(name, names), name.type);
+            return new SimpleSelector(name.toString(), addAndGetIndex(name, names), name.type);
         }
         else if (raw instanceof RawSelector.WritetimeOrTTL)
         {
@@ -107,7 +107,7 @@ public abstract class Selection
 
             if (metadata != null)
                 metadata.add(makeWritetimeOrTTLSpec(cfDef, tot));
-            return new WritetimeOrTTLSelector(addAndGetIndex(name, names), tot.isWritetime);
+            return new WritetimeOrTTLSelector(name.toString(), addAndGetIndex(name, names), tot.isWritetime);
         }
         else
         {
@@ -117,6 +117,8 @@ public abstract class Selection
                 args.add(makeSelector(cfDef, rawArg, names, null));
 
             AbstractType<?> returnType = Functions.getReturnType(withFun.functionName, cfDef.cfm.ksName, cfDef.cfm.cfName);
+            if (returnType == null)
+                throw new InvalidRequestException(String.format("Unknown function '%s'", withFun.functionName));
             ColumnSpecification spec = makeFunctionSpec(cfDef, withFun, returnType);
             Function fun = Functions.get(withFun.functionName, args, spec);
             if (metadata != null)
@@ -248,18 +250,23 @@ public abstract class Selection
 
         public void add(IColumn c)
         {
-            current.add(c == null || c.isMarkedForDelete() ? null : value(c));
+            current.add(isDead(c) ? null : value(c));
             if (timestamps != null)
             {
-                timestamps[current.size() - 1] = c.timestamp();
+                timestamps[current.size() - 1] = isDead(c) ? -1 : c.timestamp();
             }
             if (ttls != null)
             {
                 int ttl = -1;
-                if (c instanceof ExpiringColumn)
+                if (!isDead(c) && c instanceof ExpiringColumn)
                     ttl = ((ExpiringColumn)c).getLocalDeletionTime() - (int) (System.currentTimeMillis() / 1000);
                 ttls[current.size() - 1] = ttl;
             }
+        }
+
+        private boolean isDead(IColumn c)
+        {
+            return c == null || c.isMarkedForDelete();
         }
 
         public void newRow() throws InvalidRequestException
@@ -306,11 +313,13 @@ public abstract class Selection
 
     private static class SimpleSelector implements Selector
     {
+        private final String columnName;
         private final int idx;
         private final AbstractType<?> type;
 
-        public SimpleSelector(int idx, AbstractType<?> type)
+        public SimpleSelector(String columnName, int idx, AbstractType<?> type)
         {
+            this.columnName = columnName;
             this.idx = idx;
             this.type = type;
         }
@@ -322,7 +331,13 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return type.equals(receiver.type);
+            return type.asCQL3Type().equals(receiver.type.asCQL3Type());
+        }
+
+        @Override
+        public String toString()
+        {
+            return columnName;
         }
     }
 
@@ -348,17 +363,33 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return fun.returnType().equals(receiver.type);
+            return fun.returnType().asCQL3Type().equals(receiver.type.asCQL3Type());
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append(fun.name()).append("(");
+            for (int i = 0; i < argSelectors.size(); i++)
+            {
+                if (i > 0)
+                    sb.append(", ");
+                sb.append(argSelectors.get(i));
+            }
+            return sb.append(")").toString();
         }
     }
 
     private static class WritetimeOrTTLSelector implements Selector
     {
+        private final String columnName;
         private final int idx;
         private final boolean isWritetime;
 
-        public WritetimeOrTTLSelector(int idx, boolean isWritetime)
+        public WritetimeOrTTLSelector(String columnName, int idx, boolean isWritetime)
         {
+            this.columnName = columnName;
             this.idx = idx;
             this.isWritetime = isWritetime;
         }
@@ -366,7 +397,10 @@ public abstract class Selection
         public ByteBuffer compute(ResultSetBuilder rs)
         {
             if (isWritetime)
-                return ByteBufferUtil.bytes(rs.timestamps[idx]);
+            {
+                long ts = rs.timestamps[idx];
+                return ts >= 0 ? ByteBufferUtil.bytes(ts) : null;
+            }
 
             int ttl = rs.ttls[idx];
             return ttl > 0 ? ByteBufferUtil.bytes(ttl) : null;
@@ -374,7 +408,13 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return receiver.type.equals(isWritetime ? LongType.instance : Int32Type.instance);
+            return receiver.type.asCQL3Type().equals(isWritetime ? CQL3Type.Native.BIGINT : CQL3Type.Native.INT);
+        }
+
+        @Override
+        public String toString()
+        {
+            return columnName;
         }
     }
 

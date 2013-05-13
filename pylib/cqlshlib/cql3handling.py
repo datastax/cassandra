@@ -49,11 +49,11 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         'keyspace', 'schema', 'columnfamily', 'table', 'index', 'on', 'drop',
         'primary', 'into', 'values', 'timestamp', 'ttl', 'alter', 'add', 'type',
         'compact', 'storage', 'order', 'by', 'asc', 'desc', 'clustering',
-        'token', 'writetime', 'map', 'list', 'to'
+        'token', 'writetime', 'map', 'list', 'to', 'custom'
     ))
 
     unreserved_keywords = set((
-        'key', 'clustering', 'ttl', 'compact', 'storage', 'type', 'values'
+        'key', 'clustering', 'ttl', 'compact', 'storage', 'type', 'values', 'custom'
     ))
 
     columnfamily_options = (
@@ -1202,8 +1202,9 @@ def create_cf_composite_primary_key_comma_completer(ctxt, cass):
     return [',']
 
 syntax_rules += r'''
-<createIndexStatement> ::= "CREATE" "INDEX" indexname=<identifier>? "ON"
+<createIndexStatement> ::= "CREATE" "CUSTOM"? "INDEX" indexname=<identifier>? "ON"
                                cf=<columnFamilyName> "(" col=<cident> ")"
+                               ( "WITH" "options = {'class': " <stringLiteral> "}" )?
                          ;
 '''
 
@@ -1469,7 +1470,7 @@ class CqlTableDef:
         cf.partition_key_validator = lookup_casstype(cf.key_validator)
         cf.comparator = lookup_casstype(cf.comparator)
         cf.default_validator = lookup_casstype(cf.default_validator)
-        cf.coldefs = coldefs
+        cf.coldefs = cf.filter_regular_coldefs(coldefs)
         cf.compact_storage = cf.is_compact_storage()
         cf.key_aliases = cf.get_key_aliases()
         cf.partition_key_components = cf.key_aliases
@@ -1477,6 +1478,10 @@ class CqlTableDef:
         cf.primary_key_components = cf.key_aliases + list(cf.column_aliases)
         cf.columns = cf.get_columns()
         return cf
+
+    def filter_regular_coldefs(self, cols):
+        return [ c for c in cols if c.get('type', 'regular') == 'regular' ]
+
 
     # not perfect, but good enough; please read CFDefinition constructor comments
     # returns False if we are dealing with a CQL3 table, True otherwise.

@@ -24,7 +24,6 @@ import java.util.Map.Entry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Table;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.TokenMetadata.Topology;
@@ -79,7 +78,8 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
     @SuppressWarnings("serial")
     public List<InetAddress> calculateNaturalEndpoints(Token searchToken, TokenMetadata tokenMetadata)
     {
-        Set<InetAddress> replicas = new HashSet<InetAddress>();
+        // we want to preserve insertion order so that the first added endpoint becomes primary
+        Set<InetAddress> replicas = new LinkedHashSet<InetAddress>();
         // replicas we have found in each DC
         Map<String, Set<InetAddress>> dcReplicas = new HashMap<String, Set<InetAddress>>(datacenters.size())
         {{
@@ -188,7 +188,15 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
     {
         for (Entry<String, String> e : this.configOptions.entrySet())
         {
+            if (e.getKey().equalsIgnoreCase("replication_factor"))
+                throw new ConfigurationException("replication_factor is an option for SimpleStrategy, not NetworkTopologyStrategy");
             validateReplicationFactor(e.getValue());
         }
+    }
+
+    public Collection<String> recognizedOptions()
+    {
+        // We explicitely allow all options
+        return null;
     }
 }

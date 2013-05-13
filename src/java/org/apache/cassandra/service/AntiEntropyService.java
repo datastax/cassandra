@@ -40,7 +40,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.AbstractCompactedRow;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.*;
@@ -176,7 +175,7 @@ public class AntiEntropyService
                 throw new IllegalArgumentException("Requested range intersects a local range but is not fully contained in one; this would lead to imprecise repair");
             }
         }
-        if (rangeSuperSet == null || !replicaSets.containsKey(toRepair))
+        if (rangeSuperSet == null || !replicaSets.containsKey(rangeSuperSet))
             return Collections.emptySet();
 
         Set<InetAddress> neighbors = new HashSet<InetAddress>(replicaSets.get(rangeSuperSet));
@@ -296,7 +295,7 @@ public class AntiEntropyService
 
         public void prepare(ColumnFamilyStore cfs)
         {
-            if (tree.partitioner() instanceof RandomPartitioner)
+            if (!tree.partitioner().preservesOrder())
             {
                 // You can't beat an even tree distribution for md5
                 tree.init();
@@ -669,10 +668,13 @@ public class AntiEntropyService
                     throw new IOException(message);
                 }
 
-                if (MessagingService.instance().getVersion(endpoint) < MessagingService.VERSION_11 && isSequential)
+                // All endpoints should be on the same protocol version
+                if (!MessagingService.instance().knowsVersion(endpoint) || MessagingService.instance().getVersion(endpoint) != MessagingService.current_version)
                 {
-                    logger.info(String.format("[repair #%s] Cannot repair using snapshots as node %s is pre-1.1", getName(), endpoint));
-                    return;
+                    String message = "Cannot repair among different protocol versions";
+                    differencingDone.signalAll();
+                    logger.error(String.format("[repair #%s] ", getName()) + message);
+                    throw new IOException(message);
                 }
             }
 

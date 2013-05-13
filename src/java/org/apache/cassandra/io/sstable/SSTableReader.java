@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.*;
 
+import com.google.common.primitives.Longs;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,7 +37,9 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.db.compaction.ICompactionScanner;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -44,6 +48,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.compress.CompressedRandomAccessReader;
+import org.apache.cassandra.io.compress.CompressedThrottledReader;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.service.CacheService;
@@ -104,7 +109,7 @@ public class SSTableReader extends SSTable
 
         for (SSTableReader sstable : sstables)
         {
-            int indexKeyCount = sstable.getKeySamples().size();
+            int indexKeyCount = sstable.getKeySamples().length;
             count = count + (indexKeyCount + 1) * DatabaseDescriptor.getIndexInterval();
             if (logger.isDebugEnabled())
                 logger.debug("index size for bloom filter calc for file  : " + sstable.getFilename() + "   : " + count);
@@ -163,9 +168,7 @@ public class SSTableReader extends SSTable
         long start = System.currentTimeMillis();
         logger.info("Opening {} ({} bytes)", descriptor, new File(descriptor.filenameFor(COMPONENT_DATA)).length());
 
-        SSTableMetadata sstableMetadata = components.contains(Component.STATS)
-                                        ? SSTableMetadata.serializer.deserialize(descriptor)
-                                        : SSTableMetadata.createDefaultInstance();
+        SSTableMetadata sstableMetadata = SSTableMetadata.serializer.deserialize(descriptor);
 
         // Check if sstable is created using same partitioner.
         // Partitioner can be null, which indicates older version of sstable or no stats available.
@@ -366,8 +369,9 @@ public class SSTableReader extends SSTable
             if (recreatebloom)
                 bf = LegacyBloomFilter.getFilter(estimatedKeys, 15);
 
+            IndexSummaryBuilder summaryBuilder = null;
             if (!summaryLoaded)
-                indexSummary = new IndexSummary(estimatedKeys);
+                summaryBuilder = new IndexSummaryBuilder(estimatedKeys);
 
             long indexPosition;
             while (readIndex && (indexPosition = primaryIndex.getFilePointer()) != indexSize)
@@ -385,20 +389,23 @@ public class SSTableReader extends SSTable
                 // if summary was already read from disk we don't want to re-populate it using primary index
                 if (!summaryLoaded)
                 {
-                    indexSummary.maybeAddEntry(decoratedKey, indexPosition);
+                    summaryBuilder.maybeAddEntry(decoratedKey, indexPosition);
                     ibuilder.addPotentialBoundary(indexPosition);
                     dbuilder.addPotentialBoundary(indexEntry.position);
                 }
             }
+
+            if (!summaryLoaded)
+                indexSummary = summaryBuilder.build(partitioner);
         }
         finally
         {
             FileUtils.closeQuietly(primaryIndex);
         }
+
         first = getMinimalKey(first);
         last = getMinimalKey(last);
         // finalize the load.
-        indexSummary.complete();
         // finalize the state of the reader
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
@@ -478,8 +485,7 @@ public class SSTableReader extends SSTable
     /** get the position in the index file to start scanning to find the given key (at most indexInterval keys away) */
     public long getIndexScanPosition(RowPosition key)
     {
-        assert indexSummary.getKeys() != null && indexSummary.getKeys().size() > 0;
-        int index = Collections.binarySearch(indexSummary.getKeys(), key);
+        int index = indexSummary.binarySearch(key);
         if (index < 0)
         {
             // binary search gives us the first index _greater_ than the key searched for,
@@ -530,7 +536,7 @@ public class SSTableReader extends SSTable
      */
     public long estimatedKeys()
     {
-        return indexSummary.getKeys().size() * DatabaseDescriptor.getIndexInterval();
+        return indexSummary.size() * DatabaseDescriptor.getIndexInterval();
     }
 
     /**
@@ -540,7 +546,7 @@ public class SSTableReader extends SSTable
     public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
     {
         long sampleKeyCount = 0;
-        List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary.getKeys(), ranges);
+        List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
         for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
             sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
         return Math.max(1, sampleKeyCount * DatabaseDescriptor.getIndexInterval());
@@ -549,36 +555,34 @@ public class SSTableReader extends SSTable
     /**
      * @return Approximately 1/INDEX_INTERVALth of the keys in this SSTable.
      */
-    public Collection<DecoratedKey> getKeySamples()
+    public byte[][] getKeySamples()
     {
         return indexSummary.getKeys();
     }
 
-    private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(List<DecoratedKey> samples, Collection<Range<Token>> ranges)
+    private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(IndexSummary summary, Collection<Range<Token>> ranges)
     {
         // use the index to determine a minimal section for each range
         List<Pair<Integer,Integer>> positions = new ArrayList<Pair<Integer,Integer>>();
-        if (samples.isEmpty())
-            return positions;
 
         for (Range<Token> range : Range.normalize(ranges))
         {
             RowPosition leftPosition = range.left.maxKeyBound();
             RowPosition rightPosition = range.right.maxKeyBound();
 
-            int left = Collections.binarySearch(samples, leftPosition);
+            int left = summary.binarySearch(leftPosition);
             if (left < 0)
                 left = (left + 1) * -1;
             else
                 // left range are start exclusive
                 left = left + 1;
-            if (left == samples.size())
+            if (left == summary.size())
                 // left is past the end of the sampling
                 continue;
 
             int right = Range.isWrapAround(range.left, range.right)
-                      ? samples.size() - 1
-                      : Collections.binarySearch(samples, rightPosition);
+                      ? summary.size() - 1
+                      : summary.binarySearch(rightPosition);
             if (right < 0)
             {
                 // range are end inclusive so we use the previous index from what binarySearch give us
@@ -600,9 +604,7 @@ public class SSTableReader extends SSTable
 
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
-        final List<DecoratedKey> samples = indexSummary.getKeys();
-
-        final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(samples, Collections.singletonList(range));
+        final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(indexSummary, Collections.singletonList(range));
 
         if (indexRanges.isEmpty())
             return Collections.emptyList();
@@ -635,10 +637,8 @@ public class SSTableReader extends SSTable
 
                     public DecoratedKey next()
                     {
-                        RowPosition k = samples.get(idx++);
-                        // the index should only contain valid row key, we only allow RowPosition in KeyPosition for search purposes
-                        assert k instanceof DecoratedKey;
-                        return (DecoratedKey)k;
+                        byte[] bytes = indexSummary.getKey(idx++);
+                        return partitioner.decorateKey(ByteBuffer.wrap(bytes));
                     }
 
                     public void remove()
@@ -949,10 +949,10 @@ public class SSTableReader extends SSTable
     * Direct I/O SSTableScanner
     * @return A Scanner for seeking over the rows of the SSTable.
     */
-    public SSTableScanner getDirectScanner()
-    {
-        return new SSTableScanner(this, true);
-    }
+   public SSTableScanner getDirectScanner(RateLimiter limiter)
+   {
+       return new SSTableScanner(this, true, limiter);
+   }
 
    /**
     * Direct I/O SSTableScanner over a defined range of tokens.
@@ -960,11 +960,15 @@ public class SSTableReader extends SSTable
     * @param range the range of keys to cover
     * @return A Scanner for seeking over the rows of the SSTable.
     */
-    public SSTableScanner getDirectScanner(Range<Token> range)
+    public ICompactionScanner getDirectScanner(Range<Token> range, RateLimiter limiter)
     {
         if (range == null)
-            return getDirectScanner();
-        return new SSTableBoundedScanner(this, true, range);
+            return getDirectScanner(limiter);
+
+        Iterator<Pair<Long, Long>> rangeIterator = getPositionsForRanges(Collections.singletonList(range)).iterator();
+        return rangeIterator.hasNext()
+               ? new SSTableBoundedScanner(this, true, rangeIterator, limiter)
+               : new EmptyCompactionScanner(getFilename());
     }
 
     public FileDataInput getFileDataInput(long position)
@@ -1116,6 +1120,14 @@ public class SSTableReader extends SSTable
         return sstableMetadata.ancestors;
     }
 
+    public RandomAccessReader openDataReader(RateLimiter limiter)
+    {
+        assert limiter != null;
+        return compression
+               ? CompressedThrottledReader.open(getFilename(), getCompressionMetadata(), limiter)
+               : ThrottledReader.open(new File(getFilename()), limiter);
+    }
+
     public RandomAccessReader openDataReader(boolean skipIOCache)
     {
         return compression
@@ -1170,6 +1182,50 @@ public class SSTableReader extends SSTable
         for (SSTableReader sstable : sstables)
         {
             sstable.releaseReference();
+        }
+    }
+
+    private static class EmptyCompactionScanner implements ICompactionScanner
+    {
+        private final String filename;
+
+        private EmptyCompactionScanner(String filename)
+        {
+            this.filename = filename;
+        }
+
+        public long getLengthInBytes()
+        {
+            return 0;
+        }
+
+        public long getCurrentPosition()
+        {
+            return 0;
+        }
+
+        public String getBackingFiles()
+        {
+            return filename;
+        }
+
+        public void close()
+        {
+        }
+
+        public boolean hasNext()
+        {
+            return false;
+        }
+
+        public OnDiskAtomIterator next()
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        public void remove()
+        {
+            throw new UnsupportedOperationException();
         }
     }
 }

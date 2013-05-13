@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +29,7 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.MarshalException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -70,15 +70,27 @@ public abstract class Maps
                 Term k = entry.left.prepare(keySpec);
                 Term v = entry.right.prepare(valueSpec);
 
-                if (!(k instanceof Constants.Value && v instanceof Constants.Value))
-                {
-                    if (k instanceof Term.NonTerminal || v instanceof Term.NonTerminal)
-                        throw new InvalidRequestException(String.format("Invalid map literal for %s: bind variables are not supported inside collection literals", receiver));
-                    else
-                        throw new InvalidRequestException(String.format("Invalid map literal for %s: nested collections are not supported", receiver));
-                }
+                if (k instanceof Term.NonTerminal || v instanceof Term.NonTerminal)
+                    throw new InvalidRequestException(String.format("Invalid map literal for %s: bind variables are not supported inside collection literals", receiver));
 
-                if (values.put(((Constants.Value)k).bytes, ((Constants.Value)v).bytes) != null)
+                // We don't support values > 64K because the serialization format encode the length as an unsigned short.
+                ByteBuffer keyBytes = ((Constants.Value)k).bytes;
+                if (keyBytes == null)
+                    throw new InvalidRequestException("null is not supported inside collections");
+                if (keyBytes.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
+                    throw new InvalidRequestException(String.format("Map key is too long. Map keys are limited to %d bytes but %d bytes keys provided",
+                                                                    FBUtilities.MAX_UNSIGNED_SHORT,
+                                                                    keyBytes.remaining()));
+
+                ByteBuffer valueBytes = ((Constants.Value)v).bytes;
+                if (valueBytes == null)
+                    throw new InvalidRequestException("null is not supported inside collections");
+                if (valueBytes.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
+                    throw new InvalidRequestException(String.format("Map value is too long. Map values are limited to %d bytes but %d bytes value provided",
+                                                                    FBUtilities.MAX_UNSIGNED_SHORT,
+                                                                    valueBytes.remaining()));
+
+                if (values.put(keyBytes, valueBytes) != null)
                     throw new InvalidRequestException(String.format("Invalid map literal: duplicate entry for key %s", entry.left));
             }
             return new Value(values);
@@ -178,7 +190,7 @@ public abstract class Maps
         public Value bind(List<ByteBuffer> values) throws InvalidRequestException
         {
             ByteBuffer value = values.get(bindIndex);
-            return Value.fromSerialized(value, (MapType)receiver.type);
+            return value == null ? null : Value.fromSerialized(value, (MapType)receiver.type);
         }
     }
 
@@ -217,12 +229,27 @@ public abstract class Maps
 
         public void execute(ByteBuffer rowKey, ColumnFamily cf, ColumnNameBuilder prefix, UpdateParameters params) throws InvalidRequestException
         {
-            Term.Terminal key = k.bind(params.variables);
-            Term.Terminal value = t.bind(params.variables);
-            assert key instanceof Constants.Value && value instanceof Constants.Value;
+            ByteBuffer key = k.bindAndGet(params.variables);
+            ByteBuffer value = t.bindAndGet(params.variables);
+            if (key == null)
+                throw new InvalidRequestException("Invalid null map key");
 
-            ByteBuffer cellName = prefix.add(columnName.key).add(((Constants.Value)key).bytes).build();
-            cf.addColumn(params.makeColumn(cellName, ((Constants.Value)value).bytes));
+            ByteBuffer cellName = prefix.add(columnName.key).add(key).build();
+
+            if (value == null)
+            {
+                cf.addColumn(params.makeTombstone(cellName));
+            }
+            else
+            {
+                // We don't support value > 64K because the serialization format encode the length as an unsigned short.
+                if (value.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
+                    throw new InvalidRequestException(String.format("Map value is too long. Map values are limited to %d bytes but %d bytes value provided",
+                                                                    FBUtilities.MAX_UNSIGNED_SHORT,
+                                                                    value.remaining()));
+
+                cf.addColumn(params.makeColumn(cellName, value));
+            }
         }
     }
 
@@ -241,6 +268,8 @@ public abstract class Maps
         static void doPut(Term t, ColumnFamily cf, ColumnNameBuilder columnName, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.variables);
+            if (value == null)
+                return;
             assert value instanceof Maps.Value;
 
             Map<ByteBuffer, ByteBuffer> toAdd = ((Maps.Value)value).map;
@@ -262,6 +291,8 @@ public abstract class Maps
         public void execute(ByteBuffer rowKey, ColumnFamily cf, ColumnNameBuilder prefix, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal key = t.bind(params.variables);
+            if (key == null)
+                throw new InvalidRequestException("Invalid null map key");
             assert key instanceof Constants.Value;
 
             ByteBuffer cellName = prefix.add(columnName.key).add(((Constants.Value)key).bytes).build();

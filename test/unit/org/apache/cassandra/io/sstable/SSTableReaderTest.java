@@ -31,7 +31,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.*;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
+import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -56,6 +58,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CLibrary;
 import org.apache.cassandra.utils.Pair;
 
+@RunWith(OrderedJUnit4ClassRunner.class)
 public class SSTableReaderTest extends SchemaLoader
 {
     static Token t(int i)
@@ -281,8 +284,8 @@ public class SSTableReaderTest extends SchemaLoader
 
         // test to see if sstable can be opened as expected
         SSTableReader target = SSTableReader.open(desc);
-        Collection<DecoratedKey> keySamples = target.getKeySamples();
-        assert keySamples.size() == 1 && keySamples.iterator().next().equals(firstKey);
+        byte[][] keySamples = target.getKeySamples();
+        assert keySamples.length == 1 && Arrays.equals(keySamples[0], firstKey.key.array());
         assert target.first.equals(firstKey);
         assert target.last.equals(lastKey);
     }
