@@ -68,6 +68,7 @@ public class ConfigHelper
     private static final String WRITE_CONSISTENCY_LEVEL = "cassandra.consistencylevel.write";
     private static final String OUTPUT_COMPRESSION_CLASS = "cassandra.output.compression.class";
     private static final String OUTPUT_COMPRESSION_CHUNK_LENGTH = "cassandra.output.compression.length";
+    private static final String THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB = "cassandra.thrift.framed.size_mb";
 
     private static final Logger logger = LoggerFactory.getLogger(ConfigHelper.class);
 
@@ -456,6 +457,20 @@ public class ConfigHelper
     public static void setOutputCompressionChunkLength(Configuration conf, String length)
     {
         conf.set(OUTPUT_COMPRESSION_CHUNK_LENGTH, length);
+    }
+
+    public static void setThriftFramedTransportSizeInMb(Configuration conf, int frameSizeInMB)
+    {
+        conf.setInt(THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB, frameSizeInMB);
+    }
+
+    /**
+     * @param conf The configuration to use.
+     * @return Value (converts MBs to Bytes) set by {@link setThriftFramedTransportSizeInMb(Configuration, int)} or default of 15MB
+     */
+    public static int getThriftFramedTransportSize(Configuration conf)
+    {
+        return conf.getInt(THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB, 15) * 1024 * 1024; // 15MB is default in Cassandra
     }
 
     public static CompressionParameters getOutputCompressionParamaters(Configuration conf)

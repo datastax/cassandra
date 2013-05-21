@@ -56,11 +56,6 @@ public class TBinaryProtocol extends org.apache.thrift.protocol.TBinaryProtocol
             super(strictRead, strictWrite, 0);
         }
 
-        public Factory(boolean strictRead, boolean strictWrite, int readLength)
-        {
-            super(strictRead, strictWrite, readLength);
-        }
-
         public TProtocol getProtocol(TTransport trans)
         {
             TBinaryProtocol protocol = new TBinaryProtocol(trans, strictRead_, strictWrite_);

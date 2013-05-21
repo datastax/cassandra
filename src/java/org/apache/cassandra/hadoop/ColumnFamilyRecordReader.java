@@ -153,6 +153,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
             // create connection using thrift
             String location = getLocation();
+
             int port = ConfigHelper.getInputRpcPort(conf);
             client = ColumnFamilyInputFormat.createAuthenticatedClient(location, port, conf);
         }
