@@ -17,17 +17,19 @@
  */
 package org.apache.cassandra.cql;
 
-public class CQLStatement
-{
-    public StatementType type;
-    public Object statement;
-    public int boundTerms;
-    public String cqlString;
+import org.apache.cassandra.service.ClientState;
 
-    public CQLStatement(StatementType type, Object statement, int lastMarker)
-    {
-        this.type = type;
-        this.statement = statement;
-        this.boundTerms = lastMarker + 1;
-    }
+import java.nio.ByteBuffer;
+import java.util.List;
+
+/**
+ * Additional information about the execution/preparation of a CQLStatement.
+ * Used by {@link org.apache.cassandra.cql.hooks.PreExecutionHook} and
+ * {@link org.apache.cassandra.cql.hooks.OnPrepareHook}
+ */
+public class CQLExecutionContext
+{
+    public String queryString;
+    public ClientState clientState;
+    public List<ByteBuffer> variables;
 }

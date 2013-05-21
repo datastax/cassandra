@@ -15,19 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cql;
+package org.apache.cassandra.cql3;
 
-public class CQLStatement
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.thrift.ConsistencyLevel;
+
+import java.nio.ByteBuffer;
+import java.util.List;
+
+/**
+ * Additional information about the execution/preparation of a CQLStatement.
+ * Used by {@link org.apache.cassandra.cql3.hooks.PreExecutionHook},
+ * {@link org.apache.cassandra.cql3.hooks.PostExecutionHook} and
+ * {@link org.apache.cassandra.cql3.hooks.OnPrepareHook}
+ */
+public class CQLExecutionContext
 {
-    public StatementType type;
-    public Object statement;
-    public int boundTerms;
-    public String cqlString;
-
-    public CQLStatement(StatementType type, Object statement, int lastMarker)
-    {
-        this.type = type;
-        this.statement = statement;
-        this.boundTerms = lastMarker + 1;
-    }
+    public String queryString;
+    public ClientState clientState;
+    public List<ByteBuffer> variables;
+    public List<ColumnSpecification> boundNames;
 }

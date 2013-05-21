@@ -92,6 +92,11 @@ public class BatchStatement
         return timestamp != null;
     }
 
+    public long getTimestamp()
+    {
+        return timestamp;
+    }
+
     public String toString()
     {
         return String.format("BatchStatement(statements=%s, consistency=%s)", statements, consistency);
