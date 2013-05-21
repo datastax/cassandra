@@ -1,7 +1,18 @@
+1.1.9.6
+ * Fix NPE in Pig's widerow mode (CASSANDRA-5488)
+
+1.1.9.5
+ * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
+
+1.1.9.4
+ * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
+
+1.1.9.3
+ * DSP-1878 Order of set keyspace, and login, has changed with the new Authenticator (CASSANDRA-5423)
+
 1.1.9.2
  * fix nodetool repair not fail on node down (CASSANDRA-5203)
  * nodetool: ability to repair specific range (CASSANDRA-5280)
-
 
 1.1.9.1
  * Replace IAuthority with new IAuthorizer (CASSANDRA-4874)
