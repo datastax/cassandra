@@ -165,6 +165,11 @@ public class DeleteStatement extends ModificationStatement
         return prepare(boundNames);
     }
 
+    public List<Relation> getWhereClause()
+    {
+        return whereClause;
+    }
+
     public String toString()
     {
         return String.format("DeleteStatement(name=%s, columns=%s, consistency=%s keys=%s)",

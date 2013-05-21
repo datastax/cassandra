@@ -25,6 +25,7 @@ public class CQLStatement
     public StatementType type;
     public Object statement;
     public int boundTerms = 0;
+    public String cqlString;
 
     public CQLStatement(StatementType type, Object statement, int lastMarker)
     {

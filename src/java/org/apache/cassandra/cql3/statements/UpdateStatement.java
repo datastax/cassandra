@@ -365,6 +365,21 @@ public class UpdateStatement extends ModificationStatement
         }
     }
 
+    public List<Relation> getWhereClause()
+    {
+        return whereClause;
+    }
+
+    public List<Term> getColumnValues()
+    {
+        return columnValues;
+    }
+
+    public Map<ColumnIdentifier, Operation> getColumns()
+    {
+        return columns;
+    }
+
     public String toString()
     {
         return String.format("UpdateStatement(name=%s, keys=%s, columns=%s, consistency=%s, timestamp=%s, timeToLive=%s)",

@@ -56,6 +56,12 @@ public class SelectStatement
         this.numRecords = numRecords;
     }
 
+
+    public List<Relation> getClauseRelations()
+    {
+        return clause.getClauseRelations();
+    }
+
     public boolean isKeyRange()
     {
         return clause.isKeyRange();

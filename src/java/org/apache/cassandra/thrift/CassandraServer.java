@@ -30,7 +30,7 @@ import java.util.zip.Inflater;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Maps;
-import org.apache.cassandra.hadoop.ColumnFamilySplit;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +51,6 @@ import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.Pair;
 import org.apache.thrift.TException;
 
 public class CassandraServer implements Cassandra.Iface
@@ -1320,11 +1319,11 @@ public class CassandraServer implements Cassandra.Iface
         }
         else
         {
-            org.apache.cassandra.cql3.CQLStatement statement = cState.getCQL3Prepared().get(itemId);
+            ParsedStatement.Prepared statement = cState.getCQL3Prepared().get(itemId);
 
             if (statement == null)
                 throw new InvalidRequestException(String.format("Prepared query with ID %d not found", itemId));
-            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.getBoundsTerms());
+            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.statement.getBoundsTerms());
 
             return org.apache.cassandra.cql3.QueryProcessor.processPrepared(statement, cState, bindVariables);
         }

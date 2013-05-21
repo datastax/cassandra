@@ -22,6 +22,9 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.antlr.runtime.*;
+import org.apache.cassandra.cql3.hooks.OnPrepareHook;
+import org.apache.cassandra.cql3.hooks.PostExecutionHook;
+import org.apache.cassandra.cql3.hooks.PreExecutionHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +32,6 @@ import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.FBUtilities;
@@ -40,6 +42,25 @@ public class QueryProcessor
     public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.0-beta1");
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
+
+    private static volatile PreExecutionHook preExecutionHook = PreExecutionHook.NO_OP;
+    private static volatile PostExecutionHook postExecutionHook = PostExecutionHook.NO_OP;
+    private static volatile OnPrepareHook onPrepareHook = OnPrepareHook.NO_OP;
+
+    public static void setPreExecutionHook(PreExecutionHook hook)
+    {
+        preExecutionHook = hook;
+    }
+
+    public static void setPostExecutionHook(PostExecutionHook hook)
+    {
+        postExecutionHook = hook;
+    }
+
+    public static void setOnPrepareHook(OnPrepareHook hook)
+    {
+        onPrepareHook = hook;
+    }
 
     public static void validateKey(ByteBuffer key) throws InvalidRequestException
     {
@@ -100,17 +121,22 @@ public class QueryProcessor
             throw new InvalidRequestException("Range finish must come after start in traversal order");
     }
 
-    private static CqlResult processStatement(CQLStatement statement, ClientState clientState, List<ByteBuffer> variables)
+    private static CqlResult processStatement(CQLStatement statement, ClientState clientState, List<ByteBuffer> variables, CQLExecutionContext context)
     throws  UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
         statement.validate(clientState);
         statement.checkAccess(clientState);
+        context.clientState = clientState;
+        statement = preExecutionHook.execute(statement, context);
+
         CqlResult result = statement.execute(clientState, variables);
         if (result == null)
         {
             result = new CqlResult();
             result.type = CqlResultType.VOID;
         }
+
+        postExecutionHook.execute(statement, context);
         return result;
     }
 
@@ -118,7 +144,11 @@ public class QueryProcessor
     throws RecognitionException, UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
         logger.trace("CQL QUERY: {}", queryString);
-        return processStatement(getStatement(queryString, clientState).statement, clientState, Collections.<ByteBuffer>emptyList());
+
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = queryString;
+
+        return processStatement(getStatement(queryString, clientState).statement, clientState, Collections.<ByteBuffer>emptyList(), context);
     }
 
     public static CqlResult processInternal(String query) throws UnavailableException, InvalidRequestException, TimedOutException
@@ -184,8 +214,9 @@ public class QueryProcessor
         logger.trace("CQL QUERY: {}", queryString);
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
+        prepared.cqlString = queryString;
         int statementId = makeStatementId(queryString);
-        clientState.getCQL3Prepared().put(statementId, prepared.statement);
+        clientState.getCQL3Prepared().put(statementId, prepared);
         logger.trace(String.format("Stored prepared statement #%d with %d bind markers",
                                    statementId,
                                    prepared.statement.getBoundsTerms()));
@@ -202,18 +233,24 @@ public class QueryProcessor
         CqlPreparedResult result = new CqlPreparedResult(statementId, prepared.boundNames.size());
         result.setVariable_types(var_types);
         result.setVariable_names(var_names);
+
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = queryString;
+        context.clientState = clientState;
+        onPrepareHook.execute(prepared.statement, context);
+
         return result;
     }
 
-    public static CqlResult processPrepared(CQLStatement statement, ClientState clientState, List<ByteBuffer> variables)
+    public static CqlResult processPrepared(ParsedStatement.Prepared statement, ClientState clientState, List<ByteBuffer> variables)
     throws UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
         // Check to see if there are any bound variables to verify
-        if (!(variables.isEmpty() && (statement.getBoundsTerms() == 0)))
+        if (!(variables.isEmpty() && (statement.statement.getBoundsTerms() == 0)))
         {
-            if (variables.size() != statement.getBoundsTerms())
+            if (variables.size() != statement.statement.getBoundsTerms())
                 throw new InvalidRequestException(String.format("there were %d markers(?) in CQL but %d bound variables",
-                                                                statement.getBoundsTerms(),
+                                                                statement.statement.getBoundsTerms(),
                                                                 variables.size()));
 
             // at this point there is a match in count between markers and variables that is non-zero
@@ -223,7 +260,12 @@ public class QueryProcessor
                     logger.trace("[{}] '{}'", i+1, variables.get(i));
         }
 
-        return processStatement(statement, clientState, variables);
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.variables = variables;
+        context.boundNames = statement.boundNames;
+        context.queryString = statement.cqlString;
+
+        return processStatement(statement.statement, clientState, variables, context);
     }
 
     private static final int makeStatementId(String cql)

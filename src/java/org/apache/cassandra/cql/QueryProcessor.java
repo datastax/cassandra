@@ -29,6 +29,8 @@ import java.util.concurrent.TimeoutException;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Maps;
+import org.apache.cassandra.cql.hooks.OnPrepareHook;
+import org.apache.cassandra.cql.hooks.PreExecutionHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +70,19 @@ public class QueryProcessor
     private static final long timeLimitForSchemaAgreement = 10 * 1000;
 
     public static final String DEFAULT_KEY_NAME = bufferToString(CFMetaData.DEFAULT_KEY_NAME);
+
+    private static volatile PreExecutionHook preExecutionHook = PreExecutionHook.NO_OP;
+    private static volatile OnPrepareHook onPrepareHook = OnPrepareHook.NO_OP;
+
+    public static void setPreExecutionHook(PreExecutionHook hook)
+    {
+        preExecutionHook = hook;
+    }
+
+    public static void setOnPrepareHook(OnPrepareHook hook)
+    {
+        onPrepareHook = hook;
+    }
 
     private static List<org.apache.cassandra.db.Row> getSlice(CFMetaData metadata, SelectStatement select, List<ByteBuffer> variables)
     throws InvalidRequestException, TimedOutException, UnavailableException
@@ -386,7 +401,7 @@ public class QueryProcessor
                                Predicates.not(Predicates.equalTo(StorageProxy.UNREACHABLE)));
     }
 
-    public static CqlResult processStatement(CQLStatement statement,ClientState clientState, List<ByteBuffer> variables )
+    public static CqlResult processStatement(CQLStatement statement,ClientState clientState, List<ByteBuffer> variables, CQLExecutionContext context)
     throws  UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
         String keyspace = null;
@@ -398,6 +413,12 @@ public class QueryProcessor
         CqlResult result = new CqlResult();
 
         if (logger.isDebugEnabled()) logger.debug("CQL statement type: {}", statement.type.toString());
+
+        context.clientState = clientState;
+        context.variables = variables;
+
+        statement = preExecutionHook.execute(statement, context);
+
         CFMetaData metadata;
         switch (statement.type)
         {
@@ -851,13 +872,17 @@ public class QueryProcessor
     throws RecognitionException, UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
         logger.trace("CQL QUERY: {}", queryString);
-        return processStatement(getStatement(queryString), clientState, new ArrayList<ByteBuffer>(0));
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = queryString;
+        return processStatement(getStatement(queryString), clientState, new ArrayList<ByteBuffer>(0), context);
     }
 
     public static CqlPreparedResult prepare(String queryString, ClientState clientState)
     throws RecognitionException, InvalidRequestException
     {
         logger.trace("CQL QUERY: {}", queryString);
+
+
 
         CQLStatement statement = getStatement(queryString);
         int statementId = makeStatementId(queryString);
@@ -867,6 +892,11 @@ public class QueryProcessor
         logger.trace(String.format("Stored prepared statement #%d with %d bind markers",
                                    statementId,
                                    statement.boundTerms));
+
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.clientState = clientState;
+        context.queryString = queryString;
+        onPrepareHook.execute(statement, context);
 
         return new CqlPreparedResult(statementId, statement.boundTerms);
     }
@@ -889,7 +919,12 @@ public class QueryProcessor
                     logger.trace("[{}] '{}'", i+1, variables.get(i));
         }
 
-        return processStatement(statement, clientState, variables);
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = statement.cqlString;
+        context.clientState = clientState;
+        context.variables = variables;
+
+        return processStatement(statement, clientState, variables, context);
     }
 
     private static final int makeStatementId(String cql)
@@ -937,7 +972,9 @@ public class QueryProcessor
             // along the way, if necessary, we turn them into exceptions here.
             lexer.throwLastRecognitionError();
             parser.throwLastRecognitionError();
-            
+
+            // link the original cql string so we can use it in pre/post processing if necessary
+            statement.cqlString = queryStr;
             return statement;
         } 
         catch (RuntimeException re)

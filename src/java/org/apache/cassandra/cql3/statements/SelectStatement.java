@@ -535,7 +535,7 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
+    public List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
     {
         if (metadataRestrictions.isEmpty())
             return Collections.<IndexExpression>emptyList();

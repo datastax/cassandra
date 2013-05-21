@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service;
 
+import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +27,7 @@ import com.google.common.base.Throwables;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,6 +83,9 @@ public class ClientState
     // Reusable array for authorization
     private SemanticVersion cqlVersion = DEFAULT_CQL_VERSION;
 
+    // The remote address of the client - maybe null for internal clients
+    private SocketAddress remoteAddress;
+
     // An LRU map of prepared statements
     private Map<Integer, CQLStatement> prepared = new LinkedHashMap<Integer, CQLStatement>(16, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<Integer, CQLStatement> eldest) {
@@ -88,8 +93,8 @@ public class ClientState
         }
     };
 
-    private Map<Integer, org.apache.cassandra.cql3.CQLStatement> cql3Prepared = new LinkedHashMap<Integer, org.apache.cassandra.cql3.CQLStatement>(16, 0.75f, true) {
-        protected boolean removeEldestEntry(Map.Entry<Integer, org.apache.cassandra.cql3.CQLStatement> eldest) {
+    private Map<Integer, ParsedStatement.Prepared> cql3Prepared = new LinkedHashMap<Integer, ParsedStatement.Prepared>(16, 0.75f, true) {
+        protected boolean removeEldestEntry(Map.Entry<Integer, ParsedStatement.Prepared> eldest) {
             return size() > MAX_CACHE_PREPARED;
         }
     };
@@ -109,6 +114,8 @@ public class ClientState
     {
         reset();
         this.internalCall = internalCall;
+        if (!internalCall)
+            setRemoteAddress(SocketSessionManagementService.remoteSocket.get());
     }
 
     public Map<Integer, CQLStatement> getPrepared()
@@ -116,7 +123,7 @@ public class ClientState
         return prepared;
     }
 
-    public Map<Integer, org.apache.cassandra.cql3.CQLStatement> getCQL3Prepared()
+    public Map<Integer, ParsedStatement.Prepared> getCQL3Prepared()
     {
         return cql3Prepared;
     }
@@ -348,6 +355,16 @@ public class ClientState
                                                                                                     userResource.right);
                                             }
                                         });
+    }
+
+    public SocketAddress getRemoteAddress()
+    {
+        return remoteAddress;
+    }
+
+    public void setRemoteAddress(SocketAddress address)
+    {
+        remoteAddress = address;
     }
 
     public Set<Permission> authorize(IResource resource)
