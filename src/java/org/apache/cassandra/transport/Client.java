@@ -20,6 +20,7 @@ package org.apache.cassandra.transport;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -165,13 +166,26 @@ public class Client extends SimpleClient
         }
         else if (msgType.equals("AUTHENTICATE"))
         {
-            Map<String, String> credentials = readCredentials(iter);
-            if(!credentials.containsKey(IAuthenticator.USERNAME_KEY) || !credentials.containsKey(IAuthenticator.PASSWORD_KEY))
+            SaslAuthenticator authenticator;
+            if (Boolean.getBoolean("kerberos.enabled"))
             {
-                System.err.println("[ERROR] Authentication requires both 'username' and 'password'");
-                return null;
+                String hostname = ((InetSocketAddress)connection.channel().getRemoteAddress()).getHostName();
+                authenticator = new SaslAuthenticator.KerberosAuthenticator(hostname);
             }
-            return new AuthResponse(encodeCredentialsForSasl(credentials));
+            else
+            {
+                Map<String, String> credentials = readCredentials(iter);
+                if(! credentials.containsKey(IAuthenticator.USERNAME_KEY) ||
+                        ! credentials.containsKey(IAuthenticator.PASSWORD_KEY))
+                {
+                    System.err.println("[ERROR] Authentication requires both 'username' and 'password'");
+                    return null;
+                }
+                authenticator = new SaslAuthenticator.PlainTextAuthenticator(credentials.get(IAuthenticator.USERNAME_KEY),
+                                                            credentials.get(IAuthenticator.PASSWORD_KEY));
+            }
+            connection.channel().setAttachment(authenticator);
+            return new AuthResponse(authenticator.initialResponse());
         }
         else if (msgType.equals("REGISTER"))
         {
@@ -204,18 +218,6 @@ public class Client extends SimpleClient
             credentials.put(kv[0], kv[1]);
         }
         return credentials;
-    }
-
-    private byte[] encodeCredentialsForSasl(Map<String, String> credentials)
-    {
-        byte[] username = credentials.get(IAuthenticator.USERNAME_KEY).getBytes(Charset.forName("UTF-8"));
-        byte[] password = credentials.get(IAuthenticator.PASSWORD_KEY).getBytes(Charset.forName("UTF-8"));
-        byte[] initialResponse = new byte[username.length + password.length + 2];
-        initialResponse[0] = 0;
-        System.arraycopy(username, 0, initialResponse, 1, username.length);
-        initialResponse[username.length + 1] = 0;
-        System.arraycopy(password, 0, initialResponse, username.length + 2, password.length);
-        return initialResponse;
     }
 
     public static void main(String[] args) throws Exception

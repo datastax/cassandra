@@ -20,6 +20,7 @@ package org.apache.cassandra.transport;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,19 +29,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.SynchronousQueue;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import javax.security.auth.Subject;
+import javax.security.sasl.SaslClient;
 
+import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.transport.messages.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.security.SSLFactory;
-import org.apache.cassandra.transport.messages.CredentialsMessage;
-import org.apache.cassandra.transport.messages.ErrorMessage;
-import org.apache.cassandra.transport.messages.ExecuteMessage;
-import org.apache.cassandra.transport.messages.PrepareMessage;
-import org.apache.cassandra.transport.messages.QueryMessage;
-import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.transport.messages.StartupMessage;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
@@ -264,6 +262,31 @@ public class SimpleClient
         public void messageReceived(ChannelHandlerContext ctx, MessageEvent e)
         {
             assert e.getMessage() instanceof Message.Response;
+
+            if (e.getMessage() instanceof AuthChallenge)
+            {
+                AuthChallenge challenge = (AuthChallenge)e.getMessage();
+                SaslAuthenticator saslAuthClient = (SaslAuthenticator)ctx.getChannel().getAttachment();
+                byte[] responseToServer = saslAuthClient.evaluateChallenge(challenge.getToken());
+                if (responseToServer != null)
+                {
+                    // Construct a message containing the SASL response and send it to the server.
+                    logger.debug("Sending {}", AuthResponse.class.getName());
+                    ctx.getChannel().write(new AuthResponse(responseToServer));
+                    return;
+                }
+                else
+                {
+                    // If we generate a null response, then authentication has completed (if
+                    // not, warn), and return without sending a response back to the server.
+                    logger.debug("Response to server is null: authentication should now be complete.");
+                    if (!saslAuthClient.isComplete()) {
+                        logger.warn("Generated a null response, but authentication is not complete.");
+                    }
+                    return;
+                }
+            }
+
             try
             {
                 responses.put((Message.Response)e.getMessage());
@@ -281,4 +304,5 @@ public class SimpleClient
             ctx.sendUpstream(e);
         }
     }
+
 }
