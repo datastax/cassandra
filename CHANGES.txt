@@ -1,6 +1,5 @@
-
 DSE backports/cherry-picks
- * NONE
+ * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
 
 1.2.5
  * fix compaction throttling bursty-ness (CASSANDRA-4316)

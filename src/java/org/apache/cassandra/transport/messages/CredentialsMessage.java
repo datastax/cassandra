@@ -20,6 +20,9 @@ package org.apache.cassandra.transport.messages;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.transport.ProtocolException;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 
@@ -78,7 +81,8 @@ public class CredentialsMessage extends Message.Request
     {
         try
         {
-            state.getClientState().login(credentials);
+            AuthenticatedUser user = DatabaseDescriptor.getAuthenticator().authenticate(credentials);
+            state.getClientState().login(user);
             return new ReadyMessage();
         }
         catch (AuthenticationException e)

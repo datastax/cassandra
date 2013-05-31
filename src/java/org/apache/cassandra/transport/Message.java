@@ -57,19 +57,24 @@ public abstract class Message
 
     public enum Type
     {
-        ERROR        (0,  Direction.RESPONSE, ErrorMessage.codec),
-        STARTUP      (1,  Direction.REQUEST,  StartupMessage.codec),
-        READY        (2,  Direction.RESPONSE, ReadyMessage.codec),
-        AUTHENTICATE (3,  Direction.RESPONSE, AuthenticateMessage.codec),
-        CREDENTIALS  (4,  Direction.REQUEST,  CredentialsMessage.codec),
-        OPTIONS      (5,  Direction.REQUEST,  OptionsMessage.codec),
-        SUPPORTED    (6,  Direction.RESPONSE, SupportedMessage.codec),
-        QUERY        (7,  Direction.REQUEST,  QueryMessage.codec),
-        RESULT       (8,  Direction.RESPONSE, ResultMessage.codec),
-        PREPARE      (9,  Direction.REQUEST,  PrepareMessage.codec),
-        EXECUTE      (10, Direction.REQUEST,  ExecuteMessage.codec),
-        REGISTER     (11, Direction.REQUEST,  RegisterMessage.codec),
-        EVENT        (12, Direction.RESPONSE, EventMessage.codec);
+        ERROR          (0,  Direction.RESPONSE, ErrorMessage.codec),
+        STARTUP        (1,  Direction.REQUEST,  StartupMessage.codec),
+        READY          (2,  Direction.RESPONSE, ReadyMessage.codec),
+        AUTHENTICATE   (3,  Direction.RESPONSE, AuthenticateMessage.codec),
+        CREDENTIALS    (4,  Direction.REQUEST,  CredentialsMessage.codec),
+        OPTIONS        (5,  Direction.REQUEST,  OptionsMessage.codec),
+        SUPPORTED      (6,  Direction.RESPONSE, SupportedMessage.codec),
+        QUERY          (7,  Direction.REQUEST,  QueryMessage.codec),
+        RESULT         (8,  Direction.RESPONSE, ResultMessage.codec),
+        PREPARE        (9,  Direction.REQUEST,  PrepareMessage.codec),
+        EXECUTE        (10, Direction.REQUEST,  ExecuteMessage.codec),
+        REGISTER       (11, Direction.REQUEST,  RegisterMessage.codec),
+        EVENT          (12, Direction.RESPONSE, EventMessage.codec),
+//        Reserved for BatchMessage, coming in full v2 of protocol
+//        BATCH          (13, Direction.REQUEST,  BatchMessage.codec),
+        AUTH_CHALLENGE (14, Direction.RESPONSE, AuthChallenge.codec),
+        AUTH_RESPONSE  (15, Direction.REQUEST,  AuthResponse.codec),
+        AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec);
 
         public final int opcode;
         public final Direction direction;
