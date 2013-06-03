@@ -83,7 +83,7 @@ public class BatchStatement extends ModificationStatement
         }
     }
 
-    protected void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
+    public void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validateConsistency(cl);

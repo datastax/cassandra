@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.hooks;
 import org.apache.cassandra.cql3.CQLExecutionContext;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 
 /**
  * Run before the CQL Statement is executed in
@@ -40,9 +41,10 @@ public interface PreExecutionHook
      *                about the operation and statement
      * @return the actual statement that will be executed, possibly
      * this is a modification of the initial statement
-     * @throws RequestExecutionException
+     * @throws RequestExecutionException, RequestValidationException
      */
-    public CQLStatement execute(CQLStatement statement, CQLExecutionContext context) throws RequestExecutionException;
+    public CQLStatement execute(CQLStatement statement, CQLExecutionContext context)
+            throws RequestExecutionException, RequestValidationException;
 
     public static final PreExecutionHook NO_OP = new PreExecutionHook()
     {

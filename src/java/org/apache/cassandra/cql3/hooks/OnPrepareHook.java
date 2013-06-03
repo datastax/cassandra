@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.hooks;
 
 import org.apache.cassandra.cql3.CQLExecutionContext;
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 
 /**
@@ -33,7 +34,7 @@ public interface OnPrepareHook
      * @param statement the statement to perform additional processing on
      * @param context execution context containing additional info
      *                about the operation and statement
-     * @throws RequestValidationException
+     * @throws RequestValidationException, RequestValidationException
      */
     public void execute(CQLStatement statement, CQLExecutionContext context) throws RequestValidationException;
 

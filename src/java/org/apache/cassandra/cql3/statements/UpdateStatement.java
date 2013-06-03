@@ -95,7 +95,7 @@ public class UpdateStatement extends ModificationStatement
         this.whereClause = null;
     }
 
-    protected void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
+    public void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
     {
         if (type == Type.COUNTER)
             cl.validateCounterForWrite(cfDef.cfm);
@@ -390,16 +390,14 @@ public class UpdateStatement extends ModificationStatement
         return whereClause;
     }
 
-    public List<Term> getColumnValues()
+    public List<Term.Raw> getColumnValues()
     {
-//        return columnValues;
-        return Collections.EMPTY_LIST;
+        return columnValues;
     }
 
-    public Map<ColumnIdentifier, Operation> getColumns()
+    public List<Pair<ColumnIdentifier, Operation.RawUpdate>> getOperations()
     {
-//        return columns;
-        return new HashMap<ColumnIdentifier, Operation>();
+        return operations;
     }
 
     public String toString()

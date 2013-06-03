@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql;
 
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.thrift.ThriftClientState;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -30,6 +30,6 @@ import java.util.List;
 public class CQLExecutionContext
 {
     public String queryString;
-    public ClientState clientState;
+    public ThriftClientState clientState;
     public List<ByteBuffer> variables;
 }

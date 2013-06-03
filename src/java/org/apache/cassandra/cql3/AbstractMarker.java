@@ -71,6 +71,11 @@ public abstract class AbstractMarker extends Term.NonTerminal
             return true;
         }
 
+        public int getBindIndex()
+        {
+            return bindIndex;
+        }
+
         @Override
         public String toString()
         {

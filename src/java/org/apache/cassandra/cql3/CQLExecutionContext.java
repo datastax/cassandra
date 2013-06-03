@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.thrift.ConsistencyLevel;
+import org.apache.cassandra.service.QueryState;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -32,6 +32,7 @@ import java.util.List;
 public class CQLExecutionContext
 {
     public String queryString;
+    public QueryState queryState;
     public ClientState clientState;
     public List<ByteBuffer> variables;
     public List<ColumnSpecification> boundNames;

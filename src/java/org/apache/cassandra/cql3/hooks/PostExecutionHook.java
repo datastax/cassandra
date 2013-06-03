@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.hooks;
 import org.apache.cassandra.cql3.CQLExecutionContext;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 
 /**
  * Run after the CQL Statement is executed in
@@ -34,9 +35,10 @@ public interface PostExecutionHook
      * @param statement the statement to perform post-processing on
      * @param context execution context containing additional info
      *                about the operation and statement
-     * @throws RequestExecutionException
+     * @throws RequestExecutionException, RequestValidationException
      */
-    public void execute(CQLStatement statement, CQLExecutionContext context) throws RequestExecutionException;
+    public void execute(CQLStatement statement, CQLExecutionContext context)
+            throws RequestExecutionException, RequestValidationException;
 
     public static final PostExecutionHook NO_OP = new PostExecutionHook()
     {

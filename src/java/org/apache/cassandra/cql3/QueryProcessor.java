@@ -153,7 +153,7 @@ public class QueryProcessor
         statement.validate(clientState);
         statement.checkAccess(clientState);
 
-        context.clientState = clientState;
+        context.queryState = queryState;
         statement = preExecutionHook.execute(statement, context);
 
         ResultMessage result = statement.execute(cl, queryState, variables);
