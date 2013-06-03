@@ -1,3 +1,6 @@
+1.1.9.8
+ * add extension point for sstable components (CASSANDRA-4049)
+
 1.1.9.6
  * Fix NPE in Pig's widerow mode (CASSANDRA-5488)
 
