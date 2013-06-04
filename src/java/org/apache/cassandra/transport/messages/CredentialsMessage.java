@@ -102,8 +102,14 @@ public class CredentialsMessage extends Message.Request
 
         // This will cease to be an issue when we eventually catch up
         // to the protocol in C* - i.e. when DSE moves to C* 2.0
+
+        // On top of that, this horrible hack to accomodate the internal
+        // version of PasswordAuthenticator made me throw in my mouth
+        // a little. DSP-1936 would remove the need for it.
+
         Class c = DatabaseDescriptor.getAuthenticator().getClass();
-        if (! PasswordAuthenticator.class.isAssignableFrom(c))
+        if (! org.apache.cassandra.auth.PasswordAuthenticator.class.isAssignableFrom(c)
+             || ! c.getName().equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator") )
         {
             return ErrorMessage.fromException(new AuthenticationException("Unsupported Authenticator " + c.getName()));
         }
