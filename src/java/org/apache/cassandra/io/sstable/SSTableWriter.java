@@ -67,7 +67,6 @@ public class SSTableWriter extends SSTable
                                                                  Component.FILTER,
                                                                  Component.PRIMARY_INDEX,
                                                                  Component.STATS,
-                                                                 Component.SUMMARY,
                                                                  Component.TOC));
 
         if (metadata.compressionParameters().sstableCompressor != null)
