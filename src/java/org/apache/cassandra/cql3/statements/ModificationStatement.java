@@ -79,8 +79,6 @@ public abstract class ModificationStatement extends CFStatement implements CQLSt
             throw new InvalidRequestException(String.format("ttl is too large. requested (%d) maximum (%d)", timeToLive, ExpiringColumn.MAX_TTL));
     }
 
-    protected abstract void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException;
-
     public ResultMessage execute(ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables) throws RequestExecutionException, RequestValidationException
     {
         if (cl == null)
@@ -112,6 +110,8 @@ public abstract class ModificationStatement extends CFStatement implements CQLSt
         return null;
     }
 
+    public abstract void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException;
+
     public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
     {
         for (IMutation mutation : getMutations(Collections.<ByteBuffer>emptyList(), true, null, queryState.getTimestamp()))
@@ -137,6 +137,11 @@ public abstract class ModificationStatement extends CFStatement implements CQLSt
     public int getTimeToLive()
     {
         return timeToLive;
+    }
+
+    public Type getType()
+    {
+        return type;
     }
 
     protected Map<ByteBuffer, ColumnGroupMap> readRows(List<ByteBuffer> keys, ColumnNameBuilder builder, Set<ByteBuffer> toRead, CompositeType composite, boolean local, ConsistencyLevel cl)

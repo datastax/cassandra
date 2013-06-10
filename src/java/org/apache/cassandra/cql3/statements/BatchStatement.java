@@ -37,7 +37,7 @@ import org.apache.cassandra.utils.Pair;
 public class BatchStatement extends ModificationStatement
 {
     // statements to execute
-    protected final List<ModificationStatement> statements;
+    public final List<ModificationStatement> statements;
 
     /**
      * Creates a new BatchStatement from a list of statements and a
@@ -83,7 +83,7 @@ public class BatchStatement extends ModificationStatement
         }
     }
 
-    protected void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
+    public void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validateConsistency(cl);

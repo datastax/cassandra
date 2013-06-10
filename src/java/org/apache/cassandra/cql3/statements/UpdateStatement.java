@@ -95,7 +95,7 @@ public class UpdateStatement extends ModificationStatement
         this.whereClause = null;
     }
 
-    protected void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
+    public void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
     {
         if (type == Type.COUNTER)
             cl.validateCounterForWrite(cfDef.cfm);
@@ -383,6 +383,21 @@ public class UpdateStatement extends ModificationStatement
                     throw new InvalidRequestException(String.format("Non PRIMARY KEY %s found in where clause", name));
             }
         }
+    }
+
+    public List<Relation> getWhereClause()
+    {
+        return whereClause;
+    }
+
+    public List<Term.Raw> getColumnValues()
+    {
+        return columnValues;
+    }
+
+    public List<Pair<ColumnIdentifier, Operation.RawUpdate>> getOperations()
+    {
+        return operations;
     }
 
     public String toString()

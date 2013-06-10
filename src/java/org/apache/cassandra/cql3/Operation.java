@@ -46,7 +46,7 @@ public abstract class Operation
 
     // Term involved in the operation. In theory this should not be here since some operation
     // may require none of more than one term, but most need 1 so it simplify things a bit.
-    protected final Term t;
+    public final Term t;
 
     protected Operation(ColumnIdentifier columnName, Term t)
     {
@@ -116,6 +116,13 @@ public abstract class Operation
          * other} update (in the same UPDATE statement for the same column).
          */
         public boolean isCompatibleWith(RawUpdate other);
+
+        /**
+         * Get the raw term value for this update. This can be used to extract the bind index
+         * amongst other things.
+         * @return the raw term value of this operation
+         */
+        public Term.Raw getValue();
     }
 
     /**
@@ -188,6 +195,11 @@ public abstract class Operation
             // it's stupid and 2) the result would seem random to the user.
             return false;
         }
+
+        public Term.Raw getValue()
+        {
+            return value;
+        }
     }
 
     public static class SetElement implements RawUpdate
@@ -233,6 +245,11 @@ public abstract class Operation
             // too (but since the index/key set may be a bind variables we can't always do it at this point)
             return !(other instanceof SetValue);
         }
+
+        public Term.Raw getValue()
+        {
+            return value;
+        }
     }
 
     public static class Addition implements RawUpdate
@@ -275,6 +292,11 @@ public abstract class Operation
         public boolean isCompatibleWith(RawUpdate other)
         {
             return !(other instanceof SetValue);
+        }
+
+        public Term.Raw getValue()
+        {
+            return value;
         }
     }
 
@@ -319,6 +341,11 @@ public abstract class Operation
         {
             return !(other instanceof SetValue);
         }
+
+        public Term.Raw getValue()
+        {
+            return value;
+        }
     }
 
     public static class Prepend implements RawUpdate
@@ -348,6 +375,11 @@ public abstract class Operation
         public boolean isCompatibleWith(RawUpdate other)
         {
             return !(other instanceof SetValue);
+        }
+
+        public Term.Raw getValue()
+        {
+            return value;
         }
     }
 

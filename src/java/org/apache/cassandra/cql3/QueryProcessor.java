@@ -22,6 +22,10 @@ import java.util.*;
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 import org.antlr.runtime.*;
+import org.apache.cassandra.cql3.hooks.OnPrepareHook;
+import org.apache.cassandra.cql3.hooks.PostExecutionHook;
+import org.apache.cassandra.cql3.hooks.PreExecutionHook;
+import org.apache.cassandra.tracing.Tracing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,9 +36,9 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.*;
+
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.SemanticVersion;
@@ -46,23 +50,42 @@ public class QueryProcessor
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
 
     public static final int MAX_CACHE_PREPARED = 100000; // Enough to keep buggy clients from OOM'ing us
-    private static final Map<MD5Digest, CQLStatement> preparedStatements = new ConcurrentLinkedHashMap.Builder<MD5Digest, CQLStatement>()
+    private static final Map<MD5Digest, ParsedStatement.Prepared> preparedStatements = new ConcurrentLinkedHashMap.Builder<MD5Digest, ParsedStatement.Prepared>()
                                                                                .maximumWeightedCapacity(MAX_CACHE_PREPARED)
                                                                                .build();
 
-    private static final Map<Integer, CQLStatement> thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, CQLStatement>()
+    private static final Map<Integer, ParsedStatement.Prepared> thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, ParsedStatement.Prepared>()
                                                                                    .maximumWeightedCapacity(MAX_CACHE_PREPARED)
                                                                                    .build();
 
 
-    public static CQLStatement getPrepared(MD5Digest id)
+    public static ParsedStatement.Prepared getPrepared(MD5Digest id)
     {
         return preparedStatements.get(id);
     }
 
-    public static CQLStatement getPrepared(Integer id)
+    public static ParsedStatement.Prepared getPrepared(Integer id)
     {
         return thriftPreparedStatements.get(id);
+    }
+
+    private static volatile PreExecutionHook preExecutionHook = PreExecutionHook.NO_OP;
+    private static volatile PostExecutionHook postExecutionHook = PostExecutionHook.NO_OP;
+    private static volatile OnPrepareHook onPrepareHook = OnPrepareHook.NO_OP;
+
+    public static void setPreExecutionHook(PreExecutionHook hook)
+    {
+        preExecutionHook = hook;
+    }
+
+    public static void setPostExecutionHook(PostExecutionHook hook)
+    {
+        postExecutionHook = hook;
+    }
+
+    public static void setOnPrepareHook(OnPrepareHook hook)
+    {
+        onPrepareHook = hook;
     }
 
     public static void validateKey(ByteBuffer key) throws InvalidRequestException
@@ -123,13 +146,19 @@ public class QueryProcessor
         }
     }
 
-    private static ResultMessage processStatement(CQLStatement statement, ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables)
+    private static ResultMessage processStatement(CQLStatement statement, ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables, CQLExecutionContext context)
     throws RequestExecutionException, RequestValidationException
     {
         ClientState clientState = queryState.getClientState();
         statement.validate(clientState);
         statement.checkAccess(clientState);
+
+        context.queryState = queryState;
+        statement = preExecutionHook.execute(statement, context);
+
         ResultMessage result = statement.execute(cl, queryState, variables);
+
+        postExecutionHook.execute(statement, context);
         return result == null ? new ResultMessage.Void() : result;
     }
 
@@ -137,10 +166,14 @@ public class QueryProcessor
     throws RequestExecutionException, RequestValidationException
     {
         logger.trace("CQL QUERY: {}", queryString);
+
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = queryString;
+
         CQLStatement prepared = getStatement(queryString, queryState.getClientState()).statement;
         if (prepared.getBoundsTerms() > 0)
             throw new InvalidRequestException("Cannot execute query with bind variables");
-        return processStatement(prepared, cl, queryState, Collections.<ByteBuffer>emptyList());
+        return processStatement(prepared, cl, queryState, Collections.<ByteBuffer>emptyList(), context);
     }
 
     public static UntypedResultSet process(String query, ConsistencyLevel cl) throws RequestExecutionException
@@ -205,8 +238,14 @@ public class QueryProcessor
         logger.trace("CQL QUERY: {}", queryString);
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
-        ResultMessage.Prepared msg = storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared, forThrift);
+        prepared.cqlString = queryString;
 
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.queryString = queryString;
+        context.clientState = clientState;
+        onPrepareHook.execute(prepared.statement, context);
+
+        ResultMessage.Prepared msg = storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared, forThrift);
         assert prepared.statement.getBoundsTerms() == prepared.boundNames.size();
         return msg;
     }
@@ -219,7 +258,7 @@ public class QueryProcessor
         if (forThrift)
         {
             int statementId = toHash.hashCode();
-            thriftPreparedStatements.put(statementId, prepared.statement);
+            thriftPreparedStatements.put(statementId, prepared);
             logger.trace(String.format("Stored prepared statement #%d with %d bind markers",
                                        statementId,
                                        prepared.statement.getBoundsTerms()));
@@ -231,20 +270,20 @@ public class QueryProcessor
             logger.trace(String.format("Stored prepared statement %s with %d bind markers",
                                        statementId,
                                        prepared.statement.getBoundsTerms()));
-            preparedStatements.put(statementId, prepared.statement);
+            preparedStatements.put(statementId, prepared);
             return new ResultMessage.Prepared(statementId, prepared.boundNames);
         }
     }
 
-    public static ResultMessage processPrepared(CQLStatement statement, ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables)
+    public static ResultMessage processPrepared(ParsedStatement.Prepared statement,  ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables)
     throws RequestExecutionException, RequestValidationException
     {
         // Check to see if there are any bound variables to verify
-        if (!(variables.isEmpty() && (statement.getBoundsTerms() == 0)))
+        if (!(variables.isEmpty() && (statement.statement.getBoundsTerms() == 0)))
         {
-            if (variables.size() != statement.getBoundsTerms())
+            if (variables.size() != statement.statement.getBoundsTerms())
                 throw new InvalidRequestException(String.format("there were %d markers(?) in CQL but %d bound variables",
-                                                                statement.getBoundsTerms(),
+                                                                statement.statement.getBoundsTerms(),
                                                                 variables.size()));
 
             // at this point there is a match in count between markers and variables that is non-zero
@@ -254,7 +293,12 @@ public class QueryProcessor
                     logger.trace("[{}] '{}'", i+1, variables.get(i));
         }
 
-        return processStatement(statement, cl, queryState, variables);
+        CQLExecutionContext context = new CQLExecutionContext();
+        context.variables = variables;
+        context.boundNames = statement.boundNames;
+        context.queryString = statement.cqlString;
+
+        return processStatement(statement.statement, cl, queryState, variables, context);
     }
 
     private static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

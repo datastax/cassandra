@@ -44,6 +44,7 @@ public abstract class ParsedStatement
     {
         public final CQLStatement statement;
         public final List<ColumnSpecification> boundNames;
+        public String cqlString;
 
         public Prepared(CQLStatement statement, List<ColumnSpecification> boundNames)
         {

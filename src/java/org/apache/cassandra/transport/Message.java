@@ -289,6 +289,9 @@ public abstract class Message
 
                 logger.debug("Received: {}", request);
 
+                connection.getQueryState(request.getStreamId())
+                          .getClientState().setRemoteAddress(connection.channel().getRemoteAddress());
+
                 Response response = request.execute(connection.getQueryState(request.getStreamId()));
                 response.setStreamId(request.getStreamId());
                 response.attach(connection);

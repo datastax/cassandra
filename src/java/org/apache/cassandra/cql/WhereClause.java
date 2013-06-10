@@ -76,6 +76,11 @@ public class WhereClause
         keys.add(key);
     }
 
+    public List<Relation> getClauseRelations()
+    {
+        return clauseRelations;
+    }
+
     public List<Relation> getColumnRelations()
     {
         return columns;

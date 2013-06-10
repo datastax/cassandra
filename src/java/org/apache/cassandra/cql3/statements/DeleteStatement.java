@@ -51,7 +51,7 @@ public class DeleteStatement extends ModificationStatement
         this.toRemove = new ArrayList<Operation>(deletions.size());
     }
 
-    protected void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
+    public void validateConsistency(ConsistencyLevel cl) throws InvalidRequestException
     {
         if (type == Type.COUNTER)
             cl.validateCounterForWrite(cfDef.cfm);
@@ -168,6 +168,11 @@ public class DeleteStatement extends ModificationStatement
     {
         ColumnSpecification[] boundNames = new ColumnSpecification[getBoundsTerms()];
         return prepare(boundNames);
+    }
+
+    public List<Relation> getWhereClause()
+    {
+        return whereClause;
     }
 
     public String toString()

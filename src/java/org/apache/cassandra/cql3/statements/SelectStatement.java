@@ -565,7 +565,7 @@ public class SelectStatement implements CQLStatement
         return buildBound(b, cfDef.columns.values(), columnRestrictions, isReversed, cfDef.getColumnNameBuilder(), variables);
     }
 
-    private List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
+    public List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
     {
         if (metadataRestrictions.isEmpty())
             return Collections.<IndexExpression>emptyList();

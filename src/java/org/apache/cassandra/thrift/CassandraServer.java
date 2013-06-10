@@ -31,6 +31,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.cassandra.auth.AuthenticatedUser;
+
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.utils.Pair;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,9 +62,10 @@ import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.Pair;
+
 import org.apache.cassandra.utils.SemanticVersion;
 import org.apache.cassandra.utils.UUIDGen;
+
 import org.apache.thrift.TException;
 
 public class CassandraServer implements Cassandra.Iface
@@ -1822,15 +1827,14 @@ public class CassandraServer implements Cassandra.Iface
         try
         {
             ThriftClientState cState = state();
-            org.apache.cassandra.cql3.CQLStatement statement = org.apache.cassandra.cql3.QueryProcessor.getPrepared(itemId);
+            ParsedStatement.Prepared statement = org.apache.cassandra.cql3.QueryProcessor.getPrepared(itemId);
 
             if (statement == null)
                 throw new InvalidRequestException(String.format("Prepared query with ID %d not found" +
                                                                 " (either the query was not prepared on this host (maybe the host has been restarted?)" +
                                                                 " or you have prepared more than %d queries and queries %d has been evicted from the internal cache)",
                                                                 itemId, org.apache.cassandra.cql3.QueryProcessor.MAX_CACHE_PREPARED, itemId));
-            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.getBoundsTerms());
-
+            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.statement.getBoundsTerms());
             return org.apache.cassandra.cql3.QueryProcessor.processPrepared(statement, ThriftConversion.fromThrift(cLevel), cState.getQueryState(), bindVariables).toThriftResult();
         }
         catch (RequestExecutionException e)

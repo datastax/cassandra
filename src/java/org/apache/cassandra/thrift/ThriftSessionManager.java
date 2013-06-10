@@ -59,48 +59,6 @@ public class ThriftSessionManager
         return cState;
     }
 
-  
-    /**set the client state by the passing in client state
-     * @param clientState the clientState to be set for the first time
-     * @return the current session for the most recently given socket on this thread
-     */
-    public ThriftClientState currentSession(Class clazz)
-    {
-        SocketAddress socket = remoteSocket.get();
-        assert socket != null;
-
-        ThriftClientState cState = activeSocketSessions.get(socket);
-        if (cState == null)
-        {
-            if (clazz == null)
-            {
-                cState = new ThriftClientState();
-            }
-            else
-            {
-                if (ThriftClientState.class.isAssignableFrom(clazz))
-                {
-                    try
-                    {
-                        cState = (ThriftClientState) clazz.newInstance();
-                    }
-                    catch (Exception e)
-                    {
-                        throw new RuntimeException(e);
-                    }
-                }
-                
-                if (cState == null)
-                {
-                    cState = new ThriftClientState();
-                }
-            }
-
-            activeSocketSessions.put(socket, cState);
-        }
-        return cState;
-    }
-    
     /*
      * @return the remote socket address
      */

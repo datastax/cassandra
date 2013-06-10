@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.jboss.netty.buffer.ChannelBuffer;
 
 import org.apache.cassandra.cql3.CQLStatement;
@@ -99,7 +100,7 @@ public class ExecuteMessage extends Message.Request
     {
         try
         {
-            CQLStatement statement = QueryProcessor.getPrepared(statementId);
+            ParsedStatement.Prepared statement = QueryProcessor.getPrepared(statementId);
 
             if (statement == null)
                 throw new PreparedQueryNotFoundException(statementId);

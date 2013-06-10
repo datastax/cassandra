@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service;
 
+import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.thrift.ThriftSessionManager;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +77,9 @@ public class ClientState
 
     private SemanticVersion cqlVersion;
 
+    // The remote address of the client - maybe null for internal clients
+    private SocketAddress remoteAddress;
+
     // internalCall is used to mark ClientState as used by some internal component
     // that should have an ability to modify system keyspace
     private final boolean internalCall;
@@ -89,8 +95,12 @@ public class ClientState
     public ClientState(boolean internalCall)
     {
         this.internalCall = internalCall;
+
         if (!DatabaseDescriptor.getAuthenticator().requireAuthentication())
             this.user = AuthenticatedUser.ANONYMOUS_USER;
+
+        if (!internalCall)
+            setRemoteAddress(ThriftSessionManager.instance.getRemoteSocket());
     }
 
     public String getRawKeyspace()
@@ -277,7 +287,17 @@ public class ClientState
                                         });
     }
 
-    private Set<Permission> authorize(IResource resource)
+    public SocketAddress getRemoteAddress()
+    {
+        return remoteAddress;
+    }
+
+    public void setRemoteAddress(SocketAddress address)
+    {
+        remoteAddress = address;
+    }
+
+    public Set<Permission> authorize(IResource resource)
     {
         // AllowAllAuthorizer or manually disabled caching.
         if (permissionsCache == null)
