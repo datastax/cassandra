@@ -41,6 +41,7 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.thrift.TException;
+import org.apache.thrift.transport.TTransport;
 
 public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap<ByteBuffer, IColumn>>
     implements org.apache.hadoop.mapred.RecordReader<ByteBuffer, SortedMap<ByteBuffer, IColumn>>
@@ -58,7 +59,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
     private int batchSize; // fetch this many per batch
     private String keyspace;
     private String cfName;
-    private ClientHolder client;
+    private Cassandra.Client client;
     private ConsistencyLevel consistencyLevel;
     private int keyBufferSize = 8192;
     private List<IndexExpression> filter;
@@ -78,7 +79,11 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
     public void close()
     {
         if (client != null)
-            client.close();
+        {
+            TTransport transport = client.getOutputProtocol().getTransport();
+            if (transport.isOpen())
+                transport.close();
+        }
     }
 
     public ByteBuffer getCurrentKey()
@@ -142,8 +147,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
         try
         {
-            // only need to connect once
-            if (client != null && client.transport.isOpen())
+            if (client != null)
                 return;
 
             // create connection using thrift
@@ -214,11 +218,11 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
         {
             try
             {
-                partitioner = FBUtilities.newPartitioner(client.thriftClient.describe_partitioner());
+                partitioner = FBUtilities.newPartitioner(client.describe_partitioner());
 
                 // Get the Keyspace metadata, then get the specific CF metadata
                 // in order to populate the sub/comparator.
-                KsDef ks_def = client.thriftClient.describe_keyspace(keyspace);
+                KsDef ks_def = client.describe_keyspace(keyspace);
                 List<String> cfnames = new ArrayList<String>();
                 for (CfDef cfd : ks_def.cf_defs)
                     cfnames.add(cfd.name);
@@ -326,7 +330,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
                                 .setRow_filter(filter);
             try
             {
-                rows = client.thriftClient.get_range_slices(new ColumnParent(cfName), predicate, keyRange, consistencyLevel);
+                rows = client.get_range_slices(new ColumnParent(cfName), predicate, keyRange, consistencyLevel);
 
                 // nothing new? reached the end
                 if (rows.isEmpty())
@@ -418,7 +422,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
             try
             {
-                rows = client.thriftClient.get_paged_slice(cfName, keyRange, lastColumn, consistencyLevel);
+                rows = client.get_paged_slice(cfName, keyRange, lastColumn, consistencyLevel);
                 int n = 0;
                 for (KeySlice row : rows)
                     n += row.columns.size();
