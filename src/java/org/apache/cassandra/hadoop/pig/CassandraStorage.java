@@ -756,7 +756,7 @@ public class CassandraStorage extends AbstractCassandraStorage
 
     /** cassandra://[username:password@]<keyspace>/<columnfamily>[?slice_start=<start>&slice_end=<end>
      * [&reversed=true][&limit=1][&allow_deletes=true][&widerows=true]
-     * [&use_secondary=true][&comparator=<comparator>]]*/
+     * [&use_secondary=true][&comparator=<comparator>][&partitioner=<partitioner>]]*/
     private void setLocationFromUri(String location) throws IOException
     {
         try
@@ -787,6 +787,8 @@ public class CassandraStorage extends AbstractCassandraStorage
                     usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary"));
                 if (urlQuery.containsKey("split_size"))
                     splitSize = Integer.parseInt(urlQuery.get("split_size"));
+                if (urlQuery.containsKey("partitioner"))
+                    partitionerClass = urlQuery.get("partitioner");
             }
             String[] parts = urlParts[0].split("/+");
             String[] credentialsAndKeyspace = parts[1].split("@");
@@ -808,7 +810,7 @@ public class CassandraStorage extends AbstractCassandraStorage
             throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<columnfamily>" +
             		                        "[?slice_start=<start>&slice_end=<end>[&reversed=true][&limit=1]" +
             		                        "[&allow_deletes=true][&widerows=true][&use_secondary=true]" +
-            		                        "[&comparator=<comparator>][&split_size=<size>]]': " + e.getMessage());
+            		                        "[&comparator=<comparator>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
         }
     }
 

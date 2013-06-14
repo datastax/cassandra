@@ -46,7 +46,7 @@ import org.slf4j.LoggerFactory;
  * A row from a standard CF will be returned as nested tuples: 
  * (((key1, value1), (key2, value2)), ((name1, val1), (name2, val2))).
  */
-public class CQL3Storage extends AbstractCassandraStorage
+public class CqlStorage extends AbstractCassandraStorage
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraStorage.class);
 
@@ -58,13 +58,13 @@ public class CQL3Storage extends AbstractCassandraStorage
     private String outputQuery;
     private String whereClause;
 
-    public CQL3Storage()
+    public CqlStorage()
     {
         this(1000);
     }
 
     /** @param limit number of CQL rows to fetch in a thrift request */
-    public CQL3Storage(int pageSize)
+    public CqlStorage(int pageSize)
     {
         super();
         this.pageSize = pageSize;
@@ -129,6 +129,8 @@ public class CQL3Storage extends AbstractCassandraStorage
             ConfigHelper.setInputKeyspaceUserNameAndPassword(conf, username, password);
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
+        if (partitionerClass!= null)
+            ConfigHelper.setInputPartitioner(conf, partitionerClass);
 
         ConfigHelper.setInputColumnFamily(conf, keyspace, column_family);
         setConnectionInformation();
@@ -173,6 +175,8 @@ public class CQL3Storage extends AbstractCassandraStorage
             ConfigHelper.setOutputKeyspaceUserNameAndPassword(conf, username, password);
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
+        if (partitionerClass!= null)
+            ConfigHelper.setOutputPartitioner(conf, partitionerClass);
 
         ConfigHelper.setOutputColumnFamily(conf, keyspace, column_family);
         CqlConfigHelper.setOutputCql(conf, outputQuery);
@@ -381,7 +385,8 @@ public class CQL3Storage extends AbstractCassandraStorage
     }
     
     /** cassandra://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
-     * [&columns=<col1,col2>][&output_query=<prepared_statement>][&where_clause=<clause>][&split_size=<size>]] */
+     * [&columns=<col1,col2>][&output_query=<prepared_statement>][&where_clause=<clause>]
+     * [&split_size=<size>][&partitioner=<partitioner>]] */
     private void setLocationFromUri(String location) throws IOException
     {
         try
@@ -404,7 +409,7 @@ public class CQL3Storage extends AbstractCassandraStorage
 
                 // output prepared statement
                 if (urlQuery.containsKey("output_query"))
-                    outputQuery = urlQuery.get("output_query");
+                    outputQuery = urlQuery.get("output_query").replaceAll("#", "?").replaceAll("@", "=");
 
                 // user defined where clause
                 if (urlQuery.containsKey("where_clause"))
@@ -413,6 +418,8 @@ public class CQL3Storage extends AbstractCassandraStorage
                 //split size
                 if (urlQuery.containsKey("split_size"))
                     splitSize = Integer.parseInt(urlQuery.get("split_size"));
+                if (urlQuery.containsKey("partitioner"))
+                    partitionerClass = urlQuery.get("partitioner");
             }
             String[] parts = urlParts[0].split("/+");
             String[] credentialsAndKeyspace = parts[1].split("@");
@@ -433,7 +440,7 @@ public class CQL3Storage extends AbstractCassandraStorage
         {
             throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<columnfamily>" +
             		                         "[?[page_size=<size>][&columns=<col1,col2>][&output_query=<prepared_statement>]" +
-            		                         "[&where_clause=<clause>][&split_size=<size>]]': " + e.getMessage());
+            		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
         }
     }
 }
