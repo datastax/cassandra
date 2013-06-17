@@ -385,7 +385,7 @@ public class CqlStorage extends AbstractCassandraStorage
     }
     
     /** cassandra://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
-     * [&columns=<col1,col2>][&output_query=<prepared_statement>][&where_clause=<clause>]
+     * [&columns=<col1,col2>][&output_query=<prepared_statement_query>][&where_clause=<clause>]
      * [&split_size=<size>][&partitioner=<partitioner>]] */
     private void setLocationFromUri(String location) throws IOException
     {

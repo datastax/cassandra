@@ -305,6 +305,9 @@ public class CassandraStorage extends AbstractCassandraStorage
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
 
+        if (partitionerClass!= null)
+            ConfigHelper.setInputPartitioner(conf, partitionerClass);
+
         ConfigHelper.setInputColumnFamily(conf, keyspace, column_family, widerows);
         setConnectionInformation();
 
@@ -332,6 +335,8 @@ public class CassandraStorage extends AbstractCassandraStorage
             ConfigHelper.setOutputKeyspaceUserNameAndPassword(conf, username, password);
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
+        if (partitionerClass!= null)
+            ConfigHelper.setOutputPartitioner(conf, partitionerClass);
 
         ConfigHelper.setOutputColumnFamily(conf, keyspace, column_family);
         setConnectionInformation();
