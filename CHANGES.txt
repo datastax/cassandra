@@ -1,6 +1,6 @@
 
 DSE backports/cherry-picks
- * NONE
+ * Fix PermissionDetails.equals() method (CASSANDRA-5655
 
 1.2.5
  * fix compaction throttling bursty-ness (CASSANDRA-4316)
