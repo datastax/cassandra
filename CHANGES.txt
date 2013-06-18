@@ -3,6 +3,9 @@ DSE backports/cherry-picks
  * Fix PermissionDetails.equals() method (CASSANDRA-5655
 
 1.2.5
+ * make BytesToken.toString only return hex bytes (CASSANDRA-5566)
+ * Ensure that submitBackground enqueues at least one task (CASSANDRA-5554)
+ * fix 2i updates with identical values and timestamps (CASSANDRA-5540)
  * fix compaction throttling bursty-ness (CASSANDRA-4316)
  * reduce memory consumption of IndexSummary (CASSANDRA-5506)
  * remove per-row column name bloom filters (CASSANDRA-5492)
@@ -19,19 +22,23 @@ DSE backports/cherry-picks
  * Fix repair -snapshot not working (CASSANDRA-5512)
  * Set isRunning flag later in binary protocol server (CASSANDRA-5467)
  * Fix use of CQL3 functions with descending clustering order (CASSANDRA-5472)
- * Prevent repair when protocol version does not match (CASSANDRA-5523)
  * Disallow renaming columns one at a time for thrift table in CQL3
    (CASSANDRA-5531)
  * cqlsh: add CLUSTERING ORDER BY support to DESCRIBE (CASSANDRA-5528)
  * Add custom secondary index support to CQL3 (CASSANDRA-5484)
  * Fix repair hanging silently on unexpected error (CASSANDRA-5229)
  * Fix Ec2Snitch regression introduced by CASSANDRA-5171 (CASSANDRA-5432)
+ * Add nodetool enablebackup/disablebackup (CASSANDRA-5556)
+ * cqlsh: fix DESCRIBE after case insensitive USE (CASSANDRA-5567)
 Merged from 1.1
  * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
  * Use allocator information to improve memtable memory usage estimate
    (CASSANDRA-5497)
  * Fix trying to load deleted row into row cache on startup (CASSANDRA-4463)
  * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
+ * Fix Bound intersection computation (CASSANDRA-5551)
+ * sstablescrub now respects max memory size in cassandra.in.sh (CASSANDRA-5562)
+
 
 1.2.4
  * Ensure that PerRowSecondaryIndex updates see the most recent values
