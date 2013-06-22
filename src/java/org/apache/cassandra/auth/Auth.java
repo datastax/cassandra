@@ -157,6 +157,55 @@ public class Auth
                                           SUPERUSER_SETUP_DELAY,
                                           TimeUnit.MILLISECONDS);
         }
+
+        // We need to wait until we've properly joined the ring before attempting to
+        // migrate legacy auth data. It may be a overkill to wait the full
+        // RING_DELAY period, but this should only be required once per-node and
+        // only during an upgrade.
+        if (DatabaseDescriptor.requiresCredentialsDataMigration()
+                || DatabaseDescriptor.requiresPermissionsDataMigration() )
+        {
+            StorageService.tasks.schedule(new Runnable()
+                {
+                    public void run()
+                    {
+                        migrateLegacyAuthData();
+                    }
+                },
+                StorageService.RING_DELAY,
+                TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static void migrateLegacyAuthData()
+    {
+        logger.info("Migrating legacy Auth data to system keyspace");
+        if (DatabaseDescriptor.requiresCredentialsDataMigration())
+        {
+            try
+            {
+                DatabaseDescriptor.getLegacyAuthDataMigrator().migrateCredentials();
+            }
+            catch (Exception e)
+            {
+                logger.warn("Failed to migrate legacy credentials", e);
+                throw new RuntimeException(e);
+            }
+        }
+
+        if (DatabaseDescriptor.requiresPermissionsDataMigration())
+        {
+            try
+            {
+                DatabaseDescriptor.getLegacyAuthDataMigrator().migratePermissions();
+            }
+            catch (Exception e)
+            {
+                logger.warn("Failed to migrate legacy permissions", e);
+                throw new RuntimeException(e);
+            }
+        }
+        logger.info("Migration of legacy auth data is complete. You should now switch to org.apache.cassandra.auth implementations in cassandra.yaml.");
     }
 
     // Only use QUORUM cl for the default superuser.
