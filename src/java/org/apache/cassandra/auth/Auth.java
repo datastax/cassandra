@@ -125,7 +125,7 @@ public class Auth
                                              AUTH_KS,
                                              USERS_CF,
                                              escape(username)),
-                                             consistencyForUser(username));
+                               consistencyForUser(username));
     }
 
     /**
@@ -186,17 +186,15 @@ public class Auth
     private static void migrateLegacyAuthData() throws Exception
     {
         logger.info("Migrating legacy Auth data to system keyspace");
-        if (DatabaseDescriptor.hasLegacyAuthConfig())
-        {
-            LegacyAuthDataMigrator migrator = DatabaseDescriptor.getLegacyAuthDataMigrator();
-            migrator.migrateUsers();
+        LegacyAuthDataMigrator migrator = DatabaseDescriptor.getLegacyAuthDataMigrator();
+        migrator.migrateUsers();
 
-            if (DatabaseDescriptor.requiresCredentialsMigration())
-                migrator.migrateCredentials();
+        if (DatabaseDescriptor.requiresCredentialsMigration())
+            migrator.migrateCredentials();
 
-            if (DatabaseDescriptor.requiresPermissionsMigration())
-                migrator.migratePermissions();
-        }
+        if (DatabaseDescriptor.requiresPermissionsMigration())
+            migrator.migratePermissions();
+
         logger.info("Migration of legacy auth data is complete. You should now switch to org.apache.cassandra.auth implementations in cassandra.yaml.");
     }
 
