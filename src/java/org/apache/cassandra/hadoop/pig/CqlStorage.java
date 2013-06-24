@@ -384,14 +384,14 @@ public class CqlStorage extends AbstractCassandraStorage
         return keyColumns;
     }
     
-    /** cassandra://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
+    /** cql://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
      * [&columns=<col1,col2>][&output_query=<prepared_statement_query>][&where_clause=<clause>]
      * [&split_size=<size>][&partitioner=<partitioner>]] */
     private void setLocationFromUri(String location) throws IOException
     {
         try
         {
-            if (!location.startsWith("cassandra://"))
+            if (!location.startsWith("cql://"))
                 throw new Exception("Bad scheme: " + location);
 
             String[] urlParts = location.split("\\?");
@@ -438,7 +438,7 @@ public class CqlStorage extends AbstractCassandraStorage
         }
         catch (Exception e)
         {
-            throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<columnfamily>" +
+            throw new IOException("Expected 'cql://[username:password@]<keyspace>/<columnfamily>" +
             		                         "[?[page_size=<size>][&columns=<col1,col2>][&output_query=<prepared_statement>]" +
             		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
         }

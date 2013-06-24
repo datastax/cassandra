@@ -537,6 +537,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             // initial query token(k) >= start_token and token(k) <= end_token
             if (emptyPartitionKeyValues())
             {
+                logger.debug(String.format("start token: %s, end token: %s", split.getStartToken(), split.getEndToken()));
                 values.add(partitioner.getTokenValidator().fromString(split.getStartToken()));
                 values.add(partitioner.getTokenValidator().fromString(split.getEndToken()));
                 return Pair.create(0, values);
@@ -588,6 +589,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             logger.debug("type:" + query.left + ", query: " + query.right);
             CqlPreparedResult cqlPreparedResult = client.prepare_cql3_query(ByteBufferUtil.bytes(query.right), Compression.NONE);
             preparedQueryIds.put(query.left, cqlPreparedResult.itemId);
+            logger.debug("prepared statement id: " + cqlPreparedResult.itemId);
             return cqlPreparedResult.itemId;
         }
 
