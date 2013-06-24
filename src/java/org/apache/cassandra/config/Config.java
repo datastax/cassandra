@@ -36,7 +36,7 @@ public class Config
     public String authority; // for backwards compatibility - will log a warning.
     public String authorizer;
     public int permissions_validity_in_ms = 2000;
-    public String auth_replication_strategy = "org.apache.cassandra.locator.SimpleStrategy";
+    public String auth_replication_strategy;
     public Map<String, String> auth_replication_options;
 
 

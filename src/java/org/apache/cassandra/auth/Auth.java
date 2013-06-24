@@ -125,7 +125,7 @@ public class Auth
                                              AUTH_KS,
                                              USERS_CF,
                                              escape(username)),
-                               consistencyForUser(username));
+                                             consistencyForUser(username));
     }
 
     /**
@@ -162,14 +162,20 @@ public class Auth
         // migrate legacy auth data. It may be a overkill to wait the full
         // RING_DELAY period, but this should only be required once per-node and
         // only during an upgrade.
-        if (DatabaseDescriptor.requiresCredentialsDataMigration()
-                || DatabaseDescriptor.requiresPermissionsDataMigration() )
+        if (DatabaseDescriptor.hasLegacyAuthConfig())
         {
             StorageService.tasks.schedule(new Runnable()
                 {
                     public void run()
                     {
-                        migrateLegacyAuthData();
+                        try
+                        {
+                            migrateLegacyAuthData();
+                        } catch (Exception e)
+                        {
+                            logger.error("Error during migration of legacy auth data", e);
+                            throw new RuntimeException(e);
+                        }
                     }
                 },
                 StorageService.RING_DELAY,
@@ -177,33 +183,19 @@ public class Auth
         }
     }
 
-    private static void migrateLegacyAuthData()
+    private static void migrateLegacyAuthData() throws Exception
     {
         logger.info("Migrating legacy Auth data to system keyspace");
-        if (DatabaseDescriptor.requiresCredentialsDataMigration())
+        if (DatabaseDescriptor.hasLegacyAuthConfig())
         {
-            try
-            {
-                DatabaseDescriptor.getLegacyAuthDataMigrator().migrateCredentials();
-            }
-            catch (Exception e)
-            {
-                logger.warn("Failed to migrate legacy credentials", e);
-                throw new RuntimeException(e);
-            }
-        }
+            LegacyAuthDataMigrator migrator = DatabaseDescriptor.getLegacyAuthDataMigrator();
+            migrator.migrateUsers();
 
-        if (DatabaseDescriptor.requiresPermissionsDataMigration())
-        {
-            try
-            {
-                DatabaseDescriptor.getLegacyAuthDataMigrator().migratePermissions();
-            }
-            catch (Exception e)
-            {
-                logger.warn("Failed to migrate legacy permissions", e);
-                throw new RuntimeException(e);
-            }
+            if (DatabaseDescriptor.requiresCredentialsMigration())
+                migrator.migrateCredentials();
+
+            if (DatabaseDescriptor.requiresPermissionsMigration())
+                migrator.migratePermissions();
         }
         logger.info("Migration of legacy auth data is complete. You should now switch to org.apache.cassandra.auth implementations in cassandra.yaml.");
     }

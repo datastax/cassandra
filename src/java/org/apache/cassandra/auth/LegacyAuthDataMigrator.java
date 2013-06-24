@@ -28,15 +28,15 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyType;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DefsTable;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.io.compress.CompressionParameters;
-import org.apache.cassandra.io.compress.SnappyCompressor;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,12 +75,19 @@ public class LegacyAuthDataMigrator
         this.replicationOptions = replicationOptions;
     }
 
+    public void migrateUsers() throws Exception
+    {
+        logger.info("Migrating legacy user records");
+        setAuthKsReplicationFactor();
+        loadOldUsersDefinition();
+        copyUsers();
+    }
+
     public void migrateCredentials() throws Exception
     {
         logger.info("Migrating legacy user credentials");
         setAuthKsReplicationFactor();
-        loadOldCredentialsDefinitions();
-        copyUsers();
+        loadOldCredentialsDefinition();
         copyCredentials();
     }
 
@@ -101,7 +108,12 @@ public class LegacyAuthDataMigrator
     private void setAuthKsReplicationFactor() throws ConfigurationException
     {
         int rfAll = StorageService.instance.getLiveNodes().size();
-        logger.info(String.format("During migration of legacy auth data, increasing rf " +
+        int rfNow = Integer.getInteger(Schema.instance.getKSMetaData(Auth.AUTH_KS)
+                                              .strategyOptions.get("replication_factor"), 1);
+        if (rfAll == rfNow)
+            return;
+
+        logger.info(String.format("During migration of legacy auth data, setting rf " +
                                   "of system_auth to match size of the ring (%s)",
                                    rfAll));
         logger.info("Following a successful upgrade & migration this can be lowered if required");
@@ -123,35 +135,37 @@ public class LegacyAuthDataMigrator
                                                         replicationOptions,
                                                         true,
                                                         Collections.EMPTY_LIST);
-            MigrationManager.announceNewKeyspace(dseAuth);
+            DefsTable.mergeSchema(Collections.singletonList(
+                                    dseAuth.toSchema(FBUtilities.timestampMicros())));
         }
     }
 
-    private void maybeCreateColumnFamily(CFMetaData cfm, Integer oldCfId) throws Exception
+    private void createColumnFamily(CFMetaData cfm, Integer oldCfId) throws Exception
     {
-        if (null == Schema.instance.getCFMetaData(cfm.ksName, cfm.cfName))
-        {
-            MigrationManager.announceNewColumnFamily(cfm);
-        }
         logger.debug("Mapping old CfId {} to new cf {}", oldCfId, cfm.cfName);
+        DefsTable.mergeSchema(Collections.singletonList(cfm.toSchema(FBUtilities.timestampMicros())));
         Schema.instance.addOldCfIdMapping(oldCfId, cfm.cfId);
     }
 
-    private void loadOldCredentialsDefinitions() throws Exception
+    private void loadOldUsersDefinition() throws Exception
     {
+        logger.info("Re-creating dse_auth user table");
         loadOldKeyspaceDefinition();
+        createColumnFamily(getDseUsers(), USERS_CF_ID);
+    }
 
-        logger.info("Re-creating dse_auth user tables");
-        maybeCreateColumnFamily(getDseUsers(), USERS_CF_ID);
-        maybeCreateColumnFamily(getDseCredentials(), CREDENTIALS_CF_ID);
+    private void loadOldCredentialsDefinition() throws Exception
+    {
+        logger.info("Re-creating dse_auth credentials table");
+        loadOldKeyspaceDefinition();
+        createColumnFamily(getDseCredentials(), CREDENTIALS_CF_ID);
     }
 
     private void loadOldPermissionsDefinitions() throws Exception
     {
-        loadOldKeyspaceDefinition();
-
         logger.info("Re-creating dse_auth permissions table");
-        maybeCreateColumnFamily(getDsePermissions(), PERMISSIONS_CF_ID);
+        loadOldKeyspaceDefinition();
+        createColumnFamily(getDsePermissions(), PERMISSIONS_CF_ID);
     }
 
     private CFMetaData getDseUsers()
@@ -168,9 +182,7 @@ public class LegacyAuthDataMigrator
                                                           null,
                                                           null));
         dseUsers.keyAliases(Lists.newArrayList(ByteBuffer.wrap("name".getBytes())));
-        dseUsers.compressionParameters(getCompressionParams());
         return dseUsers;
-
     }
 
     private CFMetaData getDseCredentials()
@@ -187,7 +199,6 @@ public class LegacyAuthDataMigrator
                                                                 null,
                                                                 null));
         dseCredentials.keyAliases(Lists.newArrayList(ByteBuffer.wrap("username".getBytes())));
-        dseCredentials.compressionParameters(getCompressionParams());
         return dseCredentials;
     }
 
@@ -212,25 +223,7 @@ public class LegacyAuthDataMigrator
         dsePermissions.keyAliases(Lists.newArrayList(ByteBuffer.wrap("username".getBytes())));
         dsePermissions.columnAliases(Lists.newArrayList(ByteBuffer.wrap("resource".getBytes()),
                                                         ByteBuffer.wrap("permission".getBytes())));
-        dsePermissions.compressionParameters(getCompressionParams());
         return dsePermissions;
-    }
-
-    private CompressionParameters getCompressionParams()
-    {
-        try
-        {
-            return (! SnappyCompressor.isAvailable())
-                   ? CompressionParameters.create(Collections.EMPTY_MAP)
-                   : CompressionParameters.create(
-                           Collections.singletonMap(CompressionParameters.SSTABLE_COMPRESSION,
-                                   SnappyCompressor.class.getName()));
-        }
-        catch(ConfigurationException e)
-        {
-            logger.warn("Error initialising compression parameters for legacy auth ks", e);
-            return null;
-        }
     }
 
     /**

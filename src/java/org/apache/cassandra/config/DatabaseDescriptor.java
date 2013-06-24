@@ -70,8 +70,8 @@ public class DatabaseDescriptor
     private static IInternodeAuthenticator internodeAuthenticator;
 
     private static LegacyAuthDataMigrator legacy_auth_data_migrator = null;
-    private static boolean requiresCredentialsDataMigration = false;
-    private static boolean requiresPermissionsDataMigration = false;
+    private static boolean requiresCredentialsMigration = false;
+    private static boolean requiresPermissionsMigration = false;
 
     /* Hashing strategy Random or OPHF */
     private static IPartitioner<?> partitioner;
@@ -210,28 +210,39 @@ public class DatabaseDescriptor
             logger.info("disk_failure_policy is " + conf.disk_failure_policy);
 
             /* Authentication and authorization backend, implementing IAuthenticator and IAuthorizer */
-            if (conf.authenticator != null)
+            validateAuthConfig();
+
+            // If auth_replication_strategy is configured, we infer that authn/authz was in
+            // use prior to upgrading so we need to migrate auth data from dse_auth to system_auth
+            if ( conf.auth_replication_strategy != null )
             {
+                logger.info("Legacy authentication config found. Existing authentication data will " +
+                        "be migrated to a system keyspace.");
+
+                // used to reconstruct the old dse_auth ks so that data can be migrated to system_auth
+                Class<? extends AbstractReplicationStrategy> auth_replication_strategy =
+                        AbstractReplicationStrategy.getClass(conf.auth_replication_strategy);
+                Map<String, String> auth_replication_options =
+                        conf.auth_replication_options == null ? new HashMap<String, String>() : conf.auth_replication_options;
+
+                legacy_auth_data_migrator = new LegacyAuthDataMigrator(auth_replication_strategy, auth_replication_options);
+
+                // If legacy impls of authn/authz classes are specified, use the new apache versions
+                // which is safe as we'll migrate the data before allowing client connections
                 if (conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator"))
                 {
-                    logger.info("Legacy authenticator is specified in configuration. " +
-                                "Existing authentication data will be migrated to a system keyspace.");
-                    logger.info("When this is completed you should switch to the newer implementation " +
-                                "org.apache.cassandra.auth.PasswordAuthenticator");
                     conf.authenticator = PasswordAuthenticator.class.getName();
-
-                    // used to reconstruct the old dse_auth ks so that data can be migrated to system_auth
-                    Class<? extends AbstractReplicationStrategy> auth_replication_strategy =
-                                AbstractReplicationStrategy.getClass(conf.auth_replication_strategy);
-                    Map<String, String> auth_replication_options =
-                            conf.auth_replication_options == null ? new HashMap<String, String>() : conf.auth_replication_options;
-
-                    requiresCredentialsDataMigration = true;
-                    legacy_auth_data_migrator = new LegacyAuthDataMigrator(auth_replication_strategy, auth_replication_options);
+                    requiresCredentialsMigration = true;
                 }
 
-                authenticator = FBUtilities.construct(conf.authenticator, "authenticator");
+                if (conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer"))
+                {
+                    conf.authorizer = CassandraAuthorizer.class.getName();
+                    requiresPermissionsMigration = true;
+                }
             }
+
+            authenticator = FBUtilities.construct(conf.authenticator, "authenticator");
 
             if (conf.authority != null)
             {
@@ -241,35 +252,7 @@ public class DatabaseDescriptor
                                                      + " please implement IAuthorizer instead.");
             }
 
-            if (conf.authorizer != null)
-            {
-                if (conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer"))
-                {
-                    logger.info("Legacy authorizer is specified in configuration. " +
-                            "Existing permissions data will be migrated to a system keyspace.");
-                    logger.info("When this is completed you should switch to the newer implementation " +
-                            "org.apache.cassandra.auth.CassandraAuthorizer");
-                    conf.authorizer = CassandraAuthorizer.class.getName();
-
-                    // used to reconstruct the old dse_auth ks so that data can be migrated to system_auth
-                    Class<? extends AbstractReplicationStrategy> auth_replication_strategy =
-                            AbstractReplicationStrategy.getClass(conf.auth_replication_strategy);
-                    Map<String, String> auth_replication_options =
-                            conf.auth_replication_options == null ? new HashMap<String, String>() : conf.auth_replication_options;
-
-                    requiresPermissionsDataMigration = true;
-                    legacy_auth_data_migrator = new LegacyAuthDataMigrator(auth_replication_strategy, auth_replication_options);
-                }
-                authorizer = FBUtilities.construct(conf.authorizer, "authorizer");
-            }
-
-            if (! requiresCredentialsDataMigration && ! requiresPermissionsDataMigration)
-            {
-                if (conf.auth_replication_options != null || conf.auth_replication_strategy != null)
-                {
-                    logger.info("auth_replication_strategy & auth_replication_options are no longer required and may safely be removed from cassandra.yaml");
-                }
-            }
+            authorizer = FBUtilities.construct(conf.authorizer, "authorizer");
 
 
             if (conf.internode_authenticator != null)
@@ -565,6 +548,25 @@ public class DatabaseDescriptor
         }
     }
 
+    private static void validateAuthConfig() throws ConfigurationException
+    {
+        if (conf.authenticator.equals(AllowAllAuthenticator.class) && conf.authorizer.equals(AllowAllAuthorizer.class))
+        {
+            if (conf.auth_replication_options != null || conf.auth_replication_strategy != null)
+                throw new ConfigurationException("auth_replication_strategy & auth_replication_options are no " +
+                        "longer required and should be removed from cassandra.yaml");
+        }
+
+        // If using legacy DSE auth classes, replication options must be set so we can migrate data
+        if (conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator")
+           || conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer"))
+        {
+            if (conf.auth_replication_strategy == null || conf.auth_replication_options == null)
+                throw new ConfigurationException("If authentication and/or authorization are enabled, auth_replication_strategy " +
+                        "& auth_replication_options must be set in cassandra.yaml prior to upgrade.");
+        }
+    }
+
     private static IEndpointSnitch createEndpointSnitch(String snitchClassName) throws ConfigurationException
     {
         if (!snitchClassName.contains("."))
@@ -653,14 +655,19 @@ public class DatabaseDescriptor
         return authorizer;
     }
 
-    public static boolean requiresCredentialsDataMigration()
+    public static boolean hasLegacyAuthConfig()
     {
-        return requiresCredentialsDataMigration;
+        return conf.auth_replication_strategy != null;
     }
 
-    public static boolean requiresPermissionsDataMigration()
+    public static boolean requiresCredentialsMigration()
     {
-        return requiresPermissionsDataMigration;
+        return requiresCredentialsMigration;
+    }
+
+    public static boolean requiresPermissionsMigration()
+    {
+        return requiresPermissionsMigration;
     }
 
     public static LegacyAuthDataMigrator getLegacyAuthDataMigrator()
