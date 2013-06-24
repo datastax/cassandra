@@ -278,7 +278,7 @@ public class OutboundTcpConnection extends Thread
         if (logger.isDebugEnabled())
             logger.debug("attempting to connect to " + poolReference.endPoint());
 
-        targetVersion = MessagingService.instance().getVersion(poolReference.endPoint());
+        targetVersion = MessagingService.instance().getVersion(poolReference.endPoint(), true);
 
         long start = System.currentTimeMillis();
         while (System.currentTimeMillis() < start + DatabaseDescriptor.getRpcTimeout())
