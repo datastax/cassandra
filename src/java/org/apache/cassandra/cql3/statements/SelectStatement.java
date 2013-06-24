@@ -1046,11 +1046,7 @@ public class SelectStatement implements CQLStatement
                 }
                 else
                 {
-                    if (!partitioner.preservesOrder())
-                        throw new InvalidRequestException("Only EQ and IN relation are supported on the partition key for random partitioners (unless you use the token() function)");
-
-                    stmt.isKeyRange = true;
-                    shouldBeDone = true;
+                    throw new InvalidRequestException("Only EQ and IN relation are supported on the partition key (you will need to use the token() function for non equality based relation)");
                 }
                 previous = cname;
             }
@@ -1208,7 +1204,7 @@ public class SelectStatement implements CQLStatement
                     break;
                 case IN:
                     if (restriction != null)
-                        throw new InvalidRequestException(String.format("%s cannot be restricted by more than one reation if it includes a IN", name));
+                        throw new InvalidRequestException(String.format("%s cannot be restricted by more than one relation if it includes a IN", name));
                     List<Term> inValues = new ArrayList<Term>(newRel.getInValues().size());
                     for (Term.Raw raw : newRel.getInValues())
                     {
@@ -1217,6 +1213,7 @@ public class SelectStatement implements CQLStatement
                         inValues.add(t);
                     }
                     restriction = new Restriction(inValues);
+
                     break;
                 case GT:
                 case GTE:

@@ -45,7 +45,7 @@ import org.apache.cassandra.utils.SemanticVersion;
 
 public class QueryProcessor
 {
-    public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.3");
+    public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.4");
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
 
@@ -117,21 +117,6 @@ public class QueryProcessor
         }
     }
 
-    public static void validateColumnName(ByteBuffer column)
-    throws InvalidRequestException
-    {
-        validateColumnNames(Collections.singletonList(column));
-    }
-
-    public static void validateFilter(CFMetaData metadata, IDiskAtomFilter filter)
-    throws InvalidRequestException
-    {
-        if (filter instanceof SliceQueryFilter)
-            validateSliceFilter(metadata, (SliceQueryFilter)filter);
-        else
-            validateColumnNames(((NamesQueryFilter)filter).columns);
-    }
-
     public static void validateSliceFilter(CFMetaData metadata, SliceQueryFilter range)
     throws InvalidRequestException
     {
@@ -149,6 +134,7 @@ public class QueryProcessor
     private static ResultMessage processStatement(CQLStatement statement, ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables, CQLExecutionContext context)
     throws RequestExecutionException, RequestValidationException
     {
+        logger.trace("Process {} @CL.{}", statement, cl);
         ClientState clientState = queryState.getClientState();
         statement.validate(clientState);
         statement.checkAccess(clientState);
@@ -235,8 +221,6 @@ public class QueryProcessor
     public static ResultMessage.Prepared prepare(String queryString, ClientState clientState, boolean forThrift)
     throws RequestValidationException
     {
-        logger.trace("CQL QUERY: {}", queryString);
-
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.cqlString = queryString;
 
@@ -304,7 +288,7 @@ public class QueryProcessor
     private static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)
     throws RequestValidationException
     {
-        Tracing.trace("Parsing statement");
+        Tracing.trace("Parsing {}", queryStr);
         ParsedStatement statement = parseStatement(queryStr);
 
         // Set keyspace for statement that require login

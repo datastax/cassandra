@@ -21,6 +21,10 @@ package org.apache.cassandra.thrift;
  *
  */
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.cassandra.hadoop.ConfigHelper;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.thrift.transport.TFramedTransport;

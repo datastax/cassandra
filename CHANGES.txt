@@ -1,6 +1,50 @@
 
 DSE backports/cherry-picks
  * Fix PermissionDetails.equals() method (CASSANDRA-5655
+1.2.7
+ * Fix ReadResponseSerializer.serializedSize() for digest reads (CASSANDRA-5476)
+
+
+1.2.6
+ * Fix tracing when operation completes before all responses arrive (CASSANDRA-5668)
+ * Fix cross-DC mutation forwarding (CASSANDRA-5632)
+ * Scale hinted_handoff_throttle_in_kb to cluster size (CASSANDRA-5272)
+ * (Hadoop) Add CQL3 input/output formats (CASSANDRA-4421, 5622)
+ * (Hadoop) Fix InputKeyRange in CFIF (CASSANDRA-5536)
+ * Fix dealing with ridiculously large max sstable sizes in LCS (CASSANDRA-5589)
+ * Ignore pre-truncate hints (CASSANDRA-4655)
+ * Move System.exit on OOM into a separate thread (CASSANDRA-5273)
+ * Write row markers when serializing schema (CASSANDRA-5572)
+ * Check only SSTables for the requested range when streaming (CASSANDRA-5569)
+ * Improve batchlog replay behavior and hint ttl handling (CASSANDRA-5314)
+ * Exclude localTimestamp from validation for tombstones (CASSANDRA-5398)
+ * cqlsh: add custom prompt support (CASSANDRA-5539)
+ * Reuse prepared statements in hot auth queries (CASSANDRA-5594)
+ * cqlsh: add vertical output option (see EXPAND) (CASSANDRA-5597)
+ * Add a rate limit option to stress (CASSANDRA-5004)
+ * have BulkLoader ignore snapshots directories (CASSANDRA-5587) 
+ * fix SnitchProperties logging context (CASSANDRA-5602)
+ * Expose whether jna is enabled and memory is locked via JMX (CASSANDRA-5508)
+ * cqlsh: fix COPY FROM with ReversedType (CASSANDRA-5610)
+ * Allow creating CUSTOM indexes on collections (CASSANDRA-5615)
+ * Evaluate now() function at execution time (CASSANDRA-5616)
+ * Expose detailed read repair metrics (CASSANDRA-5618)
+ * Correct blob literal + ReversedType parsing (CASSANDRA-5629)
+ * Allow GPFS to prefer the internal IP like EC2MRS (CASSANDRA-5630)
+ * fix help text for -tspw cassandra-cli (CASSANDRA-5643)
+ * don't throw away initial causes exceptions for internode encryption issues (CASSANDRA-5644)
+ * Fix message spelling errors for cql select statements (CASSANDRA-5647)
+ * Suppress custom exceptions thru jmx (CASSANDRA-5652)
+ * Update CREATE CUSTOM INDEX syntax (CASSANDRA-5639)
+ * Fix PermissionDetails.equals() method (CASSANDRA-5655)
+ * Never allow partition key ranges in CQL3 without token() (CASSANDRA-5666)
+ * Gossiper incorrectly drops AppState for an upgrading node (CASSANDRA-5660)
+ * Connection thrashing during multi-region ec2 during upgrade, due to messaging version (CASSANDRA-5669)
+ * Avoid over reconnecting in EC2MRS (CASSANDRA-5678)
+Merged from 1.1:
+ * Remove buggy thrift max message length option (CASSANDRA-5529)
+ * Fix NPE in Pig's widerow mode (CASSANDRA-5488)
+ * Add split size parameter to Pig and disable split combination (CASSANDRA-5544)
 
 1.2.5
  * make BytesToken.toString only return hex bytes (CASSANDRA-5566)
@@ -31,6 +75,7 @@ DSE backports/cherry-picks
  * Add nodetool enablebackup/disablebackup (CASSANDRA-5556)
  * cqlsh: fix DESCRIBE after case insensitive USE (CASSANDRA-5567)
 Merged from 1.1
+ * Remove buggy thrift max message length option (CASSANDRA-5529)
  * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
  * Use allocator information to improve memtable memory usage estimate
    (CASSANDRA-5497)
@@ -107,6 +152,7 @@ Merged from 1.1:
  * Fix AssertionError during repair (CASSANDRA-5245)
  * Don't announce migrations to pre-1.2 nodes (CASSANDRA-5334)
 Merged from 1.1:
+ * Fix trying to load deleted row into row cache on startup (CASSANDRA-4463)
  * Update offline scrub for 1.0 -> 1.1 directory structure (CASSANDRA-5195)
  * add tmp flag to Descriptor hashcode (CASSANDRA-4021)
  * fix logging of "Found table data in data directories" when only system tables
@@ -158,7 +204,7 @@ Merged from 1.1:
  * GossipingPropertyFileSnitch loads saved dc/rack info if needed (CASSANDRA-5133)
  * drain should flush system CFs too (CASSANDRA-4446)
  * add inter_dc_tcp_nodelay setting (CASSANDRA-5148)
- * re-allow wrapping ranges for start_token/end_token range pairing (CASSANDRA-5106)
+ * re-allow wrapping ranges for start_token/end_token range pairitspwng (CASSANDRA-5106)
  * fix validation compaction of empty rows (CASSADRA-5136)
  * nodetool methods to enable/disable hint storage/delivery (CASSANDRA-4750)
  * disallow bloom filter false positive chance of 0 (CASSANDRA-5013)

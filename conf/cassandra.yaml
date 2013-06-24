@@ -42,7 +42,11 @@ hinted_handoff_enabled: true
 # generated.  After it has been dead this long, new hints for it will not be
 # created until it has been seen alive and gone down again.
 max_hint_window_in_ms: 10800000 # 3 hours
-# throttle in KBs per second, per delivery thread
+# Maximum throttle in KBs per second, per delivery thread.  This will be
+# reduced proportionally to the number of nodes in the cluster.  (If there
+# are two nodes in the cluster, each delivery thread will use the maximum
+# rate; if there are three, each will throttle to half of the maximum,
+# since we expect two nodes to be delivering hints simultaneously.)
 hinted_handoff_throttle_in_kb: 1024
 # Number of threads with which to deliver hints;
 # Consider increasing this number when you have multi-dc deployments, since
@@ -62,7 +66,7 @@ max_hints_delivery_threads: 2
 # - PasswordAuthenticator relies on username/password pairs to authenticate
 #   users. It keeps usernames and hashed passwords in system_auth.credentials table.
 #   Please increase system_auth keyspace replication factor if you use this authenticator.
-authenticator: org.apache.cassandra.auth.AllowAllAuthenticator
+authenticator: AllowAllAuthenticator
 
 # Authorization backend, implementing IAuthorizer; used to limit access/provide permissions
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllAuthorizer,
@@ -71,7 +75,7 @@ authenticator: org.apache.cassandra.auth.AllowAllAuthenticator
 # - AllowAllAuthorizer allows any action to any user - set it to disable authorization.
 # - CassandraAuthorizer stores permissions in system_auth.permissions table. Please
 #   increase system_auth keyspace replication factor if you use this authorizer.
-authorizer: org.apache.cassandra.auth.AllowAllAuthorizer
+authorizer: AllowAllAuthorizer
 
 # Validity period for permissions cache (fetching permissions can be an
 # expensive operation depending on the authorizer, CassandraAuthorizer is
@@ -405,12 +409,8 @@ rpc_server_type: sync
 # internode_send_buff_size_in_bytes:
 # internode_recv_buff_size_in_bytes:
 
-# Frame size for thrift (maximum field length).
+# Frame size for thrift (maximum message length).
 thrift_framed_transport_size_in_mb: 15
-
-# The max length of a thrift message, including all fields and
-# internal thrift overhead.
-thrift_max_message_length_in_mb: 16
 
 # Set to true to have Cassandra create a hard link to each sstable
 # flushed or streamed locally in a backups/ subdirectory of the
