@@ -53,7 +53,6 @@ public class CassandraStorage extends AbstractCassandraStorage
     public final static String PIG_ALLOW_DELETES = "PIG_ALLOW_DELETES";
     public final static String PIG_WIDEROW_INPUT = "PIG_WIDEROW_INPUT";
     public final static String PIG_USE_SECONDARY = "PIG_USE_SECONDARY";
-    public final static String PIG_INPUT_SPLIT_SIZE = "PIG_INPUT_SPLIT_SIZE";
 
     private final static String PARTITION_FILTER_SIGNATURE = "cassandra.partition.filter";
 
@@ -70,9 +69,8 @@ public class CassandraStorage extends AbstractCassandraStorage
 
     private boolean widerows = false;
     private boolean usePartitionFilter = false;
-
     private int limit;
-
+    
     // wide row hacks
     private ByteBuffer lastKey;
     private Map<ByteBuffer,IColumn> lastRow;
@@ -266,281 +264,6 @@ public class CassandraStorage extends AbstractCassandraStorage
     protected void setConnectionInformation() throws IOException
     {
         super.setConnectionInformation();
-        Tuple tuple = TupleFactory.getInstance().newTuple(1);
-        addKeyToTuple(tuple, key, cfDef, comparator);
-        return tuple;
-    }
-
-    private void addKeyToTuple(Tuple tuple, ByteBuffer key, CfDef cfDef, AbstractType comparator) throws IOException
-    {
-        if( comparator instanceof AbstractCompositeType )
-        {
-            setTupleValue(tuple, 0, composeComposite((AbstractCompositeType)comparator,key));
-        }
-        else
-        {
-            setTupleValue(tuple, 0, getDefaultMarshallers(cfDef).get(MarshallerType.KEY_VALIDATOR).compose(key));
-        }
-
-    }
-
-    private Tuple columnToTuple(IColumn col, CfDef cfDef, AbstractType comparator) throws IOException
-    {
-        Tuple pair = TupleFactory.getInstance().newTuple(2);
-
-        if( comparator instanceof AbstractCompositeType )
-        {
-            setTupleValue(pair, 0, composeComposite((AbstractCompositeType)comparator,col.name()));
-        }
-        else
-        {
-            setTupleValue(pair, 0, comparator.compose(col.name()));
-        }
-        if (col instanceof Column)
-        {
-            // standard
-            Map<ByteBuffer,AbstractType> validators = getValidatorMap(cfDef);
-
-            if (validators.get(col.name()) == null)
-            {
-                Map<MarshallerType, AbstractType> marshallers = getDefaultMarshallers(cfDef);
-                setTupleValue(pair, 1, marshallers.get(MarshallerType.DEFAULT_VALIDATOR).compose(col.value()));
-            }
-            else
-                setTupleValue(pair, 1, validators.get(col.name()).compose(col.value()));
-            return pair;
-        }
-        else
-        {
-            // super
-            ArrayList<Tuple> subcols = new ArrayList<Tuple>();
-            for (IColumn subcol : col.getSubColumns())
-                subcols.add(columnToTuple(subcol, cfDef, parseType(cfDef.getSubcomparator_type())));
-
-            pair.set(1, new DefaultDataBag(subcols));
-        }
-        return pair;
-    }
-
-    private void setTupleValue(Tuple pair, int position, Object value) throws ExecException
-    {
-       if (value instanceof BigInteger)
-           pair.set(position, ((BigInteger) value).intValue());
-       else if (value instanceof ByteBuffer)
-           pair.set(position, new DataByteArray(ByteBufferUtil.getArray((ByteBuffer) value)));
-       else if (value instanceof UUID)
-           pair.set(position, new DataByteArray(UUIDGen.decompose((java.util.UUID) value)));
-       else if (value instanceof Date)
-           pair.set(position, DateType.instance.decompose((Date) value).getLong());
-       else
-           pair.set(position, value);
-    }
-
-    private CfDef getCfDef(String signature)
-    {
-        UDFContext context = UDFContext.getUDFContext();
-        Properties property = context.getUDFProperties(CassandraStorage.class);
-        return cfdefFromString(property.getProperty(signature));
-    }
-
-    private List<IndexExpression> getIndexExpressions()
-    {
-        UDFContext context = UDFContext.getUDFContext();
-        Properties property = context.getUDFProperties(CassandraStorage.class);
-        if (property.getProperty(PARTITION_FILTER_SIGNATURE) != null)
-            return indexExpressionsFromString(property.getProperty(PARTITION_FILTER_SIGNATURE));
-        else
-            return null;
-    }
-
-    private Map<MarshallerType, AbstractType> getDefaultMarshallers(CfDef cfDef) throws IOException
-    {
-        Map<MarshallerType, AbstractType> marshallers = new EnumMap<MarshallerType, AbstractType>(MarshallerType.class);
-        AbstractType comparator;
-        AbstractType subcomparator;
-        AbstractType default_validator;
-        AbstractType key_validator;
-
-        comparator = parseType(cfDef.getComparator_type());
-        subcomparator = parseType(cfDef.getSubcomparator_type());
-        default_validator = parseType(cfDef.getDefault_validation_class());
-        key_validator = parseType(cfDef.getKey_validation_class());
-
-        marshallers.put(MarshallerType.COMPARATOR, comparator);
-        marshallers.put(MarshallerType.DEFAULT_VALIDATOR, default_validator);
-        marshallers.put(MarshallerType.KEY_VALIDATOR, key_validator);
-        marshallers.put(MarshallerType.SUBCOMPARATOR, subcomparator);
-        return marshallers;
-    }
-
-    private Map<ByteBuffer, AbstractType> getValidatorMap(CfDef cfDef) throws IOException
-    {
-        Map<ByteBuffer, AbstractType> validators = new HashMap<ByteBuffer, AbstractType>();
-        for (ColumnDef cd : cfDef.getColumn_metadata())
-        {
-            if (cd.getValidation_class() != null && !cd.getValidation_class().isEmpty())
-            {
-                AbstractType validator = null;
-                try
-                {
-                    validator = TypeParser.parse(cd.getValidation_class());
-                    validators.put(cd.name, validator);
-                }
-                catch (ConfigurationException e)
-                {
-                    throw new IOException(e);
-                }
-                catch (SyntaxException e)
-                {
-                    throw new IOException(e);
-                }
-            }
-        }
-        return validators;
-    }
-
-    private AbstractType parseType(String type) throws IOException
-    {
-        try
-        {
-            // always treat counters like longs, specifically CCT.compose is not what we need
-            if (type != null && type.equals("org.apache.cassandra.db.marshal.CounterColumnType"))
-                    return LongType.instance;
-            return TypeParser.parse(type);
-        }
-        catch (ConfigurationException e)
-        {
-            throw new IOException(e);
-        }
-        catch (SyntaxException e)
-        {
-            throw new IOException(e);
-        }
-    }
-
-    @Override
-    public InputFormat getInputFormat()
-    {
-        try
-        {
-            return FBUtilities.construct(inputFormatClass, "inputformat");
-        }
-        catch (ConfigurationException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void prepareToRead(RecordReader reader, PigSplit split)
-    {
-        this.reader = reader;
-    }
-
-    public static Map<String, String> getQueryMap(String query)
-    {
-        String[] params = query.split("&");
-        Map<String, String> map = new HashMap<String, String>();
-        for (String param : params)
-        {
-            String[] keyValue = param.split("=");
-            map.put(keyValue[0], keyValue[1]);
-        }
-        return map;
-    }
-
-    private void setLocationFromUri(String location) throws IOException
-    {
-        try
-        {
-            if (!location.startsWith("cassandra://"))
-                throw new Exception("Bad scheme.");
-            String[] urlParts = location.split("\\?");
-            if (urlParts.length > 1)
-            {
-                Map<String, String> urlQuery = getQueryMap(urlParts[1]);
-                AbstractType comparator = BytesType.instance;
-                if (urlQuery.containsKey("comparator"))
-                    comparator = TypeParser.parse(urlQuery.get("comparator"));
-                if (urlQuery.containsKey("slice_start"))
-                    slice_start = comparator.fromString(urlQuery.get("slice_start"));
-                if (urlQuery.containsKey("slice_end"))
-                    slice_end = comparator.fromString(urlQuery.get("slice_end"));
-                if (urlQuery.containsKey("reversed"))
-                    slice_reverse = Boolean.parseBoolean(urlQuery.get("reversed"));
-                if (urlQuery.containsKey("limit"))
-                    limit = Integer.parseInt(urlQuery.get("limit"));
-                if (urlQuery.containsKey("allow_deletes"))
-                    allow_deletes = Boolean.parseBoolean(urlQuery.get("allow_deletes"));
-                if (urlQuery.containsKey("widerows"))
-                    widerows = Boolean.parseBoolean(urlQuery.get("widerows"));
-                if (urlQuery.containsKey("use_secondary"))
-                    usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary"));
-                if (urlQuery.containsKey("split_size"))
-                    splitSize = Integer.parseInt(urlQuery.get("split_size"));
-            }
-            String[] parts = urlParts[0].split("/+");
-            String[] credentialsAndKeyspace = parts[1].split("@");
-            if (credentialsAndKeyspace.length > 1)
-            {
-                String[] credentials = credentialsAndKeyspace[0].split(":");
-                username = credentials[0];
-                password = credentials[1];
-                keyspace = credentialsAndKeyspace[1];
-            }
-            else
-            {
-                keyspace = parts[1];
-            }
-            column_family = parts[2];
-        }
-        catch (Exception e)
-        {
-            throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<columnfamily>[?slice_start=<start>&slice_end=<end>[&reversed=true][&limit=1][&allow_deletes=true][widerows=true][use_secondary=true]]': " + e.getMessage());
-        }
-    }
-
-    private void setConnectionInformation() throws IOException
-    {
-        if (System.getenv(PIG_RPC_PORT) != null)
-        {
-            ConfigHelper.setInputRpcPort(conf, System.getenv(PIG_RPC_PORT));
-            ConfigHelper.setOutputRpcPort(conf, System.getenv(PIG_RPC_PORT));
-        }
-
-        if (System.getenv(PIG_INPUT_RPC_PORT) != null)
-            ConfigHelper.setInputRpcPort(conf, System.getenv(PIG_INPUT_RPC_PORT));
-        if (System.getenv(PIG_OUTPUT_RPC_PORT) != null)
-            ConfigHelper.setOutputRpcPort(conf, System.getenv(PIG_OUTPUT_RPC_PORT));
-
-        if (System.getenv(PIG_INITIAL_ADDRESS) != null)
-        {
-            ConfigHelper.setInputInitialAddress(conf, System.getenv(PIG_INITIAL_ADDRESS));
-            ConfigHelper.setOutputInitialAddress(conf, System.getenv(PIG_INITIAL_ADDRESS));
-        }
-        if (System.getenv(PIG_INPUT_INITIAL_ADDRESS) != null)
-            ConfigHelper.setInputInitialAddress(conf, System.getenv(PIG_INPUT_INITIAL_ADDRESS));
-        if (System.getenv(PIG_OUTPUT_INITIAL_ADDRESS) != null)
-            ConfigHelper.setOutputInitialAddress(conf, System.getenv(PIG_OUTPUT_INITIAL_ADDRESS));
-
-        if (System.getenv(PIG_PARTITIONER) != null)
-        {
-            ConfigHelper.setInputPartitioner(conf, System.getenv(PIG_PARTITIONER));
-            ConfigHelper.setOutputPartitioner(conf, System.getenv(PIG_PARTITIONER));
-        }
-        if(System.getenv(PIG_INPUT_PARTITIONER) != null)
-            ConfigHelper.setInputPartitioner(conf, System.getenv(PIG_INPUT_PARTITIONER));
-        if(System.getenv(PIG_OUTPUT_PARTITIONER) != null)
-            ConfigHelper.setOutputPartitioner(conf, System.getenv(PIG_OUTPUT_PARTITIONER));
-        if (System.getenv(PIG_INPUT_FORMAT) != null)
-            inputFormatClass = getFullyQualifiedClassName(System.getenv(PIG_INPUT_FORMAT));
-        else
-            inputFormatClass = DEFAULT_INPUT_FORMAT;
-        if (System.getenv(PIG_OUTPUT_FORMAT) != null)
-            outputFormatClass = getFullyQualifiedClassName(System.getenv(PIG_OUTPUT_FORMAT));
-        else
-            outputFormatClass = DEFAULT_OUTPUT_FORMAT;
-
         if (System.getenv(PIG_ALLOW_DELETES) != null)
             allow_deletes = Boolean.parseBoolean(System.getenv(PIG_ALLOW_DELETES));
     }
@@ -549,9 +272,6 @@ public class CassandraStorage extends AbstractCassandraStorage
     public void setLocation(String location, Job job) throws IOException
     {
         conf = job.getConfiguration();
-        
-        // don't combine mappers to a single mapper per node
-        conf.setBoolean("pig.noSplitCombination", true);
         setLocationFromUri(location);
 
         if (ConfigHelper.getInputSlicePredicate(conf) == null)
@@ -570,20 +290,17 @@ public class CassandraStorage extends AbstractCassandraStorage
             {
                 ConfigHelper.setInputSplitSize(conf, Integer.valueOf(System.getenv(PIG_INPUT_SPLIT_SIZE)));
             }
-            catch(NumberFormatException e)
+            catch (NumberFormatException e)
             {
                 throw new RuntimeException("PIG_INPUT_SPLIT_SIZE is not a number", e);
             }           
-        }
+        } 
 
         if (usePartitionFilter && getIndexExpressions() != null)
             ConfigHelper.setInputRange(conf, getIndexExpressions());
 
         if (username != null && password != null)
             ConfigHelper.setInputKeyspaceUserNameAndPassword(conf, username, password);
-        
-        if (splitSize > 0)
-            ConfigHelper.setInputSplitSize(conf, splitSize);
 
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
