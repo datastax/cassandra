@@ -187,7 +187,8 @@ public class Auth
     {
         logger.info("Migrating legacy Auth data to system keyspace");
         LegacyAuthDataMigrator migrator = DatabaseDescriptor.getLegacyAuthDataMigrator();
-        migrator.migrateUsers();
+        if (! (DatabaseDescriptor.getAuthenticator() instanceof AllowAllAuthenticator))
+            migrator.migrateUsers();
 
         if (DatabaseDescriptor.requiresCredentialsMigration())
             migrator.migrateCredentials();
