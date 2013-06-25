@@ -17,55 +17,28 @@
  */
 package org.apache.cassandra.tools;
 
-import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
-import static org.apache.cassandra.utils.ByteBufferUtil.hexToBytes;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
-import com.google.common.util.concurrent.RateLimiter;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
-import org.apache.commons.cli.PosixParser;
+import org.apache.commons.cli.*;
 
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.AbstractColumnContainer;
-import org.apache.cassandra.db.ColumnFamily;
-import org.apache.cassandra.db.CounterColumn;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletedColumn;
-import org.apache.cassandra.db.DeletionInfo;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.ExpiringColumn;
-import org.apache.cassandra.db.IColumn;
-import org.apache.cassandra.db.OnDiskAtom;
-import org.apache.cassandra.db.RangeTombstone;
-import org.apache.cassandra.db.SuperColumn;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.KeyIterator;
-import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.SSTableReader;
-import org.apache.cassandra.io.sstable.SSTableScanner;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.codehaus.jackson.JsonGenerator;
 import org.codehaus.jackson.map.ObjectMapper;
+
+import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
+import static org.apache.cassandra.utils.ByteBufferUtil.hexToBytes;
 
 /**
  * Export SSTables to JSON format.
@@ -503,9 +476,32 @@ public class SSTableExport
 
         DatabaseDescriptor.loadSchemas();
         Descriptor descriptor = Descriptor.fromFilename(ssTableFileName);
-        if (Schema.instance.getCFMetaData(descriptor) == null)
+
+        // Start by validating keyspace name
+        if (Schema.instance.getKSMetaData(descriptor.ksname) == null)
         {
-            System.err.println(String.format("The provided column family is not part of this cassandra database: keyspace = %s, column family = %s",
+            System.err.println(String.format("Filename %s references to nonexistent keyspace: %s!",
+                                             ssTableFileName, descriptor.ksname));
+            System.exit(1);
+        }
+        Table table = Table.open(descriptor.ksname);
+
+        // Make it work for indexes too - find parent cf if necessary
+        String baseName = descriptor.cfname;
+        if (descriptor.cfname.contains("."))
+        {
+            String[] parts = descriptor.cfname.split("\\.", 2);
+            baseName = parts[0];
+        }
+
+        // IllegalArgumentException will be thrown here if ks/cf pair does not exist
+        try
+        {
+            table.getColumnFamilyStore(baseName);
+        }
+        catch (IllegalArgumentException e)
+        {
+            System.err.println(String.format("The provided column family is not part of this cassandra keyspace: keyspace = %s, column family = %s",
                                              descriptor.ksname, descriptor.cfname));
             System.exit(1);
         }
