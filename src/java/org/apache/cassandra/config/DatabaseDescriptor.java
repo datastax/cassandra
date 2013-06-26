@@ -206,7 +206,7 @@ public class DatabaseDescriptor
 
             /* Authentication and authorization backend, implementing IAuthenticator and IAuthorizer */
             if (conf.authenticator != null)
-                authenticator = FBUtilities.construct(conf.authenticator, "authenticator");
+                authenticator = FBUtilities.newAuthenticator(conf.authenticator);
 
             if (conf.authority != null)
             {
@@ -217,7 +217,7 @@ public class DatabaseDescriptor
             }
 
             if (conf.authorizer != null)
-                authorizer = FBUtilities.construct(conf.authorizer, "authorizer");
+                authorizer = FBUtilities.newAuthorizer(conf.authorizer);
 
             if (conf.internode_authenticator != null)
                 internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
@@ -332,9 +332,6 @@ public class DatabaseDescriptor
 
             if (conf.thrift_framed_transport_size_in_mb <= 0)
                 throw new ConfigurationException("thrift_framed_transport_size_in_mb must be positive");
-
-            if (conf.thrift_max_message_length_in_mb < conf.thrift_framed_transport_size_in_mb)
-                throw new ConfigurationException("thrift_max_message_length_in_mb must be greater than thrift_framed_transport_size_in_mb");
 
             /* end point snitch */
             if (conf.endpoint_snitch == null)
@@ -603,11 +600,6 @@ public class DatabaseDescriptor
     public static int getPermissionsValidity()
     {
         return conf.permissions_validity_in_ms;
-    }
-
-    public static int getThriftMaxMessageLength()
-    {
-        return conf.thrift_max_message_length_in_mb * 1024 * 1024;
     }
 
     public static int getThriftFramedTransportSize()

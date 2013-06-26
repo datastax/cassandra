@@ -406,29 +406,32 @@ public class CassandraStorage extends AbstractCassandraStorage
         // add the key first, then the indexed columns, and finally the bag
         allSchemaFields.add(keyFieldSchema);
 
-        // defined validators/indexes
-        for (ColumnDef cdef : cfDef.column_metadata)
+        if (!widerows)
         {
-            // make a new tuple for each col/val pair
-            ResourceSchema innerTupleSchema = new ResourceSchema();
-            ResourceFieldSchema innerTupleField = new ResourceFieldSchema();
-            innerTupleField.setType(DataType.TUPLE);
-            innerTupleField.setSchema(innerTupleSchema);
-            innerTupleField.setName(new String(cdef.getName()));
+            // defined validators/indexes
+            for (ColumnDef cdef : cfDef.column_metadata)
+            {
+                // make a new tuple for each col/val pair
+                ResourceSchema innerTupleSchema = new ResourceSchema();
+                ResourceFieldSchema innerTupleField = new ResourceFieldSchema();
+                innerTupleField.setType(DataType.TUPLE);
+                innerTupleField.setSchema(innerTupleSchema);
+                innerTupleField.setName(new String(cdef.getName()));
 
-            ResourceFieldSchema idxColSchema = new ResourceFieldSchema();
-            idxColSchema.setName("name");
-            idxColSchema.setType(getPigType(marshallers.get(MarshallerType.COMPARATOR)));
+                ResourceFieldSchema idxColSchema = new ResourceFieldSchema();
+                idxColSchema.setName("name");
+                idxColSchema.setType(getPigType(marshallers.get(MarshallerType.COMPARATOR)));
 
-            ResourceFieldSchema valSchema = new ResourceFieldSchema();
-            AbstractType validator = validators.get(cdef.name);
-            if (validator == null)
-                validator = marshallers.get(MarshallerType.DEFAULT_VALIDATOR);
-            valSchema.setName("value");
-            valSchema.setType(getPigType(validator));
+                ResourceFieldSchema valSchema = new ResourceFieldSchema();
+                AbstractType validator = validators.get(cdef.name);
+                if (validator == null)
+                    validator = marshallers.get(MarshallerType.DEFAULT_VALIDATOR);
+                valSchema.setName("value");
+                valSchema.setType(getPigType(validator));
 
-            innerTupleSchema.setFields(new ResourceFieldSchema[] { idxColSchema, valSchema });
-            allSchemaFields.add(innerTupleField);
+                innerTupleSchema.setFields(new ResourceFieldSchema[] { idxColSchema, valSchema });
+                allSchemaFields.add(innerTupleField);
+            }
         }
         // bag at the end for unknown columns
         allSchemaFields.add(bagField);

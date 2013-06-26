@@ -15,28 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.exceptions;
+package org.apache.cassandra.service;
 
-public class AlreadyExistsException extends ConfigurationException
+public interface NativeAccessMBean 
 {
-    public final String ksName;
-    public final String cfName;
+    boolean isAvailable();
 
-    private AlreadyExistsException(String ksName, String cfName, String msg)
-    {
-        super(ExceptionCode.ALREADY_EXISTS, msg);
-        this.ksName = ksName;
-        this.cfName = cfName;
-    }
-
-    public AlreadyExistsException(String ksName, String cfName)
-    {
-        this(ksName, cfName, String.format("Cannot add already existing column family \"%s\" to keyspace \"%s\"", cfName, ksName));
-    }
-
-    public AlreadyExistsException(String ksName)
-    {
-        this(ksName, "", String.format("Cannot add existing keyspace \"%s\"", ksName));
-    }
-
+    boolean isMemoryLockable();
 }

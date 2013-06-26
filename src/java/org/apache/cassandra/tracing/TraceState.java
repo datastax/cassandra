@@ -45,16 +45,14 @@ public class TraceState
     public final InetAddress coordinator;
     public final Stopwatch watch;
     public final ByteBuffer sessionIdBytes;
-    public final boolean isLocallyOwned;
 
-    public TraceState(InetAddress coordinator, UUID sessionId, boolean locallyOwned)
+    public TraceState(InetAddress coordinator, UUID sessionId)
     {
         assert coordinator != null;
         assert sessionId != null;
 
         this.coordinator = coordinator;
         this.sessionId = sessionId;
-        this.isLocallyOwned = locallyOwned;
         sessionIdBytes = ByteBufferUtil.bytes(sessionId);
         watch = new Stopwatch();
         watch.start();
@@ -81,11 +79,14 @@ public class TraceState
         trace(MessageFormatter.arrayFormat(format, args).getMessage());
     }
 
-    public void trace(final String message)
+    public void trace(String message)
     {
-        final int elapsed = elapsed();
-        final ByteBuffer eventId = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
+        TraceState.trace(sessionIdBytes, message, elapsed());
+    }
 
+    public static void trace(final ByteBuffer sessionIdBytes, final String message, final int elapsed)
+    {
+        final ByteBuffer eventId = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
         final String threadName = Thread.currentThread().getName();
 
         StageManager.getStage(Stage.TRACING).execute(new WrappedRunnable()
@@ -96,7 +97,8 @@ public class TraceState
                 ColumnFamily cf = ColumnFamily.create(cfMeta);
                 Tracing.addColumn(cf, Tracing.buildName(cfMeta, eventId, ByteBufferUtil.bytes("source")), FBUtilities.getBroadcastAddress());
                 Tracing.addColumn(cf, Tracing.buildName(cfMeta, eventId, ByteBufferUtil.bytes("thread")), threadName);
-                Tracing.addColumn(cf, Tracing.buildName(cfMeta, eventId, ByteBufferUtil.bytes("source_elapsed")), elapsed);
+                if (elapsed >= 0)
+                    Tracing.addColumn(cf, Tracing.buildName(cfMeta, eventId, ByteBufferUtil.bytes("source_elapsed")), elapsed);
                 Tracing.addColumn(cf, Tracing.buildName(cfMeta, eventId, ByteBufferUtil.bytes("activity")), message);
                 RowMutation mutation = new RowMutation(Tracing.TRACE_KS, sessionIdBytes);
                 mutation.add(cf);

@@ -39,6 +39,7 @@ import org.apache.cassandra.db.ExpiringColumn;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -143,17 +144,16 @@ public class Tracing
     {
         assert state.get() == null;
 
-        TraceState ts = new TraceState(localAddress, sessionId, true);
+        TraceState ts = new TraceState(localAddress, sessionId);
         state.set(ts);
         sessions.put(sessionId, ts);
 
         return sessionId;
     }
 
-    public void stopIfNonLocal(TraceState state)
+    public void stopNonLocal(TraceState state)
     {
-        if (!state.isLocallyOwned)
-            sessions.remove(state.sessionId);
+        sessions.remove(state.sessionId);
     }
 
     /**
@@ -229,31 +229,34 @@ public class Tracing
     }
 
     /**
-     * Updates the threads query context from a message
+     * Determines the tracing context from a message.  Does NOT set the threadlocal state.
      * 
-     * @param message
-     *            The internode message
+     * @param message The internode message
      */
-    public void initializeFromMessage(final MessageIn<?> message)
+    public TraceState initializeFromMessage(final MessageIn<?> message)
     {
         final byte[] sessionBytes = message.parameters.get(Tracing.TRACE_HEADER);
 
-        // if the message has no session context header don't do tracing
         if (sessionBytes == null)
-        {
-            state.set(null);
-            return;
-        }
+            return null;
 
         assert sessionBytes.length == 16;
         UUID sessionId = UUIDGen.getUUID(ByteBuffer.wrap(sessionBytes));
         TraceState ts = sessions.get(sessionId);
-        if (ts == null)
+        if (ts != null)
+            return ts;
+
+        if (message.verb == MessagingService.Verb.REQUEST_RESPONSE)
         {
-            ts = new TraceState(message.from, sessionId, false);
-            sessions.put(sessionId, ts);
+            // received a message for a session we've already closed out.  see CASSANDRA-5668
+            return new ExpiredTraceState(sessionId);
         }
-        state.set(ts);
+        else
+        {
+            ts = new TraceState(message.from, sessionId);
+            sessions.put(sessionId, ts);
+            return ts;
+        }
     }
 
     public static void trace(String message)
