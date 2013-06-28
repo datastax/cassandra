@@ -1,6 +1,6 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
- * Fix PermissionDetails.equals() method (CASSANDRA-5655
+
 1.2.7
  * Fix ReadResponseSerializer.serializedSize() for digest reads (CASSANDRA-5476)
 
