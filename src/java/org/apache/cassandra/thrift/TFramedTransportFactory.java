@@ -21,6 +21,12 @@ package org.apache.cassandra.thrift;
  *
  */
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+
+import org.apache.cassandra.hadoop.ConfigHelper;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.thrift.transport.TFramedTransport;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
@@ -36,6 +42,14 @@ public class TFramedTransportFactory implements TClientTransportFactory
     {
         TSocket socket = new TSocket(host, port);
         TTransport transport = new TFramedTransport(socket);
+        transport.open();
+        return transport;
+    }
+
+    public TTransport openTransport(String host, int port, Configuration conf) throws TTransportException
+    {
+        TSocket socket = new TSocket(host, port);
+        TTransport transport = new TFramedTransport(socket, ConfigHelper.getThriftFramedTransportSize(conf));
         transport.open();
         return transport;
     }

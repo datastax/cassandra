@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,12 +34,14 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.exceptions.AuthenticationException;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.mindrot.jbcrypt.BCrypt;
 
@@ -71,6 +74,8 @@ public class PasswordAuthenticator implements ISaslAwareAuthenticator
                                                                       CREDENTIALS_CF,
                                                                       90 * 24 * 60 * 60); // 3 months.
 
+    private SelectStatement authenticateStatement;
+
     // No anonymous access.
     public boolean requireAuthentication()
     {
@@ -101,12 +106,14 @@ public class PasswordAuthenticator implements ISaslAwareAuthenticator
         UntypedResultSet result;
         try
         {
-            result = process(String.format("SELECT %s FROM %s.%s WHERE username = '%s'",
-                                           SALTED_HASH,
-                                           Auth.AUTH_KS,
-                                           CREDENTIALS_CF,
-                                           escape(username)),
-                             consistencyForUser(username));
+            ResultMessage.Rows rows = authenticateStatement.execute(consistencyForUser(username),
+                                                                    new QueryState(new ClientState(true)),
+                                                                    Lists.newArrayList(ByteBufferUtil.bytes(username)));
+            result = new UntypedResultSet(rows.result);
+        }
+        catch (RequestValidationException e)
+        {
+            throw new AssertionError(e); // not supposed to happen
         }
         catch (RequestExecutionException e)
         {
@@ -176,6 +183,19 @@ public class PasswordAuthenticator implements ISaslAwareAuthenticator
                                           },
                                           Auth.SUPERUSER_SETUP_DELAY,
                                           TimeUnit.MILLISECONDS);
+        }
+
+        try
+        {
+            String query = String.format("SELECT %s FROM %s.%s WHERE username = ?",
+                                         SALTED_HASH,
+                                         Auth.AUTH_KS,
+                                         CREDENTIALS_CF);
+            authenticateStatement = (SelectStatement) QueryProcessor.parseStatement(query).prepare().statement;
+        }
+        catch (RequestValidationException e)
+        {
+            throw new AssertionError(e); // not supposed to happen
         }
     }
 
