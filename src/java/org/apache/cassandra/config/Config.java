@@ -22,6 +22,8 @@ import org.apache.cassandra.config.EncryptionOptions.ClientEncryptionOptions;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.utils.FBUtilities;
 
+import java.util.Map;
+
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
  * 
@@ -34,6 +36,9 @@ public class Config
     public String authority; // for backwards compatibility - will log a warning.
     public String authorizer;
     public int permissions_validity_in_ms = 2000;
+    public String auth_replication_strategy;
+    public Map<String, String> auth_replication_options;
+
 
     /* Hashing strategy Random or OPHF */
     public String partitioner;

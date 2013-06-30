@@ -42,6 +42,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.IEndpointSnitch;
@@ -67,6 +68,10 @@ public class DatabaseDescriptor
     private static InetAddress rpcAddress;
     private static SeedProvider seedProvider;
     private static IInternodeAuthenticator internodeAuthenticator;
+
+    private static LegacyAuthDataMigrator legacy_auth_data_migrator = null;
+    private static boolean requiresCredentialsMigration = false;
+    private static boolean requiresPermissionsMigration = false;
 
     /* Hashing strategy Random or OPHF */
     private static IPartitioner<?> partitioner;
@@ -205,6 +210,41 @@ public class DatabaseDescriptor
             logger.info("disk_failure_policy is " + conf.disk_failure_policy);
 
             /* Authentication and authorization backend, implementing IAuthenticator and IAuthorizer */
+
+            // validate legacy configuration settings in case we're
+            // upgrading from pre-3.1 DSE version of internal auth
+            validateAuthConfig();
+
+            // If auth_replication_strategy is configured, we infer that authn/authz was in
+            // use prior to upgrading so we need to migrate auth data from dse_auth to system_auth
+            if ( conf.auth_replication_strategy != null )
+            {
+                logger.info("Legacy authentication config found. Existing authentication data will " +
+                        "be migrated to a system keyspace.");
+
+                // used to reconstruct the old dse_auth ks so that data can be migrated to system_auth
+                Class<? extends AbstractReplicationStrategy> auth_replication_strategy =
+                        AbstractReplicationStrategy.getClass(conf.auth_replication_strategy);
+                Map<String, String> auth_replication_options =
+                        conf.auth_replication_options == null ? new HashMap<String, String>() : conf.auth_replication_options;
+
+                legacy_auth_data_migrator = new LegacyAuthDataMigrator(auth_replication_strategy, auth_replication_options);
+
+                // If legacy impls of authn/authz classes are specified, use the new apache versions
+                // which is safe as we'll migrate the data before allowing client connections
+                if (conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator"))
+                {
+                    conf.authenticator = PasswordAuthenticator.class.getName();
+                    requiresCredentialsMigration = true;
+                }
+
+                if (conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer"))
+                {
+                    conf.authorizer = CassandraAuthorizer.class.getName();
+                    requiresPermissionsMigration = true;
+                }
+            }
+
             if (conf.authenticator != null)
                 authenticator = FBUtilities.newAuthenticator(conf.authenticator);
 
@@ -509,6 +549,27 @@ public class DatabaseDescriptor
         }
     }
 
+    private static void validateAuthConfig() throws ConfigurationException
+    {
+
+        if ((conf.authenticator == null || conf.authenticator.equals(AllowAllAuthenticator.class))
+                && (conf.authorizer == null || conf.authorizer.equals(AllowAllAuthorizer.class)))
+        {
+            if (conf.auth_replication_options != null || conf.auth_replication_strategy != null)
+                throw new ConfigurationException("auth_replication_strategy & auth_replication_options are no " +
+                        "longer required and should be removed from cassandra.yaml");
+        }
+
+        // If using legacy DSE auth classes, replication options must be set so we can migrate data
+        if ((conf.authenticator != null && conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator"))
+           || (conf.authorizer != null && conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer")))
+        {
+            if (conf.auth_replication_strategy == null || conf.auth_replication_options == null)
+                throw new ConfigurationException("If authentication and/or authorization are enabled, auth_replication_strategy " +
+                        "& auth_replication_options must be set in cassandra.yaml prior to upgrade.");
+        }
+    }
+
     private static IEndpointSnitch createEndpointSnitch(String snitchClassName) throws ConfigurationException
     {
         if (!snitchClassName.contains("."))
@@ -595,6 +656,26 @@ public class DatabaseDescriptor
     public static IAuthorizer getAuthorizer()
     {
         return authorizer;
+    }
+
+    public static boolean hasLegacyAuthConfig()
+    {
+        return conf.auth_replication_strategy != null;
+    }
+
+    public static boolean requiresCredentialsMigration()
+    {
+        return requiresCredentialsMigration;
+    }
+
+    public static boolean requiresPermissionsMigration()
+    {
+        return requiresPermissionsMigration;
+    }
+
+    public static LegacyAuthDataMigrator getLegacyAuthDataMigrator()
+    {
+        return legacy_auth_data_migrator;
     }
 
     public static int getPermissionsValidity()

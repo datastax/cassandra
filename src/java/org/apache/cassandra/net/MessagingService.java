@@ -36,7 +36,11 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -213,6 +217,8 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.BOOTSTRAP_TOKEN, BootStrapper.StringSerializer.instance);
         put(Verb.REPLICATION_FINISHED, null);
     }};
+    
+    private static final int WAIT_FOR_VERSION_MAX_TIME = 30000;
 
     /* This records all the results mapped by message Id */
     private final ExpiringMap<String, CallbackInfo> callbacks;
@@ -289,6 +295,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddress, Integer> versions = new NonBlockingHashMap<InetAddress, Integer>();
+    private final Lock versionsLock = new ReentrantLock();
+    private final Condition versionsNotifier = versionsLock.newCondition();
 
     private static class MSHandle
     {
@@ -806,9 +814,18 @@ public final class MessagingService implements MessagingServiceMBean
      */
     public int setVersion(InetAddress address, int version)
     {
-        logger.debug("Setting version {} for {}", version, address);
-        Integer v = versions.put(address, version);
-        return v == null ? version : v;
+        versionsLock.lock();
+        try
+        {
+            logger.debug("Setting version {} for {}", version, address);
+            Integer v = versions.put(address, version);
+            return v == null ? version : v;
+        }
+        finally
+        {
+            versionsNotifier.signalAll();
+            versionsLock.unlock();
+        }
     }
 
     public void resetVersion(InetAddress endpoint)
@@ -817,22 +834,39 @@ public final class MessagingService implements MessagingServiceMBean
         versions.remove(endpoint);
     }
 
-    public Integer getVersion(InetAddress address)
-    {
-        Integer v = versions.get(address);
-        if (v == null)
-        {
-            // we don't know the version. assume current. we'll know soon enough if that was incorrect.
-            logger.trace("Assuming current protocol version for {}", address);
-            return MessagingService.current_version;
-        }
-        else
-            return v;
-    }
-
     public int getVersion(String address) throws UnknownHostException
     {
         return getVersion(InetAddress.getByName(address));
+    }
+    
+    public Integer getVersion(InetAddress address)
+    {
+        return getVersion(address, false);
+    }
+    
+    public int getVersion(String address, boolean wait) throws UnknownHostException
+    {
+        return getVersion(InetAddress.getByName(address), wait);
+    }
+    
+    public Integer getVersion(InetAddress address, boolean wait) {
+        Integer v = versions.get(address);
+        if (v == null && !wait)
+        {
+            // we don't know the version. assume current. we'll know soon enough if that was incorrect.
+            logger.trace("Assuming current protocol version for {}", address);
+            v = MessagingService.current_version;
+        }
+        else if (v == null && wait) 
+        {
+            // otherwise if we want to wait...
+            logger.trace("Waiting for version of {}", address);
+            v = waitForVersion(address);
+            if (v == null) {
+                throw new IllegalStateException("No known version for: " + address);
+            }
+        }
+        return v;
     }
 
     public boolean knowsVersion(InetAddress endpoint)
@@ -865,6 +899,33 @@ public final class MessagingService implements MessagingServiceMBean
 
         if (logTpstats)
             StatusLogger.log();
+    }
+    
+    private Integer waitForVersion(InetAddress address)
+    {
+        versionsLock.lock();
+        try
+        {
+            long elapsed = 0;
+            while (!versions.containsKey(address) && elapsed < WAIT_FOR_VERSION_MAX_TIME)
+            {
+                long start = System.currentTimeMillis();
+                try
+                {
+                    versionsNotifier.await(WAIT_FOR_VERSION_MAX_TIME - elapsed, TimeUnit.MILLISECONDS);
+                }
+                catch (InterruptedException ex) {}
+                finally
+                {
+                    elapsed += System.currentTimeMillis() - start;
+                }
+            }
+            return versions.get(address);
+        }
+        finally
+        {
+            versionsLock.unlock();
+        }
     }
 
     private static class SocketThread extends Thread

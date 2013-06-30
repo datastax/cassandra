@@ -147,6 +147,46 @@ public class Auth
                                           TimeUnit.MILLISECONDS);
         }
 
+        // We need to wait until we've properly joined the ring before attempting to
+        // migrate legacy auth data. It may be a overkill to wait the full
+        // RING_DELAY period, but this should only be required once per-node and
+        // only during an upgrade.
+        if (DatabaseDescriptor.hasLegacyAuthConfig())
+        {
+            StorageService.tasks.schedule(new Runnable()
+                {
+                    public void run()
+                    {
+                        try
+                        {
+                            migrateLegacyAuthData();
+                        } catch (Exception e)
+                        {
+                            logger.error("Error during migration of legacy auth data", e);
+                            throw new RuntimeException(e);
+                        }
+                    }
+                },
+                StorageService.RING_DELAY,
+                TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static void migrateLegacyAuthData() throws Exception
+    {
+        logger.info("Migrating legacy Auth data to system keyspace");
+        LegacyAuthDataMigrator migrator = DatabaseDescriptor.getLegacyAuthDataMigrator();
+        if (! (DatabaseDescriptor.getAuthenticator() instanceof AllowAllAuthenticator))
+            migrator.migrateUsers();
+
+        if (DatabaseDescriptor.requiresCredentialsMigration())
+            migrator.migrateCredentials();
+
+        if (DatabaseDescriptor.requiresPermissionsMigration())
+            migrator.migratePermissions();
+
+        logger.info("Migration of legacy auth data is complete. You should now switch to org.apache.cassandra.auth implementations in cassandra.yaml.");
+
         try
         {
             String query = String.format("SELECT * FROM %s.%s WHERE name = ?", AUTH_KS, USERS_CF);
