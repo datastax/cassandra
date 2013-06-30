@@ -170,6 +170,16 @@ public class Auth
                 StorageService.RING_DELAY,
                 TimeUnit.MILLISECONDS);
         }
+
+        try
+        {
+            String query = String.format("SELECT * FROM %s.%s WHERE name = ?", AUTH_KS, USERS_CF);
+            selectUserStatement = (SelectStatement) QueryProcessor.parseStatement(query).prepare().statement;
+        }
+        catch (RequestValidationException e)
+        {
+            throw new AssertionError(e); // not supposed to happen
+        }
     }
 
     private static void migrateLegacyAuthData() throws Exception
