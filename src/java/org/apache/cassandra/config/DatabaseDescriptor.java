@@ -551,7 +551,9 @@ public class DatabaseDescriptor
 
     private static void validateAuthConfig() throws ConfigurationException
     {
-        if (conf.authenticator.equals(AllowAllAuthenticator.class) && conf.authorizer.equals(AllowAllAuthorizer.class))
+
+        if ((conf.authenticator == null || conf.authenticator.equals(AllowAllAuthenticator.class))
+                && (conf.authorizer == null || conf.authorizer.equals(AllowAllAuthorizer.class)))
         {
             if (conf.auth_replication_options != null || conf.auth_replication_strategy != null)
                 throw new ConfigurationException("auth_replication_strategy & auth_replication_options are no " +
@@ -559,8 +561,8 @@ public class DatabaseDescriptor
         }
 
         // If using legacy DSE auth classes, replication options must be set so we can migrate data
-        if (conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator")
-           || conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer"))
+        if ((conf.authenticator != null && conf.authenticator.equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator"))
+           || (conf.authorizer != null && conf.authorizer.equals("com.datastax.bdp.cassandra.auth.CassandraAuthorizer")))
         {
             if (conf.auth_replication_strategy == null || conf.auth_replication_options == null)
                 throw new ConfigurationException("If authentication and/or authorization are enabled, auth_replication_strategy " +
