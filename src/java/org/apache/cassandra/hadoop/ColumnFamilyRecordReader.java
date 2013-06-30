@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.*;
+import org.apache.thrift.TApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +42,7 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.thrift.TException;
+import org.apache.thrift.transport.TTransport;
 
 public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap<ByteBuffer, IColumn>>
     implements org.apache.hadoop.mapred.RecordReader<ByteBuffer, SortedMap<ByteBuffer, IColumn>>
@@ -58,7 +60,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
     private int batchSize; // fetch this many per batch
     private String keyspace;
     private String cfName;
-    private ClientHolder client;
+    private Cassandra.Client client;
     private ConsistencyLevel consistencyLevel;
     private int keyBufferSize = 8192;
     private List<IndexExpression> filter;
@@ -78,7 +80,11 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
     public void close()
     {
         if (client != null)
-            client.close();
+        {
+            TTransport transport = client.getOutputProtocol().getTransport();
+            if (transport.isOpen())
+                transport.close();
+        }
     }
 
     public ByteBuffer getCurrentKey()
@@ -142,8 +148,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
         try
         {
-            // only need to connect once
-            if (client != null && client.transport.isOpen())
+            if (client != null)
                 return;
 
             // create connection using thrift
@@ -212,29 +217,100 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
         private RowIterator()
         {
+            partitioner = getPartitioner();
+            Pair<AbstractType, AbstractType> comparators;
             try
             {
-                partitioner = FBUtilities.newPartitioner(client.thriftClient.describe_partitioner());
+                comparators = getComparators();
+            }
+            catch (TException e)
+            {
+                // the peer we're communicating with may be on version < 1.2 so
+                // we fall back to fetching metadata the old way
+                logger.debug("Comparator lookup failed for {}.{}, falling back to legacy method",
+                                keyspace, cfName );
+                comparators = getComparatorsFromOlderVersion();
+            }
+            comparator = comparators.left;
+            subComparator = comparators.right;
+        }
 
+        private IPartitioner getPartitioner()
+        {
+            try
+            {
+                return FBUtilities.newPartitioner(client.describe_partitioner());
+            }
+            catch (ConfigurationException e)
+            {
+                throw new RuntimeException("unable to load partitioner", e);
+            } catch (TException e)
+            {
+                throw new RuntimeException("error communicating via Thrift", e);
+            }
+        }
+
+        private Pair<AbstractType, AbstractType> getComparatorsFromOlderVersion()
+        {
+            try
+            {
                 // Get the Keyspace metadata, then get the specific CF metadata
                 // in order to populate the sub/comparator.
-                KsDef ks_def = client.thriftClient.describe_keyspace(keyspace);
-                List<String> cfnames = new ArrayList<String>();
+                KsDef ks_def = client.describe_keyspace(keyspace);
+                List<String> cfnames = new ArrayList<String>(ks_def.cf_defs.size());
                 for (CfDef cfd : ks_def.cf_defs)
                     cfnames.add(cfd.name);
                 int idx = cfnames.indexOf(cfName);
                 CfDef cf_def = ks_def.cf_defs.get(idx);
 
-                comparator = TypeParser.parse(cf_def.comparator_type);
-                subComparator = cf_def.subcomparator_type == null ? null : TypeParser.parse(cf_def.subcomparator_type);
-            }
-            catch (ConfigurationException e)
-            {
-                throw new RuntimeException("unable to load sub/comparator", e);
+                AbstractType comparator = TypeParser.parse(cf_def.comparator_type);
+                AbstractType subComparator = cf_def.subcomparator_type == null ? null : TypeParser.parse(cf_def.subcomparator_type);
+                return Pair.create(comparator, subComparator);
             }
             catch (TException e)
             {
                 throw new RuntimeException("error communicating via Thrift", e);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException("unable to load keyspace " + keyspace, e);
+            }
+        }
+
+        private Pair<AbstractType, AbstractType> getComparators() throws TException
+        {
+            try
+            {
+                // get CF meta data
+                String query = "SELECT comparator," +
+                        "       subcomparator " +
+                        "FROM system.schema_columnfamilies " +
+                        "WHERE keyspace_name = '%s' " +
+                        "  AND columnfamily_name = '%s' ";
+
+                CqlResult result = client.execute_cql3_query(
+                        ByteBufferUtil.bytes(String.format(query, keyspace, cfName)),
+                        Compression.NONE,
+                        ConsistencyLevel.ONE);
+
+                Iterator<CqlRow> iteraRow = result.rows.iterator();
+                CfDef cfDef = new CfDef();
+                if (iteraRow.hasNext())
+                {
+                    CqlRow cqlRow = iteraRow.next();
+                    cfDef.comparator_type = ByteBufferUtil.string(cqlRow.columns.get(0).value);
+                    ByteBuffer subComparator = cqlRow.columns.get(1).value;
+                    if (subComparator != null)
+                        cfDef.subcomparator_type = ByteBufferUtil.string(subComparator);
+                }
+
+                AbstractType comparator = TypeParser.parse(cfDef.comparator_type);
+                AbstractType subComparator = cfDef.subcomparator_type == null ? null : TypeParser.parse(cfDef.subcomparator_type);
+                return Pair.create(comparator, subComparator);
+            }
+            catch (ConfigurationException e)
+            {
+                throw new RuntimeException("unable to load sub/comparator", e);
             }
             catch (Exception e)
             {
@@ -326,7 +402,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
                                 .setRow_filter(filter);
             try
             {
-                rows = client.thriftClient.get_range_slices(new ColumnParent(cfName), predicate, keyRange, consistencyLevel);
+                rows = client.get_range_slices(new ColumnParent(cfName), predicate, keyRange, consistencyLevel);
 
                 // nothing new? reached the end
                 if (rows.isEmpty())
@@ -418,7 +494,7 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
             try
             {
-                rows = client.thriftClient.get_paged_slice(cfName, keyRange, lastColumn, consistencyLevel);
+                rows = client.get_paged_slice(cfName, keyRange, lastColumn, consistencyLevel);
                 int n = 0;
                 for (KeySlice row : rows)
                     n += row.columns.size();

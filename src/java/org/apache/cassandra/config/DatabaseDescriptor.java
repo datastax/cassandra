@@ -210,6 +210,9 @@ public class DatabaseDescriptor
             logger.info("disk_failure_policy is " + conf.disk_failure_policy);
 
             /* Authentication and authorization backend, implementing IAuthenticator and IAuthorizer */
+
+            // validate legacy configuration settings in case we're
+            // upgrading from pre-3.1 DSE version of internal auth
             validateAuthConfig();
 
             // If auth_replication_strategy is configured, we infer that authn/authz was in
@@ -242,7 +245,8 @@ public class DatabaseDescriptor
                 }
             }
 
-            authenticator = FBUtilities.construct(conf.authenticator, "authenticator");
+            if (conf.authenticator != null)
+                authenticator = FBUtilities.newAuthenticator(conf.authenticator);
 
             if (conf.authority != null)
             {
@@ -252,8 +256,8 @@ public class DatabaseDescriptor
                                                      + " please implement IAuthorizer instead.");
             }
 
-            authorizer = FBUtilities.construct(conf.authorizer, "authorizer");
-
+            if (conf.authorizer != null)
+                authorizer = FBUtilities.newAuthorizer(conf.authorizer);
 
             if (conf.internode_authenticator != null)
                 internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
@@ -368,9 +372,6 @@ public class DatabaseDescriptor
 
             if (conf.thrift_framed_transport_size_in_mb <= 0)
                 throw new ConfigurationException("thrift_framed_transport_size_in_mb must be positive");
-
-            if (conf.thrift_max_message_length_in_mb < conf.thrift_framed_transport_size_in_mb)
-                throw new ConfigurationException("thrift_max_message_length_in_mb must be greater than thrift_framed_transport_size_in_mb");
 
             /* end point snitch */
             if (conf.endpoint_snitch == null)
@@ -678,11 +679,6 @@ public class DatabaseDescriptor
     public static int getPermissionsValidity()
     {
         return conf.permissions_validity_in_ms;
-    }
-
-    public static int getThriftMaxMessageLength()
-    {
-        return conf.thrift_max_message_length_in_mb * 1024 * 1024;
     }
 
     public static int getThriftFramedTransportSize()

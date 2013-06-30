@@ -68,6 +68,8 @@ public class SSTableLoader
         {
             public boolean accept(File dir, String name)
             {
+                if (new File(dir, name).isDirectory())
+                    return false;
                 Pair<Descriptor, Component> p = SSTable.tryComponentFromFilename(dir, name);
                 Descriptor desc = p == null ? null : p.left;
                 if (p == null || !p.right.equals(Component.DATA) || desc.temporary)
@@ -124,7 +126,7 @@ public class SSTableLoader
         }
 
         Map<InetAddress, Collection<Range<Token>>> endpointToRanges = client.getEndpointToRangesMap();
-        outputHandler.output(String.format("Streaming revelant part of %sto %s", names(sstables), endpointToRanges.keySet()));
+        outputHandler.output(String.format("Streaming revelant part of %s to %s", names(sstables), endpointToRanges.keySet()));
 
         // There will be one streaming session by endpoint
         LoaderFuture future = new LoaderFuture(endpointToRanges.size());

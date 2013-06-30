@@ -336,7 +336,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             throw new IllegalStateException("No configured daemon");
         }
-        daemon.nativeServer.start();
+        
+        try
+        {
+            daemon.nativeServer.start();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException("Error starting native transport: " + e.getMessage());
+        }
     }
 
     public void stopNativeTransport()
@@ -387,16 +395,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         try
         {
             // sleep a while to allow gossip to warm up (the other nodes need to know about this one before they can reply).
-            boolean isUp = false;
-            while (!isUp)
+            outer:
+            while (true)
             {
                 Thread.sleep(1000);
                 for (InetAddress address : Gossiper.instance.getLiveMembers())
                 {
                     if (!Gossiper.instance.isFatClient(address))
-                    {
-                        isUp = true;
-                    }
+                        break outer;
                 }
             }
 
@@ -1072,7 +1078,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public List<TokenRange> describeRing(String keyspace) throws InvalidRequestException
     {
-        if (keyspace == null || !Schema.instance.getNonSystemTables().contains(keyspace))
+        if (keyspace == null || Table.open(keyspace).getReplicationStrategy() instanceof LocalStrategy)
             throw new InvalidRequestException("There is no ring for the keyspace: " + keyspace);
 
         List<TokenRange> ranges = new ArrayList<TokenRange>();
