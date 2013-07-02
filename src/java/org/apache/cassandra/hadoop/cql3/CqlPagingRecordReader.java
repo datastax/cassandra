@@ -96,7 +96,6 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
     private IPartitioner partitioner;
 
     private AbstractType<?> keyValidator;
-    private boolean reversedColumn;
 
     public CqlPagingRecordReader()
     {
@@ -494,7 +493,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         private Pair<Integer, String> whereClause(List<BoundColumn> column, int position)
         {
             if (position == column.size() - 1 || column.get(position + 1).value == null)
-                return Pair.create(position + 2, " AND " + column.get(position).name + (reversedColumn ? " < ? " : " > ? "));
+                return Pair.create(position + 2, " AND " + column.get(position).name + (column.get(position).reversed ? " < ? " : " > ? "));
 
             Pair<Integer, String> clause = whereClause(column, position + 1);
             return Pair.create(clause.left, " AND " + column.get(position).name + " = ? " + clause.right);
@@ -702,8 +701,10 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         if (comparatorValidator instanceof CompositeType)
         {
             List<AbstractType<?>> types = ((CompositeType) comparatorValidator).types;
-            if (types.size() > 0 && types.get(0) instanceof ReversedType)
-                reversedColumn = true;
+            for (int i = 0; i < clusterColumns.size(); i++)
+            {
+                clusterColumns.get(i).reversed = (types.get(i) instanceof ReversedType);
+            }
         }
     }
 
@@ -756,6 +757,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         final String name;
         ByteBuffer value;
         AbstractType<?> validator;
+        boolean reversed = false;
 
         public BoundColumn(String name)
         {
