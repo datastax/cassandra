@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -95,6 +96,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
     private IPartitioner partitioner;
 
     private AbstractType<?> keyValidator;
+    private boolean reversedColumn;
 
     public CqlPagingRecordReader()
     {
@@ -492,7 +494,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         private Pair<Integer, String> whereClause(List<BoundColumn> column, int position)
         {
             if (position == column.size() - 1 || column.get(position + 1).value == null)
-                return Pair.create(position + 2, " AND " + column.get(position).name + " > ? ");
+                return Pair.create(position + 2, " AND " + column.get(position).name + (reversedColumn ? " < ? " : " > ? "));
 
             Pair<Integer, String> clause = whereClause(column, position + 1);
             return Pair.create(clause.left, " AND " + column.get(position).name + " = ? " + clause.right);
@@ -691,6 +693,17 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         else
         {
             partitionBoundColumns.get(0).validator = keyValidator;
+        }
+
+        Column rawComparator = cqlRow.columns.get(3);
+        String comparator = ByteBufferUtil.string(ByteBuffer.wrap(rawComparator.getValue()));
+        logger.debug("comparator: " + comparator);
+        AbstractType comparatorValidator = parseType(comparator);
+        if (comparatorValidator instanceof CompositeType)
+        {
+            List<AbstractType<?>> types = ((CompositeType) comparatorValidator).types;
+            if (types.size() > 0 && types.get(0) instanceof ReversedType)
+                reversedColumn = true;
         }
     }
 
