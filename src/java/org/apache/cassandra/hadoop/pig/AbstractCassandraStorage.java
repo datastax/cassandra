@@ -18,7 +18,9 @@
 package org.apache.cassandra.hadoop.pig;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
@@ -76,6 +78,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     protected String DEFAULT_INPUT_FORMAT;
     protected String DEFAULT_OUTPUT_FORMAT;
 
+    public final static String PARTITION_FILTER_SIGNATURE = "cassandra.partition.filter";
+
     protected static final Logger logger = LoggerFactory.getLogger(AbstractCassandraStorage.class);
 
     protected String username;
@@ -90,6 +94,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     protected String outputFormatClass;
     protected int splitSize = 64 * 1024;
     protected String partitionerClass;
+    protected boolean usePartitionFilter = false;
 
     public AbstractCassandraStorage()
     {
@@ -248,15 +253,15 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         }
     }
 
-    /** decompose the query to store the parameters in a map*/
-    public static Map<String, String> getQueryMap(String query)
+    /** decompose the query to store the parameters in a map */
+    public static Map<String, String> getQueryMap(String query) throws UnsupportedEncodingException
     {
         String[] params = query.split("&");
         Map<String, String> map = new HashMap<String, String>();
         for (String param : params)
         {
             String[] keyValue = param.split("=");
-            map.put(keyValue[0], keyValue[1]);
+            map.put(keyValue[0], URLDecoder.decode(keyValue[1],"UTF-8"));
         }
         return map;
     }
@@ -765,6 +770,33 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             return IndexType.COMPOSITES;
         else
             return null;
+    }
+
+    /** return partition keys */
+    public String[] getPartitionKeys(String location, Job job)
+    {
+        if (!usePartitionFilter)
+            return null;
+        List<ColumnDef> indexes = getIndexes();
+        String[] partitionKeys = new String[indexes.size()];
+        for (int i = 0; i < indexes.size(); i++)
+        {
+            partitionKeys[i] = new String(indexes.get(i).getName());
+        }
+        return partitionKeys;
+    }
+
+    /** get a list of columns with defined index*/
+    protected List<ColumnDef> getIndexes()
+    {
+        CfDef cfdef = getCfDef(loadSignature);
+        List<ColumnDef> indexes = new ArrayList<ColumnDef>();
+        for (ColumnDef cdef : cfdef.column_metadata)
+        {
+            if (cdef.index_type != null)
+                indexes.add(cdef);
+        }
+        return indexes;
     }
 }
 

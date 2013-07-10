@@ -36,6 +36,7 @@ import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.*;
+import org.apache.pig.impl.util.UDFContext;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -192,7 +193,7 @@ public class CqlStorage extends AbstractCassandraStorage
 
         initSchema(storeSignature);
     }
-    
+
     /** schema: ((name, value), (name, value), (name, value)) where keys are in the front. */
     public ResourceSchema getSchema(String location, Job job) throws IOException
     {
@@ -238,18 +239,14 @@ public class CqlStorage extends AbstractCassandraStorage
         return schema;
     }
 
-
-    /** We use CQL3 where clause to define the partition, so do nothing here*/
-    public String[] getPartitionKeys(String location, Job job)
-    {
-        return null;
-    }
-
     /** We use CQL3 where clause to define the partition, so do nothing here*/
     public void setPartitionFilter(Expression partitionFilter)
     {
+        UDFContext context = UDFContext.getUDFContext();
+        Properties property = context.getUDFProperties(AbstractCassandraStorage.class);
+        property.setProperty(PARTITION_FILTER_SIGNATURE, partitionFilterToWhereClauseString(partitionFilter));
     }
-    
+
     public void prepareToWrite(RecordWriter writer)
     {
         this.writer = writer;
@@ -353,7 +350,7 @@ public class CqlStorage extends AbstractCassandraStorage
             throw new IOException(e);
         }
     }
-    
+
     /** include key columns */
     protected List<ColumnDef> getColumnMetadata(Cassandra.Client client, boolean cql3Table)
             throws InvalidRequestException,
@@ -383,7 +380,7 @@ public class CqlStorage extends AbstractCassandraStorage
 
         return keyColumns;
     }
-    
+
     /** cql://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
      * [&columns=<col1,col2>][&output_query=<prepared_statement_query>][&where_clause=<clause>]
      * [&split_size=<size>][&partitioner=<partitioner>]] */
@@ -442,6 +439,51 @@ public class CqlStorage extends AbstractCassandraStorage
             		                         "[?[page_size=<size>][&columns=<col1,col2>][&output_query=<prepared_statement>]" +
             		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
         }
+    }
+
+    /** 
+     * Return cql where clauses for the corresponding partition filter. Make sure the data format matches 
+     * Only support the following Pig data types: int, long, float, double, boolean and chararray
+     * */
+    private String partitionFilterToWhereClauseString(Expression expression)
+    {
+        Expression.BinaryExpression be = (Expression.BinaryExpression) expression;
+        String name = be.getLhs().toString();
+        String value = be.getRhs().toString();
+        switch (expression.getOpType())
+        {
+            case OP_EQ:
+            case OP_GE:
+            case OP_GT:
+            case OP_LE:
+            case OP_LT:
+                if (isTextColumn(name))
+                    return String.format("%s %s '%s'", name, expression.getOpType().name(), value);
+                else
+                    return String.format("%s %s %s", name, expression.getOpType().name(), value);
+            case OP_AND:
+                return String.format("%s AND %s", partitionFilterToWhereClauseString(be.getLhs()), partitionFilterToWhereClauseString(be.getRhs()));
+            default:
+                throw new RuntimeException("Unsupported expression type: " + expression.getOpType().name());
+        }
+    }
+
+    /** whether the column is a text column */
+    private boolean isTextColumn(String column)
+    {
+        CfDef cfdef = getCfDef(loadSignature);
+        for (ColumnDef cdef : cfdef.column_metadata)
+        {
+            String columnName = UTF8Type.instance.compose(ByteBuffer.wrap(cdef.getName()));
+            if (column.equalsIgnoreCase(columnName))
+            {
+                if (cdef.validation_class.contains("UTF8") || cdef.validation_class.contains("AsciiType"))
+                    return true;
+                else
+                    return false;
+            }
+        }
+        return false;
     }
 }
 
