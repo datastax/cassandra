@@ -32,6 +32,7 @@ import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.Expression;
+import org.apache.pig.Expression.OpType;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
@@ -139,8 +140,18 @@ public class CqlStorage extends AbstractCassandraStorage
         CqlConfigHelper.setInputCQLPageRowSize(conf, String.valueOf(pageSize));
         if (columns != null && !columns.trim().isEmpty())
             CqlConfigHelper.setInputColumns(conf, columns);        
-        if (whereClause != null && !whereClause.trim().isEmpty())
-            CqlConfigHelper.setInputWhereClauses(conf, whereClause);
+
+        String whereClauseForPartitionFilter = getWhereClauseForPartitionFilter();
+        
+        String wc = whereClause != null && !whereClause.trim().isEmpty() 
+                       ? whereClauseForPartitionFilter == null ? whereClause: String.format("%s AND %s", whereClause.trim(), whereClauseForPartitionFilter)
+                       : whereClauseForPartitionFilter;
+
+        if (wc != null)
+        {
+            logger.debug("where clause: {}", wc);
+            CqlConfigHelper.setInputWhereClauses(conf, wc);
+        }
 
         if (System.getenv(PIG_INPUT_SPLIT_SIZE) != null)
         {
@@ -194,7 +205,7 @@ public class CqlStorage extends AbstractCassandraStorage
         initSchema(storeSignature);
     }
 
-    /** schema: ((name, value), (name, value), (name, value)) where keys are in the front. */
+    /** schema: (value, value, value) where keys are in the front. */
     public ResourceSchema getSchema(String location, Job job) throws IOException
     {
         setLocation(location, job);
@@ -210,28 +221,15 @@ public class CqlStorage extends AbstractCassandraStorage
         // will contain all fields for this schema
         List<ResourceFieldSchema> allSchemaFields = new ArrayList<ResourceFieldSchema>();
 
-        // defined validators/indexes
         for (ColumnDef cdef : cfDef.column_metadata)
         {
-            // make a new tuple for each col/val pair
-            ResourceSchema innerTupleSchema = new ResourceSchema();
-            ResourceFieldSchema innerTupleField = new ResourceFieldSchema();
-            innerTupleField.setType(DataType.TUPLE);
-            innerTupleField.setSchema(innerTupleSchema);
-            innerTupleField.setName(new String(cdef.getName()));            
-            ResourceFieldSchema idxColSchema = new ResourceFieldSchema();
-            idxColSchema.setName("name");
-            idxColSchema.setType(getPigType(UTF8Type.instance));
-
             ResourceFieldSchema valSchema = new ResourceFieldSchema();
             AbstractType validator = validators.get(cdef.name);
             if (validator == null)
                 validator = marshallers.get(MarshallerType.DEFAULT_VALIDATOR);
-            valSchema.setName("value");
+            valSchema.setName(new String(cdef.getName()));
             valSchema.setType(getPigType(validator));
-
-            innerTupleSchema.setFields(new ResourceFieldSchema[] { idxColSchema, valSchema });
-            allSchemaFields.add(innerTupleField);
+            allSchemaFields.add(valSchema);
         }
 
         // top level schema contains everything
@@ -239,12 +237,19 @@ public class CqlStorage extends AbstractCassandraStorage
         return schema;
     }
 
-    /** We use CQL3 where clause to define the partition, so do nothing here*/
     public void setPartitionFilter(Expression partitionFilter)
     {
         UDFContext context = UDFContext.getUDFContext();
         Properties property = context.getUDFProperties(AbstractCassandraStorage.class);
         property.setProperty(PARTITION_FILTER_SIGNATURE, partitionFilterToWhereClauseString(partitionFilter));
+    }
+
+    /** retrieve where clause for partition filter */
+    private String getWhereClauseForPartitionFilter()
+    {
+        UDFContext context = UDFContext.getUDFContext();
+        Properties property = context.getUDFProperties(AbstractCassandraStorage.class);
+        return property.getProperty(PARTITION_FILTER_SIGNATURE);
     }
 
     public void prepareToWrite(RecordWriter writer)
@@ -383,7 +388,7 @@ public class CqlStorage extends AbstractCassandraStorage
 
     /** cql://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
      * [&columns=<col1,col2>][&output_query=<prepared_statement_query>][&where_clause=<clause>]
-     * [&split_size=<size>][&partitioner=<partitioner>]] */
+     * [&split_size=<size>][&partitioner=<partitioner>][&use_secondary=true|false]] */
     private void setLocationFromUri(String location) throws IOException
     {
         try
@@ -417,6 +422,9 @@ public class CqlStorage extends AbstractCassandraStorage
                     splitSize = Integer.parseInt(urlQuery.get("split_size"));
                 if (urlQuery.containsKey("partitioner"))
                     partitionerClass = urlQuery.get("partitioner");
+                
+                if (urlQuery.containsKey("use_secondary"))
+                    usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary"));
             }
             String[] parts = urlParts[0].split("/+");
             String[] credentialsAndKeyspace = parts[1].split("@");
@@ -437,7 +445,7 @@ public class CqlStorage extends AbstractCassandraStorage
         {
             throw new IOException("Expected 'cql://[username:password@]<keyspace>/<columnfamily>" +
             		                         "[?[page_size=<size>][&columns=<col1,col2>][&output_query=<prepared_statement>]" +
-            		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
+            		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>][&use_secondary=true|false]]': " + e.getMessage());
         }
     }
 
@@ -450,40 +458,22 @@ public class CqlStorage extends AbstractCassandraStorage
         Expression.BinaryExpression be = (Expression.BinaryExpression) expression;
         String name = be.getLhs().toString();
         String value = be.getRhs().toString();
-        switch (expression.getOpType())
+        OpType op = expression.getOpType();
+        String opString = op.name();
+        switch (op)
         {
             case OP_EQ:
+                opString = " = ";
             case OP_GE:
             case OP_GT:
             case OP_LE:
             case OP_LT:
-                if (isTextColumn(name))
-                    return String.format("%s %s '%s'", name, expression.getOpType().name(), value);
-                else
-                    return String.format("%s %s %s", name, expression.getOpType().name(), value);
+                return String.format("%s %s %s", name, opString, value);
             case OP_AND:
                 return String.format("%s AND %s", partitionFilterToWhereClauseString(be.getLhs()), partitionFilterToWhereClauseString(be.getRhs()));
             default:
-                throw new RuntimeException("Unsupported expression type: " + expression.getOpType().name());
+                throw new RuntimeException("Unsupported expression type: " + opString);
         }
-    }
-
-    /** whether the column is a text column */
-    private boolean isTextColumn(String column)
-    {
-        CfDef cfdef = getCfDef(loadSignature);
-        for (ColumnDef cdef : cfdef.column_metadata)
-        {
-            String columnName = UTF8Type.instance.compose(ByteBuffer.wrap(cdef.getName()));
-            if (column.equalsIgnoreCase(columnName))
-            {
-                if (cdef.validation_class.contains("UTF8") || cdef.validation_class.contains("AsciiType"))
-                    return true;
-                else
-                    return false;
-            }
-        }
-        return false;
     }
 }
 

@@ -679,7 +679,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             logger.debug("Found ksDef name: {}", name);
             String keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
 
-            logger.debug("partition keys: " + keyString);
+            logger.debug("partition keys: {} ", keyString);
             List<String> keyNames = FBUtilities.fromJsonList(keyString);
  
             Iterator<String> iterator = keyNames.iterator();
@@ -692,7 +692,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
 
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
 
-            logger.debug("cluster keys: " + keyString);
+            logger.debug("cluster keys: {} ", keyString);
             keyNames = FBUtilities.fromJsonList(keyString);
 
             iterator = keyNames.iterator();
@@ -704,7 +704,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
 
             String validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue()));
-            logger.debug("row key validator: " + validator);
+            logger.debug("row key validator: {} ", validator);
             AbstractType<?> keyValidator = parseType(validator);
 
             Iterator<ColumnDef> keyItera = keys.iterator();
@@ -718,7 +718,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keyItera.next().validation_class = keyValidator.toString();
 
             validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(3).getValue()));
-            logger.debug("cluster key validator: " + validator);
+            logger.debug("cluster key validator: {} ", validator);
 
             if (keyItera.hasNext() && validator != null && !validator.isEmpty())
             {
@@ -740,7 +740,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 try
                 {
                     String compactValidator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(6).getValue()));
-                    logger.debug("default validator: " + compactValidator);
+                    logger.debug("default validator: {} ", compactValidator);
                     AbstractType<?> defaultValidator = parseType(compactValidator);
 
                     ColumnDef cDef = new ColumnDef();
