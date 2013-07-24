@@ -322,7 +322,8 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         String cfName = ConfigHelper.getOutputColumnFamily(conf);
         String query = "SELECT key_validator," +
         		       "       key_aliases," +
-        		       "       column_aliases " +
+        		       "       column_aliases," +
+        		       "       key_alias " +
                        "FROM system.schema_columnfamilies " +
                        "WHERE keyspace_name='%s' and columnfamily_name='%s'";
         String formatted = String.format(query, keyspace, cfName);
@@ -333,16 +334,26 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         keyValidator = parseType(validator);
         
         Column rawPartitionKeys = result.rows.get(0).columns.get(1);
-        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
-        logger.debug("partition keys: " + keyString);
-
-        List<String> keys = FBUtilities.fromJsonList(keyString);
-        partitionKeyColumns = new String[keys.size()];
-        int i = 0;
-        for (String key : keys)
+        String keyString;
+        List<String> keys;
+        if (rawPartitionKeys.getValue() == null)
         {
-            partitionKeyColumns[i] = key;
-            i++;
+            partitionKeyColumns = new String[1];
+            partitionKeyColumns[0] = ByteBufferUtil.string(ByteBuffer.wrap(result.rows.get(0).columns.get(3).getValue()));
+        }
+        else
+        {
+            keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
+            logger.debug("partition keys: {}", keyString);
+            keys = FBUtilities.fromJsonList(keyString);
+        
+            partitionKeyColumns = new String[keys.size()];
+            int i = 0;
+            for (String key : keys)
+            {
+                partitionKeyColumns[i] = key;
+                i++;
+            }
         }
 
         Column rawClusterColumns = result.rows.get(0).columns.get(2);
