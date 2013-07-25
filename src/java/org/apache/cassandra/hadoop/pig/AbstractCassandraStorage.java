@@ -678,13 +678,15 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         if (iteraRow.hasNext())
         {
             CqlRow cqlRow = iteraRow.next();
-            String name = ByteBufferUtil.string(cqlRow.columns.get(7).value);
+            String name = ByteBufferUtil.string(cqlRow.columns.get(4).value);
             logger.debug("Found ksDef name: {}", name);
             String keyString;
+            List<String> keyNames;
+            Iterator<String> iterator;
             if (cqlRow.columns.get(0).getValue() == null)
             {
                 ColumnDef cDef = new ColumnDef();
-                cDef.name = ByteBuffer.wrap(result.rows.get(0).columns.get(4).getValue());
+                cDef.name = ByteBuffer.wrap(result.rows.get(0).columns.get(7).getValue());
                 keys.add(cDef);
             }
             else
@@ -692,15 +694,28 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
 
                 logger.debug("partition keys: {}", keyString);
-                List<String> keyNames = FBUtilities.fromJsonList(keyString);
+                keyNames = FBUtilities.fromJsonList(keyString);
      
-                Iterator<String> iterator = keyNames.iterator();
+                iterator = keyNames.iterator();
                 while (iterator.hasNext())
                 {
                     ColumnDef cDef = new ColumnDef();
                     cDef.name = ByteBufferUtil.bytes(iterator.next());
                     keys.add(cDef);
                 }
+            }
+
+            keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
+
+            logger.debug("cluster keys: {} ", keyString);
+            keyNames = FBUtilities.fromJsonList(keyString);
+
+            iterator = keyNames.iterator();
+            while (iterator.hasNext())
+            {
+                ColumnDef cDef = new ColumnDef();
+                cDef.name = ByteBufferUtil.bytes(iterator.next());
+                keys.add(cDef);
             }
 
             String validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue()));
