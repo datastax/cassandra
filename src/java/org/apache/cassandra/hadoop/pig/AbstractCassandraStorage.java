@@ -539,11 +539,12 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     {
         // get CF meta data
         String query = "SELECT type, " +
-                       "       comparator," +
-                       "       subcomparator," +
+                       "       comparator, " +
+                       "       subcomparator, " +
                        "       default_validator, " +
-                       "       key_validator," +
-                       "       key_aliases " +
+                       "       key_validator, " +
+                       "       key_aliases, " +
+                       "       key_alias " +
                        "FROM system.schema_columnfamilies " +
                        "WHERE keyspace_name = '%s' " +
                        "  AND columnfamily_name = '%s' ";
@@ -577,6 +578,12 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             {
                 String keyAliases = ByteBufferUtil.string(cqlRow.columns.get(5).value);
                 keys = FBUtilities.fromJsonList(keyAliases);
+            }
+            else
+            {
+                String keyAlias = ByteBufferUtil.string(cqlRow.columns.get(6).value);
+                keys = new ArrayList<String>(1);
+                keys.add(keyAlias);
             }
             // get column meta data
             if (keys != null && keys.size() > 0)
@@ -651,7 +658,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                        "       comparator, " +
                        "       keyspace_name, " +
                        "       value_alias, " +
-                       "       default_validator  " +
+                       "       default_validator," +
+                       "       key_alias  " +
                        "FROM system.schema_columnfamilies " +
                        "WHERE keyspace_name = '%s'" +
                        "  AND columnfamily_name = '%s' ";
@@ -672,22 +680,34 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             CqlRow cqlRow = iteraRow.next();
             String name = ByteBufferUtil.string(cqlRow.columns.get(4).value);
             logger.debug("Found ksDef name: {}", name);
-            String keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
-
-            logger.debug("partition keys: " + keyString);
-            List<String> keyNames = FBUtilities.fromJsonList(keyString);
- 
-            Iterator<String> iterator = keyNames.iterator();
-            while (iterator.hasNext())
+            String keyString;
+            List<String> keyNames;
+            Iterator<String> iterator;
+            if (cqlRow.columns.get(0).getValue() == null)
             {
                 ColumnDef cDef = new ColumnDef();
-                cDef.name = ByteBufferUtil.bytes(iterator.next());
+                cDef.name = ByteBuffer.wrap(result.rows.get(0).columns.get(7).getValue());
                 keys.add(cDef);
+            }
+            else
+            {
+                keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
+
+                logger.debug("partition keys: {}", keyString);
+                keyNames = FBUtilities.fromJsonList(keyString);
+     
+                iterator = keyNames.iterator();
+                while (iterator.hasNext())
+                {
+                    ColumnDef cDef = new ColumnDef();
+                    cDef.name = ByteBufferUtil.bytes(iterator.next());
+                    keys.add(cDef);
+                }
             }
 
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
 
-            logger.debug("cluster keys: " + keyString);
+            logger.debug("cluster keys: {} ", keyString);
             keyNames = FBUtilities.fromJsonList(keyString);
 
             iterator = keyNames.iterator();
@@ -699,7 +719,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
 
             String validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue()));
-            logger.debug("row key validator: " + validator);
+            logger.debug("key validator : {}", validator);
             AbstractType<?> keyValidator = parseType(validator);
 
             Iterator<ColumnDef> keyItera = keys.iterator();
@@ -713,7 +733,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keyItera.next().validation_class = keyValidator.toString();
 
             validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(3).getValue()));
-            logger.debug("cluster key validator: " + validator);
+            logger.debug("cluster key validator: {}", validator);
 
             if (keyItera.hasNext() && validator != null && !validator.isEmpty())
             {
@@ -735,7 +755,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 try
                 {
                     String compactValidator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(6).getValue()));
-                    logger.debug("default validator: " + compactValidator);
+                    logger.debug("default validator: {}", compactValidator);
                     AbstractType<?> defaultValidator = parseType(compactValidator);
 
                     ColumnDef cDef = new ColumnDef();

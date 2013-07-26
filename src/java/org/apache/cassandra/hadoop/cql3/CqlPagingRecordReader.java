@@ -657,20 +657,33 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         String query = "select key_aliases," +
                        "column_aliases, " +
                        "key_validator, " +
-                       "comparator " +
+                       "comparator, " +
+                       "key_alias " +
                        "from system.schema_columnfamilies " +
                        "where keyspace_name='%s' and columnfamily_name='%s'";
         String formatted = String.format(query, keyspace, cfName);
         CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
 
         CqlRow cqlRow = result.rows.get(0);
-        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
-        logger.debug("partition keys: " + keyString);
-        List<String> keys = FBUtilities.fromJsonList(keyString);
+        String keyString;
+        List<String> keys;
+        if (cqlRow.columns.get(0).getValue() == null)
+        {
+            partitionBoundColumns.add(new BoundColumn(
+                    ByteBufferUtil.string(
+                            ByteBuffer.wrap(
+                                    result.rows.get(0).columns.get(4).getValue()))));
+        }
+        else
+        {
+            keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
+            logger.debug("partition keys: {}", keyString);
+            keys = FBUtilities.fromJsonList(keyString);
 
-        for (String key : keys)
-            partitionBoundColumns.add(new BoundColumn(key));
-
+            for (String key : keys)
+                partitionBoundColumns.add(new BoundColumn(key));
+        }
+        
         keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
         logger.debug("cluster columns: " + keyString);
         keys = FBUtilities.fromJsonList(keyString);
@@ -678,6 +691,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         for (String key : keys)
             clusterColumns.add(new BoundColumn(key));
 
+        
         Column rawKeyValidator = cqlRow.columns.get(2);
         String validator = ByteBufferUtil.string(ByteBuffer.wrap(rawKeyValidator.getValue()));
         logger.debug("row key validator: " + validator);
