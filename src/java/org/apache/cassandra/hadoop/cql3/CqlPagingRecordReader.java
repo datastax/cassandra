@@ -29,6 +29,9 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.cql3.CFDefinition;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
@@ -664,15 +667,30 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         String formatted = String.format(query, keyspace, cfName);
         CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
 
+        // if can't find keys from system.schema_columnfamilies, then check the thrift describe_keyspace API to get the meta data
+        if (result.rows.size() == 0 || result.rows.get(0).columns == null)
+        {
+            retrieveKeysForThriftTables();
+            return;
+        }
+        
         CqlRow cqlRow = result.rows.get(0);
         String keyString;
         List<String> keys;
         if (cqlRow.columns.get(0).getValue() == null)
         {
-            partitionBoundColumns.add(new BoundColumn(
-                    ByteBufferUtil.string(
+            if (result.rows.get(0).columns.get(4).getValue() == null)
+            {
+                retrieveKeysForThriftTables();
+                return;
+            }
+            else
+            {             
+                partitionBoundColumns.add(new BoundColumn(
+                        ByteBufferUtil.string(
                             ByteBuffer.wrap(
-                                    result.rows.get(0).columns.get(4).getValue()))));
+                                result.rows.get(0).columns.get(4).getValue()))));
+            }
         }
         else
         {
@@ -682,6 +700,12 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
             for (String key : keys)
                 partitionBoundColumns.add(new BoundColumn(key));
+
+            if (partitionBoundColumns.size() == 0)
+            {
+                retrieveKeysForThriftTables();
+                return;
+            }
         }
         
         keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
@@ -691,22 +715,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         for (String key : keys)
             clusterColumns.add(new BoundColumn(key));
 
-        
-        Column rawKeyValidator = cqlRow.columns.get(2);
-        String validator = ByteBufferUtil.string(ByteBuffer.wrap(rawKeyValidator.getValue()));
-        logger.debug("row key validator: " + validator);
-        keyValidator = parseType(validator);
-
-        if (keyValidator instanceof CompositeType)
-        {
-            List<AbstractType<?>> types = ((CompositeType) keyValidator).types;
-            for (int i = 0; i < partitionBoundColumns.size(); i++)
-                partitionBoundColumns.get(i).validator = types.get(i);
-        }
-        else
-        {
-            partitionBoundColumns.get(0).validator = keyValidator;
-        }
+        parseKeyValidators(ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue())));
 
         Column rawComparator = cqlRow.columns.get(3);
         String comparator = ByteBufferUtil.string(ByteBuffer.wrap(rawComparator.getValue()));
@@ -719,6 +728,46 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             {
                 clusterColumns.get(i).reversed = (types.get(i) instanceof ReversedType);
             }
+        }
+    }
+
+    /** 
+     * retrieve the fake partition keys and cluster keys for classic thrift table 
+     * use CFDefinition to get keys and columns
+     * */
+    private void retrieveKeysForThriftTables() throws Exception
+    {
+        KsDef ksDef = client.describe_keyspace(keyspace);
+        for (CfDef cfDef : ksDef.cf_defs)
+        {
+            if (cfDef.name.equalsIgnoreCase(cfName))
+            {
+                CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
+                CFDefinition cfDefinition = new CFDefinition(cfMeta);
+                Iterator<ColumnIdentifier> keyItera = cfDefinition.keys.keySet().iterator();
+                while(keyItera.hasNext())
+                    partitionBoundColumns.add(new BoundColumn(keyItera.next().toString()));
+                parseKeyValidators(cfDef.key_validation_class);
+                return;
+            }
+        }
+    }
+
+    /** parse key validators */
+    private void parseKeyValidators(String rowKeyValidator) throws IOException
+    {
+        logger.debug("row key validator: {} ", rowKeyValidator);
+        keyValidator = parseType(rowKeyValidator);
+
+        if (keyValidator instanceof CompositeType)
+        {
+            List<AbstractType<?>> types = ((CompositeType) keyValidator).types;
+            for (int i = 0; i < partitionBoundColumns.size(); i++)
+                partitionBoundColumns.get(i).validator = types.get(i);
+        }
+        else
+        {
+            partitionBoundColumns.get(0).validator = keyValidator;
         }
     }
 
