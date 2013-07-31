@@ -733,6 +733,28 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                     cDef.name = ByteBufferUtil.bytes(iterator.next());
                     keys.add(cDef);
                 }
+                // classis thrift tables
+                if (keys.size() == 0)
+                {
+                    KsDef ksDef = client.describe_keyspace(keyspace);
+                    for (CfDef cfd : ksDef.cf_defs)
+                    {
+                        if (cfd.name.equalsIgnoreCase(column_family))
+                        {
+                            CFMetaData cfMeta = CFMetaData.fromThrift(cfd);
+                            CFDefinition cfDefinition = new CFDefinition(cfMeta);
+                            for (ColumnIdentifier column : cfDefinition.keys.keySet())
+                            {
+                                String key = column.toString();
+                                logger.debug("name: {} ", key);
+                                ColumnDef cDef = new ColumnDef();
+                                cDef.name = ByteBufferUtil.bytes(key);
+                                keys.add(cDef);
+                            }
+                        }
+                    }
+                }
+
             }
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
 
