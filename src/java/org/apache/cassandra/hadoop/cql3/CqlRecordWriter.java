@@ -369,6 +369,7 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
             if (partitionKeyColumns.length == 0)
             {
                 retrieveKeysForThriftTables(client);
+                return;
             }
         }
 
