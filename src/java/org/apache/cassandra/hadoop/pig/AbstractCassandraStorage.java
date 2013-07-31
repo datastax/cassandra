@@ -568,21 +568,13 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 // classis thrift tables
                 if (keys.size() == 0 && cqlRow.columns.get(6).value == null)
                 {
-                    KsDef ksDef = client.describe_keyspace(keyspace);
-                    for (CfDef cfd : ksDef.cf_defs)
+                    CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
+                    for (ColumnIdentifier column : cfDefinition.keys.keySet())
                     {
-                        if (cfd.name.equalsIgnoreCase(column_family))
-                        {
-                            CFMetaData cfMeta = CFMetaData.fromThrift(cfd);
-                            CFDefinition cfDefinition = new CFDefinition(cfMeta);
-                            for (ColumnIdentifier column : cfDefinition.keys.keySet())
-                            {
-                                String key = column.toString();
-                                String type = cfDefinition.keys.get(column).type.toString();
-                                logger.debug("name: {}, type: {} ", key, type);
-                                keys.add(key);
-                            }
-                        }
+                        String key = column.toString();
+                        String type = cfDefinition.keys.get(column).type.toString();
+                        logger.debug("name: {}, type: {} ", key, type);
+                        keys.add(key);
                     }
                 }
             }
@@ -641,24 +633,16 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         if (rows == null || rows.isEmpty())
         {
             // check classic thrift tables
-            KsDef ksDef = client.describe_keyspace(keyspace);
-            for (CfDef cfDef : ksDef.cf_defs)
+            CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
+            for (ColumnIdentifier column : cfDefinition.columns.keySet())
             {
-                if (cfDef.name.equalsIgnoreCase(column_family))
-                {
-                    CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
-                    CFDefinition cfDefinition = new CFDefinition(cfMeta);
-                    for (ColumnIdentifier column : cfDefinition.columns.keySet())
-                    {
-                        ColumnDef cDef = new ColumnDef();
-                        String columnName = column.toString();
-                        String type = cfDefinition.columns.get(column).type.toString();
-                        logger.debug("name: {}, type: {} ", columnName, type);
-                        cDef.name = ByteBufferUtil.bytes(columnName);
-                        cDef.validation_class = type;
-                        columnDefs.add(cDef);
-                    }
-                }
+                ColumnDef cDef = new ColumnDef();
+                String columnName = column.toString();
+                String type = cfDefinition.columns.get(column).type.toString();
+                logger.debug("name: {}, type: {} ", columnName, type);
+                cDef.name = ByteBufferUtil.bytes(columnName);
+                cDef.validation_class = type;
+                columnDefs.add(cDef);
             }
             return columnDefs;
         }
@@ -736,22 +720,14 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 // classis thrift tables
                 if (keys.size() == 0)
                 {
-                    KsDef ksDef = client.describe_keyspace(keyspace);
-                    for (CfDef cfd : ksDef.cf_defs)
+                    CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
+                    for (ColumnIdentifier column : cfDefinition.keys.keySet())
                     {
-                        if (cfd.name.equalsIgnoreCase(column_family))
-                        {
-                            CFMetaData cfMeta = CFMetaData.fromThrift(cfd);
-                            CFDefinition cfDefinition = new CFDefinition(cfMeta);
-                            for (ColumnIdentifier column : cfDefinition.keys.keySet())
-                            {
-                                String key = column.toString();
-                                logger.debug("name: {} ", key);
-                                ColumnDef cDef = new ColumnDef();
-                                cDef.name = ByteBufferUtil.bytes(key);
-                                keys.add(cDef);
-                            }
-                        }
+                        String key = column.toString();
+                        logger.debug("name: {} ", key);
+                        ColumnDef cDef = new ColumnDef();
+                        cDef.name = ByteBufferUtil.bytes(key);
+                        keys.add(cDef);
                     }
                 }
 
@@ -836,6 +812,23 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             return IndexType.COMPOSITES;
         else
             return null;
+    }
+
+    /** get CFDefinition of a column family */
+    private CFDefinition getCfDefinition(String ks, String cf, Cassandra.Client client)
+            throws NotFoundException,
+            InvalidRequestException,
+            TException,
+            org.apache.cassandra.exceptions.InvalidRequestException,
+            ConfigurationException
+    {
+        KsDef ksDef = client.describe_keyspace(ks);
+        for (CfDef cfDef : ksDef.cf_defs)
+        {
+            if (cfDef.name.equalsIgnoreCase(cf))
+                return new CFDefinition(CFMetaData.fromThrift(cfDef));
+        }
+        return null;
     }
 }
 
