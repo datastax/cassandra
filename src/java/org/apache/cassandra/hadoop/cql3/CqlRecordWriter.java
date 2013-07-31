@@ -341,17 +341,8 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         List<String> keys;
         if (rawPartitionKeys.getValue() == null)
         {
-            if (result.rows.get(0).columns.get(3).getValue() == null)
-            {
-                retrieveKeysForThriftTables(client);
-                return;
-            }
-            else
-            { 
-                partitionKeyColumns = new String[1];
-                partitionKeyColumns[0] = ByteBufferUtil.string(ByteBuffer.wrap(result.rows.get(0).columns.get(3).getValue()));
-
-            }
+            partitionKeyColumns = new String[1];
+            partitionKeyColumns[0] = ByteBufferUtil.string(ByteBuffer.wrap(result.rows.get(0).columns.get(3).getValue()));
         }
         else
         {
