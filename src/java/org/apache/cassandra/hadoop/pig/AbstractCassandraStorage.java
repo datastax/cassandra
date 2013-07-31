@@ -607,7 +607,10 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             TimedOutException,
             SchemaDisagreementException,
             TException,
-            CharacterCodingException;
+            CharacterCodingException,
+            org.apache.cassandra.exceptions.InvalidRequestException,
+            ConfigurationException,
+            NotFoundException;
 
     /** get column meta data */
     protected List<ColumnDef> getColumnMeta(Cassandra.Client client)
