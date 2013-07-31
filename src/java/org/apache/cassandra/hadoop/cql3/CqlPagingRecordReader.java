@@ -672,31 +672,16 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                        "where keyspace_name='%s' and columnfamily_name='%s'";
         String formatted = String.format(query, keyspace, cfName);
         CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
-
-        // if can't find keys from system.schema_columnfamilies, then check the thrift describe_keyspace API to get the meta data
-        if (result.rows.size() == 0 || result.rows.get(0).columns == null)
-        {
-            retrieveKeysForThriftTables();
-            return;
-        }
         
         CqlRow cqlRow = result.rows.get(0);
         String keyString;
         List<String> keys;
         if (cqlRow.columns.get(0).getValue() == null)
         {
-            if (result.rows.get(0).columns.get(4).getValue() == null)
-            {
-                retrieveKeysForThriftTables();
-                return;
-            }
-            else
-            {             
-                partitionBoundColumns.add(new BoundColumn(
-                        ByteBufferUtil.string(
-                            ByteBuffer.wrap(
-                                result.rows.get(0).columns.get(4).getValue()))));
-            }
+            partitionBoundColumns.add(new BoundColumn(
+                    ByteBufferUtil.string(
+                        ByteBuffer.wrap(
+                            result.rows.get(0).columns.get(4).getValue()))));
         }
         else
         {
