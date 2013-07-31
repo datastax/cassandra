@@ -369,7 +369,7 @@ public class CqlStorage extends AbstractCassandraStorage
         {
             keyColumns = getKeysMeta(client);
         }
-        catch(IOException e)
+        catch(Exception e)
         {
             logger.error("Error in retrieving key columns" , e);   
         }

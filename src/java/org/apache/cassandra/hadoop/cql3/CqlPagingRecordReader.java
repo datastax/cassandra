@@ -440,7 +440,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
             return Pair.create(clause.left,
                                "SELECT " + columns
-                               + " FROM " + cfName
+                               + " FROM " + quote(cfName)
                                + clause.right
                                + (userDefinedWhereClauses == null ? "" : " AND " + userDefinedWhereClauses)
                                + " LIMIT " + pageRowSize
@@ -463,7 +463,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                 if (keyNames.contains(trimmed))
                     continue;
 
-                result = result == null ? trimmed : result + "," + trimmed;
+                String quoted = quote(trimmed);
+                result = result == null ? quoted : result + "," + quoted;
             }
             return result;
         }
@@ -496,10 +497,10 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         private Pair<Integer, String> whereClause(List<BoundColumn> column, int position)
         {
             if (position == column.size() - 1 || column.get(position + 1).value == null)
-                return Pair.create(position + 2, " AND " + column.get(position).name + (column.get(position).reversed ? " < ? " : " > ? "));
+                return Pair.create(position + 2, " AND " + quote(column.get(position).name) + (column.get(position).reversed ? " < ? " : " > ? "));
 
             Pair<Integer, String> clause = whereClause(column, position + 1);
-            return Pair.create(clause.left, " AND " + column.get(position).name + " = ? " + clause.right);
+            return Pair.create(clause.left, " AND " + quote(column.get(position).name) + " = ? " + clause.right);
         }
 
         /** check whether all key values are null */
@@ -518,7 +519,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         {
             String result = null;
             for (BoundColumn column : columns)
-                result = result == null ? column.name : result + "," + column.name;
+                result = result == null ? quote(column.name) : result + "," + quote(column.name);
 
             return result == null ? "" : result;
         }
@@ -595,6 +596,11 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             preparedQueryIds.put(query.left, cqlPreparedResult.itemId);
             logger.debug("prepared statement id: " + cqlPreparedResult.itemId);
             return cqlPreparedResult.itemId;
+        }
+
+        /** Quoting for working with uppercase */
+        private String quote(String identifier) {
+            return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
         }
 
         /** execute the prepared query */

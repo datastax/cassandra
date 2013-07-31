@@ -27,6 +27,9 @@ import java.util.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.cql3.CFDefinition;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.marshal.*;
@@ -36,6 +39,7 @@ import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Hex;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
 import org.apache.hadoop.conf.Configuration;
@@ -468,27 +472,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                                                              column_family,
                                                              keyspace));
             }
-            catch (TException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (InvalidRequestException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (UnavailableException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (TimedOutException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (SchemaDisagreementException e)
+            catch (Exception e)
             {
                 throw new RuntimeException(e);
             }
@@ -535,7 +519,10 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                    TimedOutException,
                    SchemaDisagreementException,
                    TException,
-                   CharacterCodingException
+                   CharacterCodingException,
+                   NotFoundException,
+                   org.apache.cassandra.exceptions.InvalidRequestException,
+                   ConfigurationException
     {
         // get CF meta data
         String query = "SELECT type, " +
@@ -578,6 +565,26 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             {
                 String keyAliases = ByteBufferUtil.string(cqlRow.columns.get(5).value);
                 keys = FBUtilities.fromJsonList(keyAliases);
+                // classis thrift tables
+                if (keys.size() == 0 && cqlRow.columns.get(6).value == null)
+                {
+                    KsDef ksDef = client.describe_keyspace(keyspace);
+                    for (CfDef cfd : ksDef.cf_defs)
+                    {
+                        if (cfd.name.equalsIgnoreCase(column_family))
+                        {
+                            CFMetaData cfMeta = CFMetaData.fromThrift(cfd);
+                            CFDefinition cfDefinition = new CFDefinition(cfMeta);
+                            for (ColumnIdentifier column : cfDefinition.keys.keySet())
+                            {
+                                String key = column.toString();
+                                String type = cfDefinition.keys.get(column).type.toString();
+                                logger.debug("name: {}, type: {} ", key, type);
+                                keys.add(key);
+                            }
+                        }
+                    }
+                }
             }
             else
             {
@@ -609,7 +616,10 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             TimedOutException,
             SchemaDisagreementException,
             TException,
-            CharacterCodingException
+            CharacterCodingException,
+            org.apache.cassandra.exceptions.InvalidRequestException,
+            ConfigurationException,
+            NotFoundException
     {
         String query = "SELECT column_name, " +
                        "       validator, " +
@@ -626,7 +636,29 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         List<CqlRow> rows = result.rows;
         List<ColumnDef> columnDefs = new ArrayList<ColumnDef>();
         if (rows == null || rows.isEmpty())
+        {
+            // check classic thrift tables
+            KsDef ksDef = client.describe_keyspace(keyspace);
+            for (CfDef cfDef : ksDef.cf_defs)
+            {
+                if (cfDef.name.equalsIgnoreCase(column_family))
+                {
+                    CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
+                    CFDefinition cfDefinition = new CFDefinition(cfMeta);
+                    for (ColumnIdentifier column : cfDefinition.columns.keySet())
+                    {
+                        ColumnDef cDef = new ColumnDef();
+                        String columnName = column.toString();
+                        String type = cfDefinition.columns.get(column).type.toString();
+                        logger.debug("name: {}, type: {} ", columnName, type);
+                        cDef.name = ByteBufferUtil.bytes(columnName);
+                        cDef.validation_class = type;
+                        columnDefs.add(cDef);
+                    }
+                }
+            }
             return columnDefs;
+        }
 
         Iterator<CqlRow> iterator = rows.iterator();
         while (iterator.hasNext())
@@ -643,14 +675,9 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         return columnDefs;
     }
 
-    /** get keys meta data  */
+    /** get keys meta data */
     protected List<ColumnDef> getKeysMeta(Cassandra.Client client)
-            throws InvalidRequestException,
-            UnavailableException,
-            TimedOutException,
-            SchemaDisagreementException,
-            TException,
-            IOException
+            throws Exception
     {
         String query = "SELECT key_aliases, " +
                        "       column_aliases, " +
@@ -704,7 +731,6 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                     keys.add(cDef);
                 }
             }
-
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
 
             logger.debug("cluster keys: {} ", keyString);
