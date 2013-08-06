@@ -15,10 +15,11 @@
 # limitations under the License.
 
 import re
+import cql
 from warnings import warn
 from .cqlhandling import CqlParsingRuleSet, Hint
 from cql.cqltypes import (cql_types, lookup_casstype, CompositeType, UTF8Type,
-                          ColumnToCollectionType, CounterColumnType)
+                          ColumnToCollectionType, CounterColumnType, _ParameterizedType)
 from . import helptopics
 
 simple_cql_types = set(cql_types)
@@ -30,6 +31,23 @@ try:
     import json
 except ImportError:
     import simplejson as json
+
+# a workaround to avoid modifying python-cql itself.
+# needed to make DESCRIBE work with DSE/cfs.
+cql.cqltypes.casstype_scanner = re.Scanner((
+    (r'[()]', lambda s,t: t),
+    (r'[a-zA-Z0-9_.:=>]+', lambda s,t: t),
+    (r'[\s,]', None),
+))
+
+class DynamicCompositeType(_ParameterizedType):
+    typename = "'org.apache.cassandra.db.marshal.DynamicCompositeType'"
+    num_subtypes = 'UNKNOWN'
+
+    @classmethod
+    def cql_parameterized_type(cls):
+        return "'%s(%s)'" % (cls.typename[1:-1], ','.join([ st.typename[1:-1] for st in cls.subtypes ]))
+# end workaround
 
 class UnexpectedTableStructure(UserWarning):
     def __init__(self, msg):
