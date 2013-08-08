@@ -1,10 +1,8 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
-
-1.2.7
-=======
  * Fix ReadResponseSerializer.serializedSize() for digest reads (CASSANDRA-5476)
  * Fix serialization of the LEFT gossip value (CASSANDRA-5696)
+ * Correctly validate sparse composite cells in scrub (CASSANDRA-5855)
 
 1.2.6
  * Fix tracing when operation completes before all responses arrive (CASSANDRA-5668)
