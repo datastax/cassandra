@@ -18,7 +18,9 @@
 package org.apache.cassandra.hadoop.pig;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
@@ -252,15 +254,15 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         }
     }
 
-    /** decompose the query to store the parameters in a map*/
-    public static Map<String, String> getQueryMap(String query)
+    /** decompose the query to store the parameters in a map */
+    public static Map<String, String> getQueryMap(String query) throws UnsupportedEncodingException
     {
         String[] params = query.split("&");
         Map<String, String> map = new HashMap<String, String>();
         for (String param : params)
         {
             String[] keyValue = param.split("=");
-            map.put(keyValue[0], keyValue[1]);
+            map.put(keyValue[0], URLDecoder.decode(keyValue[1],"UTF-8"));
         }
         return map;
     }

@@ -413,7 +413,7 @@ public class CqlStorage extends AbstractCassandraStorage
 
                 // output prepared statement
                 if (urlQuery.containsKey("output_query"))
-                    outputQuery = urlQuery.get("output_query").replaceAll("#", "?").replaceAll("@", "=");
+                    outputQuery = urlQuery.get("output_query");
 
                 // user defined where clause
                 if (urlQuery.containsKey("where_clause"))
