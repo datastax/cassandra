@@ -26,6 +26,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.cql3.CFDefinition;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
@@ -322,7 +325,8 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         String cfName = ConfigHelper.getOutputColumnFamily(conf);
         String query = "SELECT key_validator," +
         		       "       key_aliases," +
-        		       "       column_aliases " +
+        		       "       column_aliases," +
+        		       "       key_alias " +
                        "FROM system.schema_columnfamilies " +
                        "WHERE keyspace_name='%s' and columnfamily_name='%s'";
         String formatted = String.format(query, keyspace, cfName);
@@ -333,16 +337,31 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         keyValidator = parseType(validator);
         
         Column rawPartitionKeys = result.rows.get(0).columns.get(1);
-        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
-        logger.debug("partition keys: " + keyString);
-
-        List<String> keys = FBUtilities.fromJsonList(keyString);
-        partitionKeyColumns = new String[keys.size()];
-        int i = 0;
-        for (String key : keys)
+        String keyString;
+        List<String> keys;
+        if (rawPartitionKeys.getValue() == null)
         {
-            partitionKeyColumns[i] = key;
-            i++;
+            partitionKeyColumns = new String[1];
+            partitionKeyColumns[0] = ByteBufferUtil.string(ByteBuffer.wrap(result.rows.get(0).columns.get(3).getValue()));
+        }
+        else
+        {
+            keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
+            logger.debug("partition keys: {}", keyString);
+            keys = FBUtilities.fromJsonList(keyString);
+        
+            partitionKeyColumns = new String[keys.size()];
+            int i = 0;
+            for (String key : keys)
+            {
+                partitionKeyColumns[i] = key;
+                i++;
+            }
+            if (partitionKeyColumns.length == 0)
+            {
+                retrieveKeysForThriftTables(client);
+                return;
+            }
         }
 
         Column rawClusterColumns = result.rows.get(0).columns.get(2);
@@ -350,6 +369,32 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
 
         logger.debug("cluster columns: " + clusterColumnString);
         clusterColumns = FBUtilities.fromJsonList(clusterColumnString);
+    }
+
+    /** 
+     * retrieve the fake partition keys and cluster keys for classic thrift table 
+     * use CFDefinition to get keys and columns
+     * */
+    private void retrieveKeysForThriftTables(Cassandra.Client client) throws Exception
+    {
+        String keyspace = ConfigHelper.getOutputKeyspace(conf);
+        String cfName = ConfigHelper.getOutputColumnFamily(conf);
+        KsDef ksDef = client.describe_keyspace(keyspace);
+        for (CfDef cfDef : ksDef.cf_defs)
+        {
+            if (cfDef.name.equalsIgnoreCase(cfName))
+            {
+                CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
+                CFDefinition cfDefinition = new CFDefinition(cfMeta);
+                int i = 0;
+                for (ColumnIdentifier column : cfDefinition.keys.keySet())
+                {
+                    partitionKeyColumns[i] = column.toString();
+                    i++;
+                }
+                return;
+            }
+        }
     }
 
     private AbstractType<?> parseType(String type) throws ConfigurationException

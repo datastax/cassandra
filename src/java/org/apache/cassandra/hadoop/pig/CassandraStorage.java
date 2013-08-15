@@ -25,6 +25,7 @@ import java.util.*;
 
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -702,7 +703,10 @@ public class CassandraStorage extends AbstractCassandraStorage
             TimedOutException, 
             SchemaDisagreementException, 
             TException,
-            CharacterCodingException
+            CharacterCodingException,
+            org.apache.cassandra.exceptions.InvalidRequestException,
+            ConfigurationException,
+            NotFoundException
     {
         if (cql3Table)
             return new ArrayList<ColumnDef>();

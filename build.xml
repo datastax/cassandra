@@ -25,7 +25,7 @@
     <property name="debuglevel" value="source,lines,vars"/>
 
     <!-- default version and SCM information -->
-    <property name="base.version" value="1.2.6.1-DSP-2214"/>
+    <property name="base.version" value="1.2.6.2-DSP-2214"/>
     <property name="scm.connection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.developerConnection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.url" value="http://git-wip-us.apache.org/repos/asf?p=cassandra.git;a=tree"/>
@@ -681,12 +681,12 @@
         <echo message="${ant.project.name}: ${ant.file}"/>
         <!-- Order matters! -->
         <javac debug="true" debuglevel="${debuglevel}"
-               destdir="${build.classes.thrift}" includeantruntime="false">
+               destdir="${build.classes.thrift}" includeantruntime="false" source="${source.version}" target="${target.version}">
             <src path="${interface.thrift.dir}/gen-java"/>
             <classpath refid="cassandra.classpath"/>
         </javac>
         <javac debug="true" debuglevel="${debuglevel}"
-               destdir="${build.classes.main}" includeantruntime="false">
+               destdir="${build.classes.main}" includeantruntime="false" source="${source.version}" target="${target.version}">
             <src path="${build.src.java}"/>
             <src path="${build.src.gen-java}"/>
             <classpath refid="cassandra.classpath"/>
