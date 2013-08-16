@@ -646,6 +646,14 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 cDef.validation_class = type;
                 columnDefs.add(cDef);
             }
+            String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
+            if ("value".equals(value))
+            {
+                ColumnDef cDef = new ColumnDef();
+                cDef.name = ByteBufferUtil.bytes(value);
+                cDef.validation_class = cfDefinition.value.type.toString();
+                columnDefs.add(cDef);
+            }
             return columnDefs;
         }
 
