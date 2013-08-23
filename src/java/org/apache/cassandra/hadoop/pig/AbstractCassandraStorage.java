@@ -206,6 +206,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 try
                 {
                     validator = TypeParser.parse(cd.getValidation_class());
+                    if (validator instanceof CounterColumnType)
+                        validator = LongType.instance;
                     validators.put(cd.name, validator);
                 }
                 catch (ConfigurationException e)
