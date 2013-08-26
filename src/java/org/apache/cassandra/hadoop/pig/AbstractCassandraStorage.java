@@ -582,6 +582,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                         keys.add(key);
                     }
                 }
+                else
+                    cql3Table = true;
             }
             else
             {
@@ -589,9 +591,6 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keys = new ArrayList<String>(1);
                 keys.add(keyAlias);
             }
-            // get column meta data
-            if (keys != null && keys.size() > 0)
-                cql3Table = true;
         }
         cfDef.column_metadata = getColumnMetadata(client, cql3Table);
         return cfDef;
@@ -647,6 +646,14 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 logger.debug("name: {}, type: {} ", columnName, type);
                 cDef.name = ByteBufferUtil.bytes(columnName);
                 cDef.validation_class = type;
+                columnDefs.add(cDef);
+            }
+            String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
+            if ("value".equals(value))
+            {
+                ColumnDef cDef = new ColumnDef();
+                cDef.name = ByteBufferUtil.bytes(value);
+                cDef.validation_class = cfDefinition.value.type.toString();
                 columnDefs.add(cDef);
             }
             return columnDefs;
