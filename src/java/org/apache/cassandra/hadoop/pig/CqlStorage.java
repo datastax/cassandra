@@ -18,6 +18,7 @@
 package org.apache.cassandra.hadoop.pig;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
@@ -29,13 +30,16 @@ import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
+import org.apache.cassandra.hadoop.pig.AbstractCassandraStorage.MarshallerType;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.Expression;
 import org.apache.pig.Expression.OpType;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
+import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.*;
 import org.apache.pig.impl.util.UDFContext;
@@ -108,10 +112,10 @@ public class CqlStorage extends AbstractCassandraStorage
                 if (columnValue != null)
                 {
                     IColumn column = new Column(cdef.name, columnValue);
-                    tuple.set(i, columnToTuple(column, cfDef, UTF8Type.instance));
+                    tuple.set(i, pigValue(cqlColumnToObj(column, cfDef)));
                 }
                 else
-                    tuple.set(i, TupleFactory.getInstance().newTuple());
+                    tuple.set(i, null);
                 i++;
             }
             return tuple;
@@ -120,6 +124,35 @@ public class CqlStorage extends AbstractCassandraStorage
         {
             throw new IOException(e.getMessage());
         }
+    }
+
+    /** convert a cql column to a tuple */
+    protected Object cqlColumnToObj(IColumn col, CfDef cfDef) throws IOException
+    {
+        // standard
+        Map<ByteBuffer,AbstractType> validators = getValidatorMap(cfDef);
+        if (validators.get(col.name()) == null)
+        {
+            Map<MarshallerType, AbstractType> marshallers = getDefaultMarshallers(cfDef);
+            return marshallers.get(MarshallerType.DEFAULT_VALIDATOR).compose(col.value());
+        }
+        else
+            return validators.get(col.name()).compose(col.value());
+    }
+    
+    /** set the value to the position of the tuple */
+    protected Object pigValue(Object value) throws ExecException
+    {
+       if (value instanceof BigInteger)
+           return ((BigInteger) value).intValue();
+       else if (value instanceof ByteBuffer)
+           return new DataByteArray(ByteBufferUtil.getArray((ByteBuffer) value));
+       else if (value instanceof UUID)
+           return new DataByteArray(UUIDGen.decompose((java.util.UUID) value));
+       else if (value instanceof Date)
+           return DateType.instance.decompose((Date) value).getLong();
+       else
+           return value;
     }
 
     /** set read configuration settings */
@@ -463,7 +496,7 @@ public class CqlStorage extends AbstractCassandraStorage
         String name = be.getLhs().toString();
         String value = be.getRhs().toString();
         OpType op = expression.getOpType();
-        String opString = op.name();
+        String opString = op.toString();
         switch (op)
         {
             case OP_EQ:
