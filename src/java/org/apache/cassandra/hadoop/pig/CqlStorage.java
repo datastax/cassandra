@@ -379,7 +379,7 @@ public class CqlStorage extends AbstractCassandraStorage
         }
 
         // get other columns
-        List<ColumnDef> columns = getColumnMeta(client);
+        List<ColumnDef> columns = getColumnMeta(client, false);
 
         // combine all columns in a list
         if (keyColumns != null && columns != null)
