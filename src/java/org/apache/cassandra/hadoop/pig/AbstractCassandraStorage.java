@@ -608,7 +608,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             NotFoundException;
 
     /** get column meta data */
-    protected List<ColumnDef> getColumnMeta(Cassandra.Client client)
+    protected List<ColumnDef> getColumnMeta(Cassandra.Client client, boolean cassandraStorage)
             throws InvalidRequestException,
             UnavailableException,
             TimedOutException,
@@ -633,30 +633,35 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
 
         List<CqlRow> rows = result.rows;
         List<ColumnDef> columnDefs = new ArrayList<ColumnDef>();
-        if (rows == null || rows.isEmpty())
+        if (!cassandraStorage && (rows == null || rows.isEmpty()))
         {
             // check classic thrift tables
             CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
-            for (ColumnIdentifier column : cfDefinition.columns.keySet())
+            for (ColumnIdentifier column : cfDefinition.metadata.keySet())
             {
                 ColumnDef cDef = new ColumnDef();
                 String columnName = column.toString();
-                String type = cfDefinition.columns.get(column).type.toString();
+                String type = cfDefinition.metadata.get(column).type.toString();
                 logger.debug("name: {}, type: {} ", columnName, type);
                 cDef.name = ByteBufferUtil.bytes(columnName);
                 cDef.validation_class = type;
                 columnDefs.add(cDef);
             }
-            String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
-            if ("value".equals(value))
+            if (columnDefs.size() == 0)
             {
-                ColumnDef cDef = new ColumnDef();
-                cDef.name = ByteBufferUtil.bytes(value);
-                cDef.validation_class = cfDefinition.value.type.toString();
-                columnDefs.add(cDef);
+                String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
+                if ("value".equals(value))
+                {
+                    ColumnDef cDef = new ColumnDef();
+                    cDef.name = ByteBufferUtil.bytes(value);
+                    cDef.validation_class = cfDefinition.value.type.toString();
+                    columnDefs.add(cDef);
+                }
             }
             return columnDefs;
         }
+        else if (rows == null || rows.isEmpty())
+            return columnDefs;
 
         Iterator<CqlRow> iterator = rows.iterator();
         while (iterator.hasNext())
@@ -733,6 +738,14 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 {
                     CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
                     for (ColumnIdentifier column : cfDefinition.keys.keySet())
+                    {
+                        String key = column.toString();
+                        logger.debug("name: {} ", key);
+                        ColumnDef cDef = new ColumnDef();
+                        cDef.name = ByteBufferUtil.bytes(key);
+                        keys.add(cDef);
+                    }
+                    for (ColumnIdentifier column : cfDefinition.columns.keySet())
                     {
                         String key = column.toString();
                         logger.debug("name: {} ", key);
