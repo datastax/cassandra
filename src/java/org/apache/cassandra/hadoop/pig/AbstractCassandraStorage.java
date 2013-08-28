@@ -660,6 +660,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
             return columnDefs;
         }
+        else if (rows == null || rows.isEmpty())
+            return columnDefs;
 
         Iterator<CqlRow> iterator = rows.iterator();
         while (iterator.hasNext())
