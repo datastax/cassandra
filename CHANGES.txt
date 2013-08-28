@@ -2,6 +2,7 @@ DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
  * Fix streaming does not transfer wrapped range (CASSANDRA-5948)
  * Fix loading index summary containing empty key (CASSANDRA-5965)
+ * Fix CqlRecordWriter with composite keys (CASSANDRA-5949)
 
 1.2.9
  * Fix getBloomFilterDiskSpaceUsed for AlwaysPresentFilter (CASSANDRA-5900)
