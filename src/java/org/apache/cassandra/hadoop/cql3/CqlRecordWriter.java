@@ -76,7 +76,7 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
 
     private AbstractType<?> keyValidator;
     private String [] partitionKeyColumns;
-    private List<String> clusterColumns;
+    private List<String> clusterColumns = new ArrayList<String>();
 
     /**
      * Upon construction, obtain the map that this writer will use to collect
@@ -349,7 +349,7 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
             logger.debug("partition keys: {}", keyString);
             keys = FBUtilities.fromJsonList(keyString);
-        
+
             partitionKeyColumns = new String[keys.size()];
             int i = 0;
             for (String key : keys)
@@ -387,11 +387,14 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
                 CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
                 CFDefinition cfDefinition = new CFDefinition(cfMeta);
                 int i = 0;
+                partitionKeyColumns = new String[cfDefinition.keys.keySet().size()];
                 for (ColumnIdentifier column : cfDefinition.keys.keySet())
                 {
                     partitionKeyColumns[i] = column.toString();
                     i++;
                 }
+                for (ColumnIdentifier column : cfDefinition.columns.keySet())
+                    clusterColumns.add(column.toString());
                 return;
             }
         }
@@ -420,10 +423,15 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         String keyWhereClause = "";
 
         for (String partitionKey : partitionKeyColumns)
-            keyWhereClause += String.format("%s = ?", keyWhereClause.isEmpty() ? partitionKey : (" AND " + partitionKey));
+            keyWhereClause += String.format("%s = ?", keyWhereClause.isEmpty() ? quote(partitionKey) : (" AND " + quote(partitionKey)));
         for (String clusterColumn : clusterColumns)
-            keyWhereClause += " AND " + clusterColumn + " = ?";
+            keyWhereClause += " AND " + quote(clusterColumn) + " = ?";
 
         return cqlQuery + " WHERE " + keyWhereClause;
+    }
+
+    /** Quoting for working with uppercase */
+    private String quote(String identifier) {
+        return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
     }
 }
