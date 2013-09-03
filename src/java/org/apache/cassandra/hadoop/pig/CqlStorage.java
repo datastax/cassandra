@@ -18,6 +18,7 @@
 package org.apache.cassandra.hadoop.pig;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
@@ -29,14 +30,19 @@ import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
+import org.apache.cassandra.hadoop.pig.AbstractCassandraStorage.MarshallerType;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.Expression;
+import org.apache.pig.Expression.OpType;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
+import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.*;
+import org.apache.pig.impl.util.UDFContext;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,10 +112,10 @@ public class CqlStorage extends AbstractCassandraStorage
                 if (columnValue != null)
                 {
                     IColumn column = new Column(cdef.name, columnValue);
-                    tuple.set(i, columnToTuple(column, cfDef, UTF8Type.instance));
+                    tuple.set(i, pigValue(cqlColumnToObj(column, cfDef)));
                 }
                 else
-                    tuple.set(i, TupleFactory.getInstance().newTuple());
+                    tuple.set(i, null);
                 i++;
             }
             return tuple;
@@ -118,6 +124,35 @@ public class CqlStorage extends AbstractCassandraStorage
         {
             throw new IOException(e.getMessage());
         }
+    }
+
+    /** convert a cql column to a tuple */
+    protected Object cqlColumnToObj(IColumn col, CfDef cfDef) throws IOException
+    {
+        // standard
+        Map<ByteBuffer,AbstractType> validators = getValidatorMap(cfDef);
+        if (validators.get(col.name()) == null)
+        {
+            Map<MarshallerType, AbstractType> marshallers = getDefaultMarshallers(cfDef);
+            return marshallers.get(MarshallerType.DEFAULT_VALIDATOR).compose(col.value());
+        }
+        else
+            return validators.get(col.name()).compose(col.value());
+    }
+    
+    /** set the value to the position of the tuple */
+    protected Object pigValue(Object value) throws ExecException
+    {
+       if (value instanceof BigInteger)
+           return ((BigInteger) value).intValue();
+       else if (value instanceof ByteBuffer)
+           return new DataByteArray(ByteBufferUtil.getArray((ByteBuffer) value));
+       else if (value instanceof UUID)
+           return new DataByteArray(UUIDGen.decompose((java.util.UUID) value));
+       else if (value instanceof Date)
+           return DateType.instance.decompose((Date) value).getLong();
+       else
+           return value;
     }
 
     /** set read configuration settings */
@@ -139,8 +174,18 @@ public class CqlStorage extends AbstractCassandraStorage
         CqlConfigHelper.setInputCQLPageRowSize(conf, String.valueOf(pageSize));
         if (columns != null && !columns.trim().isEmpty())
             CqlConfigHelper.setInputColumns(conf, columns);        
-        if (whereClause != null && !whereClause.trim().isEmpty())
-            CqlConfigHelper.setInputWhereClauses(conf, whereClause);
+
+        String whereClauseForPartitionFilter = getWhereClauseForPartitionFilter();
+        
+        String wc = whereClause != null && !whereClause.trim().isEmpty() 
+                       ? whereClauseForPartitionFilter == null ? whereClause: String.format("%s AND %s", whereClause.trim(), whereClauseForPartitionFilter)
+                       : whereClauseForPartitionFilter;
+
+        if (wc != null)
+        {
+            logger.debug("where clause: {}", wc);
+            CqlConfigHelper.setInputWhereClauses(conf, wc);
+        }
 
         if (System.getenv(PIG_INPUT_SPLIT_SIZE) != null)
         {
@@ -193,8 +238,8 @@ public class CqlStorage extends AbstractCassandraStorage
 
         initSchema(storeSignature);
     }
-    
-    /** schema: ((name, value), (name, value), (name, value)) where keys are in the front. */
+
+    /** schema: (value, value, value) where keys are in the front. */
     public ResourceSchema getSchema(String location, Job job) throws IOException
     {
         setLocation(location, job);
@@ -210,28 +255,15 @@ public class CqlStorage extends AbstractCassandraStorage
         // will contain all fields for this schema
         List<ResourceFieldSchema> allSchemaFields = new ArrayList<ResourceFieldSchema>();
 
-        // defined validators/indexes
         for (ColumnDef cdef : cfDef.column_metadata)
         {
-            // make a new tuple for each col/val pair
-            ResourceSchema innerTupleSchema = new ResourceSchema();
-            ResourceFieldSchema innerTupleField = new ResourceFieldSchema();
-            innerTupleField.setType(DataType.TUPLE);
-            innerTupleField.setSchema(innerTupleSchema);
-            innerTupleField.setName(new String(cdef.getName()));            
-            ResourceFieldSchema idxColSchema = new ResourceFieldSchema();
-            idxColSchema.setName("name");
-            idxColSchema.setType(getPigType(UTF8Type.instance));
-
             ResourceFieldSchema valSchema = new ResourceFieldSchema();
             AbstractType validator = validators.get(cdef.name);
             if (validator == null)
                 validator = marshallers.get(MarshallerType.DEFAULT_VALIDATOR);
-            valSchema.setName("value");
+            valSchema.setName(new String(cdef.getName()));
             valSchema.setType(getPigType(validator));
-
-            innerTupleSchema.setFields(new ResourceFieldSchema[] { idxColSchema, valSchema });
-            allSchemaFields.add(innerTupleField);
+            allSchemaFields.add(valSchema);
         }
 
         // top level schema contains everything
@@ -239,18 +271,21 @@ public class CqlStorage extends AbstractCassandraStorage
         return schema;
     }
 
-
-    /** We use CQL3 where clause to define the partition, so do nothing here*/
-    public String[] getPartitionKeys(String location, Job job)
-    {
-        return null;
-    }
-
-    /** We use CQL3 where clause to define the partition, so do nothing here*/
     public void setPartitionFilter(Expression partitionFilter)
     {
+        UDFContext context = UDFContext.getUDFContext();
+        Properties property = context.getUDFProperties(AbstractCassandraStorage.class);
+        property.setProperty(PARTITION_FILTER_SIGNATURE, partitionFilterToWhereClauseString(partitionFilter));
     }
-    
+
+    /** retrieve where clause for partition filter */
+    private String getWhereClauseForPartitionFilter()
+    {
+        UDFContext context = UDFContext.getUDFContext();
+        Properties property = context.getUDFProperties(AbstractCassandraStorage.class);
+        return property.getProperty(PARTITION_FILTER_SIGNATURE);
+    }
+
     public void prepareToWrite(RecordWriter writer)
     {
         this.writer = writer;
@@ -354,7 +389,7 @@ public class CqlStorage extends AbstractCassandraStorage
             throw new IOException(e);
         }
     }
-    
+
     /** include key columns */
     protected List<ColumnDef> getColumnMetadata(Cassandra.Client client, boolean cql3Table)
             throws InvalidRequestException,
@@ -387,10 +422,10 @@ public class CqlStorage extends AbstractCassandraStorage
 
         return keyColumns;
     }
-    
+
     /** cql://[username:password@]<keyspace>/<columnfamily>[?[page_size=<size>]
      * [&columns=<col1,col2>][&output_query=<prepared_statement_query>][&where_clause=<clause>]
-     * [&split_size=<size>][&partitioner=<partitioner>]] */
+     * [&split_size=<size>][&partitioner=<partitioner>][&use_secondary=true|false]] */
     private void setLocationFromUri(String location) throws IOException
     {
         try
@@ -424,6 +459,9 @@ public class CqlStorage extends AbstractCassandraStorage
                     splitSize = Integer.parseInt(urlQuery.get("split_size"));
                 if (urlQuery.containsKey("partitioner"))
                     partitionerClass = urlQuery.get("partitioner");
+                
+                if (urlQuery.containsKey("use_secondary"))
+                    usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary"));
             }
             String[] parts = urlParts[0].split("/+");
             String[] credentialsAndKeyspace = parts[1].split("@");
@@ -444,7 +482,34 @@ public class CqlStorage extends AbstractCassandraStorage
         {
             throw new IOException("Expected 'cql://[username:password@]<keyspace>/<columnfamily>" +
             		                         "[?[page_size=<size>][&columns=<col1,col2>][&output_query=<prepared_statement>]" +
-            		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>]]': " + e.getMessage());
+            		                         "[&where_clause=<clause>][&split_size=<size>][&partitioner=<partitioner>][&use_secondary=true|false]]': " + e.getMessage());
+        }
+    }
+
+    /** 
+     * Return cql where clauses for the corresponding partition filter. Make sure the data format matches 
+     * Only support the following Pig data types: int, long, float, double, boolean and chararray
+     * */
+    private String partitionFilterToWhereClauseString(Expression expression)
+    {
+        Expression.BinaryExpression be = (Expression.BinaryExpression) expression;
+        String name = be.getLhs().toString();
+        String value = be.getRhs().toString();
+        OpType op = expression.getOpType();
+        String opString = op.toString();
+        switch (op)
+        {
+            case OP_EQ:
+                opString = " = ";
+            case OP_GE:
+            case OP_GT:
+            case OP_LE:
+            case OP_LT:
+                return String.format("%s %s %s", name, opString, value);
+            case OP_AND:
+                return String.format("%s AND %s", partitionFilterToWhereClauseString(be.getLhs()), partitionFilterToWhereClauseString(be.getRhs()));
+            default:
+                throw new RuntimeException("Unsupported expression type: " + opString);
         }
     }
 }
