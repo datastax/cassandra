@@ -82,6 +82,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     protected String DEFAULT_INPUT_FORMAT;
     protected String DEFAULT_OUTPUT_FORMAT;
 
+    public final static String PARTITION_FILTER_SIGNATURE = "cassandra.partition.filter";
+
     protected static final Logger logger = LoggerFactory.getLogger(AbstractCassandraStorage.class);
 
     protected String username;
@@ -96,6 +98,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     protected String outputFormatClass;
     protected int splitSize = 64 * 1024;
     protected String partitionerClass;
+    protected boolean usePartitionFilter = false;
 
     public AbstractCassandraStorage()
     {
@@ -608,7 +611,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             NotFoundException;
 
     /** get column meta data */
-    protected List<ColumnDef> getColumnMeta(Cassandra.Client client)
+    protected List<ColumnDef> getColumnMeta(Cassandra.Client client, boolean cassandraStorage)
             throws InvalidRequestException,
             UnavailableException,
             TimedOutException,
@@ -633,30 +636,35 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
 
         List<CqlRow> rows = result.rows;
         List<ColumnDef> columnDefs = new ArrayList<ColumnDef>();
-        if (rows == null || rows.isEmpty())
+        if (!cassandraStorage && (rows == null || rows.isEmpty()))
         {
             // check classic thrift tables
             CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
-            for (ColumnIdentifier column : cfDefinition.columns.keySet())
+            for (ColumnIdentifier column : cfDefinition.metadata.keySet())
             {
                 ColumnDef cDef = new ColumnDef();
                 String columnName = column.toString();
-                String type = cfDefinition.columns.get(column).type.toString();
+                String type = cfDefinition.metadata.get(column).type.toString();
                 logger.debug("name: {}, type: {} ", columnName, type);
                 cDef.name = ByteBufferUtil.bytes(columnName);
                 cDef.validation_class = type;
                 columnDefs.add(cDef);
             }
-            String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
-            if ("value".equals(value))
+            if (columnDefs.size() == 0)
             {
-                ColumnDef cDef = new ColumnDef();
-                cDef.name = ByteBufferUtil.bytes(value);
-                cDef.validation_class = cfDefinition.value.type.toString();
-                columnDefs.add(cDef);
+                String value = cfDefinition.value != null ? cfDefinition.value.toString() : null;
+                if ("value".equals(value))
+                {
+                    ColumnDef cDef = new ColumnDef();
+                    cDef.name = ByteBufferUtil.bytes(value);
+                    cDef.validation_class = cfDefinition.value.type.toString();
+                    columnDefs.add(cDef);
+                }
             }
             return columnDefs;
         }
+        else if (rows == null || rows.isEmpty())
+            return columnDefs;
 
         Iterator<CqlRow> iterator = rows.iterator();
         while (iterator.hasNext())
@@ -728,11 +736,19 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                     cDef.name = ByteBufferUtil.bytes(iterator.next());
                     keys.add(cDef);
                 }
-                // classis thrift tables
+                // classic thrift tables
                 if (keys.size() == 0)
                 {
                     CFDefinition cfDefinition = getCfDefinition(keyspace, column_family, client);
                     for (ColumnIdentifier column : cfDefinition.keys.keySet())
+                    {
+                        String key = column.toString();
+                        logger.debug("name: {} ", key);
+                        ColumnDef cDef = new ColumnDef();
+                        cDef.name = ByteBufferUtil.bytes(key);
+                        keys.add(cDef);
+                    }
+                    for (ColumnIdentifier column : cfDefinition.columns.keySet())
                     {
                         String key = column.toString();
                         logger.debug("name: {} ", key);
@@ -757,7 +773,9 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
 
             String validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue()));
+
             logger.debug("key validator : {}", validator);
+
             AbstractType<?> keyValidator = parseType(validator);
 
             Iterator<ColumnDef> keyItera = keys.iterator();
@@ -771,6 +789,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keyItera.next().validation_class = keyValidator.toString();
 
             validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(3).getValue()));
+
             logger.debug("cluster key validator: {}", validator);
 
             if (keyItera.hasNext() && validator != null && !validator.isEmpty())
@@ -793,7 +812,9 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 try
                 {
                     String compactValidator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(6).getValue()));
+
                     logger.debug("default validator: {}", compactValidator);
+
                     AbstractType<?> defaultValidator = parseType(compactValidator);
 
                     ColumnDef cDef = new ColumnDef();
@@ -823,6 +844,33 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             return IndexType.COMPOSITES;
         else
             return null;
+    }
+
+    /** return partition keys */
+    public String[] getPartitionKeys(String location, Job job)
+    {
+        if (!usePartitionFilter)
+            return null;
+        List<ColumnDef> indexes = getIndexes();
+        String[] partitionKeys = new String[indexes.size()];
+        for (int i = 0; i < indexes.size(); i++)
+        {
+            partitionKeys[i] = new String(indexes.get(i).getName());
+        }
+        return partitionKeys;
+    }
+
+    /** get a list of columns with defined index*/
+    protected List<ColumnDef> getIndexes()
+    {
+        CfDef cfdef = getCfDef(loadSignature);
+        List<ColumnDef> indexes = new ArrayList<ColumnDef>();
+        for (ColumnDef cdef : cfdef.column_metadata)
+        {
+            if (cdef.index_type != null)
+                indexes.add(cdef);
+        }
+        return indexes;
     }
 
     /** get CFDefinition of a column family */
