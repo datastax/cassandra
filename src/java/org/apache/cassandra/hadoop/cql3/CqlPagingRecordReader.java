@@ -190,7 +190,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
     {
         if (!rowIterator.hasNext())
         {
-            logger.debug("Finished scanning " + rowIterator.totalRead + " rows (estimate was: " + totalRowCount + ")");
+            logger.debug("Finished scanning {} rows (estimate was: {})", rowIterator.totalRead, totalRowCount);
             return false;
         }
 
@@ -299,18 +299,18 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                 // no more data
                 if (index == -1 || emptyPartitionKeyValues())
                 {
-                    logger.debug("no more data.");
+                    logger.debug("no more data");
                     return endOfData();
                 }
 
                 index = setTailNull(clusterColumns);
-                logger.debug("set tail to null, index: " + index);
+                logger.debug("set tail to null, index: {}", index);
                 executeQuery();
                 pageRows = 0;
 
                 if (rows == null || !rows.hasNext() && index < 0)
                 {
-                    logger.debug("no more data.");
+                    logger.debug("no more data");
                     return endOfData();
                 }
             }
@@ -322,7 +322,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             for (Column column : row.columns)
             {
                 String columnName = stringValue(ByteBuffer.wrap(column.getName()));
-                logger.debug("column: " + columnName);
+                logger.debug("column: {}", columnName);
 
                 if (i < partitionBoundColumns.size() + clusterColumns.size())
                     keyColumns.put(stringValue(column.name), column.value);
@@ -374,7 +374,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                     rowKey = rowKey + column.validator.getString(ByteBufferUtil.clone(iter.next())) + ":";
             }
 
-            logger.debug("previous RowKey: " + previousRowKey + ", new row key: " + rowKey);
+            logger.debug("previous RowKey: {}, new row key: {}", previousRowKey, rowKey);
             if (previousRowKey == null)
             {
                 this.previousRowKey = rowKey;
@@ -404,7 +404,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                 {
                     int index = previousIndex > 0 ? previousIndex : 0;
                     BoundColumn column = values.get(index);
-                    logger.debug("set key " + column.name + " value to  null");
+                    logger.debug("set key {} value to  null", column.name);
                     column.value = null;
                     return previousIndex - 1;
                 }
@@ -413,7 +413,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             }
 
             BoundColumn column = values.get(previousIndex);
-            logger.debug("set key " + column.name + " value to null");
+            logger.debug("set key {} value to  null", column.name);
             column.value = null;
             return previousIndex - 1;
         }
@@ -438,13 +438,10 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                         : partitionKey + "," + clusterKey + "," + columns;
             }
 
+            String whereStr = userDefinedWhereClauses == null ? "" : " AND " + userDefinedWhereClauses;
             return Pair.create(clause.left,
-                               "SELECT " + columns
-                               + " FROM " + quote(cfName)
-                               + clause.right
-                               + (userDefinedWhereClauses == null ? "" : " AND " + userDefinedWhereClauses)
-                               + " LIMIT " + pageRowSize
-                               + " ALLOW FILTERING");
+                               String.format("SELECT %s FROM %s%s%s LIMIT %d ALLOW FILTERING",
+                                             columns, quote(cfName), clause.right, whereStr, pageRowSize));
         }
 
 
@@ -479,28 +476,28 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
                 partitionKeyMarkers = partitionKeyMarkers();
             // initial query token(k) >= start_token and token(k) <= end_token
             if (emptyPartitionKeyValues())
-                return Pair.create(0, " WHERE token(" + partitionKeyString + ") > ? AND token(" + partitionKeyString + ") <= ?");
+                return Pair.create(0, String.format(" WHERE token(%s) > ? AND token(%s) <= ?", partitionKeyString, partitionKeyString));
 
             // query token(k) > token(pre_partition_key) and token(k) <= end_token
             if (clusterColumns.size() == 0 || clusterColumns.get(0).value == null)
                 return Pair.create(1,
-                                   " WHERE token(" + partitionKeyString + ") > token(" + partitionKeyMarkers + ") "
-                                   + " AND token(" + partitionKeyString + ") <= ?");
+                                   String.format(" WHERE token(%s) > token(%s)  AND token(%s) <= ?",
+                                                 partitionKeyString, partitionKeyMarkers, partitionKeyString));
 
             // query token(k) = token(pre_partition_key) and m = pre_cluster_key_m and n > pre_cluster_key_n
             Pair<Integer, String> clause = whereClause(clusterColumns, 0);
             return Pair.create(clause.left,
-                               " WHERE token(" + partitionKeyString + ") = token(" + partitionKeyMarkers + ") " + clause.right);
+                               String.format(" WHERE token(%s) = token(%s) %s", partitionKeyString, partitionKeyMarkers, clause.right));
         }
 
         /** recursively compose the where clause */
         private Pair<Integer, String> whereClause(List<BoundColumn> column, int position)
         {
             if (position == column.size() - 1 || column.get(position + 1).value == null)
-                return Pair.create(position + 2, " AND " + quote(column.get(position).name) + (column.get(position).reversed ? " < ? " : " > ? "));
+                return Pair.create(position + 2, String.format(" AND %s %s ? ", quote(column.get(position).name), column.get(position).reversed ? " < " : " > "));
 
             Pair<Integer, String> clause = whereClause(column, position + 1);
-            return Pair.create(clause.left, " AND " + quote(column.get(position).name) + " = ? " + clause.right);
+            return Pair.create(clause.left, String.format(" AND %s = ? %s", quote(column.get(position).name), clause.right));
         }
 
         /** check whether all key values are null */
@@ -591,7 +588,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
             Pair<Integer, String> query = null;
             query = composeQuery(columns);
-            logger.debug("type:" + query.left + ", query: " + query.right);
+            logger.debug("type: {}, query: {}", query.left, query.right);
             CqlPreparedResult cqlPreparedResult = client.prepare_cql3_query(ByteBufferUtil.bytes(query.right), Compression.NONE);
             preparedQueryIds.put(query.left, cqlPreparedResult.itemId);
             logger.debug("prepared statement id: " + cqlPreparedResult.itemId);
@@ -599,7 +596,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         }
 
         /** Quoting for working with uppercase */
-        private String quote(String identifier) {
+        private String quote(String identifier)
+        {
             return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
         }
 
@@ -607,7 +605,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         private void executeQuery()
         {
             Pair<Integer, List<ByteBuffer>> bindValues = preparedQueryBindValues();
-            logger.debug("query type: " + bindValues.left);
+            logger.debug("query type: {}", bindValues.left);
 
             // check whether it reach end of range for type 1 query CASSANDRA-5573
             if (bindValues.left == 1 && reachEndRange())
@@ -674,33 +672,20 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
         
         CqlRow cqlRow = result.rows.get(0);
-        String keyString;
-        List<String> keys;
-        if (cqlRow.columns.get(0).getValue() == null)
-        {
-            partitionBoundColumns.add(new BoundColumn(
-                    ByteBufferUtil.string(
-                        ByteBuffer.wrap(
-                            result.rows.get(0).columns.get(4).getValue()))));
-        }
-        else
-        {
-            keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
-            logger.debug("partition keys: {}", keyString);
-            keys = FBUtilities.fromJsonList(keyString);
+        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
+        logger.debug("partition keys: {}", keyString);
+        List<String> keys = FBUtilities.fromJsonList(keyString);
 
-            for (String key : keys)
-                partitionBoundColumns.add(new BoundColumn(key));
-
-            if (partitionBoundColumns.size() == 0)
-            {
-                retrieveKeysForThriftTables();
-                return;
-            }
+        for (String key : keys)
+            partitionBoundColumns.add(new BoundColumn(key));
+        if (partitionBoundColumns.isEmpty())
+        {
+            retrieveKeysForThriftTables();
+            return;
         }
-        
+
         keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
-        logger.debug("cluster columns: " + keyString);
+        logger.debug("cluster columns: {}", keyString);
         keys = FBUtilities.fromJsonList(keyString);
 
         for (String key : keys)
@@ -710,15 +695,16 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
         Column rawComparator = cqlRow.columns.get(3);
         String comparator = ByteBufferUtil.string(ByteBuffer.wrap(rawComparator.getValue()));
-        logger.debug("comparator: " + comparator);
+        logger.debug("comparator: {}", comparator);
         AbstractType comparatorValidator = parseType(comparator);
         if (comparatorValidator instanceof CompositeType)
         {
-            List<AbstractType<?>> types = ((CompositeType) comparatorValidator).types;
             for (int i = 0; i < clusterColumns.size(); i++)
-            {
-                clusterColumns.get(i).reversed = (types.get(i) instanceof ReversedType);
-            }
+                clusterColumns.get(i).reversed = (((CompositeType) comparatorValidator).types.get(i) instanceof ReversedType);
+        }
+        else if (comparatorValidator instanceof ReversedType)
+        {
+            clusterColumns.get(0).reversed = true;
         }
     }
 
@@ -735,9 +721,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             {
                 CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
                 CFDefinition cfDefinition = new CFDefinition(cfMeta);
-                Iterator<ColumnIdentifier> keyItera = cfDefinition.keys.keySet().iterator();
-                while(keyItera.hasNext())
-                    partitionBoundColumns.add(new BoundColumn(keyItera.next().toString()));
+                for (ColumnIdentifier columnIdentifier : cfDefinition.keys.keySet())
+                    partitionBoundColumns.add(new BoundColumn(columnIdentifier.toString()));
                 parseKeyValidators(cfDef.key_validation_class);
                 return;
             }
@@ -782,7 +767,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
         String endToken = split.getEndToken();
         String currentToken = partitioner.getToken(rowKey).toString();
-        logger.debug("End token: " + endToken + ", current token: " + currentToken);
+        logger.debug("End token: {}, current token: {}", endToken, currentToken);
 
         return endToken.equals(currentToken);
     }

@@ -32,7 +32,7 @@ exit 1
 from __future__ import with_statement
 
 description = "CQL Shell for Apache Cassandra"
-version = "3.1.2"
+version = "3.1.7"
 
 from StringIO import StringIO
 from itertools import groupby
@@ -118,8 +118,19 @@ from cqlshlib.formatting import format_by_type
 from cqlshlib.util import trim_if_present
 from cqlshlib.tracing import print_trace_session
 
-CONFIG_FILE = os.path.expanduser(os.path.join('~', '.cqlshrc'))
-HISTORY = os.path.expanduser(os.path.join('~', '.cqlsh_history'))
+HISTORY_DIR = os.path.expanduser(os.path.join('~', '.cassandra'))
+CONFIG_FILE = os.path.join(HISTORY_DIR, 'cqlshrc')
+HISTORY = os.path.join(HISTORY_DIR, 'cqlsh_history')
+if not os.path.exists(HISTORY_DIR):
+    os.mkdir(HISTORY_DIR)
+
+OLD_CONFIG_FILE = os.path.expanduser(os.path.join('~', '.cqlshrc'))
+if os.path.exists(OLD_CONFIG_FILE):
+    os.rename(OLD_CONFIG_FILE, CONFIG_FILE)
+OLD_HISTORY = os.path.expanduser(os.path.join('~', '.cqlsh_history'))
+if os.path.exists(OLD_HISTORY):
+    os.rename(OLD_HISTORY, HISTORY)
+
 DEFAULT_HOST = 'localhost'
 DEFAULT_PORT = 9160
 DEFAULT_CQLVER = '3'
@@ -129,7 +140,7 @@ DEFAULT_TIME_FORMAT = '%Y-%m-%d %H:%M:%S%z'
 DEFAULT_FLOAT_PRECISION = 5
 DEFAULT_SELECT_LIMIT = 10000
 
-if readline is not None and 'libedit' in readline.__doc__:
+if readline is not None and readline.__doc__ is not None and 'libedit' in readline.__doc__:
     DEFAULT_COMPLETEKEY = '\t'
 else:
     DEFAULT_COMPLETEKEY = 'tab'
@@ -567,6 +578,17 @@ class Shell(cmd.Cmd):
     def myformat_colname(self, name, nametype):
         return self.myformat_value(name, nametype, colormap=COLUMN_NAME_COLORS)
 
+    # cql/cursor.py:Cursor.decode_row() function, modified to not turn '' into None.
+    def decode_row(self, cursor, row):
+        values = []
+        bytevals = cursor.columnvalues(row)
+        for val, vtype, nameinfo in zip(bytevals, cursor.column_types, cursor.name_info):
+            if val == '':
+                values.append(val)
+            else:
+                values.append(cursor.decoder.decode_value(val, vtype, nameinfo[0]))
+        return values
+
     def report_connection(self):
         self.show_host()
         self.show_version()
@@ -835,7 +857,7 @@ class Shell(cmd.Cmd):
             else:
                 old_completer = readline.get_completer()
                 readline.set_completer(self.complete)
-                if 'libedit' in readline.__doc__:
+                if readline.__doc__ is not None and 'libedit' in readline.__doc__:
                     readline.parse_and_bind("bind -e")
                     readline.parse_and_bind("bind '" + self.completekey + "' rl_complete")
                 else:
@@ -1115,7 +1137,7 @@ class Shell(cmd.Cmd):
         colnames = [d[0] for d in cursor.description]
         colnames_t = [(name, self.get_nametype(cursor, n)) for (n, name) in enumerate(colnames)]
         formatted_names = [self.myformat_colname(name, nametype) for (name, nametype) in colnames_t]
-        formatted_values = [map(self.myformat_value, row, cursor.column_types) for row in cursor]
+        formatted_values = [map(self.myformat_value, self.decode_row(cursor, row), cursor.column_types) for row in cursor.result]
         if self.expand_enabled:
             self.print_formatted_result_vertically(formatted_names, formatted_values)
         else:
@@ -1153,11 +1175,12 @@ class Shell(cmd.Cmd):
             self.writeresult('')
 
     def print_dynamic_result(self, cursor):
-        for row in cursor:
+        for row in cursor.result:
+            cursor.fetchone()
             colnames = [d[0] for d in cursor.description]
             colnames_t = [(name, self.get_nametype(cursor, n)) for (n, name) in enumerate(colnames)]
             colnames = [self.myformat_colname(name, nametype) for (name, nametype) in colnames_t]
-            colvals = map(self.myformat_value, row, cursor.column_types)
+            colvals = map(self.myformat_value, self.decode_row(cursor, row), cursor.column_types)
             line = ' | '.join('%s,%s' % (n.coloredval, v.coloredval) for (n, v) in zip(colnames, colvals))
             self.writeresult(' ' + line)
 
@@ -1427,17 +1450,21 @@ class Shell(cmd.Cmd):
                     optval = '{%s}' % ', '.join(['%s: %s' % (self.cql_protect_value(k),
                                                              self.cql_protect_value(v))
                                                  for (k, v) in optval.items()])
-                    if optval == '{}':
-                        continue
                 out.write(" %s\n  %s=%s" % (joiner, optname, optval))
                 joiner = 'AND'
         out.write(";\n")
 
         for col in indexed_columns:
             out.write('\n')
-            # guess CQL can't represent index_type or index_options
-            out.write('CREATE INDEX %s ON %s (%s);\n'
-                         % (col.index_name, cfname, self.cql_protect_name(col.name)))
+            if col.index_type != 'CUSTOM':
+                out.write('CREATE INDEX %s ON %s (%s);\n'
+                             % (col.index_name, cfname, self.cql_protect_name(col.name)))
+            else:
+                out.write("CREATE CUSTOM INDEX %s ON %s (%s) USING '%s';\n"
+                             % (col.index_name,
+                                cfname,
+                                self.cql_protect_name(col.name),
+                                col.index_options[u'class_name']))
 
     def describe_keyspaces(self):
         print
@@ -1680,14 +1707,18 @@ class Shell(cmd.Cmd):
     def do_import_row(self, columns, nullval, layout, row):
         rowmap = {}
         for name, value in zip(columns, row):
+            type = layout.get_column(name).cqltype
+            if issubclass(type, ReversedType):
+                type = type.subtypes[0]
+            cqltype = type.cql_parameterized_type()
+
             if value != nullval:
-                type = layout.get_column(name).cqltype
-                if issubclass(type, ReversedType):
-                    type = type.subtypes[0]
-                if type.cql_parameterized_type() in ('ascii', 'text', 'timestamp', 'inet'):
+                if cqltype in ('ascii', 'text', 'timestamp', 'inet'):
                     rowmap[name] = self.cql_protect_value(value)
                 else:
                     rowmap[name] = value
+            elif name in layout.column_aliases and not type.empty_binary_ok:
+                rowmap[name] = 'blobAs%s(0x)' % cqltype.title()
             else:
                 rowmap[name] = 'null'
         return self.do_import_insert(layout, rowmap)

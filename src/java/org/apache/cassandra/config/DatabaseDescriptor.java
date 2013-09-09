@@ -259,6 +259,9 @@ public class DatabaseDescriptor
             if (conf.authorizer != null)
                 authorizer = FBUtilities.newAuthorizer(conf.authorizer);
 
+            if (authenticator instanceof AllowAllAuthenticator && !(authorizer instanceof AllowAllAuthorizer))
+                throw new ConfigurationException("AllowAllAuthenticator can't be used with " +  conf.authorizer);
+
             if (conf.internode_authenticator != null)
                 internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
             else
@@ -596,9 +599,9 @@ public class DatabaseDescriptor
                 logger.info("Couldn't detect any schema definitions in local storage.");
                 // peek around the data directories to see if anything is there.
                 if (hasExistingNoSystemTables())
-                    logger.info("Found table data in data directories. Consider using the CLI to define your schema.");
+                    logger.info("Found table data in data directories. Consider using cqlsh to define your schema.");
                 else
-                    logger.info("To create keyspaces and column families, see 'help create keyspace' in the CLI, or set up a schema using the thrift system_* calls.");
+                    logger.info("To create keyspaces and column families, see 'help create' in cqlsh.");
             }
             else
             {
@@ -794,6 +797,22 @@ public class DatabaseDescriptor
     public static Collection<String> getReplaceTokens()
     {
         return tokensFromString(System.getProperty("cassandra.replace_token", null));
+    }
+
+    public static UUID getReplaceNode()
+    {
+        try
+        {
+            return UUID.fromString(System.getProperty("cassandra.replace_node", null));
+        } catch (NullPointerException e)
+        {
+            return null;
+        }
+    }
+
+    public static boolean isReplacing()
+    {
+        return 0 != getReplaceTokens().size() || getReplaceNode() != null;
     }
 
     public static String getClusterName()

@@ -223,8 +223,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         Caching caching = metadata.getCaching();
 
-        if (logger.isDebugEnabled())
-            logger.debug("Starting CFS {}", columnFamily);
+        logger.info("Initializing {}.{}", table.name, columnFamily);
 
         // scan for sstables corresponding to this cf and load them
         data = new DataTracker(this);
@@ -232,7 +231,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (loadSSTables)
         {
             Directories.SSTableLister sstableFiles = directories.sstableLister().skipTemporary(true);
-            Collection<SSTableReader> sstables = SSTableReader.batchOpen(sstableFiles.list().entrySet(), metadata, this.partitioner);
+            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata, this.partitioner);
             if (metadata.getDefaultValidator().isCommutative())
             {
                 // Filter non-compacted sstables, remove compacted ones
@@ -968,9 +967,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         CompactionManager.instance.performCleanup(ColumnFamilyStore.this, renewer);
     }
 
-    public void scrub() throws ExecutionException, InterruptedException
+    public void scrub(boolean disableSnapshot) throws ExecutionException, InterruptedException
     {
-        snapshotWithoutFlush("pre-scrub-" + System.currentTimeMillis());
+        // skip snapshot creation during scrub, SEE JIRA 5891
+        if(!disableSnapshot)
+            snapshotWithoutFlush("pre-scrub-" + System.currentTimeMillis());
         CompactionManager.instance.performScrub(ColumnFamilyStore.this);
     }
 

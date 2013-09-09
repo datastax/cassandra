@@ -31,10 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.*;
 
 import org.apache.cassandra.service.ClientState;
@@ -45,7 +42,7 @@ import org.apache.cassandra.utils.SemanticVersion;
 
 public class QueryProcessor
 {
-    public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.4");
+    public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.5");
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
 
@@ -114,20 +111,6 @@ public class QueryProcessor
                                                                 IColumn.MAX_NAME_LENGTH));
             if (name.remaining() == 0)
                 throw new InvalidRequestException("zero-length column name");
-        }
-    }
-
-    public static void validateSliceFilter(CFMetaData metadata, SliceQueryFilter range)
-    throws InvalidRequestException
-    {
-        try
-        {
-            AbstractType<?> comparator = metadata.getComparatorFor(null);
-            ColumnSlice.validate(range.slices, comparator, range.reversed);
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new InvalidRequestException(e.getMessage());
         }
     }
 
@@ -321,13 +304,14 @@ public class QueryProcessor
         }
         catch (RuntimeException re)
         {
-            SyntaxException ire = new SyntaxException("Failed parsing statement: [" + queryStr + "] reason: " + re.getClass().getSimpleName() + " " + re.getMessage());
-            throw ire;
+            throw new SyntaxException(String.format("Failed parsing statement: [%s] reason: %s %s",
+                                                    queryStr,
+                                                    re.getClass().getSimpleName(),
+                                                    re.getMessage()));
         }
         catch (RecognitionException e)
         {
-            SyntaxException ire = new SyntaxException("Invalid or malformed CQL query string: " + e.getMessage());
-            throw ire;
+            throw new SyntaxException("Invalid or malformed CQL query string: " + e.getMessage());
         }
     }
 }

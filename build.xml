@@ -25,7 +25,7 @@
     <property name="debuglevel" value="source,lines,vars"/>
 
     <!-- default version and SCM information -->
-    <property name="base.version" value="1.2.6.6"/>
+    <property name="base.version" value="1.2.9-DSE"/>
     <property name="scm.connection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.developerConnection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.url" value="http://git-wip-us.apache.org/repos/asf?p=cassandra.git;a=tree"/>
@@ -711,7 +711,7 @@
     </path>
     <target name="stress-build" depends="build">
     	<mkdir dir="${stress.build.classes}" />
-        <javac destdir="${stress.build.classes}" includeantruntime="true">
+        <javac debug="true" debuglevel="${debuglevel}" destdir="${stress.build.classes}" includeantruntime="true" source="${source.version}" target="${target.version}">
             <src path="${stress.build.src}" />
             <classpath>
                 <path refid="cassandra.classes" />

@@ -290,19 +290,11 @@ insertStatement returns [UpdateStatement expr]
     ;
 
 usingClause[Attributes attrs]
-    : K_USING usingClauseObjective[attrs] ( K_AND? usingClauseObjective[attrs] )*
-    ;
-
-usingClauseDelete[Attributes attrs]
-    : K_USING usingClauseDeleteObjective[attrs] ( K_AND? usingClauseDeleteObjective[attrs] )*
-    ;
-
-usingClauseDeleteObjective[Attributes attrs]
-    : K_TIMESTAMP ts=INTEGER { attrs.timestamp = Long.valueOf($ts.text); }
+    : K_USING usingClauseObjective[attrs] ( K_AND usingClauseObjective[attrs] )*
     ;
 
 usingClauseObjective[Attributes attrs]
-    : usingClauseDeleteObjective[attrs]
+    : K_TIMESTAMP ts=INTEGER { attrs.timestamp = Long.valueOf($ts.text); }
     | K_TTL t=INTEGER { attrs.timeToLive = Integer.valueOf($t.text); }
     ;
 
@@ -357,6 +349,10 @@ deleteOp returns [Operation.RawDeletion op]
     | c=cident '[' t=term ']' { $op = new Operation.ElementDeletion(c, t); }
     ;
 
+usingClauseDelete[Attributes attrs]
+    : K_USING K_TIMESTAMP ts=INTEGER { attrs.timestamp = Long.valueOf($ts.text); }
+    ;
+
 /**
  * BEGIN BATCH
  *   UPDATE <CF> SET name1 = value1 WHERE KEY = keyname1;
@@ -390,7 +386,7 @@ batchStatement returns [BatchStatement expr]
     : K_BEGIN
       ( K_UNLOGGED { type = BatchStatement.Type.UNLOGGED; } | K_COUNTER { type = BatchStatement.Type.COUNTER; } )?
       K_BATCH ( usingClause[attrs] )?
-          s1=batchStatementObjective ';'? { statements.add(s1); } ( sN=batchStatementObjective ';'? { statements.add(sN); } )*
+          ( s=batchStatementObjective ';'? { statements.add(s); } )+
       K_APPLY K_BATCH
       {
           return new BatchStatement(type, statements, attrs);
@@ -676,33 +672,28 @@ constant returns [Constants.Literal constant]
     | t=HEXNUMBER      { $constant = Constants.Literal.hex($t.text); }
     ;
 
-set_tail[List<Term.Raw> s]
-    : '}'
-    | ',' t=term { s.add(t); } set_tail[s]
-    ;
-
-map_tail[List<Pair<Term.Raw, Term.Raw>> m]
-    : '}'
-    | ',' k=term ':' v=term { m.add(Pair.create(k, v)); } map_tail[m]
-    ;
-
 map_literal returns [Maps.Literal map]
-    : '{' '}' { $map = new Maps.Literal(Collections.<Pair<Term.Raw, Term.Raw>>emptyList()); }
-    | '{' { List<Pair<Term.Raw, Term.Raw>> m = new ArrayList<Pair<Term.Raw, Term.Raw>>(); }
-          k1=term ':' v1=term { m.add(Pair.create(k1, v1)); } map_tail[m]
-       { $map = new Maps.Literal(m); }
+    : '{' { List<Pair<Term.Raw, Term.Raw>> m = new ArrayList<Pair<Term.Raw, Term.Raw>>(); }
+          ( k1=term ':' v1=term { m.add(Pair.create(k1, v1)); } ( ',' kn=term ':' vn=term { m.add(Pair.create(kn, vn)); } )* )?
+      '}' { $map = new Maps.Literal(m); }
     ;
 
 set_or_map[Term.Raw t] returns [Term.Raw value]
-    : ':' v=term { List<Pair<Term.Raw, Term.Raw>> m = new ArrayList<Pair<Term.Raw, Term.Raw>>(); m.add(Pair.create(t, v)); } map_tail[m] { $value = new Maps.Literal(m); }
-    | { List<Term.Raw> s = new ArrayList<Term.Raw>(); s.add(t); } set_tail[s] { $value = new Sets.Literal(s); }
+    : ':' v=term { List<Pair<Term.Raw, Term.Raw>> m = new ArrayList<Pair<Term.Raw, Term.Raw>>(); m.add(Pair.create(t, v)); }
+          ( ',' kn=term ':' vn=term { m.add(Pair.create(kn, vn)); } )*
+      { $value = new Maps.Literal(m); }
+    | { List<Term.Raw> s = new ArrayList<Term.Raw>(); s.add(t); }
+          ( ',' tn=term { s.add(tn); } )*
+      { $value = new Sets.Literal(s); }
     ;
 
-// This is a bit convoluted but that's because I haven't found a much better to have antl disambiguate between sets and maps
 collection_literal returns [Term.Raw value]
-    : '[' { List<Term.Raw> l = new ArrayList<Term.Raw>(); } ( t1=term { l.add(t1); } ( ',' tn=term { l.add(tn); } )* )? ']' { $value = new Lists.Literal(l); }
-    | '{' t=term v=set_or_map[t] { $value = v; }
-    // Note that we have an ambiguity between maps and set for "{}". So we force it to a set literal, and deal with it later based on the type of the column (SetLiteral.java).
+    : '[' { List<Term.Raw> l = new ArrayList<Term.Raw>(); }
+          ( t1=term { l.add(t1); } ( ',' tn=term { l.add(tn); } )* )?
+      ']' { $value = new Lists.Literal(l); }
+    | '{' t=term v=set_or_map[t] { $value = v; } '}'
+    // Note that we have an ambiguity between maps and set for "{}". So we force it to a set literal,
+    // and deal with it later based on the type of the column (SetLiteral.java).
     | '{' '}' { $value = new Sets.Literal(Collections.<Term.Raw>emptyList()); }
     ;
 
@@ -799,7 +790,7 @@ relation[List<Relation> clauses]
                 $clauses.add(new Relation(id, type, t, true));
         }
     | name=cident K_IN { Relation rel = Relation.createInRelation($name.id); }
-       '(' f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* ')' { $clauses.add(rel); }
+       '(' ( f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* )? ')' { $clauses.add(rel); }
     ;
 
 comparatorType returns [CQL3Type t]

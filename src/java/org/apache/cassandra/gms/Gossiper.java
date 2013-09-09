@@ -38,6 +38,9 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+
 /**
  * This module is responsible for Gossiping information for the local endpoint. This abstraction
  * maintains the list of live and dead endpoints. Periodically i.e. every 1 second this module
@@ -100,6 +103,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     private final Map<InetAddress, Long> justRemovedEndpoints = new ConcurrentHashMap<InetAddress, Long>();
 
     private final Map<InetAddress, Long> expireTimeEndpointMap = new ConcurrentHashMap<InetAddress, Long>();
+
+    // have we ever in our lifetime reached a seed?
+    private boolean seedContacted = false;
 
     private class GossipTask implements Runnable
     {
@@ -179,6 +185,17 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             throw new RuntimeException(e);
         }
+    }
+
+    protected void checkSeedContact(InetAddress ep)
+    {
+        if (!seedContacted && seeds.contains(ep))
+            seedContacted = true;
+    }
+
+    public boolean seenAnySeed()
+    {
+        return seedContacted;
     }
 
     /**
@@ -494,11 +511,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     private boolean sendGossip(MessageOut<GossipDigestSyn> message, Set<InetAddress> epSet)
     {
-        int size = epSet.size();
+        List<InetAddress> liveEndpoints = ImmutableList.copyOf(epSet);
+        
+        int size = liveEndpoints.size();
         if (size < 1)
             return false;
         /* Generate a random number from 0 -> size */
-        List<InetAddress> liveEndpoints = new ArrayList<InetAddress>(epSet);
         int index = (size == 1) ? 0 : random.nextInt(size);
         InetAddress to = liveEndpoints.get(index);
         if (logger.isTraceEnabled())

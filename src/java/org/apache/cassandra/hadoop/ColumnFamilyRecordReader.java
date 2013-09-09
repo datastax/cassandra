@@ -217,55 +217,38 @@ public class ColumnFamilyRecordReader extends RecordReader<ByteBuffer, SortedMap
 
         private RowIterator()
         {
-            partitioner = getPartitioner();
-            Pair<AbstractType, AbstractType> comparators;
             try
             {
-                comparators = getComparators();
-            }
-            catch (TException e)
-            {
-                // the peer we're communicating with may be on version < 1.2 so
-                // we fall back to fetching metadata the old way
-                logger.debug("Comparator lookup failed for {}.{}, falling back to legacy method",
-                                keyspace, cfName );
-                comparators = getComparatorsFromOlderVersion();
-            }
-            comparator = comparators.left;
-            subComparator = comparators.right;
-        }
+                partitioner = FBUtilities.newPartitioner(client.describe_partitioner());
+                // get CF meta data
+                String query = "SELECT comparator," +
+                               "       subcomparator " +
+                               "FROM system.schema_columnfamilies " +
+                               "WHERE keyspace_name = '%s' " +
+                               "  AND columnfamily_name = '%s' ";
 
-        private IPartitioner getPartitioner()
-        {
-            try
-            {
-                return FBUtilities.newPartitioner(client.describe_partitioner());
+                CqlResult result = client.execute_cql3_query(
+                                        ByteBufferUtil.bytes(String.format(query, keyspace, cfName)),
+                                        Compression.NONE,
+                                        ConsistencyLevel.ONE);
+
+                Iterator<CqlRow> iteraRow = result.rows.iterator();
+                CfDef cfDef = new CfDef();
+                if (iteraRow.hasNext())
+                {
+                    CqlRow cqlRow = iteraRow.next();
+                    cfDef.comparator_type = ByteBufferUtil.string(cqlRow.columns.get(0).value);
+                    ByteBuffer subComparator = cqlRow.columns.get(1).value;
+                    if (subComparator != null)
+                        cfDef.subcomparator_type = ByteBufferUtil.string(subComparator);
+                }
+
+                comparator = TypeParser.parse(cfDef.comparator_type);
+                subComparator = cfDef.subcomparator_type == null ? null : TypeParser.parse(cfDef.subcomparator_type);
             }
             catch (ConfigurationException e)
             {
-                throw new RuntimeException("unable to load partitioner", e);
-            } catch (TException e)
-            {
-                throw new RuntimeException("error communicating via Thrift", e);
-            }
-        }
-
-        private Pair<AbstractType, AbstractType> getComparatorsFromOlderVersion()
-        {
-            try
-            {
-                // Get the Keyspace metadata, then get the specific CF metadata
-                // in order to populate the sub/comparator.
-                KsDef ks_def = client.describe_keyspace(keyspace);
-                List<String> cfnames = new ArrayList<String>(ks_def.cf_defs.size());
-                for (CfDef cfd : ks_def.cf_defs)
-                    cfnames.add(cfd.name);
-                int idx = cfnames.indexOf(cfName);
-                CfDef cf_def = ks_def.cf_defs.get(idx);
-
-                AbstractType comparator = TypeParser.parse(cf_def.comparator_type);
-                AbstractType subComparator = cf_def.subcomparator_type == null ? null : TypeParser.parse(cf_def.subcomparator_type);
-                return Pair.create(comparator, subComparator);
+                throw new RuntimeException("unable to load sub/comparator", e);
             }
             catch (TException e)
             {
