@@ -3,6 +3,7 @@ DSE backports/cherry-picks
  * Fix streaming does not transfer wrapped range (CASSANDRA-5948)
  * Fix loading index summary containing empty key (CASSANDRA-5965)
  * Fix CqlRecordWriter with composite keys (CASSANDRA-5949)
+ * Pig: handle CQL collections (CASSANDRA-5867)
 
 1.2.9
  * Fix getBloomFilterDiskSpaceUsed for AlwaysPresentFilter (CASSANDRA-5900)
