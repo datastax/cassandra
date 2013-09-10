@@ -173,7 +173,7 @@ public class UpdateStatement extends ModificationStatement
         for (CFDefinition.Name name : cfDef.keys.values())
         {
             List<Term> values = processed.get(name.name);
-            if (values == null || values.isEmpty())
+            if (values == null)
                 throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", name));
 
             if (keyBuilder.remainingCount() == 1)
@@ -188,7 +188,7 @@ public class UpdateStatement extends ModificationStatement
             }
             else
             {
-                if (values.size() > 1)
+                if (values.isEmpty() || values.size() > 1)
                     throw new InvalidRequestException("IN is only supported on the last column of the partition key");
                 ByteBuffer val = values.get(0).bindAndGet(variables);
                 if (val == null)
@@ -213,7 +213,7 @@ public class UpdateStatement extends ModificationStatement
 
         QueryProcessor.validateKey(key);
         RowMutation rm = new RowMutation(cfDef.cfm.ksName, key);
-        ColumnFamily cf = rm.addOrGet(cfDef.cfm.cfName);
+        ColumnFamily cf = rm.addOrGet(cfDef.cfm);
 
         // Inserting the CQL row marker (see #4361)
         // We always need to insert a marker, because of the following situation:

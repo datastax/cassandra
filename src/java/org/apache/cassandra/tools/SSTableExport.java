@@ -101,7 +101,7 @@ public class SSTableExport
         if (columnContainer instanceof ColumnFamily)
         {
             ColumnFamily columnFamily = (ColumnFamily) columnContainer;
-            if (!columnFamily.deletionInfo().equals(DeletionInfo.LIVE))
+            if (!columnFamily.deletionInfo().isLive())
             {
                 // begin meta
                 writeKey(out, "metadata");
@@ -116,7 +116,7 @@ public class SSTableExport
             SuperColumn superColumn = (SuperColumn) columnContainer;
             DeletionInfo deletionInfo = new DeletionInfo(superColumn.getMarkedForDeleteAt(),
                     superColumn.getLocalDeletionTime());
-            if (!deletionInfo.equals(DeletionInfo.LIVE))
+            if (!deletionInfo.isLive())
             {
                 writeKey(out, "metadata");
                 writeDeletionInfo(out, deletionInfo.getTopLevelDeletion());
@@ -355,12 +355,11 @@ public class SSTableExport
             if (!row.getKey().equals(decoratedKey))
                 continue;
 
-            serializeRow(row, decoratedKey, outs);
-
             if (i != 0)
                 outs.println(",");
-
             i++;
+
+            serializeRow(row, decoratedKey, outs);
         }
 
         outs.println("\n]");

@@ -971,7 +971,6 @@ public class CassandraServer implements Cassandra.Iface
         }
         catch (ReadTimeoutException e)
         {
-            logger.debug("... timed out");
             throw ThriftConversion.toThrift(e);
         }
         catch (org.apache.cassandra.exceptions.UnavailableException e)
@@ -1055,7 +1054,6 @@ public class CassandraServer implements Cassandra.Iface
         }
         catch (ReadTimeoutException e)
         {
-            logger.debug("... timed out");
             throw ThriftConversion.toThrift(e);
         }
         catch (org.apache.cassandra.exceptions.UnavailableException e)
@@ -1131,7 +1129,6 @@ public class CassandraServer implements Cassandra.Iface
         }
         catch (ReadTimeoutException e)
         {
-            logger.debug("... timed out");
             throw ThriftConversion.toThrift(e);
         }
         catch (org.apache.cassandra.exceptions.UnavailableException e)
@@ -1464,7 +1461,6 @@ public class CassandraServer implements Cassandra.Iface
         }
         catch (TimeoutException e)
         {
-            logger.debug("... timed out");
             throw new TimedOutException();
         }
         catch (IOException e)

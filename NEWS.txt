@@ -13,8 +13,34 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
-1.2.6 (DSE)
+1.2.9
 =====
+
+Features
+--------
+    - A history of executed nodetool commands is now captured.
+      It can be found in ~/.cassandra/nodetool.history. Other tools output files
+      (cli and cqlsh history, .cqlshrc) are now centralized in ~/.cassandra, as well.
+    - A new sstablesplit utility allows to split large sstables offline.
+
+Defaults
+--------
+    - After performance testing for CASSANDRA-5727, the default LCS filesize
+      has been changed from 5MB to 160MB.
+
+
+1.2.8
+=====
+
+Upgrading
+---------
+    - Nothing specific to this release, but please see 1.2.7 if you are upgrading
+      from a previous version.
+
+
+1.2.7
+=====
+
 Upgrading
 ---------
     - If you have decommissioned a node in the past 72 hours, it is imperative

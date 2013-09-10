@@ -147,6 +147,7 @@ public class SystemTable
         ColumnFamilyStore oldStatusCfs = table.getColumnFamilyStore(OLD_STATUS_CF);
         if (oldStatusCfs.getSSTables().size() > 0)
         {
+            logger.info("Old system data found in {}.{}; migrating to new format in {}.{}", Table.SYSTEM_KS, OLD_STATUS_CF, Table.SYSTEM_KS, LOCAL_CF);
             SortedSet<ByteBuffer> cols = new TreeSet<ByteBuffer>(BytesType.instance);
             cols.add(ByteBufferUtil.bytes("ClusterName"));
             cols.add(ByteBufferUtil.bytes("Token"));
@@ -178,6 +179,61 @@ public class SystemTable
         {
             logger.info("Possible old-format hints found. Truncating");
             oldHintsCfs.truncate();
+        }
+
+        migrateKeyAlias();
+    }
+
+    /**
+     * 1.1 used a key_alias column; 1.2 changed that to key_aliases as part of CQL3
+     */
+    public static void migrateKeyAlias()
+    {
+        String selectQuery = String.format("SELECT keyspace_name, columnfamily_name, writetime(type), key_aliases, key_alias FROM %s.%s",
+                                           Table.SYSTEM_KS,
+                                           SCHEMA_COLUMNFAMILIES_CF);
+        for (UntypedResultSet.Row row : processInternal(selectQuery))
+        {
+            String ks = row.getString("keyspace_name");
+            String cf = row.getString("columnfamily_name");
+            Long timestamp = row.getLong("writetime(type)"); // guaranteed to be present
+
+            String keyAlias = row.has("key_alias") ? row.getString("key_alias") : null;
+            String keyAliases = row.has("key_aliases") ? row.getString("key_aliases") : null;
+
+            if (keyAliases != null)
+            {
+                if (keyAlias == null)
+                    continue; // key_alias has never existed or has already been migrated - moving on.
+
+                // delete key_alias if it's still there - it's not being used anymore.
+                processInternal(String.format("DELETE key_alias "
+                                              + "FROM %s.%s "
+                                              + "USING TIMESTAMP %d "
+                                              + "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
+                                              Table.SYSTEM_KS,
+                                              SCHEMA_COLUMNFAMILIES_CF,
+                                              timestamp,
+                                              ks,
+                                              cf));
+            }
+            else
+            {
+                // key_aliases is null. Set to either '[]' or '["<keyAlias>"]', depending on the key_alias (lack of) value.
+                List<String> aliases = keyAlias == null
+                                     ? Collections.<String>emptyList()
+                                     : Collections.singletonList(keyAlias);
+                processInternal(String.format("UPDATE %s.%s "
+                                              + "USING TIMESTAMP %d "
+                                              + "SET key_alias = null, key_aliases = '%s' "
+                                              + "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
+                                              Table.SYSTEM_KS,
+                                              SCHEMA_COLUMNFAMILIES_CF,
+                                              timestamp,
+                                              FBUtilities.json(aliases),
+                                              ks,
+                                              cf));
+            }
         }
     }
 
@@ -346,20 +402,10 @@ public class SystemTable
         return tokens;
     }
 
-    private static void forceBlockingFlush(String cfname)
+    public static void forceBlockingFlush(String cfname)
     {
-        try
-        {
-            Table.open(Table.SYSTEM_KS).getColumnFamilyStore(cfname).forceBlockingFlush();
-        }
-        catch (ExecutionException e)
-        {
-            throw new RuntimeException(e);
-        }
-        catch (InterruptedException e)
-        {
-            throw new AssertionError(e);
-        }
+        if (!Boolean.getBoolean("cassandra.unsafesystem"))
+            FBUtilities.waitOnFuture(Table.open(Table.SYSTEM_KS).getColumnFamilyStore(cfname).forceFlush());
     }
 
     /**
@@ -438,24 +484,51 @@ public class SystemTable
             ex.initCause(err);
             throw ex;
         }
-        ColumnFamilyStore cfs = table.getColumnFamilyStore(LOCAL_CF);
 
-        String req = "SELECT cluster_name FROM system.%s WHERE key='%s'";
-        UntypedResultSet result = processInternal(String.format(req, LOCAL_CF, LOCAL_KEY));
+        String savedClusterName;
 
-        if (result.isEmpty() || !result.one().has("cluster_name"))
+        // See if there is still data in System.LocationInfo, indicating that the system data has not yet been
+        // upgraded by SystemTable.upgradeSystemData()
+        ColumnFamilyStore oldStatusCfs = table.getColumnFamilyStore(OLD_STATUS_CF);
+        if (oldStatusCfs.getSSTables().size() > 0)
         {
-            // this is a brand new node
-            if (!cfs.getSSTables().isEmpty())
-                throw new ConfigurationException("Found system table files, but they couldn't be loaded!");
+            logger.debug("Detected system data in {}.{}, checking saved cluster name", Table.SYSTEM_KS, OLD_STATUS_CF);
+            SortedSet<ByteBuffer> cols = new TreeSet<ByteBuffer>(BytesType.instance);
+            cols.add(ByteBufferUtil.bytes("ClusterName"));
+            QueryFilter filter = QueryFilter.getNamesFilter(decorate(ByteBufferUtil.bytes("L")), new QueryPath(OLD_STATUS_CF), cols);
+            ColumnFamily oldCf = oldStatusCfs.getColumnFamily(filter);
+            try
+            {
+                savedClusterName = ByteBufferUtil.string(oldCf.getColumn(ByteBufferUtil.bytes("ClusterName")).value());
+            }
+            catch (CharacterCodingException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            ColumnFamilyStore cfs = table.getColumnFamilyStore(LOCAL_CF);
 
-            // no system files.  this is a new node.
-            req = "INSERT INTO system.%s (key, cluster_name) VALUES ('%s', '%s')";
-            processInternal(String.format(req, LOCAL_CF, LOCAL_KEY, DatabaseDescriptor.getClusterName()));
-            return;
+            String req = "SELECT cluster_name FROM system.%s WHERE key='%s'";
+            UntypedResultSet result = processInternal(String.format(req, LOCAL_CF, LOCAL_KEY));
+
+            if (result.isEmpty() || !result.one().has("cluster_name"))
+            {
+
+                // this is a brand new node
+                if (!cfs.getSSTables().isEmpty())
+                    throw new ConfigurationException("Found system table files, but they couldn't be loaded!");
+
+                // no system files.  this is a new node.
+                req = "INSERT INTO system.%s (key, cluster_name) VALUES ('%s', '%s')";
+                processInternal(String.format(req, LOCAL_CF, LOCAL_KEY, DatabaseDescriptor.getClusterName()));
+                return;
+            }
+
+            savedClusterName = result.one().getString("cluster_name");
         }
 
-        String savedClusterName = result.one().getString("cluster_name");
         if (!DatabaseDescriptor.getClusterName().equals(savedClusterName))
             throw new ConfigurationException("Saved cluster name " + savedClusterName + " != configured name " + DatabaseDescriptor.getClusterName());
     }

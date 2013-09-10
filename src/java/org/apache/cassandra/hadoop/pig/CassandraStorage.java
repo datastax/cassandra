@@ -25,7 +25,7 @@ import java.util.*;
 
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.exceptions.ConfigurationException;
+
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -302,6 +302,8 @@ public class CassandraStorage extends AbstractCassandraStorage
 
         if (splitSize > 0)
             ConfigHelper.setInputSplitSize(conf, splitSize);
+        if (partitionerClass!= null)
+            ConfigHelper.setInputPartitioner(conf, partitionerClass);
 
         if (partitionerClass!= null)
             ConfigHelper.setInputPartitioner(conf, partitionerClass);
@@ -431,6 +433,7 @@ public class CassandraStorage extends AbstractCassandraStorage
                 allSchemaFields.add(innerTupleField);
             }
         }
+
         // bag at the end for unknown columns
         allSchemaFields.add(bagField);
 
@@ -703,15 +706,12 @@ public class CassandraStorage extends AbstractCassandraStorage
             TimedOutException, 
             SchemaDisagreementException, 
             TException,
-            CharacterCodingException,
-            org.apache.cassandra.exceptions.InvalidRequestException,
-            ConfigurationException,
-            NotFoundException
+            CharacterCodingException
     {
         if (cql3Table)
             return new ArrayList<ColumnDef>();
         
-        return getColumnMeta(client, true);
+        return getColumnMeta(client);
     }
 
     /** convert key to a tuple */
