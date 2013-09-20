@@ -307,7 +307,7 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         {
             ByteBuffer[] keys = new ByteBuffer[partitionKeyColumns.length];
             for (int i = 0; i< keys.length; i++)
-                keys[i] = keyColumns.get(partitionKeyColumns[i]);
+                keys[i] = keyColumns.get(partitionKeyColumns[i]).duplicate();
 
             partitionKey = ((CompositeType) keyValidator).build(keys);
         }
@@ -337,31 +337,21 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
         keyValidator = parseType(validator);
         
         Column rawPartitionKeys = result.rows.get(0).columns.get(1);
-        String keyString;
-        List<String> keys;
-        if (rawPartitionKeys.getValue() == null)
-        {
-            partitionKeyColumns = new String[1];
-            partitionKeyColumns[0] = ByteBufferUtil.string(ByteBuffer.wrap(result.rows.get(0).columns.get(3).getValue()));
-        }
-        else
-        {
-            keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
-            logger.debug("partition keys: {}", keyString);
-            keys = FBUtilities.fromJsonList(keyString);
+        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(rawPartitionKeys.getValue()));
+        logger.debug("partition keys: " + keyString);
 
-            partitionKeyColumns = new String[keys.size()];
-            int i = 0;
-            for (String key : keys)
-            {
-                partitionKeyColumns[i] = key;
-                i++;
-            }
-            if (partitionKeyColumns.length == 0)
-            {
-                retrieveKeysForThriftTables(client);
-                return;
-            }
+        List<String> keys = FBUtilities.fromJsonList(keyString);
+        if (keys.isEmpty())
+        {
+            retrieveKeysForThriftTables(client);
+            return;
+        }
+        partitionKeyColumns = new String[keys.size()];
+        int i = 0;
+        for (String key : keys)
+        {
+            partitionKeyColumns[i] = key;
+            i++;
         }
 
         Column rawClusterColumns = result.rows.get(0).columns.get(2);
@@ -393,8 +383,9 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
                     partitionKeyColumns[i] = column.toString();
                     i++;
                 }
+                clusterColumns = new ArrayList<String>();
                 for (ColumnIdentifier column : cfDefinition.columns.keySet())
-                    clusterColumns.add(column.toString());
+                    clusterColumns.add(column.toString()); 
                 return;
             }
         }
@@ -431,7 +422,8 @@ final class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String,
     }
 
     /** Quoting for working with uppercase */
-    private String quote(String identifier) {
+    private String quote(String identifier)
+    {
         return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
     }
 }

@@ -18,7 +18,6 @@
 package org.apache.cassandra.hadoop.pig;
 
 import java.io.IOException;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
@@ -27,18 +26,19 @@ import java.util.*;
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.marshal.*;
+
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
-import org.apache.cassandra.hadoop.pig.AbstractCassandraStorage.MarshallerType;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+
 import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.Expression;
 import org.apache.pig.Expression.OpType;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
+
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.*;
@@ -55,7 +55,7 @@ import org.slf4j.LoggerFactory;
  */
 public class CqlStorage extends AbstractCassandraStorage
 {
-    private static final Logger logger = LoggerFactory.getLogger(CassandraStorage.class);
+    private static final Logger logger = LoggerFactory.getLogger(CqlStorage.class);
 
     private RecordReader<Map<String, ByteBuffer>, Map<String, ByteBuffer>> reader;
     private RecordWriter<Map<String, ByteBuffer>, List<ByteBuffer>> writer;
@@ -112,7 +112,8 @@ public class CqlStorage extends AbstractCassandraStorage
                 if (columnValue != null)
                 {
                     IColumn column = new Column(cdef.name, columnValue);
-                    tuple.set(i, pigValue(cqlColumnToObj(column, cfDef)));
+                    AbstractType<?> validator = getValidatorMap(cfDef).get(column.name());
+                    setTupleValue(tuple, i, cqlColumnToObj(column, cfDef), validator);
                 }
                 else
                     tuple.set(i, null);
@@ -126,8 +127,62 @@ public class CqlStorage extends AbstractCassandraStorage
         }
     }
 
-    /** convert a cql column to a tuple */
-    protected Object cqlColumnToObj(IColumn col, CfDef cfDef) throws IOException
+    /** set the value to the position of the tuple */
+    private void setTupleValue(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
+    {
+        if (validator instanceof CollectionType)
+            setCollectionTupleValues(tuple, position, value, validator);
+        else
+           setTupleValue(tuple, position, value);
+    }
+
+    /** set the values of set/list at and after the position of the tuple */
+    private void setCollectionTupleValues(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
+    {
+        if (validator instanceof MapType)
+        {
+            setMapTupleValues(tuple, position, value, validator);
+            return;
+        }
+        AbstractType<?> elementValidator;
+        if (validator instanceof SetType)
+            elementValidator = ((SetType<?>) validator).elements;
+        else if (validator instanceof ListType)
+            elementValidator = ((ListType<?>) validator).elements;
+        else 
+            return;
+        
+        int i = 0;
+        Tuple innerTuple = TupleFactory.getInstance().newTuple(((Collection<?>) value).size());
+        for (Object entry : (Collection<?>) value)
+        {
+            setTupleValue(innerTuple, i, entry, elementValidator);
+            i++;
+        }
+        tuple.set(position, innerTuple);
+    }
+
+    /** set the values of set/list at and after the position of the tuple */
+    private void setMapTupleValues(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
+    {
+        AbstractType<?> keyValidator = ((MapType<?, ?>) validator).keys;
+        AbstractType<?> valueValidator = ((MapType<?, ?>) validator).values;
+        
+        int i = 0;
+        Tuple innerTuple = TupleFactory.getInstance().newTuple(((Map<?,?>) value).size());
+        for(Map.Entry<?,?> entry :  ((Map<Object, Object>)value).entrySet())
+        {
+            Tuple mapEntryTuple = TupleFactory.getInstance().newTuple(2);
+            setTupleValue(mapEntryTuple, 0, entry.getKey(), keyValidator);
+            setTupleValue(mapEntryTuple, 1, entry.getValue(), valueValidator);
+            innerTuple.set(i, mapEntryTuple);
+            i++;
+        }
+        tuple.set(position, innerTuple);
+    }
+
+    /** convert a cql column to an object */
+    private Object cqlColumnToObj(IColumn col, CfDef cfDef) throws IOException
     {
         // standard
         Map<ByteBuffer,AbstractType> validators = getValidatorMap(cfDef);
@@ -138,21 +193,6 @@ public class CqlStorage extends AbstractCassandraStorage
         }
         else
             return validators.get(col.name()).compose(col.value());
-    }
-    
-    /** set the value to the position of the tuple */
-    protected Object pigValue(Object value) throws ExecException
-    {
-       if (value instanceof BigInteger)
-           return ((BigInteger) value).intValue();
-       else if (value instanceof ByteBuffer)
-           return new DataByteArray(ByteBufferUtil.getArray((ByteBuffer) value));
-       else if (value instanceof UUID)
-           return new DataByteArray(UUIDGen.decompose((java.util.UUID) value));
-       else if (value instanceof Date)
-           return DateType.instance.decompose((Date) value).getLong();
-       else
-           return value;
     }
 
     /** set read configuration settings */
@@ -173,13 +213,12 @@ public class CqlStorage extends AbstractCassandraStorage
 
         CqlConfigHelper.setInputCQLPageRowSize(conf, String.valueOf(pageSize));
         if (columns != null && !columns.trim().isEmpty())
-            CqlConfigHelper.setInputColumns(conf, columns);        
+            CqlConfigHelper.setInputColumns(conf, columns);
 
         String whereClauseForPartitionFilter = getWhereClauseForPartitionFilter();
-        
         String wc = whereClause != null && !whereClause.trim().isEmpty() 
-                       ? whereClauseForPartitionFilter == null ? whereClause: String.format("%s AND %s", whereClause.trim(), whereClauseForPartitionFilter)
-                       : whereClauseForPartitionFilter;
+                               ? whereClauseForPartitionFilter == null ? whereClause: String.format("%s AND %s", whereClause.trim(), whereClauseForPartitionFilter)
+                               : whereClauseForPartitionFilter;
 
         if (wc != null)
         {
@@ -459,9 +498,8 @@ public class CqlStorage extends AbstractCassandraStorage
                     splitSize = Integer.parseInt(urlQuery.get("split_size"));
                 if (urlQuery.containsKey("partitioner"))
                     partitionerClass = urlQuery.get("partitioner");
-                
                 if (urlQuery.containsKey("use_secondary"))
-                    usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary"));
+                    usePartitionFilter = Boolean.parseBoolean(urlQuery.get("use_secondary")); 
             }
             String[] parts = urlParts[0].split("/+");
             String[] credentialsAndKeyspace = parts[1].split("@");

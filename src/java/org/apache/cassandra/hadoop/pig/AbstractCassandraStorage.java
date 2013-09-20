@@ -41,7 +41,6 @@ import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Hex;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
 import org.apache.hadoop.conf.Configuration;
@@ -98,7 +97,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     protected String outputFormatClass;
     protected int splitSize = 64 * 1024;
     protected String partitionerClass;
-    protected boolean usePartitionFilter = false;
+    protected boolean usePartitionFilter = false; 
 
     public AbstractCassandraStorage()
     {
@@ -210,7 +209,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 {
                     validator = TypeParser.parse(cd.getValidation_class());
                     if (validator instanceof CounterColumnType)
-                        validator = LongType.instance;
+                        validator = LongType.instance; 
                     validators.put(cd.name, validator);
                 }
                 catch (ConfigurationException e)
@@ -260,7 +259,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     }
 
     /** decompose the query to store the parameters in a map */
-    public static Map<String, String> getQueryMap(String query) throws UnsupportedEncodingException
+    public static Map<String, String> getQueryMap(String query) throws UnsupportedEncodingException 
     {
         String[] params = query.split("&");
         Map<String, String> map = new HashMap<String, String>();
@@ -336,7 +335,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             return DataType.FLOAT;
         else if (type instanceof DoubleType)
             return DataType.DOUBLE;
-        else if (type instanceof AbstractCompositeType )
+        else if (type instanceof AbstractCompositeType || type instanceof CollectionType)
             return DataType.TUPLE;
 
         return DataType.BYTEARRAY;
@@ -407,28 +406,70 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             return ByteBuffer.wrap(UUIDGen.decompose((UUID) o));
         if(o instanceof Tuple) {
             List<Object> objects = ((Tuple)o).getAll();
-            List<ByteBuffer> serialized = new ArrayList<ByteBuffer>(objects.size());
-            int totalLength = 0;
-            for(Object sub : objects)
+            //collections
+            if (objects.size() > 0 && objects.get(0) instanceof String)
             {
-                ByteBuffer buffer = objToBB(sub);
-                serialized.add(buffer);
-                totalLength += 2 + buffer.remaining() + 1;
+                String collectionType = (String) objects.get(0);
+                if ("set".equalsIgnoreCase(collectionType) ||
+                        "list".equalsIgnoreCase(collectionType))
+                    return objToListOrSetBB(objects.subList(1, objects.size()));
+                else if ("map".equalsIgnoreCase(collectionType))
+                    return objToMapBB(objects.subList(1, objects.size()));
+                   
             }
-            ByteBuffer out = ByteBuffer.allocate(totalLength);
-            for (ByteBuffer bb : serialized)
-            {
-                int length = bb.remaining();
-                out.put((byte) ((length >> 8) & 0xFF));
-                out.put((byte) (length & 0xFF));
-                out.put(bb);
-                out.put((byte) 0);
-            }
-            out.flip();
-            return out;
+            return objToCompositeBB(objects);
         }
 
         return ByteBuffer.wrap(((DataByteArray) o).get());
+    }
+
+    private ByteBuffer objToListOrSetBB(List<Object> objects)
+    {
+        List<ByteBuffer> serialized = new ArrayList<ByteBuffer>(objects.size());
+        for(Object sub : objects)
+        {
+            ByteBuffer buffer = objToBB(sub);
+            serialized.add(buffer);
+        }      
+        return CollectionType.pack(serialized, objects.size());
+    }
+
+    private ByteBuffer objToMapBB(List<Object> objects)
+    {
+        List<ByteBuffer> serialized = new ArrayList<ByteBuffer>(objects.size() * 2);
+        for(Object sub : objects)
+        {
+            List<Object> keyValue = ((Tuple)sub).getAll();
+            for (Object entry: keyValue)
+            {
+                ByteBuffer buffer = objToBB(entry);
+                serialized.add(buffer);
+            }
+        } 
+        return CollectionType.pack(serialized, objects.size());
+    }
+
+    private ByteBuffer objToCompositeBB(List<Object> objects)
+    {
+        List<ByteBuffer> serialized = new ArrayList<ByteBuffer>(objects.size());
+        int totalLength = 0;
+        for(Object sub : objects)
+        {
+            ByteBuffer buffer = objToBB(sub);
+            serialized.add(buffer);
+            totalLength += 2 + buffer.remaining() + 1;
+        }
+        ByteBuffer out = ByteBuffer.allocate(totalLength);
+        for (ByteBuffer bb : serialized)
+        {
+            int length = bb.remaining();
+            out.put((byte) ((length >> 8) & 0xFF));
+            out.put((byte) (length & 0xFF));
+            out.put(bb);
+            out.put((byte) 0);
+        }
+        out.flip();
+        return out;
     }
 
     public void cleanupOnFailure(String failure, Job job)
@@ -532,12 +573,12 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                    ConfigurationException
     {
         // get CF meta data
-        String query = "SELECT type, " +
-                       "       comparator, " +
-                       "       subcomparator, " +
-                       "       default_validator, " +
-                       "       key_validator, " +
-                       "       key_aliases, " +
+        String query = "SELECT type," +
+                       "       comparator," +
+                       "       subcomparator," +
+                       "       default_validator," +
+                       "       key_validator," +
+                       "       key_aliases," +
                        "       key_alias " +
                        "FROM system.schema_columnfamilies " +
                        "WHERE keyspace_name = '%s' " +
@@ -761,7 +802,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
             keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
 
-            logger.debug("cluster keys: {} ", keyString);
+            logger.debug("cluster keys: {}", keyString);
             keyNames = FBUtilities.fromJsonList(keyString);
 
             iterator = keyNames.iterator();
@@ -773,9 +814,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             }
 
             String validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(2).getValue()));
-
-            logger.debug("key validator : {}", validator);
-
+            logger.debug("row key validator: {}", validator);
             AbstractType<?> keyValidator = parseType(validator);
 
             Iterator<ColumnDef> keyItera = keys.iterator();
@@ -789,7 +828,6 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 keyItera.next().validation_class = keyValidator.toString();
 
             validator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(3).getValue()));
-
             logger.debug("cluster key validator: {}", validator);
 
             if (keyItera.hasNext() && validator != null && !validator.isEmpty())
@@ -812,9 +850,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 try
                 {
                     String compactValidator = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(6).getValue()));
-
                     logger.debug("default validator: {}", compactValidator);
-
                     AbstractType<?> defaultValidator = parseType(compactValidator);
 
                     ColumnDef cDef = new ColumnDef();
@@ -872,6 +908,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         }
         return indexes;
     }
+
 
     /** get CFDefinition of a column family */
     private CFDefinition getCfDefinition(String ks, String cf, Cassandra.Client client)

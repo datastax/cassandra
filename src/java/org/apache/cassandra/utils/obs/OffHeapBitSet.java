@@ -36,8 +36,18 @@ public class OffHeapBitSet implements IBitSet
     public OffHeapBitSet(long numBits)
     {
         // OpenBitSet.bits2words calculation is there for backward compatibility.
-        int byteCount = OpenBitSet.bits2words(numBits) * 8;
-        bytes = RefCountedMemory.allocate(byteCount);
+        long wordCount = OpenBitSet.bits2words(numBits);
+        if (wordCount > Integer.MAX_VALUE)
+            throw new UnsupportedOperationException("Bloom filter size is > 16GB, reduce the bloom_filter_fp_chance");
+        try
+        {
+            long byteCount = wordCount * 8L;
+            bytes = RefCountedMemory.allocate(byteCount);
+        }
+        catch (OutOfMemoryError e)
+        {
+            throw new RuntimeException("Out of native memory occured, You can avoid it by increasing the system ram space or by increasing bloom_filter_fp_chance.");
+        }
         // flush/clear the existing memory.
         clear();
     }
@@ -112,9 +122,9 @@ public class OffHeapBitSet implements IBitSet
 
     public static OffHeapBitSet deserialize(DataInput dis) throws IOException
     {
-        int byteCount = dis.readInt() * 8;
+        long byteCount = dis.readInt() * 8L;
         Memory memory = RefCountedMemory.allocate(byteCount);
-        for (int i = 0; i < byteCount;)
+        for (long i = 0; i < byteCount;)
         {
             long v = dis.readLong();
             memory.setByte(i++, (byte) (v >>> 0));

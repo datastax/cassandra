@@ -1,6 +1,6 @@
 <link rel="StyleSheet" href="CQL.css" type="text/css" media="screen">
 
-h1. Cassandra Query Language (CQL) v3.0.4
+h1. Cassandra Query Language (CQL) v3.0.5
 
 
  <span id="tableOfContents">
@@ -61,9 +61,13 @@ h3. Comments
 
 A comment in CQL is a line beginning by either double dashes (@--@) or double slash (@//@).
 
+Multi-line comments are also supported through enclosure withing @/*@ and @*/@ (but nesting is not supported).
+
 bc(sample). 
 -- This is a comment
 // This is a comment too
+/* This is
+   a multiline comment */
 
 h3(#statements). Statements
 
@@ -464,8 +468,10 @@ bc(syntax)..
                | <identifier> '=' <identifier> '+' <map-literal>
                | <identifier> '[' <term> ']' '=' <term>
 
-<where-clause> ::= <identifier> '=' <term>
-                 | <identifier> IN '(' <term> ( ',' <term> )* ')'
+<where-clause> ::= <relation> ( AND <relation> )*
+
+<relation> ::= <identifier> '=' <term>
+             | <identifier> IN '(' ( <term> ( ',' <term> )* )? ')'
 
 <option> ::= TIMESTAMP <integer>
            | TTL <integer>
@@ -481,7 +487,7 @@ WHERE movie = 'Serenity';
 
 UPDATE UserActions SET total = total + 2 WHERE user = B70DE1D0-9908-4AE3-BE34-5573E5B09F14 AND action = 'click';
 p. 
-The @UPDATE@ statement writes one or more columns for a given row in a table. The @<where-clause>@ is used to select the row to update and must include all columns composing the @PRIMARY KEY@. Other columns values are specified through @<assignment>@ after the @SET@ keyword.
+The @UPDATE@ statement writes one or more columns for a given row in a table. The @<where-clause>@ is used to select the row to update and must include all columns composing the @PRIMARY KEY@ (the @IN@ relation is only supported for the last column of the partition key). Other columns values are specified through @<assignment>@ after the @SET@ keyword.
 
 Note that unlike in SQL, @UPDATE@ does not check the prior existence of the row: the row is created if none existed before, and updated otherwise. Furthermore, there is no mean to know which of creation or update happened. In fact, the semantic of @INSERT@ and @UPDATE@ are identical.
 
@@ -510,8 +516,10 @@ bc(syntax)..
 
 <selection> ::= <identifier> ( '[' <term> ']' )?
 
-<where-clause> ::= <identifier> '=' <term>
-                 | <identifier> IN '(' <term> ( ',' <term> )* ')'
+<where-clause> ::= <relation> ( AND <relation> )*
+
+<relation> ::= <identifier> '=' <term>
+             | <identifier> IN '(' ( <term> ( ',' <term> )* )? ')'
 p. 
 __Sample:__
 
@@ -520,7 +528,7 @@ DELETE FROM NerdMovies USING TIMESTAMP 1240003134 WHERE movie = 'Serenity';
 
 DELETE phone FROM Users WHERE userid IN (C73DE1D3-AF08-40F3-B124-3FF3E5109F22, B70DE1D0-9908-4AE3-BE34-5573E5B09F14);
 p. 
-The @DELETE@ statement deletes columns and rows. If column names are provided directly after the @DELETE@ keyword, only those columns are deleted from the row indicated by the @<where-clause>@ (the @id[value]@ syntax in @<selection>@ is for collection, please refer to the "collection section":#collections for more details).  Otherwise whole rows are removed. The @<where-clause>@ allows to specify the key for the row(s) to delete.
+The @DELETE@ statement deletes columns and rows. If column names are provided directly after the @DELETE@ keyword, only those columns are deleted from the row indicated by the @<where-clause>@ (the @id[value]@ syntax in @<selection>@ is for collection, please refer to the "collection section":#collections for more details).  Otherwise whole rows are removed. The @<where-clause>@ allows to specify the key for the row(s) to delete (the @IN@ relation is only supported for the last column of the partition key).
 
 @DELETE@ supports the @TIMESTAMP@ options with the same semantic that in the "@UPDATE@":#updateStmt statement.
 
@@ -590,11 +598,11 @@ bc(syntax)..
              | TTL '(' <identifier> ')'
              | <function> '(' (<selector> (',' <selector>)*)? ')'
 
-<where-clause> ::= <relation> ( "AND" <relation> )*
+<where-clause> ::= <relation> ( AND <relation> )*
 
-<relation> ::= <identifier> ("=" | "<" | ">" | "<=" | ">=") <term>
-             | <identifier> IN '(' <term> ( ',' <term>)* ')'
-             | TOKEN '(' <identifier> ')' ("=" | "<" | ">" | "<=" | ">=") (<term> | TOKEN '( <term> ')' )
+<relation> ::= <identifier> ('=' | '<' | '>' | '<=' | '>=') <term>
+             | <identifier> IN '(' ( <term> ( ',' <term>)* )? ')'
+             | TOKEN '(' <identifier> ')' ('=' | '<' | '>' | '<=' | '>=') (<term> | TOKEN '(' <term> ')' )
 
 <order-by> ::= <ordering> ( ',' <odering> )*
 <ordering> ::= <identifer> ( ASC | DESC )?
@@ -607,8 +615,8 @@ SELECT name, occupation FROM users WHERE userid IN (199, 200, 207);
 SELECT time, value
 FROM events
 WHERE event_type = 'myEvent'
-  AND time > 2011-02-03
-  AND time <= 2012-01-01
+  AND time > '2011-02-03'
+  AND time <= '2012-01-01'
 
 SELECT COUNT(*) FROM users;
 p. 
@@ -642,18 +650,20 @@ CREATE TABLE posts (
 The following query is allowed:
 
 bc(sample). 
-SELECT entry_title, content FROM posts WHERE userid='john doe' AND blog_title='John's Blog' AND posted_at >= 2012-01-01 AND posted_at < 2012-01-31
+SELECT entry_title, content FROM posts WHERE userid='john doe' AND blog_title='John's Blog' AND posted_at >= '2012-01-01' AND posted_at < '2012-01-31'
 
 But the following one is not, as it does not select a contiguous set of rows (and we suppose no secondary indexes are set):
 
 bc(sample). 
 // Needs a blog_title to be set to select ranges of posted_at
-SELECT entry_title, content FROM posts WHERE userid='john doe' AND posted_at >= 2012-01-01 AND posted_at < 2012-01-31
+SELECT entry_title, content FROM posts WHERE userid='john doe' AND posted_at >= '2012-01-01' AND posted_at < '2012-01-31'
 
 When specifying relations, the @TOKEN@ function can be used on the @PARTITION KEY@ column to query. In that case, rows will be selected based on the token of their @PARTITION_KEY@ rather than on the value. Note that the token of a key depends on the partitioner in use, and that in particular the RandomPartitioner won't yeld a meaningful order. Also note that ordering partitioners always order token values by bytes (so even if the partition key is of type int, @token(-1) > token(0)@ in particular). Example:
 
 bc(sample). 
 SELECT * FROM posts WHERE token(userid) > token('tom') AND token(userid) < token('bob')
+
+Moreover, the @IN@ relation is only allowed on the last column of the partition key and on the last column of the full primary key.
 
 h4(#selectOrderBy). @<order-by>@
 
@@ -1047,6 +1057,10 @@ CQL distinguishes between _reserved_ and _non-reserved_ keywords. Reserved keywo
 h2(#changes). Changes
 
 The following describes the addition/changes brought for each version of CQL.
+
+h3. 3.0.5
+
+* @SELECT@, @UPDATE@, and @DELETE@ statements now allow empty @IN@ relations (see "CASSANDRA-5626":https://issues.apache.org/jira/browse/CASSANDRA-5626).
 
 h3. 3.0.4
 

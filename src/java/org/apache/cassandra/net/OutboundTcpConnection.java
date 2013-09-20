@@ -215,7 +215,7 @@ public class OutboundTcpConnection extends Thread
 
                 // if the message was important, such as a repair acknowledgement, put it back on the queue
                 // to retry after re-connecting.  See CASSANDRA-5393
-                if (e instanceof SocketException && qm.shouldRetry())
+                if (qm.shouldRetry())
                 {
                     try
                     {
@@ -385,7 +385,7 @@ public class OutboundTcpConnection extends Thread
         return false;
     }
     
-    private int handshakeVersion(final DataInputStream inputStream) throws IOException
+    private int handshakeVersion(final DataInputStream inputStream)
     {
         final AtomicInteger version = new AtomicInteger(NO_VERSION);
         final CountDownLatch versionLatch = new CountDownLatch(1);
@@ -398,27 +398,30 @@ public class OutboundTcpConnection extends Thread
                 {
                     logger.info("Handshaking version with {}", poolReference.endPoint());
                     version.set(inputStream.readInt());
-                    versionLatch.countDown();
                 }
                 catch (IOException ex) 
                 {
-                    logger.info("Cannot handshake version with {}", poolReference.endPoint());
+                    final String msg = "Cannot handshake version with " + poolReference.endPoint();
+                    if (logger.isTraceEnabled())
+                        logger.trace(msg, ex);
+                    else
+                        logger.info(msg);
+                }
+                finally
+                {
+                    //unblock the waiting thread on either success or fail
+                    versionLatch.countDown();
                 }
             }
         }.start();
-        long start = System.currentTimeMillis();
-        long elapsed = 0;
-        while (elapsed < WAIT_FOR_VERSION_MAX_TIME)
+
+        try
         {
-            try
-            {
-                versionLatch.await(WAIT_FOR_VERSION_MAX_TIME - elapsed, TimeUnit.MILLISECONDS);
-                break;
-            }
-            catch (InterruptedException ex)
-            {
-                elapsed += System.currentTimeMillis() - start;
-            }
+            versionLatch.await(WAIT_FOR_VERSION_MAX_TIME, TimeUnit.MILLISECONDS);
+        }
+        catch (InterruptedException ex)
+        {
+            throw new AssertionError(ex);
         }
         return version.get();
     }

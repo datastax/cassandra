@@ -1,12 +1,92 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
- * Fix ReadResponseSerializer.serializedSize() for digest reads (CASSANDRA-5476)
- * Fix serialization of the LEFT gossip value (CASSANDRA-5696)
+ * Fix streaming does not transfer wrapped range (CASSANDRA-5948)
+ * Fix loading index summary containing empty key (CASSANDRA-5965)
+ * Fix CqlRecordWriter with composite keys (CASSANDRA-5949)
+ * Pig: handle CQL collections (CASSANDRA-5867)
+ * (Hadoop) Fix CQLRW for thrift tables (CASSANDRA-6002)
+
+
+1.2.9
+ * Fix getBloomFilterDiskSpaceUsed for AlwaysPresentFilter (CASSANDRA-5900)
+ * migrate 1.1 schema_columnfamilies.key_alias column to key_aliases
+   (CASSANDRA-5800)
+ * add --migrate option to sstableupgrade and sstablescrub (CASSANDRA-5831)
+ * fix bulk-loading compressed sstables (CASSANDRA-5820)
+ * (Hadoop) fix quoting in CqlPagingRecordReader and CqlRecordWriter 
+   (CASSANDRA-5824)
+ * update default LCS sstable size to 160MB (CASSANDRA-5727)
+ * Allow compacting 2Is via nodetool (CASSANDRA-5670)
+ * Hex-encode non-String keys in OPP (CASSANDRA-5793)
+ * nodetool history logging (CASSANDRA-5823)
+ * (Hadoop) fix support for Thrift tables in CqlPagingRecordReader 
+   (CASSANDRA-5752)
+ * add "all time blocked" to StatusLogger output (CASSANDRA-5825)
+ * Future-proof inter-major-version schema migrations (CASSANDRA-5845)
+ * (Hadoop) add CqlPagingRecordReader support for ReversedType in Thrift table
+   (CASSANDRA-5718)
+ * Add KeyCacheHitRate metric to CF metrics (CASSANDRA-5868)
+ * cqlsh: add support for multiline comments (CASSANDRA-5798)
+ * Handle CQL3 SELECT duplicate IN restrictions on clustering columns
+   (CASSANDRA-5856)
+ * Don't announce schema version until we've loaded the changes locally
+   (CASSANDRA-5904)
+ * Add -no-snapshot option to scrub (CASSANDRA-5891)
+ * Fix to support off heap bloom filters size greater than 2 GB (CASSANDRA-5903)
+ * Properly handle parsing huge map and set literals (CASSANDRA-5893)
+ * Fix LCS L0 compaction may overlap in L1 (CASSANDRA-5907)
+ * New sstablesplit tool to split large sstables offline (CASSANDRA-4766)
+ * Fix potential deadlock in native protocol server (CASSANDRA-5926)
+ * Disallow incompatible type change in CQL3 (CASSANDRA-5882)
+Merged from 1.1:
  * Correctly validate sparse composite cells in scrub (CASSANDRA-5855)
 
+
+1.2.8
+ * Fix reading DeletionTime from 1.1-format sstables (CASSANDRA-5814)
+ * cqlsh: add collections support to COPY (CASSANDRA-5698)
+ * retry important messages for any IOException (CASSANDRA-5804)
+ * Allow empty IN relations in SELECT/UPDATE/DELETE statements (CASSANDRA-5626)
+ * cqlsh: fix crashing on Windows due to libedit detection (CASSANDRA-5812)
+
+
+1.2.7
+ * if no seeds can be a reached a node won't start in a ring by itself (CASSANDRA-5768)
+ * add cassandra.unsafesystem property (CASSANDRA-5704)
+ * (Hadoop) quote identifiers in CqlPagingRecordReader (CASSANDRA-5763)
+ * Add replace_node functionality for vnodes (CASSANDRA-5337)
+ * Add timeout events to query traces (CASSANDRA-5520)
+ * make starting native protocol server idempotent (CASSANDRA-5728)
+ * Fix loading key cache when a saved entry is no longer valid (CASSANDRA-5706)
+ * Fix serialization of the LEFT gossip value (CASSANDRA-5696)
+ * Pig: support for cql3 tables (CASSANDRA-5234)
+ * cqlsh: Don't show 'null' in place of empty values (CASSANDRA-5675)
+ * Race condition in detecting version on a mixed 1.1/1.2 cluster
+   (CASSANDRA-5692)
+ * Fix skipping range tombstones with reverse queries (CASSANDRA-5712)
+ * Expire entries out of ThriftSessionManager (CASSANRDA-5719)
+ * Don't keep ancestor information in memory (CASSANDRA-5342)
+ * cqlsh: fix handling of semicolons inside BATCH queries (CASSANDRA-5697)
+ * Expose native protocol server status in nodetool info (CASSANDRA-5735)
+ * Fix pathetic performance of range tombstones (CASSANDRA-5677)
+ * Fix querying with an empty (impossible) range (CASSANDRA-5573)
+ * cqlsh: handle CUSTOM 2i in DESCRIBE output (CASSANDRA-5760)
+ * Fix minor bug in Range.intersects(Bound) (CASSANDRA-5771)
+ * cqlsh: handle disabled compression in DESCRIBE output (CASSANDRA-5766)
+ * Ensure all UP events are notified on the native protocol (CASSANDRA-5769)
+ * Fix formatting of sstable2json with multiple -k arguments (CASSANDRA-5781)
+ * Don't rely on row marker for queries in general to hide lost markers
+   after TTL expires (CASSANDRA-5762)
+ * Sort nodetool help output (CASSANDRA-5776)
+ * Fix column expiring during 2 phases compaction (CASSANDRA-5799)
+ * now() is being rejected in INSERTs when inside collections (CASSANDRA-5795)
+
+
 1.2.6
- * Fix tracing when operation completes before all responses arrive (CASSANDRA-5668)
+ * Fix tracing when operation completes before all responses arrive 
+   (CASSANDRA-5668)
  * Fix cross-DC mutation forwarding (CASSANDRA-5632)
+ * Reduce SSTableLoader memory usage (CASSANDRA-5555)
  * Scale hinted_handoff_throttle_in_kb to cluster size (CASSANDRA-5272)
  * (Hadoop) Add CQL3 input/output formats (CASSANDRA-4421, 5622)
  * (Hadoop) Fix InputKeyRange in CFIF (CASSANDRA-5536)
@@ -31,14 +111,16 @@ DSE backports/cherry-picks
  * Correct blob literal + ReversedType parsing (CASSANDRA-5629)
  * Allow GPFS to prefer the internal IP like EC2MRS (CASSANDRA-5630)
  * fix help text for -tspw cassandra-cli (CASSANDRA-5643)
- * don't throw away initial causes exceptions for internode encryption issues (CASSANDRA-5644)
+ * don't throw away initial causes exceptions for internode encryption issues 
+   (CASSANDRA-5644)
  * Fix message spelling errors for cql select statements (CASSANDRA-5647)
  * Suppress custom exceptions thru jmx (CASSANDRA-5652)
  * Update CREATE CUSTOM INDEX syntax (CASSANDRA-5639)
  * Fix PermissionDetails.equals() method (CASSANDRA-5655)
  * Never allow partition key ranges in CQL3 without token() (CASSANDRA-5666)
  * Gossiper incorrectly drops AppState for an upgrading node (CASSANDRA-5660)
- * Connection thrashing during multi-region ec2 during upgrade, due to messaging version (CASSANDRA-5669)
+ * Connection thrashing during multi-region ec2 during upgrade, due to 
+   messaging version (CASSANDRA-5669)
  * Avoid over reconnecting in EC2MRS (CASSANDRA-5678)
  * Fix ReadResponseSerializer.serializedSize() for digest reads (CASSANDRA-5476)
  * allow sstable2json on 2i CFs (CASSANDRA-5694)

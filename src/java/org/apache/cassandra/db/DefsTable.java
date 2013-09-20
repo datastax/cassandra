@@ -44,7 +44,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * SCHEMA_{KEYSPACES, COLUMNFAMILIES, COLUMNS}_CF are used to store Keyspace/ColumnFamily attributes to make schema
@@ -342,10 +341,12 @@ public class DefsTable
         for (RowMutation mutation : mutations)
             mutation.apply();
 
+        // Must be called after each schema pull and not just on startup to guarantee the migration.
+        // See CASSANDRA-5800 comments for the details.
+        SystemTable.migrateKeyAlias();
+
         if (!StorageService.instance.isClientMode())
             flushSchemaCFs();
-
-        Schema.instance.updateVersionAndAnnounce();
 
         // with new data applied
         Map<DecoratedKey, ColumnFamily> newKeyspaces = SystemTable.getSchema(SystemTable.SCHEMA_KEYSPACES_CF);
@@ -358,6 +359,7 @@ public class DefsTable
         for (String keyspaceToDrop : keyspacesToDrop)
             dropKeyspace(keyspaceToDrop);
 
+        Schema.instance.updateVersionAndAnnounce();
     }
 
     private static Set<String> mergeKeyspaces(Map<DecoratedKey, ColumnFamily> old, Map<DecoratedKey, ColumnFamily> updated)
@@ -620,14 +622,9 @@ public class DefsTable
 
     private static void flushSchemaCFs()
     {
-        flushSchemaCF(SystemTable.SCHEMA_KEYSPACES_CF);
-        flushSchemaCF(SystemTable.SCHEMA_COLUMNFAMILIES_CF);
-        flushSchemaCF(SystemTable.SCHEMA_COLUMNS_CF);
-    }
-
-    private static void flushSchemaCF(String cfName)
-    {
-        FBUtilities.waitOnFuture(SystemTable.schemaCFS(cfName).forceFlush());
+        SystemTable.forceBlockingFlush(SystemTable.SCHEMA_KEYSPACES_CF);
+        SystemTable.forceBlockingFlush(SystemTable.SCHEMA_COLUMNFAMILIES_CF);
+        SystemTable.forceBlockingFlush(SystemTable.SCHEMA_COLUMNS_CF);
     }
 
     private static ByteBuffer toUTF8Bytes(UUID version)
