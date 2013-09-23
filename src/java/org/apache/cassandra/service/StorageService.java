@@ -323,7 +323,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean isRPCServerRunning()
     {
-        if (daemon == null)
+        if ((daemon == null) || (daemon.thriftServer == null))
         {
             return false;
         }
@@ -358,7 +358,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean isNativeTransportRunning()
     {
-        if (daemon == null)
+        if ((daemon == null) || (daemon.nativeServer == null))
         {
             return false;
         }
@@ -3859,7 +3859,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getExceptionCount()
     {
-        return CassandraDaemon.exceptions.get();
+        return (int)StorageMetrics.exceptions.count();
     }
 
     public void rescheduleFailedDeletions()
@@ -3921,5 +3921,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void disableScheduledRangeXfers()
     {
         rangeXferExecutor.tearDown();
+    }
+
+    /** Returns the name of the cluster */
+    public String getClusterName()
+    {
+        return DatabaseDescriptor.getClusterName();
+    }
+
+    /** Returns the cluster partitioner */
+    public String getPartitionerName()
+    {
+        return DatabaseDescriptor.getPartitionerName();
     }
 }

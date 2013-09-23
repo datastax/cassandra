@@ -56,10 +56,7 @@ import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.service.AntiEntropyService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.CounterId;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.*;
 
 /**
  * A singleton which manages a private executor of ongoing compactions. A readwrite lock
@@ -405,7 +402,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
 
         ColumnFamilyStore cfs = Table.open(ksname).getColumnFamilyStore(cfname);
-        submitUserDefined(cfs, descriptors, getDefaultGcBefore(cfs));
+        FBUtilities.waitOnFuture(submitUserDefined(cfs, descriptors, getDefaultGcBefore(cfs)));
     }
 
     public Future<?> submitUserDefined(final ColumnFamilyStore cfs, final Collection<Descriptor> dataFiles, final int gcBefore)
@@ -587,7 +584,7 @@ public class CompactionManager implements CompactionManagerMBean
             logger.info("Cleaning up " + sstable);
             // Calculate the expected compacted filesize
             long expectedRangeFileSize = cfs.getExpectedCompactedFileSize(Arrays.asList(sstable), OperationType.CLEANUP);
-            File compactionFileLocation = cfs.directories.getDirectoryForNewSSTables(expectedRangeFileSize);
+            File compactionFileLocation = cfs.directories.getDirectoryForNewSSTables();
             if (compactionFileLocation == null)
                 throw new IOException("disk full");
 
@@ -717,7 +714,8 @@ public class CompactionManager implements CompactionManagerMBean
 
         Collection<SSTableReader> sstables;
         int gcBefore;
-        if (cfs.snapshotExists(validator.request.sessionid))
+        boolean isSnapshotValidation = cfs.snapshotExists(validator.request.sessionid);
+        if (isSnapshotValidation)
         {
             // If there is a snapshot created for the session then read from there.
             sstables = cfs.getSnapshotSSTableReader(validator.request.sessionid);
@@ -771,10 +769,17 @@ public class CompactionManager implements CompactionManagerMBean
         }
         finally
         {
-            SSTableReader.releaseReferences(sstables);
             iter.close();
-            if (cfs.table.snapshotExists(validator.request.sessionid))
-                cfs.table.clearSnapshot(validator.request.sessionid);
+            if (isSnapshotValidation)
+            {
+                for (SSTableReader sstable : sstables)
+                    FileUtils.closeQuietly(sstable);
+                cfs.clearSnapshot(validator.request.sessionid);
+            }
+            else
+            {
+                SSTableReader.releaseReferences(sstables);
+            }
 
             metrics.finishCompaction(ci);
         }

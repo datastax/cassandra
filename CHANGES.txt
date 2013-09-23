@@ -1,10 +1,31 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
+
+
+1.2.10
+ * Avoid second-guessing out-of-space state (CASSANDRA-5605)
+ * Tuning knobs for dealing with large blobs and many CFs (CASSANDRA-5982)
+ * (Hadoop) Fix CQLRW for thrift tables (CASSANDRA-6002)
+ * Fix possible divide-by-zero in HHOM (CASSANDRA-5990)
+ * Allow local batchlog writes for CL.ANY (CASSANDRA-5967)
+ * Upgrade metrics-core to version 2.2.0 (CASSANDRA-5947)
+ * Add snitch, schema version, cluster, partitioner to JMX (CASSANDRA-5881)
+ * Fix CqlRecordWriter with composite keys (CASSANDRA-5949)
+ * Allow disabling SlabAllocator (CASSANDRA-5935)
+ * Make user-defined compaction JMX blocking (CASSANDRA-4952)
  * Fix streaming does not transfer wrapped range (CASSANDRA-5948)
  * Fix loading index summary containing empty key (CASSANDRA-5965)
- * Fix CqlRecordWriter with composite keys (CASSANDRA-5949)
+ * Correctly handle limits in CompositesSearcher (CASSANDRA-5975)
  * Pig: handle CQL collections (CASSANDRA-5867)
- * (Hadoop) Fix CQLRW for thrift tables (CASSANDRA-6002)
+ * Pass the updated cf to the PRSI index() method (CASSANDRA-5999)
+ * Allow empty CQL3 batches (as no-op) (CASSANDRA-5994)
+ * Support null in CQL3 functions (CASSANDRA-5910)
+ * Replace the deprecated MapMaker with CacheLoader (CASSANDRA-6007)
+ * Add SSTableDeletingNotification to DataTracker (CASSANDRA-6010)
+ * Fix snapshots in use get deleted during snapshot repair (CASSANDRA-6011)
+ * Move hints and exception count to o.a.c.metrics (CASSANDRA-6017)
+ * Fix memory leak in snapshot repair (CASSANDRA-6047)
+ * Fix sstable2sjon for CQL3 tables (CASSANDRA-5852)
 
 
 1.2.9

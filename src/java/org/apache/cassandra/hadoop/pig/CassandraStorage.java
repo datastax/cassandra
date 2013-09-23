@@ -25,7 +25,6 @@ import java.util.*;
 
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.marshal.*;
-
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.thrift.*;

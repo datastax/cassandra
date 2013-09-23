@@ -25,30 +25,28 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Function;
 import com.google.common.base.Throwables;
-
-import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.index.SecondaryIndexManager;
-import org.apache.cassandra.io.util.DiskAwareRunnable;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
-import org.github.jamm.MemoryMeter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
+import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.columniterator.SimpleAbstractColumnIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.filter.AbstractColumnIterator;
 import org.apache.cassandra.db.filter.NamesQueryFilter;
 import org.apache.cassandra.db.filter.SliceQueryFilter;
+import org.apache.cassandra.db.index.SecondaryIndexManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.sstable.SSTableMetadata;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableWriter;
-import org.apache.cassandra.utils.SlabAllocator;
+import org.apache.cassandra.io.util.DiskAwareRunnable;
+import org.apache.cassandra.utils.Allocator;
+import org.github.jamm.MemoryMeter;
 
 public class Memtable
 {
@@ -85,24 +83,15 @@ public class Memtable
     // outstanding/running meterings to a maximum of one per CFS using this set; the executor's queue is unbounded but
     // will implicitly be bounded by the number of CFS:s.
     private static final Set<ColumnFamilyStore> meteringInProgress = new NonBlockingHashSet<ColumnFamilyStore>();
-    private static final ExecutorService meterExecutor = new DebuggableThreadPoolExecutor(1,
-                                                                                          1,
+    private static final ExecutorService meterExecutor = new JMXEnabledThreadPoolExecutor(1,
                                                                                           Integer.MAX_VALUE,
                                                                                           TimeUnit.MILLISECONDS,
                                                                                           new LinkedBlockingQueue<Runnable>(),
-                                                                                          new NamedThreadFactory("MemoryMeter"))
-    {
-        @Override
-        protected void afterExecute(Runnable r, Throwable t)
-        {
-            super.afterExecute(r, t);
-            DebuggableThreadPoolExecutor.logExceptionsAfterExecute(r, t);
-        }
-    };
-
+                                                                                          new NamedThreadFactory("MemoryMeter"),
+                                                                                          "internal");
     private final MemoryMeter meter;
 
-    volatile static Memtable activelyMeasuring;
+    volatile static ColumnFamilyStore activelyMeasuring;
 
     private final AtomicLong currentSize = new AtomicLong(0);
     private final AtomicLong currentOperations = new AtomicLong(0);
@@ -114,7 +103,7 @@ public class Memtable
     public final ColumnFamilyStore cfs;
     private final long creationTime;
 
-    private final SlabAllocator allocator = new SlabAllocator();
+    private final Allocator allocator = DatabaseDescriptor.getMemtableAllocator();
     // We really only need one column by allocator but one by memtable is not a big waste and avoids needing allocators to know about CFS
     private final Function<IColumn, IColumn> localCopyFunction = new Function<IColumn, IColumn>()
     {
@@ -186,8 +175,9 @@ public class Memtable
         if (!MemoryMeter.isInitialized())
         {
             // hack for openjdk.  we log a warning about this in the startup script too.
-            logger.warn("MemoryMeter uninitialized (jamm not specified as java agent); assuming liveRatio of 10.0.  Usually this means cassandra-env.sh disabled jamm because you are using a buggy JRE; upgrade to the Sun JRE instead");
-            cfs.liveRatio = 10.0;
+            logger.warn("MemoryMeter uninitialized (jamm not specified as java agent); assuming liveRatio of {}.  "
+                        + " Usually this means cassandra-env.sh disabled jamm because you are using a buggy JRE; "
+                        + " upgrade to the Sun JRE instead", cfs.liveRatio);
             return;
         }
 
@@ -197,56 +187,7 @@ public class Memtable
             return;
         }
 
-        Runnable runnable = new Runnable()
-        {
-            public void run()
-            {
-                try
-                {
-                    activelyMeasuring = Memtable.this;
-
-                    long start = System.currentTimeMillis();
-                    // ConcurrentSkipListMap has cycles, so measureDeep will have to track a reference to EACH object it visits.
-                    // So to reduce the memory overhead of doing a measurement, we break it up to row-at-a-time.
-                    long deepSize = meter.measure(columnFamilies);
-                    int objects = 0;
-                    for (Map.Entry<RowPosition, ColumnFamily> entry : columnFamilies.entrySet())
-                    {
-                        deepSize += meter.measureDeep(entry.getKey()) + meter.measureDeep(entry.getValue());
-                        objects += entry.getValue().getColumnCount();
-                    }
-                    double newRatio = (double) deepSize / currentSize.get();
-
-                    if (newRatio < MIN_SANE_LIVE_RATIO)
-                    {
-                        logger.warn("setting live ratio to minimum of {} instead of {}", MIN_SANE_LIVE_RATIO, newRatio);
-                        newRatio = MIN_SANE_LIVE_RATIO;
-                    }
-                    if (newRatio > MAX_SANE_LIVE_RATIO)
-                    {
-                        logger.warn("setting live ratio to maximum of {} instead of {}", MAX_SANE_LIVE_RATIO, newRatio);
-                        newRatio = MAX_SANE_LIVE_RATIO;
-                    }
-
-                    // we want to be very conservative about our estimate, since the penalty for guessing low is OOM
-                    // death.  thus, higher estimates are believed immediately; lower ones are averaged w/ the old
-                    if (newRatio > cfs.liveRatio)
-                        cfs.liveRatio = newRatio;
-                    else
-                        cfs.liveRatio = (cfs.liveRatio + newRatio) / 2.0;
-
-                    logger.info("{} liveRatio is {} (just-counted was {}).  calculation took {}ms for {} columns",
-                                cfs, cfs.liveRatio, newRatio, System.currentTimeMillis() - start, objects);
-                    activelyMeasuring = null;
-                }
-                finally
-                {
-                    meteringInProgress.remove(cfs);
-                }
-            }
-        };
-
-        meterExecutor.submit(runnable);
+        meterExecutor.submit(new MeteringRunnable(cfs));
     }
 
     private void resolve(DecoratedKey key, ColumnFamily cf, SecondaryIndexManager.Updater indexer)
@@ -519,6 +460,65 @@ public class Memtable
                                      cfs.metadata,
                                      cfs.partitioner,
                                      sstableMetadataCollector);
+        }
+    }
+
+    private static class MeteringRunnable implements Runnable
+    {
+        // we might need to wait in the meter queue for a while.  measure whichever memtable is active at that point,
+        // rather than keeping the original memtable referenced (and thus un-freeable) until this runs.
+        private final ColumnFamilyStore cfs;
+
+        public MeteringRunnable(ColumnFamilyStore cfs)
+        {
+            this.cfs = cfs;
+        }
+
+        public void run()
+        {
+            try
+            {
+                activelyMeasuring = cfs;
+                Memtable memtable = cfs.getMemtableThreadSafe();
+
+                long start = System.currentTimeMillis();
+                // ConcurrentSkipListMap has cycles, so measureDeep will have to track a reference to EACH object it visits.
+                // So to reduce the memory overhead of doing a measurement, we break it up to row-at-a-time.
+                long deepSize = memtable.meter.measure(memtable.columnFamilies);
+                int objects = 0;
+                for (Map.Entry<RowPosition, ColumnFamily> entry : memtable.columnFamilies.entrySet())
+                {
+                    deepSize += memtable.meter.measureDeep(entry.getKey()) + memtable.meter.measureDeep(entry.getValue());
+                    objects += entry.getValue().getColumnCount();
+                }
+                double newRatio = (double) deepSize / memtable.currentSize.get();
+
+                if (newRatio < MIN_SANE_LIVE_RATIO)
+                {
+                    logger.warn("setting live ratio to minimum of {} instead of {}", MIN_SANE_LIVE_RATIO, newRatio);
+                    newRatio = MIN_SANE_LIVE_RATIO;
+                }
+                if (newRatio > MAX_SANE_LIVE_RATIO)
+                {
+                    logger.warn("setting live ratio to maximum of {} instead of {}", MAX_SANE_LIVE_RATIO, newRatio);
+                    newRatio = MAX_SANE_LIVE_RATIO;
+                }
+
+                // we want to be very conservative about our estimate, since the penalty for guessing low is OOM
+                // death.  thus, higher estimates are believed immediately; lower ones are averaged w/ the old
+                if (newRatio > cfs.liveRatio)
+                    cfs.liveRatio = newRatio;
+                else
+                    cfs.liveRatio = (cfs.liveRatio + newRatio) / 2.0;
+
+                logger.info("{} liveRatio is {} (just-counted was {}).  calculation took {}ms for {} columns",
+                            cfs, cfs.liveRatio, newRatio, System.currentTimeMillis() - start, objects);
+            }
+            finally
+            {
+                activelyMeasuring = null;
+                meteringInProgress.remove(cfs);
+            }
         }
     }
 }

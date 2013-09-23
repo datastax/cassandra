@@ -15,34 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.locator;
+package org.apache.cassandra.notifications;
 
-import java.net.UnknownHostException;
+import org.apache.cassandra.io.sstable.SSTableReader;
 
 /**
- * MBean exposing standard Snitch info
+ * Fired right before removing an SSTable.
  */
-public interface EndpointSnitchInfoMBean
+public class SSTableDeletingNotification implements INotification
 {
-    /**
-     * Provides the Rack name depending on the respective snitch used, given the host name/ip
-     * @param host
-     * @throws UnknownHostException
-     */
-    public String getRack(String host) throws UnknownHostException;
+    public final SSTableReader deleting;
 
-    /**
-     * Provides the Datacenter name depending on the respective snitch used, given the hostname/ip
-     * @param host
-     * @throws UnknownHostException
-     */
-    public String getDatacenter(String host) throws UnknownHostException;
-
-
-    /**
-     * Provides the snitch name of the cluster
-     * @return Snitch name
-     */
-    public String getSnitchName();
-
+    public SSTableDeletingNotification(SSTableReader deleting)
+    {
+        this.deleting = deleting;
+    }
 }

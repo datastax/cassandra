@@ -111,6 +111,7 @@ public class NodeCmd
         COMPACT,
         COMPACTIONSTATS,
         DECOMMISSION,
+        DESCRIBECLUSTER,
         DISABLEBINARY,
         DISABLEGOSSIP,
         DISABLEHANDOFF,
@@ -771,6 +772,29 @@ public class NodeCmd
         outs.println("Current stream throughput: " + probe.getStreamThroughput() + " MB/s");
     }
 
+    /**
+     * Print the name, snitch, partitioner and schema version(s) of a cluster
+     *
+     * @param outs Output stream
+     * @param host Server address
+     */
+    public void printClusterDescription(PrintStream outs, String host)
+    {
+        // display cluster name, snitch and partitioner
+        outs.println("Cluster Information:");
+        outs.println("\tName: " + probe.getClusterName());
+        outs.println("\tSnitch: " + probe.getEndpointSnitchInfoProxy().getSnitchName());
+        outs.println("\tPartitioner: " + probe.getPartitioner());
+
+        // display schema version for each node
+        outs.println("\tSchema versions:");
+        Map<String, List<String>> schemaVersions = probe.getSpProxy().getSchemaVersions();
+        for (String version : schemaVersions.keySet())
+        {
+            outs.println(String.format("\t\t%s: %s%n", version, schemaVersions.get(version)));
+        }
+    }
+
     public void printColumnFamilyStats(PrintStream outs)
     {
         Map <String, List <ColumnFamilyStoreMBean>> cfstoreMap = new HashMap <String, List <ColumnFamilyStoreMBean>>();
@@ -868,6 +892,7 @@ public class NodeCmd
                 }
                 outs.println("\t\tSpace used (live): " + cfstore.getLiveDiskSpaceUsed());
                 outs.println("\t\tSpace used (total): " + cfstore.getTotalDiskSpaceUsed());
+                outs.println("\t\tSSTable Compression Ratio: " + cfstore.getCompressionRatio());
                 outs.println("\t\tNumber of Keys (estimate): " + cfstore.estimateKeys());
                 outs.println("\t\tMemtable Columns Count: " + cfstore.getMemtableColumnsCount());
                 outs.println("\t\tMemtable Data Size: " + cfstore.getMemtableDataSize());
@@ -1109,6 +1134,7 @@ public class NodeCmd
                 case TPSTATS         : nodeCmd.printThreadPoolStats(System.out); break;
                 case VERSION         : nodeCmd.printReleaseVersion(System.out); break;
                 case COMPACTIONSTATS : nodeCmd.printCompactionStats(System.out); break;
+                case DESCRIBECLUSTER : nodeCmd.printClusterDescription(System.out, host); break;
                 case DISABLEBINARY   : probe.stopNativeTransport(); break;
                 case ENABLEBINARY    : probe.startNativeTransport(); break;
                 case STATUSBINARY    : nodeCmd.printIsNativeTransportRunning(System.out); break;

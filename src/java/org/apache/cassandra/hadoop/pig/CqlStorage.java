@@ -26,7 +26,6 @@ import java.util.*;
 import org.apache.cassandra.db.IColumn;
 import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.marshal.*;
-
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
@@ -38,7 +37,6 @@ import org.apache.pig.Expression;
 import org.apache.pig.Expression.OpType;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
-
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.*;

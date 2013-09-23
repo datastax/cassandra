@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
-import com.google.common.base.Function;
+import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -61,6 +61,7 @@ import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -82,15 +83,13 @@ public class StorageProxy implements StorageProxyMBean
     public static final StorageProxy instance = new StorageProxy();
 
     private static volatile int maxHintsInProgress = 1024 * FBUtilities.getAvailableProcessors();
-    private static final AtomicInteger totalHintsInProgress = new AtomicInteger();
-    private static final Map<InetAddress, AtomicInteger> hintsInProgress = new MapMaker().concurrencyLevel(1).makeComputingMap(new Function<InetAddress, AtomicInteger>()
+    private static final CacheLoader<InetAddress, AtomicInteger> hintsInProgress = new CacheLoader<InetAddress, AtomicInteger>()
     {
-        public AtomicInteger apply(InetAddress inetAddress)
+        public AtomicInteger load(InetAddress inetAddress)
         {
             return new AtomicInteger(0);
         }
-    });
-    private static final AtomicLong totalHints = new AtomicLong();
+    };
     private static final ClientRequestMetrics readMetrics = new ClientRequestMetrics("Read");
     private static final ClientRequestMetrics rangeMetrics = new ClientRequestMetrics("RangeSlice");
     private static final ClientRequestMetrics writeMetrics = new ClientRequestMetrics("Write");
@@ -261,7 +260,7 @@ public class StorageProxy implements StorageProxyMBean
             }
 
             // write to the batchlog
-            Collection<InetAddress> batchlogEndpoints = getBatchlogEndpoints(localDataCenter);
+            Collection<InetAddress> batchlogEndpoints = getBatchlogEndpoints(localDataCenter, consistency_level);
             UUID batchUUID = UUID.randomUUID();
             syncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID);
 
@@ -418,7 +417,7 @@ public class StorageProxy implements StorageProxyMBean
      * - choose min(2, number of qualifying candiates above)
      * - allow the local node to be the only replica only if it's a single-node cluster
      */
-    private static Collection<InetAddress> getBatchlogEndpoints(String localDataCenter) throws UnavailableException
+    private static Collection<InetAddress> getBatchlogEndpoints(String localDataCenter, ConsistencyLevel consistencyLevel) throws UnavailableException
     {
         // will include every known node in the DC, including localhost.
         TokenMetadata.Topology topology = StorageService.instance.getTokenMetadata().cloneOnlyTokenMap().getTopology();
@@ -440,7 +439,12 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         if (candidates.isEmpty())
+        {
+            if (consistencyLevel == ConsistencyLevel.ANY)
+                return Collections.singleton(FBUtilities.getBroadcastAddress());
+
             throw new UnavailableException(ConsistencyLevel.ONE, 1, 0);
+        }
 
         if (candidates.size() > 2)
         {
@@ -483,10 +487,10 @@ public class StorageProxy implements StorageProxyMBean
             // The idea is that if we have over maxHintsInProgress hints in flight, this is probably due to
             // a small number of nodes causing problems, so we should avoid shutting down writes completely to
             // healthy nodes.  Any node with no hintsInProgress is considered healthy.
-            if (totalHintsInProgress.get() > maxHintsInProgress
-                && (hintsInProgress.get(destination).get() > 0 && shouldHint(destination)))
+            if (StorageMetrics.totalHintsInProgress.count() > maxHintsInProgress
+                && (getHintsInProgressFor(destination).get() > 0 && shouldHint(destination)))
             {
-                throw new OverloadedException("Too many in flight hints: " + totalHintsInProgress.get());
+                throw new OverloadedException("Too many in flight hints: " + StorageMetrics.totalHintsInProgress.count());
             }
 
             if (FailureDetector.instance.isAlive(destination))
@@ -533,6 +537,18 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
+    private static AtomicInteger getHintsInProgressFor(InetAddress destination)
+    {
+        try
+        {
+            return hintsInProgress.load(destination);
+        }
+        catch (Exception e)
+        {
+            throw new AssertionError(e);
+        }
+    }
+
     public static Future<Void> submitHint(final RowMutation mutation,
                                           final InetAddress target,
                                           final AbstractWriteResponseHandler responseHandler,
@@ -566,8 +582,8 @@ public class StorageProxy implements StorageProxyMBean
 
     private static Future<Void> submitHint(HintRunnable runnable)
     {
-        totalHintsInProgress.incrementAndGet();
-        hintsInProgress.get(runnable.target).incrementAndGet();
+        StorageMetrics.totalHintsInProgress.inc();
+        getHintsInProgressFor(runnable.target).incrementAndGet();
         return (Future<Void>) StageManager.getStage(Stage.MUTATION).submit(runnable);
     }
 
@@ -582,7 +598,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         assert hostId != null : "Missing host ID for " + target.getHostAddress();
         mutation.toHint(ttl, hostId).apply();
-        totalHints.incrementAndGet();
+        StorageMetrics.totalHints.inc();
     }
 
     private static void sendMessagesToOneDC(MessageOut message, Collection<InetAddress> targets, boolean localDC, AbstractWriteResponseHandler handler)
@@ -1275,6 +1291,11 @@ public class StorageProxy implements StorageProxyMBean
             return rows.size() > command.maxResults ? rows.subList(0, command.maxResults) : rows;
     }
 
+    public Map<String, List<String>> getSchemaVersions()
+    {
+        return this.describeSchemaVersions();
+    }
+
     /**
      * initiate a request/response session with each live node to check whether or not everybody is using the same
      * migration id. This is useful for determining if a schema change has propagated through the cluster. Disagreement
@@ -1663,8 +1684,8 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
-                totalHintsInProgress.decrementAndGet();
-                hintsInProgress.get(target).decrementAndGet();
+                StorageMetrics.totalHintsInProgress.dec();
+                getHintsInProgressFor(target).decrementAndGet();
             }
         }
 
@@ -1673,7 +1694,7 @@ public class StorageProxy implements StorageProxyMBean
 
     public long getTotalHints()
     {
-        return totalHints.get();
+        return StorageMetrics.totalHints.count();
     }
 
     public int getMaxHintsInProgress()
@@ -1688,7 +1709,7 @@ public class StorageProxy implements StorageProxyMBean
 
     public int getHintsInProgress()
     {
-        return totalHintsInProgress.get();
+        return (int) StorageMetrics.totalHintsInProgress.count();
     }
 
     public void verifyNoHintsInProgress()
