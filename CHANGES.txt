@@ -1,6 +1,8 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
-
+ * Fix NPE in pig with tables created from thrift (CASSANDRA-6072)
+ * Change runtime exceptions to IOE in pig (CASSANDRA-6099)
+ * Don't add extraneous field with CqlStorage (CASSANDRA-6071)
 
 1.2.10
  * Avoid second-guessing out-of-space state (CASSANDRA-5605)
