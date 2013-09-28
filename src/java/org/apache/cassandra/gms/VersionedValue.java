@@ -111,6 +111,11 @@ public class VersionedValue implements Comparable<VersionedValue>
         {
             this.partitioner = partitioner;
         }
+        
+        public VersionedValue cloneWithHigherVersion(VersionedValue value)
+        {
+            return new VersionedValue(value.value);
+        }
 
         public VersionedValue bootstrapping(Collection<Token> tokens)
         {
