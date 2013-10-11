@@ -1125,12 +1125,17 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         EndpointState epState = endpointStateMap.get(FBUtilities.getBroadcastAddress());
         InetAddress epAddr = FBUtilities.getBroadcastAddress();
         assert epState != null;
+        // Get current max version:
+        int beforeChangeMaxVersion = getMaxEndpointStateVersion(epState);
         // Fire "before change" notifications:
         doBeforeChangeNotifications(epAddr, epState, state, value);
-        // Notifications may have taken some time, so preventively raise the version
-        // of the new value, otherwise it could be ignored by the remote node
+        // Notifications may have taken some time, so raise the version
+        // of the new value if changed, otherwise it could be ignored by the remote node
         // if another value with a newer version was received in the meantime:
-        value = StorageService.instance.valueFactory.cloneWithHigherVersion(value);
+        if (beforeChangeMaxVersion != getMaxEndpointStateVersion(epState))
+        {
+            value = StorageService.instance.valueFactory.cloneWithHigherVersion(value);
+        }
         // Add to local application state and fire "on change" notifications:
         epState.addApplicationState(state, value);
         doOnChangeNotifications(epAddr, state, value);
