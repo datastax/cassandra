@@ -1,6 +1,0 @@
-.classpath
-.project
-.externalToolsBuilders
-*.pyc
-build/
-src/gen-java

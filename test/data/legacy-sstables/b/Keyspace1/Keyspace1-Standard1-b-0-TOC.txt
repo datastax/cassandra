@@ -1,4 +1,0 @@
-Index.db
-TOC.txt
-Filter.db
-Data.db

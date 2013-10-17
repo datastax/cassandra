@@ -39,7 +39,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 
 /**
  * This module is responsible for Gossiping information for the local endpoint. This abstraction
@@ -849,11 +848,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         String[] pieces = value.split(VersionedValue.DELIMITER_STR, -1);
         assert (pieces.length > 0);
         String state = pieces[0];
-        for (String deadstate : DEAD_STATES)
-        {
-            if (state.equals(deadstate))
-                return true;
-        }
+            for (String deadstate : DEAD_STATES)
+            {
+                if (state.equals(deadstate))
+                    return true;
+            }
         return false;
     }
 
@@ -941,12 +940,21 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
         for (Entry<ApplicationState, VersionedValue> remoteEntry : remoteState.getApplicationStateMap().entrySet())
         {
-            doNotifications(addr, remoteEntry.getKey(), remoteEntry.getValue());
+            doOnChangeNotifications(addr, remoteEntry.getKey(), remoteEntry.getValue());
+        }
+    }
+    
+    // notify that a local application state is going to change (doesn't get triggered for remote changes)
+    private void doBeforeChangeNotifications(InetAddress addr, EndpointState epState, ApplicationState apState, VersionedValue newValue)
+    {
+        for (IEndpointStateChangeSubscriber subscriber : subscribers)
+        {
+            subscriber.beforeChange(addr, epState, apState, newValue);
         }
     }
 
     // notify that an application state has changed
-    private void doNotifications(InetAddress addr, ApplicationState state, VersionedValue value)
+    private void doOnChangeNotifications(InetAddress addr, ApplicationState state, VersionedValue value)
     {
         for (IEndpointStateChangeSubscriber subscriber : subscribers)
         {
@@ -1115,9 +1123,22 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     public void addLocalApplicationState(ApplicationState state, VersionedValue value)
     {
         EndpointState epState = endpointStateMap.get(FBUtilities.getBroadcastAddress());
+        InetAddress epAddr = FBUtilities.getBroadcastAddress();
         assert epState != null;
+        // Get current max version:
+        int beforeChangeMaxVersion = getMaxEndpointStateVersion(epState);
+        // Fire "before change" notifications:
+        doBeforeChangeNotifications(epAddr, epState, state, value);
+        // Notifications may have taken some time, so raise the version
+        // of the new value if changed, otherwise it could be ignored by the remote node
+        // if another value with a newer version was received in the meantime:
+        if (beforeChangeMaxVersion != getMaxEndpointStateVersion(epState))
+        {
+            value = StorageService.instance.valueFactory.cloneWithHigherVersion(value);
+        }
+        // Add to local application state and fire "on change" notifications:
         epState.addApplicationState(state, value);
-        doNotifications(FBUtilities.getBroadcastAddress(), state, value);
+        doOnChangeNotifications(epAddr, state, value);
     }
 
     public void stop()
