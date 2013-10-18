@@ -1,5 +1,6 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
+ * Remove dead node from system.peers when replacing (CASSANDRA-6217)
 
 
 1.2.11
