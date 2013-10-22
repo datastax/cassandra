@@ -361,9 +361,8 @@ start_rpc: true
 # (i.e. it will be based on the configured hostname of the node).
 #
 # Note that unlike ListenAddress above, it is allowed to specify 0.0.0.0
-# here if you want to listen on all interfaces but is not best practice
-# as it is known to confuse the node auto-discovery features of some
-# client drivers.
+# here if you want to listen on all interfaces, but that will break clients 
+# that rely on node auto-discovery.
 rpc_address: localhost
 # port for Thrift to listen for clients on
 rpc_port: 9160
@@ -439,6 +438,11 @@ snapshot_before_compaction: false
 # should be used to provide data safety. If you set this flag to false, you will
 # lose data on truncation or drop.
 auto_snapshot: true
+
+# Log a debug message if more than this many tombstones are scanned
+# in a single-partition query.  Set the threshold on SliceQueryFilter
+# to debug to enable.
+tombstone_debug_threshold: 10000
 
 # Add column indexes to a row after its contents reach this size.
 # Increase if your column values are large, or if you have a very large

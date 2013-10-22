@@ -28,9 +28,9 @@ commands:
   - name: status
     help: |
       Print cluster information (state, load, IDs, ...)
-  - name: cfstats
+  - name: cfstats [keyspace].[cfname] ...
     help: |
-      Print statistics on column families
+      Print statistics on column families. Use the -i flag to ignore the list of column families and display the remaining cfs.
   - name: version
     help: |
       Print cassandra version
@@ -144,7 +144,7 @@ commands:
       Flush one or more column families
   - name: repair [keyspace] [cfnames]
     help: |
-      Repair one or more column families (use -pr to repair only the first range returned by the partitioner)
+      Repair one or more column families (use -pr to repair only the first range returned by the partitioner; -snapshot to repair one node at a time sequentially using snapshots)
   - name: cleanup [keyspace] [cfnames]
     help: |
       Run cleanup on one or more column families
@@ -185,6 +185,9 @@ commands:
   - name: setcachecapacity <key-cache-capacity> <row-cache-capacity>
     help: |
       Set global key and row cache capacities (in MB units).
+  - name: setcachekeystosave <key-cache-keys-to-save> <row-cache-keys-to-save>
+    help: |
+      Set number of keys saved by each cache for faster post-restart warmup. 0 to disable.
   - name: getendpoints <keyspace> <cf> <key>
     help: |
       Print the end points that owns the key

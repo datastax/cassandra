@@ -13,6 +13,24 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+
+1.2.11
+======
+
+Features
+--------
+    - Added a new consistenct level, LOCAL_ONE, that forces all CL.ONE operations to
+      execute only in the local datacenter.
+    - New replace_address to supplant the (now removed) replace_token and
+      replace_node workflows to replace a dead node in place.  Works like the
+      old options, but takes the IP address of the node to be replaced.
+
+Upgrading
+---------
+    - ColumnFamilyMetrics#sstablesPerReadHistogram switched from uniform sampling
+      to biased-to-last-five-minutes sampling.
+
+
 1.2.10
 ======
 

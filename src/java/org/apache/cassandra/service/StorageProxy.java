@@ -25,7 +25,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -385,7 +384,7 @@ public class StorageProxy implements StorageProxyMBean
         return responseHandler;
     }
 
-    // same as above except does not initiate writes (but does perfrom availability checks).
+    // same as above except does not initiate writes (but does perform availability checks).
     private static WriteResponseHandlerWrapper wrapResponseHandler(RowMutation mutation, ConsistencyLevel consistency_level, WriteType writeType)
     {
         AbstractReplicationStrategy rs = Table.open(mutation.getTable()).getReplicationStrategy();
@@ -468,7 +467,7 @@ public class StorageProxy implements StorageProxyMBean
      * | off            |       >=1      | --> DO NOT fire hints. And DO NOT wait for them to complete.
      * | off            |       ANY      | --> DO NOT fire hints. And DO NOT wait for them to complete.
      *
-     * @throws TimeoutException if the hints cannot be written/enqueued
+     * @throws OverloadedException if the hints cannot be written/enqueued
      */
     public static void sendToHintedEndpoints(final RowMutation rm,
                                              Iterable<InetAddress> targets,
@@ -1551,7 +1550,8 @@ public class StorageProxy implements StorageProxyMBean
             throw new UnavailableException(ConsistencyLevel.ALL, liveMembers + Gossiper.instance.getUnreachableMembers().size(), liveMembers);
         }
 
-        Set<InetAddress> allEndpoints = Gossiper.instance.getLiveMembers();
+        Set<InetAddress> allEndpoints = Gossiper.instance.getLiveTokenOwners();
+        
         int blockFor = allEndpoints.size();
         final TruncateResponseHandler responseHandler = new TruncateResponseHandler(blockFor);
 

@@ -79,6 +79,10 @@ public class ColumnFamilyMetrics
     public final Gauge<Long> bloomFilterDiskSpaceUsed;
     /** Key cache hit rate  for this CF */
     public final Gauge<Double> keyCacheHitRate;
+    /** Tombstones scanned in queries on this CF */
+    public final Histogram tombstoneScannedHistogram;
+    /** Live cells scanned in queries on this CF */
+    public final Histogram liveScannedHistogram;
 
     private final MetricNameFactory factory;
 
@@ -138,7 +142,7 @@ public class ColumnFamilyMetrics
                 return histogram;
             }
         });
-        sstablesPerReadHistogram = Metrics.newHistogram(factory.createMetricName("SSTablesPerReadHistogram"));
+        sstablesPerReadHistogram = Metrics.newHistogram(factory.createMetricName("SSTablesPerReadHistogram"), true);
         compressionRatio = Metrics.newGauge(factory.createMetricName("CompressionRatio"), new Gauge<Double>()
         {
             public Double value()
@@ -295,6 +299,8 @@ public class ColumnFamilyMetrics
                 return Math.max(requests, 1); // to avoid NaN.
             }
         });
+        tombstoneScannedHistogram = Metrics.newHistogram(factory.createMetricName("TombstoneScannedHistogram"), true);
+        liveScannedHistogram = Metrics.newHistogram(factory.createMetricName("LiveScannedHistogram"), true);
     }
 
     public void updateSSTableIterated(int count)
@@ -331,6 +337,8 @@ public class ColumnFamilyMetrics
         Metrics.defaultRegistry().removeMetric(factory.createMetricName("RecentBloomFilterFalseRatio"));
         Metrics.defaultRegistry().removeMetric(factory.createMetricName("BloomFilterDiskSpaceUsed"));
         Metrics.defaultRegistry().removeMetric(factory.createMetricName("KeyCacheHitRate"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("TombstoneScannedHistogram"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("LiveScannedHistogram"));
     }
 
     class ColumnFamilyMetricNameFactory implements MetricNameFactory

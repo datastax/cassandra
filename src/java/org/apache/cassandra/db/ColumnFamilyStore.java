@@ -49,10 +49,7 @@ import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.filter.ExtendedFilter;
-import org.apache.cassandra.db.filter.IDiskAtomFilter;
-import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.db.filter.QueryPath;
+import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -1193,12 +1190,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             if (isRowCacheEnabled())
             {
-                UUID cfId = Schema.instance.getId(table.name, columnFamily);
-                if (cfId == null)
-                {
-                    logger.trace("no id found for {}.{}", table.name, columnFamily);
-                    return null;
-                }
+                assert !isIndex(); // CASSANDRA-5732
+                UUID cfId = metadata.cfId;
 
                 ColumnFamily cached = getThroughCache(cfId, filter);
                 if (cached == null)
@@ -1220,6 +1213,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 // their subcolumns for relevance, so we need to do a second prune post facto here.
                 result = cf.isSuper() ? removeDeleted(cf, gcBefore) : removeDeletedCF(cf, gcBefore);
 
+            }
+
+            if (filter.filter instanceof SliceQueryFilter)
+            {
+                // Log the number of tombstones scanned on single key queries
+                metric.tombstoneScannedHistogram.update(((SliceQueryFilter) filter.filter).lastIgnored());
+                metric.liveScannedHistogram.update(((SliceQueryFilter) filter.filter).lastLive());
             }
         }
         finally
@@ -1905,6 +1905,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public boolean isCompactionDisabled()
     {
         return getMinimumCompactionThreshold() <= 0 || getMaximumCompactionThreshold() <= 0;
+    }
+
+    public double getTombstonesPerSlice()
+    {
+        return metric.tombstoneScannedHistogram.getSnapshot().getMedian();
+    }
+
+    public double getLiveCellsPerSlice()
+    {
+        return metric.liveScannedHistogram.getSnapshot().getMedian();
     }
 
     // End JMX get/set.
