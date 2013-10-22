@@ -335,7 +335,7 @@ public final class CFMetaData
     public static CFMetaData newIndexMetadata(CFMetaData parent, ColumnDefinition info, AbstractType<?> columnComparator)
     {
         // Depends on parent's cache setting, turn on its index CF's cache.
-        // Here, only key cache is enabled, but later (in KeysIndex) row cache will be turned on depending on cardinality.
+        // Row caching is never enabled; see CASSANDRA-5732
         Caching indexCaching = parent.getCaching() == Caching.ALL || parent.getCaching() == Caching.KEYS_ONLY
                              ? Caching.KEYS_ONLY
                              : Caching.NONE;

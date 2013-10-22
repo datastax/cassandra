@@ -1224,6 +1224,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long start = System.nanoTime();
         try
         {
+            if (isRowCacheEnabled())
+            {
+                assert !isIndex(); // see CASSANDRA-5732
+            }
+            
             if (!isRowCacheEnabled())
             {
                 ColumnFamily cf = getTopLevelColumns(filter, gcBefore, false);

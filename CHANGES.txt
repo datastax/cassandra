@@ -1,3 +1,6 @@
+1.1.9.10
+* Fix indexed queries with row cache enabled on parent table (CASSANDRA-5732)
+
 1.1.9.9
  * Remove buggy thrift max message length option (CASSANDRA-5529)
 
