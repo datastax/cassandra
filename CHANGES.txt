@@ -3,6 +3,7 @@ DSE backports/cherry-picks
  * Remove dead node from system.peers when replacing (CASSANDRA-6217)
  * (Hadoop) Require CFRR batchSize to be at least 2 (CASSANDRA-6114)
  * Fix altering column types (CASSANDRA-6185)
+ * Fix potential stack overflow during range tombstones insertion (CASSANDRA-6181)
 
 
 1.2.11
