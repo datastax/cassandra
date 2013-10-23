@@ -4,7 +4,7 @@ DSE backports/cherry-picks
  * (Hadoop) Require CFRR batchSize to be at least 2 (CASSANDRA-6114)
  * Fix altering column types (CASSANDRA-6185)
  * Fix potential stack overflow during range tombstones insertion (CASSANDRA-6181)
-
+ * Fix harmless NPE in MM/HHOM (CASSANDRA-5815)
 
 1.2.11
  * Add a warning for small LCS sstable size (CASSANDRA-6191)
