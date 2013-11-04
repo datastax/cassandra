@@ -24,9 +24,7 @@ import java.io.IOException;
 import java.util.*;
 
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.cassandra.io.compress.CompressionParameters;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +46,6 @@ public class ConfigHelper
 {
     private static final String INPUT_PARTITIONER_CONFIG = "cassandra.input.partitioner.class";
     private static final String OUTPUT_PARTITIONER_CONFIG = "cassandra.output.partitioner.class";
-    private static final String INPUT_DATA_CENTERS_CONFIG = "cassandra.input.dc";
     private static final String INPUT_KEYSPACE_CONFIG = "cassandra.input.keyspace";
     private static final String OUTPUT_KEYSPACE_CONFIG = "cassandra.output.keyspace";
     private static final String INPUT_KEYSPACE_USERNAME_CONFIG = "cassandra.input.keyspace.username";
@@ -61,7 +58,6 @@ public class ConfigHelper
     private static final String INPUT_KEYRANGE_CONFIG = "cassandra.input.keyRange";
     private static final String INPUT_SPLIT_SIZE_CONFIG = "cassandra.input.split.size";
     private static final String INPUT_WIDEROWS_CONFIG = "cassandra.input.widerows";
-
     private static final int DEFAULT_SPLIT_SIZE = 64 * 1024;
     private static final String RANGE_BATCH_SIZE_CONFIG = "cassandra.range.batch.size";
     private static final int DEFAULT_RANGE_BATCH_SIZE = 4096;
@@ -77,7 +73,6 @@ public class ConfigHelper
     private static final String INPUT_TRANSPORT_FACTORY_CLASS = "cassandra.input.transport.factory.class";
     private static final String OUTPUT_TRANSPORT_FACTORY_CLASS = "cassandra.output.transport.factory.class";
     private static final String THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB = "cassandra.thrift.framed.size_mb";
-
 
     private static final Logger logger = LoggerFactory.getLogger(ConfigHelper.class);
 
@@ -611,23 +606,5 @@ public class ConfigHelper
                 options.put(optionKey, optionValue);
         }
         return options;
-    }
-
-    public static Set<String> getInputDataCenters(Configuration conf)
-    {
-        String dataCentersStr = conf.get(INPUT_DATA_CENTERS_CONFIG);
-        if (dataCentersStr == null || dataCentersStr.trim().isEmpty())
-            return null;
-
-        String[] dataCenters = dataCentersStr.split(",[ \t]*");
-        return Sets.newHashSet(dataCenters);
-    }
-
-    public static void setInputDataCenters(Configuration conf, Collection<String> dataCenters)
-    {
-        if (dataCenters == null)
-            conf.set(INPUT_DATA_CENTERS_CONFIG, null);
-        else
-            conf.set(INPUT_DATA_CENTERS_CONFIG, StringUtils.join(dataCenters, ","));
     }
 }
