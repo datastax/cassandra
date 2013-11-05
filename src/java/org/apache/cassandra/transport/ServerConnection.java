@@ -77,7 +77,7 @@ public class ServerConnection extends Connection
             case AUTHENTICATION:
                 // Support both SASL auth from protocol v2 and the older style Credentials auth from v1
                 if (type != Message.Type.AUTH_RESPONSE && type != Message.Type.CREDENTIALS)
-                    throw new ProtocolException(String.format("Unexpected message %s, expecting CREDENTIALS or AUTH_RESPONSE"));
+                    throw new ProtocolException(String.format("Unexpected message %s, expecting CREDENTIALS or AUTH_RESPONSE", type));
                 break;
             case READY:
                 if (type == Message.Type.STARTUP)
