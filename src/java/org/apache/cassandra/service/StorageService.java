@@ -1190,8 +1190,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         Map<Range<Token>, List<InetAddress>> rangeToAddressMap =
                 includeOnlyLocalDC
-                        ? getRangeToAddressMap(keyspace)
-                        : getRangeToAddressMapInLocalDC(keyspace);
+                        ? getRangeToAddressMapInLocalDC(keyspace)
+                        : getRangeToAddressMap(keyspace);
 
         for (Map.Entry<Range<Token>, List<InetAddress>> entry : rangeToAddressMap.entrySet())
         {
