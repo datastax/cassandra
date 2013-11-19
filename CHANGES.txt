@@ -1,35 +1,55 @@
-1.1.9.10
-* Fix indexed queries with row cache enabled on parent table (CASSANDRA-5732)
-
-1.1.9.9
- * Remove buggy thrift max message length option (CASSANDRA-5529)
-
-1.1.9.8
+DSE backports/cherry-picks
+ * Fix indexed queries with row cache enabled on parent table (CASSANDRA-5732)
  * add extension point for sstable components (CASSANDRA-4049)
-
-1.1.9.6
- * Fix NPE in Pig's widerow mode (CASSANDRA-5488)
-
-1.1.9.5
- * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
-
-1.1.9.4
- * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
-
-1.1.9.3
- * DSP-1878 Order of set keyspace, and login, has changed with the new Authenticator (CASSANDRA-5423)
-
-1.1.9.2
- * fix nodetool repair not fail on node down (CASSANDRA-5203)
- * nodetool: ability to repair specific range (CASSANDRA-5280)
-
-1.1.9.1
+ * Order of set keyspace, and login, has changed with the new Authenticator (CASSANDRA-5423)
  * Replace IAuthority with new IAuthorizer (CASSANDRA-4874)
  * Update IAuthenticator to match the new IAuthorizer (CASSANDRA-5003)
- * Pulled in fix for "Start token sorts after end token (CASSANDRA-5106)
  * Accept all thrift update on CQL3 cf but don't expose their metadata (CASSANDRA-4377)
  * Add require_client_auth option to internode ssl configuration (CASSANDRA-5120)
+
+
+1.1.12
+ * Remove buggy thrift max message length option (CASSANDRA-5529)
+ * Add retry mechanism to OTC for non-droppable_verbs (CASSANDRA-5393)
+ * Use allocator information to improve memtable memory usage estimate 
+   (CASSANDRA-5497)
+ * fsync leveled manifest to avoid corruption (CASSANDRA-5535)
+ * Fix Bound intersection computation (CASSANDRA-5551)
+ * Fix NPE in Pig's widerow mode (CASSANDRA-5488)
+
+
+1.1.11
+ * Fix trying to load deleted row into row cache on startup (CASSANDRA-4463)
+ * Update offline scrub for 1.0 -> 1.1 directory structure (CASSANDRA-5195)
+ * add tmp flag to Descriptor hashcode (CASSANDRA-4021)
+ * fix logging of "Found table data in data directories" when only system tables
+   are present (CASSANDRA-5289)
+ * cli: Add JMX authentication support (CASSANDRA-5080)
+ * nodetool: ability to repair specific range (CASSANDRA-5280)
  * Fix possible assertion triggered in SliceFromReadCommand (CASSANDRA-5284)
+ * cqlsh: Add inet type support on Windows (ipv4-only) (CASSANDRA-4801)
+ * Fix race when initializing ColumnFamilyStore (CASSANDRA-5350)
+ * Add UseTLAB JVM flag (CASSANDRA-5361)
+ * cli: Quote ks and cf names in schema output when needed (CASSANDRA-5052)
+ * Fix bad default for min/max timestamp in SSTableMetadata (CASSANDRA-5372)
+ * Fix cf name extraction from manifest in Directories.migrateFile() (CASSANDRA-5242)
+ * Support pluggable internode authentication (CASSANDRA-5401)
+ * Replace mistaken usage of commons-logging with slf4j (CASSANDRA-5464)
+
+
+1.1.10
+ * fix saved key cache not loading at startup (CASSANDRA-5166)
+ * fix ConcurrentModificationException in getBootstrapSource (CASSANDRA-5170)
+ * fix sstable maxtimestamp for row deletes and pre-1.1.1 sstables (CASSANDRA-5153)
+ * fix start key/end token validation for wide row iteration (CASSANDRA-5168)
+ * add ConfigHelper support for Thrift frame and max message sizes (CASSANDRA-5188)
+ * fix nodetool repair not fail on node down (CASSANDRA-5203)
+ * always collect tombstone hints (CASSANDRA-5068)
+ * Fix thread growth on node removal (CASSANDRA-5175)
+ * Fix error when sourcing file in cqlsh (CASSANDRA-5235)
+ * Make Ec2Region's datacenter name configurable (CASSANDRA-5155)
+
+>>>>>>> cassandra-1.1.12
 
 1.1.9
  * Simplify CompressedRandomAccessReader to work around JDK FD bug (CASSANDRA-5088)
@@ -44,6 +64,7 @@
  * fix get_count returns incorrect value with TTL (CASSANDRA-5099)
  * better handling for amid compaction failure (CASSANDRA-5137)
  * calculate pending ranges asynchronously (CASSANDRA-5135)
+ * convert default marshallers list to map for better readability (CASSANDRA-5109)
 
 
 1.1.8

@@ -68,6 +68,10 @@ public class ConfigHelper
     private static final String WRITE_CONSISTENCY_LEVEL = "cassandra.consistencylevel.write";
     private static final String OUTPUT_COMPRESSION_CLASS = "cassandra.output.compression.class";
     private static final String OUTPUT_COMPRESSION_CHUNK_LENGTH = "cassandra.output.compression.length";
+
+    private static final String INPUT_TRANSPORT_FACTORY_CLASS = "cassandra.input.transport.factory.class";
+    private static final String OUTPUT_TRANSPORT_FACTORY_CLASS = "cassandra.output.transport.factory.class";
+
     private static final String THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB = "cassandra.thrift.framed.size_mb";
 
     private static final Logger logger = LoggerFactory.getLogger(ConfigHelper.class);
@@ -473,6 +477,13 @@ public class ConfigHelper
         return conf.getInt(THRIFT_FRAMED_TRANSPORT_SIZE_IN_MB, 15) * 1024 * 1024; // 15MB is default in Cassandra
     }
 
+
+    @Deprecated
+    public static void setThriftMaxMessageLengthInMb(Configuration conf, int maxMessageSizeInMB)
+    {
+        // SEE CASSANDRA-5529
+    }
+
     public static CompressionParameters getOutputCompressionParamaters(Configuration conf)
     {
         if (getOutputCompressionClass(conf) == null)
@@ -531,8 +542,8 @@ public class ConfigHelper
     {
         try
         {
-            TTransport transport = getClientTransportFactory(conf).openTransport(host, port);
-            return new Cassandra.Client(new TBinaryProtocol(transport));
+            TTransport transport = getClientTransportFactory(conf).openTransport(host, port, conf);
+            return new Cassandra.Client(new TBinaryProtocol(transport, true, true));
         }
         catch (Exception e)
         {

@@ -24,7 +24,8 @@ initial_token:
 # See http://wiki.apache.org/cassandra/HintedHandoff
 hinted_handoff_enabled: true
 # this defines the maximum amount of time a dead host will have hints
-# generated.  After it has been dead this long, hints will be dropped.
+# generated.  After it has been dead this long, new hints for it will not be
+# created until it has been seen alive and gone down again.
 max_hint_window_in_ms: 3600000 # one hour
 # Sleep this long after delivering each hint
 hinted_handoff_throttle_delay_in_ms: 1
@@ -285,6 +286,10 @@ listen_address: localhost
 # Address to broadcast to other Cassandra nodes
 # Leaving this blank will set it to the same value as listen_address
 # broadcast_address: 1.2.3.4
+
+# Internode authentication backend, implementing IInternodeAuthenticator;
+# used to allow/disallow connections from peer nodes.
+# internode_authenticator: org.apache.cassandra.auth.AllowAllInternodeAuthenticator
 
 # The address to bind the Thrift RPC service to -- clients connect
 # here. Unlike ListenAddress above, you *can* specify 0.0.0.0 here if

@@ -30,6 +30,11 @@ calculate_heap_sizes()
             system_memory_in_mb=`prtconf | awk '/Memory size:/ {print $3}'`
             system_cpu_cores=`psrinfo | wc -l`
         ;;
+        Darwin)
+            system_memory_in_bytes=`sysctl hw.memsize | awk '{print $2}'`
+            system_memory_in_mb=`expr $system_memory_in_bytes / 1024 / 1024`
+            system_cpu_cores=`sysctl hw.ncpu | awk '{print $2}'`
+        ;;
         *)
             # assume reasonable defaults for e.g. a modern desktop or
             # cheap server
@@ -197,6 +202,7 @@ JVM_OPTS="$JVM_OPTS -XX:SurvivorRatio=8"
 JVM_OPTS="$JVM_OPTS -XX:MaxTenuringThreshold=1"
 JVM_OPTS="$JVM_OPTS -XX:CMSInitiatingOccupancyFraction=75"
 JVM_OPTS="$JVM_OPTS -XX:+UseCMSInitiatingOccupancyOnly"
+JVM_OPTS="$JVM_OPTS -XX:+UseTLAB"
 
 # GC logging options -- uncomment to enable
 # JVM_OPTS="$JVM_OPTS -XX:+PrintGCDetails"

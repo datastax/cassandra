@@ -46,6 +46,7 @@ public class OutboundTcpConnection extends Thread
                                                               StorageService.Verb.INTERNAL_RESPONSE,
                                                               ArrayUtils.EMPTY_BYTE_ARRAY,
                                                               MessagingService.version_);
+    private volatile boolean isStopped = false;
 
     private static final int OPEN_RETRY_DELAY = 100; // ms between retries
 
@@ -80,10 +81,11 @@ public class OutboundTcpConnection extends Thread
         }
     }
 
-    void closeSocket()
+    void closeSocket(boolean destroyThread)
     {
         active.clear();
         backlog.clear();
+        isStopped = destroyThread; // Exit loop to stop the thread
         enqueue(CLOSE_SENTINEL, null);
     }
 
@@ -119,6 +121,8 @@ public class OutboundTcpConnection extends Thread
             if (m == CLOSE_SENTINEL)
             {
                 disconnect();
+                if (isStopped)
+                    break;
                 continue;
             }
             if (entry.timestamp < System.currentTimeMillis() - DatabaseDescriptor.getRpcTimeout())

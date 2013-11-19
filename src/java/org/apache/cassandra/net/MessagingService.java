@@ -70,6 +70,7 @@ public final class MessagingService implements MessagingServiceMBean
     public static final int VERSION_10  = 3;
     public static final int VERSION_11  = 4;
     public static final int VERSION_117 = 5;
+    public static final int VERSION_12  = 6;
 
     public static final int version_ = VERSION_117;
 
@@ -305,9 +306,9 @@ public final class MessagingService implements MessagingServiceMBean
             return;
         // these null guards are simply for tests
         if (cp.ackCon != null)
-            cp.ackCon.closeSocket();
+            cp.ackCon.closeSocket(true);
         if (cp.cmdCon != null)
-            cp.cmdCon.closeSocket();
+            cp.cmdCon.closeSocket(true);
         connectionManagers_.remove(to);
         recentTimeoutsPerHost.remove(to.getHostAddress());
         timeoutsPerHost.remove(to.getHostAddress());
@@ -697,7 +698,10 @@ public final class MessagingService implements MessagingServiceMBean
                 try
                 {
                     Socket socket = server.accept();
-                    new IncomingTcpConnection(socket).start();
+                    if (authenticate(socket))
+                        new IncomingTcpConnection(socket).start();
+                    else
+                        socket.close();
                 }
                 catch (AsynchronousCloseException e)
                 {
@@ -715,6 +719,11 @@ public final class MessagingService implements MessagingServiceMBean
         void close() throws IOException
         {
             server.close();
+        }
+
+        private boolean authenticate(Socket socket)
+        {
+            return DatabaseDescriptor.getInternodeAuthenticator().authenticate(socket.getInetAddress(), socket.getPort());
         }
     }
 

@@ -148,8 +148,8 @@ public class ColumnFamilyOutputFormat extends OutputFormat<ByteBuffer,List<Mutat
     public static ClientHolder createAuthenticatedClient(String host, int port, Configuration conf) throws Exception
     {
         logger.debug("Creating authenticated client for CF output format");
-        TTransport transport = ConfigHelper.getClientTransportFactory(conf).openTransport(host, port);
-        TBinaryProtocol binaryProtocol = new TBinaryProtocol(transport);
+        TTransport transport = ConfigHelper.getClientTransportFactory(conf).openTransport(host, port, conf);
+        TBinaryProtocol binaryProtocol = new TBinaryProtocol(transport, true, true);
         Cassandra.Client client = new Cassandra.Client(binaryProtocol);
         client.set_keyspace(ConfigHelper.getOutputKeyspace(conf));
         if (ConfigHelper.getOutputKeyspaceUserName(conf) != null)

@@ -110,6 +110,10 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
         if (Gossiper.instance.getVersion(endpoint) < MessagingService.VERSION_117)
             return;
 
+        // Don't request migrations from nodes with versions that are >= 1.2
+        if (Gossiper.instance.getVersion(endpoint) >= MessagingService.VERSION_12)
+            return;
+
         if (Schema.instance.getVersion().equals(theirVersion))
             return;
 
@@ -277,7 +281,6 @@ public class MigrationManager implements IEndpointStateChangeSubscriber
      */
     public static void passiveAnnounce(UUID version)
     {
-        assert Gossiper.instance.isEnabled();
         Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
         logger.debug("Gossiping my schema version " + version);
     }

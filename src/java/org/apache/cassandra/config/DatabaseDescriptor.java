@@ -36,6 +36,7 @@ import org.apache.cassandra.config.Config.RequestSchedulerId;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DefsTable;
 import org.apache.cassandra.db.SystemTable;
+import org.apache.cassandra.db.Table;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
@@ -58,6 +59,7 @@ public class DatabaseDescriptor
     private static InetAddress broadcastAddress;
     private static InetAddress rpcAddress;
     private static SeedProvider seedProvider;
+    private static IInternodeAuthenticator internodeAuthenticator;
 
     /* Hashing strategy Random or OPHF */
     private static IPartitioner partitioner;
@@ -220,11 +222,20 @@ public class DatabaseDescriptor
             if (auth_replication_strategy == SimpleStrategy.class && auth_replication_options.isEmpty())
                 auth_replication_options.put("replication_factor", "1");
 
+            if (conf.internode_authenticator != null)
+                internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
+            else
+                internodeAuthenticator = new AllowAllInternodeAuthenticator();
+
+            internodeAuthenticator.validateConfiguration();
+
+
             /* Hashing strategy */
             if (conf.partitioner == null)
             {
                 throw new ConfigurationException("Missing directive: partitioner");
             }
+
             try
             {
                 partitioner = FBUtilities.newPartitioner(System.getProperty("cassandra.partitioner", conf.partitioner));
@@ -559,7 +570,7 @@ public class DatabaseDescriptor
                 {
                     public boolean accept(File pathname)
                     {
-                        return pathname.isDirectory();
+                        return (pathname.isDirectory() && !Table.SYSTEM_TABLE.equals(pathname.getName()));
                     }
                 }).length;
 
@@ -830,6 +841,11 @@ public class DatabaseDescriptor
         return broadcastAddress;
     }
 
+    public static IInternodeAuthenticator getInternodeAuthenticator()
+    {
+        return internodeAuthenticator;
+    }
+
     public static void setBroadcastAddress(InetAddress broadcastAdd)
     {
         broadcastAddress = broadcastAdd;
@@ -984,20 +1000,6 @@ public class DatabaseDescriptor
     public static boolean getPreheatKeyCache()
     {
         return conf.compaction_preheat_key_cache;
-    }
-
-    public static void validateMemtableThroughput(int sizeInMB) throws ConfigurationException
-    {
-        if (sizeInMB <= 0)
-            throw new ConfigurationException("memtable_throughput_in_mb must be greater than 0.");
-    }
-
-    public static void validateMemtableOperations(double operationsInMillions) throws ConfigurationException
-    {
-        if (operationsInMillions <= 0)
-            throw new ConfigurationException("memtable_operations_in_millions must be greater than 0.0.");
-        if (operationsInMillions > Long.MAX_VALUE / 1024 * 1024)
-            throw new ConfigurationException("memtable_operations_in_millions must be less than " + Long.MAX_VALUE / 1024 * 1024);
     }
 
     public static boolean isIncrementalBackupsEnabled()

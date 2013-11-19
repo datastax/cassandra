@@ -21,6 +21,7 @@ package org.apache.cassandra.thrift;
  *
  */
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.thrift.transport.TTransport;
 
 import java.util.Map;
@@ -52,6 +53,24 @@ public interface TClientTransportFactory
      *         if the connection cannot be established
      */
     TTransport openTransport(String host, int port) throws Exception;
+
+    /**
+     * Opens a client transport to a thrift server.
+     * Example:
+     *
+     * <pre>
+     * TTransport transport = clientTransportFactory.openTransport(address, port);
+     * Cassandra.Iface client = new Cassandra.Client(new BinaryProtocol(transport));
+     * </pre>
+     *
+     * @param host fully qualified hostname of the server
+     * @param port RPC port of the server
+     * @param conf Hadoop configuration
+     * @return open and ready to use transport
+     * @throws Exception implementation defined; usually throws TTransportException or IOException
+     *         if the connection cannot be established
+     */
+    TTransport openTransport(String host, int port, Configuration conf) throws Exception;
 
     /**
      * Sets an implementation defined set of options.

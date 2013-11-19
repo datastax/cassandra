@@ -108,7 +108,7 @@ public class ColumnFamilyInputFormat extends InputFormat<ByteBuffer, SortedMap<B
     {
         logger.debug("Creating authenticated client for CF input format");
         TTransport transport = ConfigHelper.getClientTransportFactory(conf).openTransport(location, port);
-        TBinaryProtocol binaryProtocol = new TBinaryProtocol(transport);
+        TBinaryProtocol binaryProtocol = new TBinaryProtocol(transport, true, true);
         Cassandra.Client client = new Cassandra.Client(binaryProtocol);
 
         // log in
