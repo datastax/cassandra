@@ -90,8 +90,8 @@ public class CredentialsMessage extends Message.Request
         // Kerberos authentication would be bypassed & users could log
         // in with any credentials.
         // To prevent that, here we verify the IAuthenticator class &
-        // reject the request if it is anything other than
-        // PasswordAuthenticator.
+        // reject the request if it is anything other than one of the 2
+        // PasswordAuthenticator implementations.
 
         // An alternative would be to bump the protocol version to 2,
         // but
@@ -109,7 +109,8 @@ public class CredentialsMessage extends Message.Request
 
         Class c = DatabaseDescriptor.getAuthenticator().getClass();
         if (! org.apache.cassandra.auth.PasswordAuthenticator.class.isAssignableFrom(c)
-             || ! c.getName().equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator") )
+             || ! ( c.getName().equals("com.datastax.bdp.cassandra.auth.PasswordAuthenticator")
+                    || c.equals(PasswordAuthenticator.class)))
         {
             return ErrorMessage.fromException(new AuthenticationException("Unsupported Authenticator " + c.getName()));
         }
