@@ -1427,6 +1427,9 @@ public class CassandraServer implements Cassandra.Iface
             if (oldCfm == null)
                 throw new InvalidRequestException("Could not find column family definition to modify.");
 
+            if (oldCfm.isThriftIncompatible())
+                throw new InvalidRequestException("Cannot modify CQL3 table " + oldCfm.cfName + " as it may break the schema. You should use cqlsh to modify CQL3 tables instead.");
+
             state().hasColumnFamilyAccess(cf_def.keyspace, cf_def.name, Permission.ALTER);
 
             CFMetaData.applyImplicitDefaults(cf_def);
@@ -1751,10 +1754,12 @@ public class CassandraServer implements Cassandra.Iface
 
         validateCQLVersion(2);
 
+        String queryString = uncompress(query,compression);
+        ThriftClientState cState = state();
+
         try
         {
-            ThriftClientState cState = state();
-            String queryString = uncompress(query,compression);
+            cState.validateLogin();
             return QueryProcessor.prepare(queryString, cState);
         }
         catch (RequestValidationException e)
@@ -1771,10 +1776,12 @@ public class CassandraServer implements Cassandra.Iface
 
         validateCQLVersion(3);
 
+        String queryString = uncompress(query,compression);
+        ThriftClientState cState = state();
+
         try
         {
-            ThriftClientState cState = state();
-            String queryString = uncompress(query,compression);
+            cState.validateLogin();
             return org.apache.cassandra.cql3.QueryProcessor.prepare(queryString, cState, true).toThriftPreparedResult();
         }
         catch (RequestValidationException e)
@@ -1850,7 +1857,6 @@ public class CassandraServer implements Cassandra.Iface
                                                                 " or you have prepared too many queries and it has been evicted from the internal cache)",
                                                                 itemId));
             logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.statement.getBoundsTerms());
-
             return org.apache.cassandra.cql3.QueryProcessor.processPrepared(statement, ThriftConversion.fromThrift(cLevel), cState.getQueryState(), bindVariables).toThriftResult();
         }
         catch (RequestExecutionException e)

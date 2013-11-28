@@ -444,7 +444,6 @@ public class Session implements Serializable
             validateTransportFactory();
             if (cmd.hasOption("un"))
                 username = cmd.getOptionValue("un");
-
             if (cmd.hasOption("pw"))
                 password = cmd.getOptionValue("pw");
         }

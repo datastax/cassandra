@@ -173,9 +173,9 @@ public class Memtable
         if (!MemoryMeter.isInitialized())
         {
             // hack for openjdk.  we log a warning about this in the startup script too.
-            logger.warn("MemoryMeter uninitialized (jamm not specified as java agent); assuming liveRatio of {}.  "
-                        + " Usually this means cassandra-env.sh disabled jamm because you are using a buggy JRE; "
-                        + " upgrade to the Sun JRE instead", cfs.liveRatio);
+            logger.error("MemoryMeter uninitialized (jamm not specified as java agent); assuming liveRatio of {}.  "
+                         + " Usually this means cassandra-env.sh disabled jamm because you are using a buggy JRE; "
+                         + " upgrade to the Sun JRE instead", cfs.liveRatio);
             return;
         }
 
@@ -497,7 +497,7 @@ public class Memtable
 
                 if (newRatio < MIN_SANE_LIVE_RATIO)
                 {
-                    logger.warn("setting live ratio to minimum of {} instead of {}", MIN_SANE_LIVE_RATIO, newRatio);
+                    logger.debug("setting live ratio to minimum of {} instead of {}", MIN_SANE_LIVE_RATIO, newRatio);
                     newRatio = MIN_SANE_LIVE_RATIO;
                 }
                 if (newRatio > MAX_SANE_LIVE_RATIO)

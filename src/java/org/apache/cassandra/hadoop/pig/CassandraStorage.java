@@ -321,9 +321,6 @@ public class CassandraStorage extends AbstractCassandraStorage
         if (initHostAddress != null)
             ConfigHelper.setInputInitialAddress(conf, initHostAddress);
 
-        if (partitionerClass!= null)
-            ConfigHelper.setInputPartitioner(conf, partitionerClass);
-
         ConfigHelper.setInputColumnFamily(conf, keyspace, column_family, widerows);
         setConnectionInformation();
 
@@ -738,7 +735,6 @@ public class CassandraStorage extends AbstractCassandraStorage
             ConfigurationException,
             NotFoundException
     {
-
         return getColumnMeta(client, true, true);
     }
 
@@ -827,6 +823,11 @@ public class CassandraStorage extends AbstractCassandraStorage
                     "[&comparator=<comparator>][&split_size=<size>][&partitioner=<partitioner>]" +
                     "[&init_address=<host>][&rpc_port=<port>]]': " + e.getMessage());
         }
+    }
+    
+    public ByteBuffer nullToBB()
+    {
+        return (ByteBuffer) null;
     }
 }
 
