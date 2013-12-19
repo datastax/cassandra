@@ -1,6 +1,6 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
-
+ * Don't drop local mutations without a trace (CASSANDRA-6510)
 
 1.2.13
  * Improved error message on bad properties in DDL queries (CASSANDRA-6453)
