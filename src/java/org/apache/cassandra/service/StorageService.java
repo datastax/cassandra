@@ -1308,7 +1308,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      *   set if the node is dead and has been removed by its REMOVAL_COORDINATOR
      *
      * Note: Any time a node state changes from STATUS_NORMAL, it will not be visible to new nodes. So it follows that
-     * you should never bootstrap a new node during a removetoken, decommission or move.
+     * you should never bootstrap a new node during a removenode, decommission or move.
      */
     public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value)
     {
@@ -1466,7 +1466,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Set<Token> tokensToUpdateInSystemTable = new HashSet<Token>();
         Set<Token> localTokensToRemove = new HashSet<Token>();
         Set<InetAddress> endpointsToRemove = new HashSet<InetAddress>();
-        Multimap<InetAddress, Token> epToTokenCopy = getTokenMetadata().getEndpointToTokenMapForReading();
 
         for (final Token token : tokens)
         {
@@ -1520,6 +1519,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
                 // currentOwner is no longer current, endpoint is.  Keep track of these moves, because when
                 // a host no longer has any tokens, we'll want to remove it.
+                Multimap<InetAddress, Token> epToTokenCopy = getTokenMetadata().getEndpointToTokenMapForReading();
                 epToTokenCopy.get(currentOwner).remove(token);
                 if (epToTokenCopy.get(currentOwner).size() < 1)
                     endpointsToRemove.add(currentOwner);
@@ -1660,7 +1660,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * Handle notification that a node being actively removed from the ring via 'removetoken'
+     * Handle notification that a node being actively removed from the ring via 'removenode'
      *
      * @param endpoint node
      * @param pieces either REMOVED_TOKEN (node is gone) or REMOVING_TOKEN (replicas need to be restored)
@@ -1671,7 +1671,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
         {
-            logger.info("Received removeToken gossip about myself. Is this node rejoining after an explicit removetoken?");
+            logger.info("Received removenode gossip about myself. Is this node rejoining after an explicit removenode?");
             try
             {
                 drain();
@@ -1912,7 +1912,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         TokenMetadata temp = tokenMetadata.cloneAfterAllLeft();
 
-        // endpoint might or might not be 'leaving'. If it was not leaving (that is, removetoken
+        // endpoint might or might not be 'leaving'. If it was not leaving (that is, removenode
         // command was used), it is still present in temp and must be removed.
         if (temp.isMember(endpoint))
             temp.removeEndpoint(endpoint);
@@ -3207,7 +3207,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            throw new UnsupportedOperationException("No tokens to force removal on, call 'removetoken' first");
+            throw new UnsupportedOperationException("No tokens to force removal on, call 'removenode' first");
         }
     }
 
@@ -3243,7 +3243,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.warn("Node " + endpoint + " is already being removed, continuing removal anyway");
 
         if (!replicatingNodes.isEmpty())
-            throw new UnsupportedOperationException("This node is already processing a removal. Wait for it to complete, or use 'removetoken force' if this has failed.");
+            throw new UnsupportedOperationException("This node is already processing a removal. Wait for it to complete, or use 'removenode force' if this has failed.");
 
         // Find the endpoints that are going to become responsible for data
         for (String table : Schema.instance.getNonSystemTables())

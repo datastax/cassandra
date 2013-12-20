@@ -22,15 +22,11 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.common.collect.*;
-
-import org.apache.cassandra.utils.BiMultiValMap;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.SortedBiMultiValMap;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +36,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.BiMultiValMap;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.SortedBiMultiValMap;
 
 public class TokenMetadata
 {
@@ -96,8 +95,6 @@ public class TokenMetadata
     private volatile ArrayList<Token> sortedTokens;
 
     private final Topology topology;
-    /* list of subscribers that are notified when the tokenToEndpointMap changed */
-    private final CopyOnWriteArrayList<AbstractReplicationStrategy> subscribers = new CopyOnWriteArrayList<AbstractReplicationStrategy>();
 
     private static final Comparator<InetAddress> inetaddressCmp = new Comparator<InetAddress>()
     {
@@ -106,6 +103,9 @@ public class TokenMetadata
             return ByteBuffer.wrap(o1.getAddress()).compareTo(ByteBuffer.wrap(o2.getAddress()));
         }
     };
+
+    // signals replication strategies that nodes have joined or left the ring and they need to recompute ownership
+    private volatile long ringVersion = 0;
 
     public TokenMetadata()
     {
@@ -428,7 +428,7 @@ public class TokenMetadata
             leavingEndpoints.remove(endpoint);
             endpointToHostIdMap.remove(endpoint);
             sortedTokens = sortTokens();
-            invalidateCaches();
+            invalidateCachedRings();
         }
         finally
         {
@@ -456,7 +456,7 @@ public class TokenMetadata
                 }
             }
 
-            invalidateCaches();
+            invalidateCachedRings();
         }
         finally
         {
@@ -586,6 +586,8 @@ public class TokenMetadata
         }
     }
 
+    private final AtomicReference<TokenMetadata> cachedTokenMap = new AtomicReference<TokenMetadata>();
+
     /**
      * Create a copy of TokenMetadata with only tokenToEndpointMap. That is, pending ranges,
      * bootstrap tokens and leaving endpoints are not included in the copy.
@@ -602,6 +604,31 @@ public class TokenMetadata
         finally
         {
             lock.readLock().unlock();
+        }
+    }
+
+    /**
+     * Return a cached TokenMetadata with only tokenToEndpointMap, i.e., the same as cloneOnlyTokenMap but
+     * uses a cached copy that is invalided when the ring changes, so in the common case
+     * no extra locking is required.
+     *
+     * Callers must *NOT* mutate the returned metadata object.
+     */
+    public TokenMetadata cachedOnlyTokenMap()
+    {
+        TokenMetadata tm = cachedTokenMap.get();
+        if (tm != null)
+            return tm;
+
+        // synchronize to prevent thundering herd (CASSANDRA-6345)
+        synchronized (this)
+        {
+            if ((tm = cachedTokenMap.get()) != null)
+                return tm;
+
+            tm = cloneOnlyTokenMap();
+            cachedTokenMap.set(tm);
+            return tm;
         }
     }
 
@@ -885,7 +912,7 @@ public class TokenMetadata
             leavingEndpoints.clear();
             pendingRanges.clear();
             endpointToHostIdMap.clear();
-            invalidateCaches();
+            invalidateCachedRings();
         }
         finally
         {
@@ -977,24 +1004,6 @@ public class TokenMetadata
         return sb.toString();
     }
 
-    public void invalidateCaches()
-    {
-        for (AbstractReplicationStrategy subscriber : subscribers)
-        {
-            subscriber.invalidateCachedTokenEndpointValues();
-        }
-    }
-
-    public void register(AbstractReplicationStrategy subscriber)
-    {
-        subscribers.add(subscriber);
-    }
-
-    public void unregister(AbstractReplicationStrategy subscriber)
-    {
-        subscribers.remove(subscriber);
-    }
-
     public Collection<InetAddress> pendingEndpointsFor(Token token, String table)
     {
         Map<Range<Token>, Collection<InetAddress>> ranges = getPendingRanges(table);
@@ -1066,6 +1075,17 @@ public class TokenMetadata
     {
         assert this != StorageService.instance.getTokenMetadata();
         return topology;
+    }
+
+    public long getRingVersion()
+    {
+        return ringVersion;
+    }
+
+    public void invalidateCachedRings()
+    {
+        ringVersion++;
+        cachedTokenMap.set(null);
     }
 
     /**

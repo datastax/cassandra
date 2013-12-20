@@ -54,6 +54,9 @@ public abstract class AbstractReplicationStrategy
     public final Map<String, String> configOptions;
     private final TokenMetadata tokenMetadata;
 
+    // track when the token range changes, signaling we need to invalidate our endpoint cache
+    private volatile long lastInvalidatedVersion = 0;
+
     public IEndpointSnitch snitch;
 
     AbstractReplicationStrategy(String tableName, TokenMetadata tokenMetadata, IEndpointSnitch snitch, Map<String, String> configOptions)
@@ -63,7 +66,6 @@ public abstract class AbstractReplicationStrategy
         assert tokenMetadata != null;
         this.tokenMetadata = tokenMetadata;
         this.snitch = snitch;
-        this.tokenMetadata.register(this);
         this.configOptions = configOptions == null ? Collections.<String, String>emptyMap() : configOptions;
         this.tableName = tableName;
         // lazy-initialize table itself since we don't create them until after the replication strategies
@@ -73,18 +75,22 @@ public abstract class AbstractReplicationStrategy
 
     public ArrayList<InetAddress> getCachedEndpoints(Token t)
     {
+        long lastVersion = tokenMetadata.getRingVersion();
+
+        if (lastVersion > lastInvalidatedVersion)
+        {
+            synchronized (this)
+            {
+                if (lastVersion > lastInvalidatedVersion)
+                {
+                    logger.debug("clearing cached endpoints");
+                    cachedEndpoints.clear();
+                    lastInvalidatedVersion = lastVersion;
+                }
+            }
+        }
+
         return cachedEndpoints.get(t);
-    }
-
-    public void cacheEndpoint(Token t, ArrayList<InetAddress> addr)
-    {
-        cachedEndpoints.put(t, addr);
-    }
-
-    public void clearEndpointCache()
-    {
-        logger.debug("clearing cached endpoints");
-        cachedEndpoints.clear();
     }
 
     /**
@@ -101,10 +107,11 @@ public abstract class AbstractReplicationStrategy
         ArrayList<InetAddress> endpoints = getCachedEndpoints(keyToken);
         if (endpoints == null)
         {
-            TokenMetadata tokenMetadataClone = tokenMetadata.cloneOnlyTokenMap();
-            keyToken = TokenMetadata.firstToken(tokenMetadataClone.sortedTokens(), searchToken);
-            endpoints = new ArrayList<InetAddress>(calculateNaturalEndpoints(searchToken, tokenMetadataClone));
-            cacheEndpoint(keyToken, endpoints);
+            TokenMetadata tm = tokenMetadata.cachedOnlyTokenMap();
+            // if our cache got invalidated, it's possible there is a new token to account for too
+            keyToken = TokenMetadata.firstToken(tm.sortedTokens(), searchToken);
+            endpoints = new ArrayList<InetAddress>(calculateNaturalEndpoints(searchToken, tm));
+            cachedEndpoints.put(keyToken, endpoints);
         }
 
         return new ArrayList<InetAddress>(endpoints);
@@ -202,11 +209,6 @@ public abstract class AbstractReplicationStrategy
         TokenMetadata temp = metadata.cloneOnlyTokenMap();
         temp.updateNormalTokens(pendingTokens, pendingAddress);
         return getAddressRanges(temp).get(pendingAddress);
-    }
-
-    public void invalidateCachedTokenEndpointValues()
-    {
-        clearEndpointCache();
     }
 
     public abstract void validateOptions() throws ConfigurationException;

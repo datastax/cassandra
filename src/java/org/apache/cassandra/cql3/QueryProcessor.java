@@ -260,7 +260,10 @@ public class QueryProcessor
         onPrepareHook.execute(prepared.statement, context);
 
         ResultMessage.Prepared msg = storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared, forThrift);
-        assert prepared.statement.getBoundsTerms() == prepared.boundNames.size();
+        int bountTerms = prepared.statement.getBoundsTerms();
+        if (bountTerms > FBUtilities.MAX_UNSIGNED_SHORT)
+            throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", bountTerms, FBUtilities.MAX_UNSIGNED_SHORT));
+        assert bountTerms == prepared.boundNames.size();
         return msg;
     }
 
