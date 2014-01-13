@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
 
