@@ -14,6 +14,19 @@ restore snapshots created with the previous major version using the
 using the provided 'sstableupgrade' tool.
 
 
+1.2.13.3
+======
+
+Upgrading
+---------
+    - The system property cassandra.default_messaging_version has been added
+      to allow faster upgrades from 1.1.  Normally, a 1.2 node will need to
+      wait until a 1.1 node connects to it to discover that the 1.1 node uses
+      an older internal message protocol; setting this property (to 5, 
+      corresponding to 1.1.7+) will allow newly upgraded 1.2 nodes to
+      participate in a mostly-1.1 cluster faster.
+
+
 1.2.13
 ======
 
