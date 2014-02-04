@@ -355,7 +355,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             throw new IllegalStateException("No configured daemon");
         }
-        daemon.nativeServer.stop();
+        if (daemon.nativeServer != null)
+            daemon.nativeServer.stop();
     }
 
     public boolean isNativeTransportRunning()
@@ -1312,48 +1313,59 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value)
     {
-        switch (state)
+        if (state.equals(ApplicationState.STATUS))
         {
-            case STATUS:
-                String apStateValue = value.value;
-                String[] pieces = apStateValue.split(VersionedValue.DELIMITER_STR, -1);
-                assert (pieces.length > 0);
+            String apStateValue = value.value;
+            String[] pieces = apStateValue.split(VersionedValue.DELIMITER_STR, -1);
+            assert (pieces.length > 0);
 
-                String moveName = pieces[0];
+            String moveName = pieces[0];
 
-                if (moveName.equals(VersionedValue.STATUS_BOOTSTRAPPING))
-                    handleStateBootstrap(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.STATUS_NORMAL))
-                    handleStateNormal(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.REMOVING_TOKEN) || moveName.equals(VersionedValue.REMOVED_TOKEN))
-                    handleStateRemoving(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.STATUS_LEAVING))
-                    handleStateLeaving(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.STATUS_LEFT))
-                    handleStateLeft(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.STATUS_MOVING))
-                    handleStateMoving(endpoint, pieces);
-                else if (moveName.equals(VersionedValue.STATUS_RELOCATING))
-                    handleStateRelocating(endpoint, pieces);
-                break;
-            case RELEASE_VERSION:
-                SystemTable.updatePeerInfo(endpoint, "release_version", quote(value.value));
-                break;
-            case DC:
-                SystemTable.updatePeerInfo(endpoint, "data_center", quote(value.value));
-                break;
-            case RACK:
-                SystemTable.updatePeerInfo(endpoint, "rack", quote(value.value));
-                break;
-            case RPC_ADDRESS:
-                SystemTable.updatePeerInfo(endpoint, "rpc_address", quote(value.value));
-                break;
-            case SCHEMA:
-                SystemTable.updatePeerInfo(endpoint, "schema_version", value.value);
-                break;
-            case HOST_ID:
-                SystemTable.updatePeerInfo(endpoint, "host_id", value.value);
-                break;
+            if (moveName.equals(VersionedValue.STATUS_BOOTSTRAPPING))
+                handleStateBootstrap(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.STATUS_NORMAL))
+                handleStateNormal(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.REMOVING_TOKEN) || moveName.equals(VersionedValue.REMOVED_TOKEN))
+                handleStateRemoving(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.STATUS_LEAVING))
+                handleStateLeaving(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.STATUS_LEFT))
+                handleStateLeft(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.STATUS_MOVING))
+                handleStateMoving(endpoint, pieces);
+            else if (moveName.equals(VersionedValue.STATUS_RELOCATING))
+                handleStateRelocating(endpoint, pieces);
+        }
+        else
+        {
+            EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+            if (epState == null || Gossiper.instance.isDeadState(epState))
+            {
+                logger.debug("Ignoring state change for dead or unknown endpoint: {}", endpoint);
+                return;
+            }
+
+            switch (state)
+            {
+                case RELEASE_VERSION:
+                    SystemTable.updatePeerInfo(endpoint, "release_version", quote(value.value));
+                    break;
+                case DC:
+                    SystemTable.updatePeerInfo(endpoint, "data_center", quote(value.value));
+                    break;
+                case RACK:
+                    SystemTable.updatePeerInfo(endpoint, "rack", quote(value.value));
+                    break;
+                case RPC_ADDRESS:
+                    SystemTable.updatePeerInfo(endpoint, "rpc_address", quote(value.value));
+                    break;
+                case SCHEMA:
+                    SystemTable.updatePeerInfo(endpoint, "schema_version", value.value);
+                    break;
+                case HOST_ID:
+                    SystemTable.updatePeerInfo(endpoint, "host_id", value.value);
+                    break;
+            }
         }
     }
 
@@ -1446,6 +1458,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         tokens = getTokensFor(endpoint, pieces[1]);
 
+        Set<Token> tokensToUpdateInMetadata = new HashSet<Token>();
+        Set<Token> tokensToUpdateInSystemTable = new HashSet<Token>();
+        Set<Token> localTokensToRemove = new HashSet<Token>();
+        Set<InetAddress> endpointsToRemove = new HashSet<InetAddress>();
+
+
         if (logger.isDebugEnabled())
             logger.debug("Node " + endpoint + " state normal, token " + tokens);
 
@@ -1456,16 +1474,38 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (Gossiper.instance.usesHostId(endpoint))
         {
             UUID hostId = Gossiper.instance.getHostId(endpoint);
+            InetAddress existing = tokenMetadata.getEndpointForHostId(hostId);
             if (DatabaseDescriptor.isReplacing() && Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null && (hostId.equals(Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress()))))
                 logger.warn("Not updating token metadata for {} because I am replacing it", endpoint);
             else
-                tokenMetadata.updateHostId(hostId, endpoint);
-        }
+            {
+                if (existing != null && !existing.equals(endpoint))
+                {
+                    if (existing.equals(FBUtilities.getBroadcastAddress()))
+                    {
+                        logger.warn("Not updating host ID {} for {} because it's mine", hostId, endpoint);
+                        tokenMetadata.removeEndpoint(endpoint);
+                        endpointsToRemove.add(endpoint);
+                    }
+                    else if (Gossiper.instance.compareEndpointStartup(endpoint, existing) > 0)
+                    {
+                        logger.warn("Host ID collision for {} between {} and {}; {} is the new owner", hostId, existing, endpoint, endpoint);
+                        tokenMetadata.removeEndpoint(existing);
+                        endpointsToRemove.add(existing);
+                        tokenMetadata.updateHostId(hostId, endpoint);
+                    }
+                    else
+                    {
+                        logger.warn("Host ID Collision for {} between {} and {}; ignored {}", hostId, existing, endpoint, endpoint);
+                        tokenMetadata.removeEndpoint(endpoint);
+                        endpointsToRemove.add(endpoint);
+                    }
+                }
+                else
+                    tokenMetadata.updateHostId(hostId, endpoint);
+            }
 
-        Set<Token> tokensToUpdateInMetadata = new HashSet<Token>();
-        Set<Token> tokensToUpdateInSystemTable = new HashSet<Token>();
-        Set<Token> localTokensToRemove = new HashSet<Token>();
-        Set<InetAddress> endpointsToRemove = new HashSet<InetAddress>();
+        }
 
         for (final Token token : tokens)
         {
@@ -1709,7 +1749,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else // now that the gossiper has told us about this nonexistent member, notify the gossiper to remove it
         {
-            addExpireTimeIfFound(endpoint, extractExpireTime(pieces, MessagingService.instance().getVersion(endpoint)));
+            if (VersionedValue.REMOVED_TOKEN.equals(pieces[0]))
+                addExpireTimeIfFound(endpoint, extractExpireTime(pieces, MessagingService.instance().getVersion(endpoint)));
             removeEndpoint(endpoint);
         }
     }
@@ -2165,6 +2206,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public void takeSnapshot(String tag, String... tableNames) throws IOException
     {
+        if (operationMode.equals(Mode.JOINING))
+            throw new IOException("Cannot snapshot until bootstrap completes");
         if (tag == null || tag.equals(""))
             throw new IOException("You must supply a snapshot name.");
 
@@ -2200,6 +2243,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public void takeColumnFamilySnapshot(String tableName, String columnFamilyName, String tag) throws IOException
     {
+        if (operationMode.equals(Mode.JOINING))
+            throw new IOException("Cannot snapshot until bootstrap completes");
         if (tableName == null)
             throw new IOException("You must supply a table name");
 
@@ -3392,8 +3437,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         setMode(Mode.DRAINING, "shutting down MessageService", false);
         MessagingService.instance().shutdown();
-        setMode(Mode.DRAINING, "waiting for streaming", false);
-        MessagingService.instance().waitForStreaming();
 
         setMode(Mode.DRAINING, "clearing mutation stage", false);
         mutationStage.shutdown();

@@ -595,7 +595,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             return false;
         }
-        return !isDeadState(epState) && !epState.isAlive() && !StorageService.instance.getTokenMetadata().isMember(endpoint);
+        return !isDeadState(epState) && !StorageService.instance.getTokenMetadata().isMember(endpoint);
     }
 
     private void doStatusCheck()
@@ -860,7 +860,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             subscriber.onJoin(ep, epState);
     }
 
-    private Boolean isDeadState(EndpointState epState)
+    public Boolean isDeadState(EndpointState epState)
     {
         if (epState.getApplicationState(ApplicationState.STATUS) == null)
             return false;

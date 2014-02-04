@@ -33,8 +33,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +46,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.filter.QueryPath;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -65,8 +68,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 {
     private static final String MBEAN_NAME = "org.apache.cassandra.db:type=BatchlogManager";
     private static final int VERSION = MessagingService.VERSION_12;
-    private static final long TIMEOUT = 2 * DatabaseDescriptor.getWriteRpcTimeout();
     private static final long REPLAY_INTERVAL = 60 * 1000; // milliseconds
+    private static final int PAGE_SIZE = 128; // same as HHOM, for now, w/out using any heuristics. TODO: set based on avg batch size.
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
@@ -75,7 +78,7 @@ public class BatchlogManager implements BatchlogManagerMBean
     private final AtomicBoolean isReplaying = new AtomicBoolean();
 
     private static final ScheduledExecutorService batchlogTasks = new DebuggableScheduledThreadPoolExecutor("BatchlogTasks");
-    
+
     public void start()
     {
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
@@ -123,14 +126,19 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static RowMutation getBatchlogMutationFor(Collection<RowMutation> mutations, UUID uuid)
     {
-        long timestamp = FBUtilities.timestampMicros();
-        ByteBuffer writtenAt = LongType.instance.decompose(timestamp / 1000);
+        return getBatchlogMutationFor(mutations, uuid, FBUtilities.timestampMicros());
+    }
+
+    @VisibleForTesting
+    static RowMutation getBatchlogMutationFor(Collection<RowMutation> mutations, UUID uuid, long now)
+    {
+        ByteBuffer writtenAt = LongType.instance.decompose(now / 1000);
         ByteBuffer data = serializeRowMutations(mutations);
 
         ColumnFamily cf = ColumnFamily.create(CFMetaData.BatchlogCf);
-        cf.addColumn(new Column(columnName(""), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp));
-        cf.addColumn(new Column(columnName("written_at"), writtenAt, timestamp));
-        cf.addColumn(new Column(columnName("data"), data, timestamp));
+        cf.addColumn(new Column(columnName(""), ByteBufferUtil.EMPTY_BYTE_BUFFER, now));
+        cf.addColumn(new Column(columnName("written_at"), writtenAt, now));
+        cf.addColumn(new Column(columnName("data"), data, now));
         RowMutation rm = new RowMutation(Table.SYSTEM_KS, UUIDType.instance.decompose(uuid));
         rm.add(cf);
 
@@ -156,18 +164,40 @@ public class BatchlogManager implements BatchlogManagerMBean
         return ByteBuffer.wrap(bos.toByteArray());
     }
 
-    private void replayAllFailedBatches() throws ExecutionException, InterruptedException
+    @VisibleForTesting
+    void replayAllFailedBatches() throws ExecutionException, InterruptedException
     {
         if (!isReplaying.compareAndSet(false, true))
             return;
 
         logger.debug("Started replayAllFailedBatches");
 
+        // rate limit is in bytes per second. Uses Double.MAX_VALUE if disabled (set to 0 in cassandra.yaml).
+        // max rate is scaled by the number of nodes in the cluster (same as for HHOM - see CASSANDRA-5272).
+        int throttleInKB = DatabaseDescriptor.getBatchlogReplayThrottleInKB() / StorageService.instance.getTokenMetadata().getAllEndpoints().size();
+        RateLimiter rateLimiter = RateLimiter.create(throttleInKB == 0 ? Double.MAX_VALUE : throttleInKB * 1024);
+
         try
         {
-            for (UntypedResultSet.Row row : process("SELECT id, written_at FROM %s.%s", Table.SYSTEM_KS, SystemTable.BATCHLOG_CF))
-                if (System.currentTimeMillis() > row.getLong("written_at") + TIMEOUT)
-                    replayBatch(row.getUUID("id"));
+            UntypedResultSet page = process("SELECT id, data, written_at FROM %s.%s LIMIT %d",
+                                            Table.SYSTEM_KS,
+                                            SystemTable.BATCHLOG_CF,
+                                            PAGE_SIZE);
+
+            while (!page.isEmpty())
+            {
+                UUID id = processBatchlogPage(page, rateLimiter);
+
+                if (page.size() < PAGE_SIZE)
+                    break; // we've exhausted the batchlog, next query would be empty.
+
+                page = process("SELECT id, data, written_at FROM %s.%s WHERE token(id) > token(%s) LIMIT %d",
+                               Table.SYSTEM_KS,
+                               SystemTable.BATCHLOG_CF,
+                               id,
+                               PAGE_SIZE);
+            }
+
             cleanup();
         }
         finally
@@ -178,41 +208,61 @@ public class BatchlogManager implements BatchlogManagerMBean
         logger.debug("Finished replayAllFailedBatches");
     }
 
-    private void replayBatch(UUID id)
+    // returns the UUID of the last seen batch
+    private UUID processBatchlogPage(UntypedResultSet page, RateLimiter rateLimiter)
+    {
+        UUID id = null;
+        for (UntypedResultSet.Row row : page)
+        {
+            id = row.getUUID("id");
+            long writtenAt = row.getLong("written_at");
+            // enough time for the actual write + batchlog entry mutation delivery (two separate requests).
+            long timeout = DatabaseDescriptor.getWriteRpcTimeout() * 2; // enough time for the actual write + BM removal mutation
+            if (System.currentTimeMillis() < writtenAt + timeout)
+                continue; // not ready to replay yet, might still get a deletion.
+            replayBatch(id, row.getBytes("data"), writtenAt, rateLimiter);
+        }
+        return id;
+    }
+
+    private void replayBatch(UUID id, ByteBuffer data, long writtenAt, RateLimiter rateLimiter)
     {
         logger.debug("Replaying batch {}", id);
 
-        UntypedResultSet result = process("SELECT written_at, data FROM %s.%s WHERE id = %s", Table.SYSTEM_KS, SystemTable.BATCHLOG_CF, id);
-        if (result.isEmpty())
-            return;
-
         try
         {
-            replaySerializedMutations(result.one().getBytes("data"), result.one().getLong("written_at"));
+            replaySerializedMutations(data, writtenAt, rateLimiter);
         }
         catch (IOException e)
         {
             logger.warn("Skipped batch replay of {} due to {}", id, e);
         }
 
-        process("DELETE FROM %s.%s WHERE id = %s", Table.SYSTEM_KS, SystemTable.BATCHLOG_CF, id);
+        deleteBatch(id);
 
         totalBatchesReplayed.incrementAndGet();
     }
 
-    private void replaySerializedMutations(ByteBuffer data, long writtenAt) throws IOException
+    private void deleteBatch(UUID id)
+    {
+        RowMutation mutation = new RowMutation(Table.SYSTEM_KS, UUIDType.instance.decompose(id));
+        mutation.delete(new QueryPath(SystemTable.BATCHLOG_CF, null, null), System.currentTimeMillis());
+        mutation.apply();
+    }
+
+    private void replaySerializedMutations(ByteBuffer data, long writtenAt, RateLimiter rateLimiter) throws IOException
     {
         DataInputStream in = new DataInputStream(ByteBufferUtil.inputStream(data));
         int size = in.readInt();
         for (int i = 0; i < size; i++)
-            replaySerializedMutation(RowMutation.serializer.deserialize(in, VERSION), writtenAt);
+            replaySerializedMutation(RowMutation.serializer.deserialize(in, VERSION), writtenAt, rateLimiter);
     }
 
     /*
      * We try to deliver the mutations to the replicas ourselves if they are alive and only resort to writing hints
      * when a replica is down or a write request times out.
      */
-    private void replaySerializedMutation(RowMutation mutation, long writtenAt) throws IOException
+    private void replaySerializedMutation(RowMutation mutation, long writtenAt, RateLimiter rateLimiter) throws IOException
     {
         int ttl = calculateHintTTL(mutation, writtenAt);
         if (ttl <= 0)
@@ -221,9 +271,12 @@ public class BatchlogManager implements BatchlogManagerMBean
         Set<InetAddress> liveEndpoints = new HashSet<InetAddress>();
         String ks = mutation.getTable();
         Token tk = StorageService.getPartitioner().getToken(mutation.key());
+        int mutationSize = (int) RowMutation.serializer.serializedSize(mutation, VERSION);
+
         for (InetAddress endpoint : Iterables.concat(StorageService.instance.getNaturalEndpoints(ks, tk),
                                                      StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, ks)))
         {
+            rateLimiter.acquire(mutationSize);
             if (endpoint.equals(FBUtilities.getBroadcastAddress()))
                 mutation.apply();
             else if (FailureDetector.instance.isAlive(endpoint))

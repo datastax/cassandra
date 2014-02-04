@@ -20,16 +20,12 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.primitives.Ints;
-
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
-import com.googlecode.concurrentlinkedhashmap.EntryWeigher;
 import org.antlr.runtime.*;
 import org.apache.cassandra.cql3.hooks.OnPrepareHook;
 import org.apache.cassandra.cql3.hooks.PostExecutionHook;
 import org.apache.cassandra.cql3.hooks.PreExecutionHook;
 import org.apache.cassandra.tracing.Tracing;
-import org.github.jamm.MemoryMeter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,56 +45,15 @@ public class QueryProcessor
     public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.0.5");
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
-    private static final MemoryMeter meter = new MemoryMeter();
-    private static final long MAX_CACHE_PREPARED_MEMORY = Runtime.getRuntime().maxMemory() / 256;
-    private static final int MAX_CACHE_PREPARED_COUNT = 10000;
 
-    private static EntryWeigher<MD5Digest, ParsedStatement.Prepared> cqlMemoryUsageWeigher = new EntryWeigher<MD5Digest, ParsedStatement.Prepared>()
-    {
-        @Override
-        public int weightOf(MD5Digest key, ParsedStatement.Prepared value)
-        {
-            return Ints.checkedCast(measure(key) + measure(value));
-        }
-    };
+    public static final int MAX_CACHE_PREPARED = 50000; // Enough to keep buggy clients from OOM'ing us
+    private static final Map<MD5Digest, ParsedStatement.Prepared> preparedStatements = new ConcurrentLinkedHashMap.Builder<MD5Digest, ParsedStatement.Prepared>()
+                                                                               .maximumWeightedCapacity(MAX_CACHE_PREPARED)
+                                                                               .build();
 
-    private static EntryWeigher<Integer, ParsedStatement.Prepared> thriftMemoryUsageWeigher = new EntryWeigher<Integer, ParsedStatement.Prepared>()
-    {
-        @Override
-        public int weightOf(Integer key, ParsedStatement.Prepared value)
-        {
-            return Ints.checkedCast(measure(key) + measure(value));
-        }
-    };
-
-    private static final ConcurrentLinkedHashMap<MD5Digest, ParsedStatement.Prepared> preparedStatements;
-    private static final ConcurrentLinkedHashMap<Integer, ParsedStatement.Prepared> thriftPreparedStatements;
-
-    static
-    {
-        if (MemoryMeter.isInitialized())
-        {
-            preparedStatements = new ConcurrentLinkedHashMap.Builder<MD5Digest, ParsedStatement.Prepared>()
-                                 .maximumWeightedCapacity(MAX_CACHE_PREPARED_MEMORY)
-                                 .weigher(cqlMemoryUsageWeigher)
-                                 .build();
-            thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, ParsedStatement.Prepared>()
-                                       .maximumWeightedCapacity(MAX_CACHE_PREPARED_MEMORY)
-                                       .weigher(thriftMemoryUsageWeigher)
-                                       .build();
-        }
-        else
-        {
-            logger.error("Unable to initialize MemoryMeter (jamm not specified as javaagent).  This means "
-                         + "Cassandra will be unable to measure object sizes accurately and may consequently OOM.");
-            preparedStatements = new ConcurrentLinkedHashMap.Builder<MD5Digest, ParsedStatement.Prepared>()
-                                 .maximumWeightedCapacity(MAX_CACHE_PREPARED_COUNT)
-                                 .build();
-            thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, ParsedStatement.Prepared>()
-                                       .maximumWeightedCapacity(MAX_CACHE_PREPARED_COUNT)
-                                       .build();
-        }
-    }
+    private static final Map<Integer, ParsedStatement.Prepared> thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, ParsedStatement.Prepared>()
+                                                                                   .maximumWeightedCapacity(MAX_CACHE_PREPARED)
+                                                                                   .build();
 
     public static ParsedStatement.Prepared getPrepared(MD5Digest id)
     {
@@ -187,7 +142,7 @@ public class QueryProcessor
         context.queryString = queryString;
 
         CQLStatement prepared = getStatement(queryString, queryState.getClientState()).statement;
-        if (prepared.getBoundsTerms() > 0)
+        if (prepared.getBoundTerms() > 0)
             throw new InvalidRequestException("Cannot execute query with bind variables");
         return processStatement(prepared, cl, queryState, Collections.<ByteBuffer>emptyList(), context);
     }
@@ -260,33 +215,25 @@ public class QueryProcessor
         onPrepareHook.execute(prepared.statement, context);
 
         ResultMessage.Prepared msg = storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared, forThrift);
-        int bountTerms = prepared.statement.getBoundsTerms();
-        if (bountTerms > FBUtilities.MAX_UNSIGNED_SHORT)
-            throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", bountTerms, FBUtilities.MAX_UNSIGNED_SHORT));
-        assert bountTerms == prepared.boundNames.size();
+        int boundTerms = prepared.statement.getBoundTerms();
+        if (boundTerms > FBUtilities.MAX_UNSIGNED_SHORT)
+            throw new InvalidRequestException(String.format("Too many markers(?). %d markers exceed the allowed maximum of %d", boundTerms, FBUtilities.MAX_UNSIGNED_SHORT));
+        assert boundTerms == prepared.boundNames.size();
         return msg;
     }
 
     private static ResultMessage.Prepared storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared, boolean forThrift)
-    throws InvalidRequestException
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
         // (if the keyspace is null, queryString has to have a fully-qualified keyspace so it's fine.
         String toHash = keyspace == null ? queryString : keyspace + queryString;
-        long statementSize = measure(prepared.statement);
-        // don't execute the statement if it's bigger than the allowed threshold
-        if (statementSize > MAX_CACHE_PREPARED_MEMORY)
-            throw new InvalidRequestException(String.format("Prepared statement of size %d bytes is larger than allowed maximum of %d bytes.",
-                                                            statementSize,
-                                                            MAX_CACHE_PREPARED_MEMORY));
-
         if (forThrift)
         {
             int statementId = toHash.hashCode();
             thriftPreparedStatements.put(statementId, prepared);
             logger.trace(String.format("Stored prepared statement #%d with %d bind markers",
                                        statementId,
-                                       prepared.statement.getBoundsTerms()));
+                                       prepared.statement.getBoundTerms()));
             return ResultMessage.Prepared.forThrift(statementId, prepared.boundNames);
         }
         else
@@ -295,7 +242,7 @@ public class QueryProcessor
             preparedStatements.put(statementId, prepared);
             logger.trace(String.format("Stored prepared statement %s with %d bind markers",
                                        statementId,
-                                       prepared.statement.getBoundsTerms()));
+                                       prepared.statement.getBoundTerms()));
             return new ResultMessage.Prepared(statementId, prepared.boundNames);
         }
     }
@@ -304,11 +251,11 @@ public class QueryProcessor
     throws RequestExecutionException, RequestValidationException
     {
         // Check to see if there are any bound variables to verify
-        if (!(variables.isEmpty() && (statement.statement.getBoundsTerms() == 0)))
+        if (!(variables.isEmpty() && (statement.statement.getBoundTerms() == 0)))
         {
-            if (variables.size() != statement.statement.getBoundsTerms())
+            if (variables.size() != statement.statement.getBoundTerms())
                 throw new InvalidRequestException(String.format("there were %d markers(?) in CQL but %d bound variables",
-                                                                statement.statement.getBoundsTerms(),
+                                                                statement.statement.getBoundTerms(),
                                                                 variables.size()));
 
             // at this point there is a match in count between markers and variables that is non-zero
@@ -371,15 +318,5 @@ public class QueryProcessor
         {
             throw new SyntaxException("Invalid or malformed CQL query string: " + e.getMessage());
         }
-    }
-
-    private static long measure(Object key)
-    {
-        if (!MemoryMeter.isInitialized())
-            return 1;
-
-        return key instanceof MeasurableForPreparedCache
-             ? ((MeasurableForPreparedCache)key).measureForPreparedCache(meter)
-             : meter.measureDeep(key);
     }
 }

@@ -134,7 +134,7 @@ public abstract class AbstractReplicationStrategy
             // block for in this context will be localnodes block.
             return new DatacenterWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, getTable(), callback, writeType);
         }
-        else if (consistency_level == ConsistencyLevel.EACH_QUORUM)
+        else if (consistency_level == ConsistencyLevel.EACH_QUORUM && (this instanceof NetworkTopologyStrategy))
         {
             return new DatacenterSyncWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, getTable(), callback, writeType);
         }
@@ -271,7 +271,7 @@ public abstract class AbstractReplicationStrategy
         catch (ConfigurationException e)
         {
             // If that happens at this point, there is nothing we can do about it.
-            throw new RuntimeException();
+            throw new RuntimeException(e);
         }
     }
 
