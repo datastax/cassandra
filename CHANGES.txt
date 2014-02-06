@@ -1,5 +1,6 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
+ * Fix upgradesstables NPE for non-CF-based indexes (CASSANDRA-6645)
  
 
 1.2.15

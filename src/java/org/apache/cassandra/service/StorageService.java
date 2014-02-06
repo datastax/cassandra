@@ -2319,8 +2319,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     for (SecondaryIndex si : cfStore.indexManager.getIndexes())
                     {
-                        logger.info("adding secondary index {} to operation", si.getIndexName());
-                        valid.add(si.getIndexCfs());
+                        if (si.getIndexCfs() != null)
+                        {
+                            logger.info("adding secondary index {} to operation", si.getIndexName());
+                            valid.add(si.getIndexCfs());
+                        }
                     }
 
                 }
@@ -2369,8 +2372,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     for(SecondaryIndex si : cfStore.indexManager.getIndexes())
                     {
-                        logger.info("adding secondary index {} to operation", si.getIndexName());
-                        valid.add(si.getIndexCfs());
+                        if (si.getIndexCfs() != null)
+                        {
+                            logger.info("adding secondary index {} to operation", si.getIndexName());
+                            valid.add(si.getIndexCfs());
+                        }
                     }
                 }
             }
