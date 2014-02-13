@@ -808,13 +808,13 @@ public final class MessagingService implements MessagingServiceMBean
     /**
      * @return the last version associated with address, or @param version if this is the first such version
      */
-    public int setVersion(InetAddress address, int version)
+    public int setVersion(InetAddress endpoint, int version)
     {
         versionsLock.lock();
         try
         {
-            logger.debug("Setting version {} for {}", version, address);
-            Integer v = versions.put(address, version);
+            logger.debug("Setting version {} for {}", version, endpoint);
+            Integer v = versions.put(endpoint, version);
             return v == null ? version : v;
         }
         finally
@@ -840,34 +840,42 @@ public final class MessagingService implements MessagingServiceMBean
         return getVersion(address, false);
     }
     
-    public int getVersion(String address, boolean wait) throws UnknownHostException
+    public int getVersion(String endpoint, boolean wait) throws UnknownHostException
     {
-        return getVersion(InetAddress.getByName(address), wait);
+        return getVersion(InetAddress.getByName(endpoint), wait);
     }
     
-    public Integer getVersion(InetAddress address, boolean wait) {
-        Integer v = versions.get(address);
+    public Integer getVersion(InetAddress endpoint, boolean wait) {
+        Integer v = versions.get(endpoint);
         if (v == null && !wait)
         {
             // we don't know the version. assume current. we'll know soon enough if that was incorrect.
-            logger.trace("Assuming current protocol version for {}", address);
+            logger.trace("Assuming current protocol version for {}", endpoint);
             v = MessagingService.current_version;
         }
         else if (v == null && wait) 
         {
             // otherwise if we want to wait...
-            logger.trace("Waiting for version of {}", address);
-            v = waitForVersion(address);
+            logger.trace("Waiting for version of {}", endpoint);
+            v = waitForVersion(endpoint);
             if (v == null) {
-                throw new IllegalStateException("No known version for: " + address);
+                throw new IllegalStateException("No known version for: " + endpoint);
             }
         }
+        return Math.min(v, MessagingService.current_version);
+    }
+
+    public int getRawVersion(InetAddress endpoint)
+    {
+        Integer v = versions.get(endpoint);
+        if (v == null)
+            throw new IllegalStateException("getRawVersion() was called without checking knowsVersion() result first");
         return v;
     }
 
     public boolean knowsVersion(InetAddress endpoint)
     {
-        return versions.get(endpoint) != null;
+        return versions.containsKey(endpoint);
     }
 
     public void incrementDroppedMessages(Verb verb)
