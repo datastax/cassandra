@@ -4,6 +4,7 @@ DSE backports/cherry-picks
  * Fix unwanted schema pull while upgrading nodes from 1.2 to 2.0 (CASSANDRA-6678)
  * Don't exchange schema between nodes with different versions (CASSANDRA-6695)
  * Use real node messaging versions for schema exchange decisions (CASSANDRA-6700)
+ * Fix SecondaryIndexManager#deleteFromIndexes() (CASSANDRA-6711)
 
 
 1.2.15
