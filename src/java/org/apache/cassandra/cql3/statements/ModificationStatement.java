@@ -444,7 +444,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
 
         // It's cleaner to use the query timestamp below, but it's in seconds while the conditions expects microseconds, so just
         // put it back in millis (we don't really lose precision because the ultimate consumer, Column.isLive, re-divide it).
-        long now = queryState.getTimestamp() * 1000;
+        long now = queryState.getTimestamp();
         CASConditions conditions = ifNotExists
                                  ? new NotExistCondition(clusteringPrefix, now)
                                  : new ColumnsConditions(clusteringPrefix, cfm, key, columnConditions, variables, now);
@@ -578,7 +578,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
         protected CQL3CasConditions(ColumnNameBuilder rowPrefix, long now)
         {
             this.rowPrefix = rowPrefix;
-            this.now = now;
+            this.now = now / 1000;
         }
 
         public IDiskAtomFilter readFilter()
