@@ -579,7 +579,14 @@ public class DatabaseDescriptor
 
     private static void validateAuthConfig() throws ConfigurationException
     {
-
+        if ((conf.auth_replication_options == null) != (conf.auth_replication_strategy == null))
+        {
+            throw new ConfigurationException("auth_replication_strategy & auth_replication_options are interdependent " +
+                    "options. If you are in the process of migrating away from the legacy " +
+                    "com.datastax auth classes, please ensure both options are set. " +
+                    "Otherwise, please ensure both options are removed from cassandra.yaml");
+        }
+        
         if ((conf.authenticator == null || conf.authenticator.equals(AllowAllAuthenticator.class))
                 && (conf.authorizer == null || conf.authorizer.equals(AllowAllAuthorizer.class)))
         {
