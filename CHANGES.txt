@@ -1,3 +1,6 @@
+DSE backports/cherry-picks
+ * Fix SSTable not released if stream session fails (CASSANDRA-6818)
+
 2.0.7
  * Restrict Windows to parallel repairs (CASSANDRA-6907)
  * (Hadoop) Allow manually specifying start/end tokens in CFIF (CASSANDRA-6436)
