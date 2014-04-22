@@ -1370,7 +1370,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public List<String> getSSTablesForKey(String key)
     {
-        DecoratedKey dk = new DecoratedKey(partitioner.getToken(ByteBuffer.wrap(key.getBytes())), ByteBuffer.wrap(key.getBytes()));
+        DecoratedKey dk = partitioner.decorateKey(metadata.getKeyValidator().fromString(key));
         ViewFragment view = markReferenced(dk);
         try
         {
@@ -2095,11 +2095,5 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public double getDroppableTombstoneRatio()
     {
         return getDataTracker().getDroppableTombstoneRatio();
-    }
-
-    public long getTruncationTime()
-    {
-        Pair<ReplayPosition, Long> truncationRecord = SystemTable.getTruncationRecords().get(metadata.cfId);
-        return truncationRecord == null ? Long.MIN_VALUE : truncationRecord.right;
     }
 }

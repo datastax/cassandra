@@ -133,7 +133,7 @@ if os.path.exists(OLD_HISTORY):
 
 DEFAULT_HOST = 'localhost'
 DEFAULT_PORT = 9160
-DEFAULT_CQLVER = '3'
+DEFAULT_CQLVER = '3.0.5'
 DEFAULT_TRANSPORT_FACTORY = 'cqlshlib.tfactory.regular_transport_factory'
 
 DEFAULT_TIME_FORMAT = '%Y-%m-%d %H:%M:%S%z'
@@ -1635,7 +1635,8 @@ class Shell(cmd.Cmd):
             fname = os.path.expanduser(self.cql_unprotect_value(fname))
         copyoptnames = map(str.lower, parsed.get_binding('optnames', ()))
         copyoptvals = map(self.cql_unprotect_value, parsed.get_binding('optvals', ()))
-        opts = dict(zip(copyoptnames, copyoptvals))
+        cleancopyoptvals  = [optval.decode('string-escape') for optval in copyoptvals]
+        opts = dict(zip(copyoptnames, cleancopyoptvals))
 
         timestart = time.time()
 

@@ -30,7 +30,6 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.RateLimiter;
@@ -309,6 +308,7 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                            / (StorageService.instance.getTokenMetadata().getAllEndpoints().size() - 1);
         RateLimiter rateLimiter = RateLimiter.create(throttleInKB == 0 ? Double.MAX_VALUE : throttleInKB * 1024);
 
+        boolean finished = false;
         delivery:
         while (true)
         {
@@ -323,13 +323,17 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                                                                      (int) (System.currentTimeMillis() / 1000));
 
             if (pagingFinished(hintsPage, startColumn))
+            {
+                logger.info("Finished hinted handoff of {} rows to endpoint {}", rowsReplayed, endpoint);
+                finished = true;
                 break;
+            }
 
             // check if node is still alive and we should continue delivery process
             if (!FailureDetector.instance.isAlive(endpoint))
             {
                 logger.info("Endpoint {} died during hint delivery; aborting ({} delivered)", endpoint, rowsReplayed);
-                return;
+                break;
             }
 
             List<WriteResponseHandler> responseHandlers = Lists.newArrayList();
@@ -372,20 +376,11 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                     throw new AssertionError(e);
                 }
 
-                Map<UUID, Long> truncationTimesCache = new HashMap<UUID, Long>();
-                for (UUID cfId : ImmutableSet.copyOf((rm.getColumnFamilyIds())))
+                for (UUID cfId : rm.getColumnFamilyIds())
                 {
-                    Long truncatedAt = truncationTimesCache.get(cfId);
-                    if (truncatedAt == null)
+                    if (hint.maxTimestamp() <= SystemTable.getTruncatedAt(cfId))
                     {
-                        ColumnFamilyStore cfs = Table.open(rm.getTable()).getColumnFamilyStore(cfId);
-                        truncatedAt = cfs.getTruncationTime();
-                        truncationTimesCache.put(cfId, truncatedAt);
-                    }
-
-                    if (hint.maxTimestamp() < truncatedAt)
-                    {
-                        logger.debug("Skipping delivery of hint for truncated columnfamily {}" + cfId);
+                        logger.debug("Skipping delivery of hint for truncated columnfamily {}", cfId);
                         rm = rm.without(cfId);
                     }
                 }
@@ -420,20 +415,21 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                 catch (WriteTimeoutException e)
                 {
                     logger.info("Timed out replaying hints to {}; aborting ({} delivered)", endpoint, rowsReplayed);
-                    return;
+                    break delivery;
                 }
             }
         }
 
-        logger.info("Finished hinted handoff of {} rows to endpoint {}", rowsReplayed, endpoint);
-
-        try
+        if (finished || rowsReplayed.get() >= DatabaseDescriptor.getTombstoneDebugThreshold())
         {
-            compact().get();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
+            try
+            {
+                compact().get();
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 

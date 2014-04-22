@@ -204,9 +204,7 @@ public class Memtable
 
         long sizeDelta = previous.addAllWithSizeDelta(cf, allocator, localCopyFunction, indexer);
         currentSize.addAndGet(sizeDelta);
-        currentOperations.addAndGet((cf.getColumnCount() == 0)
-                                    ? cf.isMarkedForDelete() ? 1 : 0
-                                    : cf.getColumnCount());
+        currentOperations.addAndGet(cf.getColumnCount() + (cf.isMarkedForDelete() ? 1 : 0) + cf.deletionInfo().rangeCount());
     }
 
     // for debugging

@@ -830,6 +830,7 @@ public final class MessagingService implements MessagingServiceMBean
         versions.remove(endpoint);
     }
 
+
     public int getVersion(String address) throws UnknownHostException
     {
         return getVersion(InetAddress.getByName(address));

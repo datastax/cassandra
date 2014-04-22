@@ -1,12 +1,46 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
- * Don't attempt cross-dc forwarding in mixed-version cluster with 1.1 (CASSANDRA-6732)
+ 
+   
+1.2.17
+ * Fix BatchlogManager#deleteBatch() use of millisecond timsestamps
+   (CASSANDRA-6822)
+ * Continue assassinating even if the endpoint vanishes (CASSANDRA-6787)
+ * Schedule schema pulls on change (CASSANDRA-6971)
+ * Non-droppable verbs shouldn't be dropped from OTC (CASSANDRA-6980)
+ * Shutdown batchlog executor in SS#drain() (CASSANDRA-7025)
+ * Fix batchlog to account for CF truncation records (CASSANDRA-6999)
+ * Fix CQLSH parsing of functions and BLOB literals (CASSANDRA-7018)
+ * Require nodetool rebuild_index to specify index names (CASSANDRA-7038)
+
+
+1.2.16
+ * Add UNLOGGED, COUNTER options to BATCH documentation (CASSANDRA-6816)
+ * add extra SSL cipher suites (CASSANDRA-6613)
+ * fix nodetool getsstables for blob PK (CASSANDRA-6803)
+ * Add CMSClassUnloadingEnabled JVM option (CASSANDRA-6541)
  * Catch memtable flush exceptions during shutdown (CASSANDRA-6735)
+ * Don't attempt cross-dc forwarding in mixed-version cluster with 1.1 
+   (CASSANDRA-6732)
+ * Fix broken streams when replacing with same IP (CASSANDRA-6622)
  * Fix upgradesstables NPE for non-CF-based indexes (CASSANDRA-6645)
- * Fix unwanted schema pull while upgrading nodes from 1.2 to 2.0 (CASSANDRA-6678)
+ * Fix partition and range deletes not triggering flush (CASSANDRA-6655)
+ * Fix mean cells and mean row size per sstable calculations (CASSANDRA-6667)
+ * Compact hints after partial replay to clean out tombstones (CASSANDRA-6666)
+ * Log USING TTL/TIMESTAMP in a counter update warning (CASSANDRA-6649)
  * Don't exchange schema between nodes with different versions (CASSANDRA-6695)
- * Use real node messaging versions for schema exchange decisions (CASSANDRA-6700)
+ * Use real node messaging versions for schema exchange decisions 
+   (CASSANDRA-6700)
+ * IN on the last clustering columns + ORDER BY DESC yield no results 
+   (CASSANDRA-6701)
  * Fix SecondaryIndexManager#deleteFromIndexes() (CASSANDRA-6711)
+ * Fix snapshot repair not snapshotting coordinator itself (CASSANDRA-6713)
+ * Support negative timestamps for CQL3 dates in query string (CASSANDRA-6718)
+ * Avoid NPEs when receiving table changes for an unknown keyspace (CASSANDRA-5631)
+ * Fix bootstrapping when there is no schema (CASSANDRA-6685)
+ * Fix truncating compression metadata (CASSANDRA-6791)
+ * Fix SSTable not released if stream session fails before starts (CASSANDRA-6818)
+ * Properly load trustore in the native protocol (CASSANDRA-6847)
 
 
 1.2.15
@@ -883,6 +917,7 @@ Merged from 1.0:
 
 
 1.1.1
+ * add populate_io_cache_on_flush option (CASSANDRA-2635)
  * allow larger cache capacities than 2GB (CASSANDRA-4150)
  * add getsstables command to nodetool (CASSANDRA-4199)
  * apply parent CF compaction settings to secondary index CFs (CASSANDRA-4280)

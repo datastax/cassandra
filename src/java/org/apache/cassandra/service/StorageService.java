@@ -652,6 +652,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                     SystemTable.bootstrapInProgress(),
                                     SystemTable.bootstrapComplete(),
                                     DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress())});
+        if (DatabaseDescriptor.isAutoBootstrap() && !SystemTable.bootstrapComplete() && DatabaseDescriptor.getSeeds().contains(FBUtilities.getLocalAddress()))
+            logger.info("This node will not auto bootstrap because it is configured to be a seed node.");
         if (DatabaseDescriptor.isAutoBootstrap()
             && !SystemTable.bootstrapComplete()
             && !DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
@@ -742,6 +744,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                             throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist!");
                         }
                     }
+                }
+                else
+                {
+                    try
+                    {
+                        Thread.sleep(RING_DELAY);
+                    }
+                    catch (InterruptedException e)
+                    {
+                        throw new AssertionError(e);
+                    }
+
                 }
                 setMode(Mode.JOINING, "Replacing a node with token(s): " + tokens, true);
             }
@@ -1364,6 +1378,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     break;
                 case SCHEMA:
                     SystemTable.updatePeerInfo(endpoint, "schema_version", value.value);
+                    MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
                     break;
                 case HOST_ID:
                     SystemTable.updatePeerInfo(endpoint, "host_id", value.value);
@@ -3195,7 +3210,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         if (tokens.size() < 1)
+        {
             logger.warn("no valid token arguments specified; nothing to relocate");
+            return;
+        }
 
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.relocating(tokens));
         setMode(Mode.RELOCATING, String.format("relocating %s to %s", tokens, localAddress.getHostAddress()), true);
@@ -3485,6 +3503,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 flushes.add(cfs.forceFlush());
         }
         FBUtilities.waitOnFutures(flushes);
+
+        BatchlogManager.batchlogTasks.shutdown();
+        BatchlogManager.batchlogTasks.awaitTermination(60, TimeUnit.SECONDS);
 
         ColumnFamilyStore.postFlushExecutor.shutdown();
         ColumnFamilyStore.postFlushExecutor.awaitTermination(60, TimeUnit.SECONDS);
