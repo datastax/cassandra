@@ -43,12 +43,12 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class FailureDetector implements IFailureDetector, FailureDetectorMBean
 {
+    private static final Logger logger = LoggerFactory.getLogger(FailureDetector.class);
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=FailureDetector";
     private static final int SAMPLE_SIZE = 1000;
     protected static final int INITIAL_VALUE = getInitialValue();
 
     public static final IFailureDetector instance = new FailureDetector();
-    private static final Logger logger = LoggerFactory.getLogger(FailureDetector.class);
 
     // this is useless except to provide backwards compatibility in phi_convict_threshold,
     // because everyone seems pretty accustomed to the default of 8, and users who have
@@ -82,7 +82,7 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
             return Integer.parseInt(newvalue);
         }
         else
-            return Gossiper.intervalInMillis * 30;
+            return Gossiper.intervalInMillis * 2;
     }
 
     public String getAllEndpointStates()
@@ -141,6 +141,8 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
 
     private void appendEndpointState(StringBuilder sb, EndpointState endpointState)
     {
+        sb.append("  generation:").append(endpointState.getHeartBeatState().getGeneration()).append("\n");
+        sb.append("  heartbeat:").append(endpointState.getHeartBeatState().getHeartBeatVersion()).append("\n");
         for (Map.Entry<ApplicationState, VersionedValue> state : endpointState.applicationState.entrySet())
         {
             if (state.getKey() == ApplicationState.TOKENS)

@@ -479,6 +479,11 @@ public final class MessagingService implements MessagingServiceMBean
         }
     }
 
+    public boolean isListening()
+    {
+        return listenGate.isSignaled();
+    }
+
     public void destroyConnectionPool(InetAddress to)
     {
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
@@ -567,6 +572,17 @@ public final class MessagingService implements MessagingServiceMBean
     }
 
     /**
+     * A special version of sendRR that doesn't trigger a hint for the mutation on a timeout.
+     * Used by BatchlogManager and HintedHandOffManager.
+     */
+    public void sendUnhintableMutation(RowMutation mutation, InetAddress to, IMessageCallback cb)
+    {
+        String id = nextId();
+        callbacks.put(id, new CallbackInfo(to, cb, WriteResponse.serializer), DatabaseDescriptor.getWriteRpcTimeout());
+        sendOneWay(mutation.createMessage(), id, to);
+    }
+
+    /**
      * Send a message to a given endpoint. This method specifies a callback
      * which is invoked with the actual response.
      * Also holds the message (only mutation messages) to determine if it
@@ -575,7 +591,6 @@ public final class MessagingService implements MessagingServiceMBean
      * @param message message to be sent.
      * @param to      endpoint to which the message needs to be sent
      * @param cb      callback interface which is used to pass the responses or
-     *                suggest that a timeout occurred to the invoker of the send().
      *                suggest that a timeout occurred to the invoker of the send().
      * @param timeout the timeout used for expiration
      * @return an reference to message id used to match with the result
@@ -951,9 +966,14 @@ public final class MessagingService implements MessagingServiceMBean
                 {
                     Socket socket = server.accept();
                     if (authenticate(socket))
+                    {
+                        socket.setKeepAlive(true);
                         new IncomingTcpConnection(socket).start();
+                    }
                     else
+                    {
                         socket.close();
+                    }
                 }
                 catch (AsynchronousCloseException e)
                 {

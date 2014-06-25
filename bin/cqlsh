@@ -122,7 +122,10 @@ HISTORY_DIR = os.path.expanduser(os.path.join('~', '.cassandra'))
 CONFIG_FILE = os.path.join(HISTORY_DIR, 'cqlshrc')
 HISTORY = os.path.join(HISTORY_DIR, 'cqlsh_history')
 if not os.path.exists(HISTORY_DIR):
-    os.mkdir(HISTORY_DIR)
+    try:
+        os.mkdir(HISTORY_DIR)
+    except OSError:
+        print '\nWarning: Cannot create directory at `%s`. Command history will not be saved.\n' % HISTORY_DIR
 
 OLD_CONFIG_FILE = os.path.expanduser(os.path.join('~', '.cqlshrc'))
 if os.path.exists(OLD_CONFIG_FILE):
@@ -548,6 +551,7 @@ class Shell(cmd.Cmd):
             self.show_line_nums = True
         self.stdin = stdin
         self.query_out = sys.stdout
+        self.statement_error = False
 
     def set_expanded_cql_version(self, ver):
         ver, vertuple = full_cql_version(ver)
@@ -2175,6 +2179,7 @@ class Shell(cmd.Cmd):
         self.query_out.flush()
 
     def printerr(self, text, color=RED, newline=True, shownum=None):
+        self.statement_error = True
         if shownum is None:
             shownum = self.show_line_nums
         if shownum:
@@ -2404,6 +2409,8 @@ def main(options, hostname, port):
 
     shell.cmdloop()
     save_history()
+    if options.file and shell.statement_error:
+        sys.exit(2)
 
 if __name__ == '__main__':
     main(*read_options(sys.argv[1:], os.environ))

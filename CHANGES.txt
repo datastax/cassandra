@@ -3,6 +3,26 @@ DSE backports/cherry-picks
  
    
 1.2.17
+ * Expose global ColmunFamily metrics (CASSANDRA-7273)
+ * Handle possible integer overflow in FastByteArrayOutputStream (CASSANDRA-7373)
+ * cqlsh: 'ascii' values weren't formatted as text (CASSANDRA-7407)
+ * cqlsh: ignore .cassandra permission errors (CASSANDRA-7266)
+ * reduce failure detector initial value to 2s (CASSANDRA-7307)
+ * Fix problem truncating on a node that was previously in a dead state (CASSANDRA-7318)
+ * Don't insert tombstones that hide indexed values into 2i (CASSANDRA-7268)
+ * Track metrics at a keyspace level (CASSANDRA-6539)
+ * Add replace_address_first_boot flag to only replace if not bootstrapped
+   (CASSANDRA-7356)
+ * Enable keepalive for native protocol (CASSANDRA-7380)
+ * Check internal addresses for seeds (CASSANDRA-6523)
+ * Fix potential / by 0 in HHOM page size calculation (CASSANDRA-7354)
+ * Fix handling of empty counter replication mutations (CASSANDRA-7144)
+ * Use LOCAL_ONE for non-superuser auth queries (CASSANDRA-7328)
+ * Set keepalive on MessagingService connections (CASSANDRA-7170)
+ * Add Cloudstack snitch (CASSANDRA-7147)
+ * Update system.peers correctly when relocating tokens (CASSANDRA-7126)
+ * Add Google Compute Engine snitch (CASSANDRA-7132)
+ * Fix nodetool display with vnodes (CASSANDRA-7082)
  * Fix schema concurrency exceptions (CASSANDRA-6841)
  * Fix BatchlogManager#deleteBatch() use of millisecond timsestamps
    (CASSANDRA-6822)
@@ -13,6 +33,21 @@ DSE backports/cherry-picks
  * Fix batchlog to account for CF truncation records (CASSANDRA-6999)
  * Fix CQLSH parsing of functions and BLOB literals (CASSANDRA-7018)
  * Require nodetool rebuild_index to specify index names (CASSANDRA-7038)
+ * Ensure that batchlog and hint timeouts do not produce hints (CASSANDRA-7058)
+ * Don't shut MessagingService down when replacing a node (CASSANDRA-6476)
+ * Always clean up references in SerializingCache (CASSANDRA-6994)
+ * fix npe when doing -Dcassandra.fd_initial_value_ms (CASSANDRA-6751)
+ * Preserves CQL metadata when updating table from thrift (CASSANDRA-6831)
+ * fix time conversion to milliseconds in SimpleCondition.await (CASSANDRA-7149)
+ * remove duplicate query for local tokens (CASSANDRA-7182)
+ * raise streaming phi convict threshold level (CASSANDRA-7063)
+ * reduce garbage creation in calculatePendingRanges (CASSANDRA-7191)
+ * exit CQLSH with error status code if script fails (CASSANDRA-6344)
+ * Fix bug with some IN queries missig results (CASSANDRA-7105)
+ * Fix availability validation for LOCAL_ONE CL (CASSANDRA-7319)
+ * Hint streaming can cause decommission to fail (CASSANDRA-7219)
+ * RepairTask didn't send a correct message on IllegalArgumentException (CASSANDRA-7336)
+ * Fix race in Thrift server that can exhaust the pool of worker threads (CASSANDRA-6788)
 
 
 1.2.16

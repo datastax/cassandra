@@ -209,8 +209,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         SystemTable.updateTokens(tokens);
         tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
         // order is important here, the gossiper can fire in between adding these two states.  It's ok to send TOKENS without STATUS, but *not* vice versa.
-        Gossiper.instance.addLocalApplicationState(ApplicationState.TOKENS, valueFactory.tokens(getLocalTokens()));
-        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.normal(getLocalTokens()));
+        Collection<Token> localTokens = getLocalTokens();
+        Gossiper.instance.addLocalApplicationState(ApplicationState.TOKENS, valueFactory.tokens(localTokens));
+        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.normal(localTokens));
         setMode(Mode.NORMAL, false);
     }
 
@@ -390,7 +391,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public synchronized Collection<Token> prepareReplacementInfo() throws ConfigurationException
     {
         logger.info("Gathering node replacement information for {}", DatabaseDescriptor.getReplaceAddress());
-        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+        if (!MessagingService.instance().isListening())
+            MessagingService.instance().listen(FBUtilities.getLocalAddress());
 
         // make magic happen
         Gossiper.instance.doShadowRound();
@@ -407,7 +409,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Collection<Token> tokens = TokenSerializer.deserialize(getPartitioner(), new DataInputStream(new ByteArrayInputStream(getApplicationStateValue(DatabaseDescriptor.getReplaceAddress(), ApplicationState.TOKENS))));
             
             SystemTable.setLocalHostId(hostId); // use the replacee's host Id as our own so we receive hints, etc
-            MessagingService.instance().shutdown();
             Gossiper.instance.resetEndpointStateMap(); // clean up since we have what we need
             return tokens;        
         }
@@ -435,7 +436,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         break outer;
                 }
             }
-
             // sleep until any schema migrations have finished
             while (!MigrationManager.isReadyForBootstrap())
             {
@@ -464,7 +464,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Gossiper.instance.start((int) (System.currentTimeMillis() / 1000)); // needed for node-ring gathering.
         Gossiper.instance.addLocalApplicationState(ApplicationState.NET_VERSION, valueFactory.networkVersion());
 
-        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+        if (!MessagingService.instance().isListening())
+            MessagingService.instance().listen(FBUtilities.getLocalAddress());
         try
         {
            Thread.sleep(ringDelay);
@@ -617,9 +618,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // for bootstrap to get the load info it needs.
         // (we won't be part of the storage ring though until we add a counterId to our state, below.)
         // Seed the host ID-to-endpoint map with our own ID.
-        getTokenMetadata().updateHostId(SystemTable.getLocalHostId(), FBUtilities.getBroadcastAddress());
+        UUID localHostId = SystemTable.getLocalHostId();
+        getTokenMetadata().updateHostId(localHostId, FBUtilities.getBroadcastAddress());
         appStates.put(ApplicationState.NET_VERSION, valueFactory.networkVersion());
-        appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(SystemTable.getLocalHostId()));
+        appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
         appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(DatabaseDescriptor.getRpcAddress()));
         appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
         logger.info("Starting up server gossip");
@@ -631,7 +633,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
 
 
-        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+        if (!MessagingService.instance().isListening())
+            MessagingService.instance().listen(FBUtilities.getLocalAddress());
         LoadBroadcaster.instance.startBroadcasting();
 
         HintedHandOffManager.instance.start();
@@ -736,7 +739,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         if (existing != null)
                         {
                             if (Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp() > (System.currentTimeMillis() - delay))
-                                throw new UnsupportedOperationException("Cannnot replace a live node... ");
+                                throw new UnsupportedOperationException("Cannot replace a live node... ");
                             current.add(existing);
                         }
                         else
@@ -1387,6 +1390,35 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
+    private void updatePeerInfo(InetAddress endpoint)
+    {
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        for (Map.Entry<ApplicationState, VersionedValue> entry : epState.getApplicationStateMap().entrySet())
+        {
+            switch (entry.getKey())
+            {
+                case RELEASE_VERSION:
+                    SystemTable.updatePeerInfo(endpoint, "release_version", quote(entry.getValue().value));
+                    break;
+                case DC:
+                    SystemTable.updatePeerInfo(endpoint, "data_center", quote(entry.getValue().value));
+                    break;
+                case RACK:
+                    SystemTable.updatePeerInfo(endpoint, "rack", quote(entry.getValue().value));
+                    break;
+                case RPC_ADDRESS:
+                    SystemTable.updatePeerInfo(endpoint, "rpc_address", quote(entry.getValue().value));
+                    break;
+                case SCHEMA:
+                    SystemTable.updatePeerInfo(endpoint, "schema_version", entry.getValue().value);
+                    break;
+                case HOST_ID:
+                    SystemTable.updatePeerInfo(endpoint, "host_id", entry.getValue().value);
+                    break;
+            }
+        }
+    }
+
     private String quote(String value)
     {
         return "'" + value + "'";
@@ -1488,6 +1520,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (tokenMetadata.isMember(endpoint))
             logger.info("Node " + endpoint + " state jump to normal");
 
+        updatePeerInfo(endpoint);
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
         if (Gossiper.instance.usesHostId(endpoint))
         {
@@ -1539,8 +1572,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             else if (endpoint.equals(currentOwner))
             {
                 // set state back to normal, since the node may have tried to leave, but failed and is now back up
-                // no need to persist, token/ip did not change
                 tokensToUpdateInMetadata.add(token);
+                if (!isClientMode)
+                    tokensToUpdateInSystemTable.add(token);
             }
             else if (tokenMetadata.isRelocating(token) && tokenMetadata.getRelocatingRanges().get(token).equals(endpoint))
             {
@@ -2520,7 +2554,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     catch (IllegalArgumentException e)
                     {
                         logger.error("Repair session failed:", e);
-                        sendNotification("repair", message, new int[]{cmd, AntiEntropyService.Status.SESSION_FAILED.ordinal()});
+                        sendNotification("repair", e.getMessage(), new int[]{cmd, AntiEntropyService.Status.SESSION_FAILED.ordinal()});
                         continue;
                     }
                     if (future == null)
@@ -2937,7 +2971,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private CountDownLatch streamHints()
     {
-        if (HintedHandOffManager.instance.listEndpointsPendingHints().size() == 0)
+        ColumnFamilyStore hintsCF = Table.open(Table.SYSTEM_KS).getColumnFamilyStore(SystemTable.HINTS_CF);
+        if (hintsCF.getMemtableColumnsCount() == 0 && hintsCF.estimateKeys() == 0)
             return new CountDownLatch(0);
 
         // gather all live nodes in the cluster that aren't also leaving
