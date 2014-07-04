@@ -261,7 +261,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         {
             value.clear();
             value.putAll(getCurrentValue());
-            
+
             keys.clear();
             keys.putAll(getCurrentKey());
 
@@ -722,8 +722,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         }
     }
 
-    /** 
-     * retrieve the fake partition keys and cluster keys for classic thrift table 
+    /**
+     * retrieve the fake partition keys and cluster keys for classic thrift table
      * use CFDefinition to get keys and columns
      * */
     private void retrieveKeysForThriftTables() throws Exception
@@ -735,8 +735,10 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             {
                 CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
                 CFDefinition cfDefinition = new CFDefinition(cfMeta);
-                for (ColumnIdentifier columnIdentifier : cfDefinition.keys.keySet())
-                    partitionBoundColumns.add(new BoundColumn(columnIdentifier.toString()));
+                for (ColumnIdentifier key : cfDefinition.keys.keySet())
+                    partitionBoundColumns.add(new BoundColumn(key.toString()));
+                for (ColumnIdentifier column : cfDefinition.columns.keySet())
+                    clusterColumns.add(new BoundColumn(column.toString()));
                 parseKeyValidators(cfDef.key_validation_class);
                 return;
             }
@@ -817,7 +819,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             this.name = name;
         }
     }
-    
+
     /** get string from a ByteBuffer, catch the exception and throw it as runtime exception*/
     private static String stringValue(ByteBuffer value)
     {
