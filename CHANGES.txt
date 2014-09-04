@@ -1,7 +1,25 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
- 
-   
+
+
+1.2.19
+ * Don't allow compacted sstables to be marked as compacting (CASSANDRA-7145)
+ * Track expired tombstones (CASSANDRA-7810)
+ * Validate empty cell names from counter updates (CASSANDRA-7798)
+ * Improve PasswordAuthenticator default super user setup (CASSANDRA-7788)
+ * Remove duplicates from StorageService.getJoiningNodes (CASSANDRA-7478)
+ * Clone token map outside of hot gossip loops (CASSANDRA-7758)
+ * Add stop method to EmbeddedCassandraService (CASSANDRA-7595)
+ * Support connecting to ipv6 jmx with nodetool (CASSANDRA-7669)
+ * Set gc_grace_seconds to seven days for system schema tables (CASSANDRA-7668)
+ * SimpleSeedProvider no longer caches seeds forever (CASSANDRA-7663)
+ * Set correct stream ID on responses when non-Exception Throwables
+   are thrown while handling native protocol messages (CASSANDRA-7470)
+ * Fix row size miscalculation in LazilyCompactedRow (CASSANDRA-7543)
+ * Fix race in background compaction check (CASSANDRA-7745)
+ * Don't clear out range tombstones during compaction (CASSANDRA-7808)
+
+
 1.2.18
  * Support Thrift tables clustering columns on CqlPagingInputFormat (CASSANDRA-7445)
  * Fix compilation with java 6 broke by CASSANDRA-7147

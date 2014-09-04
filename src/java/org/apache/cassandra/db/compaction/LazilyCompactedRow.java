@@ -118,7 +118,7 @@ public class LazilyCompactedRow extends AbstractCompactedRow implements Iterable
         DataOutputBuffer clockOut = new DataOutputBuffer();
         DeletionTime.serializer.serialize(emptyColumnFamily.deletionInfo().getTopLevelDeletion(), clockOut);
 
-        long dataSize = clockOut.getLength() + columnSerializedSize;
+        long dataSize = clockOut.getLength() + columnSerializedSize + this.indexBuilder.getOpenedMarkerSize();
         if (logger.isDebugEnabled())
             logger.debug(String.format("clock / column sizes are %s / %s", clockOut.getLength(), columnSerializedSize));
         assert dataSize > 0;
@@ -167,8 +167,9 @@ public class LazilyCompactedRow extends AbstractCompactedRow implements Iterable
 
     public boolean isEmpty()
     {
+        // need to clone emptyColumnFamily to avoid resetting the deletion time. See CASSANDRA-7808.
         boolean cfIrrelevant = shouldPurge
-                             ? ColumnFamilyStore.removeDeletedCF(emptyColumnFamily, controller.gcBefore) == null
+                             ? ColumnFamilyStore.removeDeletedCF(emptyColumnFamily.cloneMeShallow(), controller.gcBefore) == null
                              : !emptyColumnFamily.isMarkedForDelete(); // tombstones are relevant
         return cfIrrelevant && columnStats.columnCount == 0;
     }
@@ -270,8 +271,9 @@ public class LazilyCompactedRow extends AbstractCompactedRow implements Iterable
                 RangeTombstone t = tombstone;
                 tombstone = null;
 
-                if (t.data.isGcAble(controller.gcBefore))
+                if (shouldPurge && t.data.isGcAble(controller.gcBefore))
                 {
+                    indexBuilder.tombstoneTracker().update(t, true);
                     return null;
                 }
                 else
@@ -285,11 +287,12 @@ public class LazilyCompactedRow extends AbstractCompactedRow implements Iterable
                 ColumnFamily purged = PrecompactedRow.removeDeletedAndOldShards(key, shouldPurge, controller, container);
                 if (purged == null || !purged.iterator().hasNext())
                 {
-                    container.clear();
+                    // don't call clear() because that resets the deletion time. See CASSANDRA-7808.
+                    container = emptyColumnFamily.cloneMeShallow();
                     return null;
                 }
                 IColumn reduced = purged.iterator().next();
-                container.clear();
+                container = emptyColumnFamily.cloneMeShallow();
 
                 // PrecompactedRow.removeDeletedAndOldShards have only checked the top-level CF deletion times,
                 // not the range tombstone. For that we use the columnIndexer tombstone tracker.
