@@ -57,6 +57,17 @@ public abstract class AbstractReadExecutor
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractReadExecutor.class);
 
+    private static final String SPECULATIVE_RETRY_PROPERTY = "cassandra.speculative_retry_enabled";
+    private static final boolean SPECULATIVE_RETRY_ENABLED = Boolean.getBoolean(SPECULATIVE_RETRY_PROPERTY);
+
+    static
+    {
+        if (!SPECULATIVE_RETRY_ENABLED)
+        {
+            logger.warn("speculative retry disabled. Set system property {}=true to enable it", SPECULATIVE_RETRY_PROPERTY);
+        }
+    }
+
     protected final ReadCommand command;
     protected final List<InetAddress> targetReplicas;
     protected final RowDigestResolver resolver;
@@ -154,8 +165,14 @@ public abstract class AbstractReadExecutor
 
         // Fat client. Speculating read executors need access to cfs metrics and sampled latency, and fat clients
         // can't provide that. So, for now, fat clients will always use NeverSpeculatingReadExecutor.
-        if (StorageService.instance.isClientMode())
+        if (StorageService.instance.isClientMode() || !SPECULATIVE_RETRY_ENABLED)
+        {
+            if (!SPECULATIVE_RETRY_ENABLED && logger.isDebugEnabled())
+            {
+                logger.debug("Speculating retry disabled, returning NeverSpeculatingReadExecutor");
+            }
             return new NeverSpeculatingReadExecutor(command, consistencyLevel, targetReplicas);
+        }
 
         if (repairDecision != ReadRepairDecision.NONE)
             ReadRepairMetrics.attempted.mark();
