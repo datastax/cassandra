@@ -247,6 +247,7 @@ public class SimpleClient
             SSLEngine sslEngine = sslContext.createSSLEngine();
             sslEngine.setUseClientMode(true);
             sslEngine.setEnabledCipherSuites(encryptionOptions.cipher_suites);
+            sslEngine.setEnabledProtocols(SSLFactory.ACCEPTED_PROTOCOLS);
             ChannelPipeline pipeline = super.getPipeline();
 
             pipeline.addFirst("ssl", new SslHandler(sslEngine));

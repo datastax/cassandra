@@ -73,6 +73,7 @@ import org.apache.cassandra.utils.*;
 public final class MessagingService implements MessagingServiceMBean
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=MessagingService";
+    private static final String ALWAYS_LISTEN_UNENCRYPTED = "cassandra.always_listen_on_unencrypted";
 
     // 8 bits version, so don't waste versions
     public static final int VERSION_10  = 3;
@@ -422,8 +423,14 @@ public final class MessagingService implements MessagingServiceMBean
             logger.info("Starting Encrypted Messaging Service on SSL port {}", DatabaseDescriptor.getSSLStoragePort());
         }
 
-        if (DatabaseDescriptor.getServerEncryptionOptions().internode_encryption != ServerEncryptionOptions.InternodeEncryption.all)
+        if (DatabaseDescriptor.getServerEncryptionOptions().internode_encryption != ServerEncryptionOptions.InternodeEncryption.all || Boolean.getBoolean(ALWAYS_LISTEN_UNENCRYPTED))
         {
+
+            if (DatabaseDescriptor.getServerEncryptionOptions().internode_encryption == ServerEncryptionOptions.InternodeEncryption.all)
+            {
+                logger.warn("Listening on unencrypted socket even though internode_encryption is set to all");
+            }
+
             ServerSocketChannel serverChannel = null;
             try
             {
