@@ -243,8 +243,16 @@ JVM_OPTS="$JVM_OPTS -Djava.net.preferIPv4Stack=true"
 # https://blogs.oracle.com/jmxetc/entry/troubleshooting_connection_problems_in_jconsole
 # for more on configuring JMX through firewalls, etc. (Short version:
 # get it working with no firewall first.)
-JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.port=$JMX_PORT"
-JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.ssl=false"
-JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.authenticate=false"
+#
+# Due to potential security exploits, Cassandra ships with JMX accessible
+# *only* from localhost.  To enable remote JMX connections, uncomment lines below
+# with authentication and ssl enabled. See https://wiki.apache.org/cassandra/JmxSecurity 
+#
+#JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.port=$JMX_PORT"
+#JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.rmi.port=$JMX_PORT"
+#JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.ssl=false"
+#JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.authenticate=true"
 #JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.password.file=/etc/cassandra/jmxremote.password"
+JVM_OPTS="$JVM_OPTS -Dcassandra.jmx.local.port=$JMX_PORT"
+
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"

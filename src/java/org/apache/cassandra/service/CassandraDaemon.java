@@ -23,15 +23,25 @@ import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.server.RMIServerSocketFactory;
+import java.rmi.server.RMISocketFactory;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
+import javax.management.remote.JMXConnectorServer;
+import javax.management.remote.JMXConnectorServerFactory;
+import javax.management.remote.JMXServiceURL;
+import javax.management.remote.rmi.RMIConnectorServer;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.*;
 import org.apache.log4j.PropertyConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,8 +58,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.thrift.ThriftServer;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.CLibrary;
-import org.apache.cassandra.utils.Mx4jTool;
 
 /**
  * The <code>CassandraDaemon</code> is an abstraction for a Cassandra daemon
@@ -60,6 +68,7 @@ import org.apache.cassandra.utils.Mx4jTool;
 public class CassandraDaemon
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=NativeAccess";
+    public static JMXConnectorServer jmxServer = null;
     
     static
     {
@@ -122,6 +131,57 @@ public class CassandraDaemon
 
     private static final Logger logger = LoggerFactory.getLogger(CassandraDaemon.class);
 
+    private static void maybeInitJmx()
+    {
+        String jmxPort = System.getProperty("com.sun.management.jmxremote.port");
+
+        if (jmxPort == null)
+        {
+            logger.warn("JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.");
+
+            jmxPort = System.getProperty("cassandra.jmx.local.port");
+
+            if (jmxPort == null)
+            {
+                logger.error("cassandra.jmx.local.port missing from cassandra-env.sh, unable to start local JMX service." + jmxPort);
+            }
+            else
+            {
+                System.setProperty("java.rmi.server.hostname","127.0.0.1");
+
+                try
+                {
+                    RMIServerSocketFactory serverFactory = new RMIServerSocketFactoryImpl();
+                    LocateRegistry.createRegistry(Integer.valueOf(jmxPort), null, serverFactory);
+
+                    StringBuffer url = new StringBuffer();
+                    url.append("service:jmx:");
+                    url.append("rmi://localhost/jndi/");
+                    url.append("rmi://localhost:").append(jmxPort).append("/jmxrmi");
+                    
+                    Map env = new HashMap();
+                    env.put(RMIConnectorServer.RMI_SERVER_SOCKET_FACTORY_ATTRIBUTE, serverFactory);
+
+                    jmxServer = new RMIConnectorServer(
+                            new JMXServiceURL(url.toString()),
+                            env,
+                            ManagementFactory.getPlatformMBeanServer()
+                    );
+
+                    jmxServer.start();
+                }
+                catch (IOException e)
+                {
+                    logger.error("Error starting local jmx server: ", e);
+                }
+            }
+        }
+        else
+        {
+            logger.info("JMX is enabled to receive remote connections on port: " + jmxPort);
+        }
+    }
+
     private static final CassandraDaemon instance = new CassandraDaemon();
 
     public Server thriftServer;
@@ -182,6 +242,8 @@ public class CassandraDaemon
         logger.info("Heap size: {}/{}", Runtime.getRuntime().totalMemory(), Runtime.getRuntime().maxMemory());
         logger.info("Classpath: {}", System.getProperty("java.class.path"));
         CLibrary.tryMlockall();
+
+        maybeInitJmx();
 
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
         {
@@ -414,6 +476,18 @@ public class CassandraDaemon
         logger.info("Cassandra shutting down...");
         thriftServer.stop();
         nativeServer.stop();
+
+        if (jmxServer != null)
+        {
+            try
+            {
+                jmxServer.stop();
+            }
+            catch (IOException e)
+            {
+                logger.error("Error shutting down local JMX server: ", e);
+            }
+        }
     }
 
 
