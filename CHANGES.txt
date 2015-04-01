@@ -1,5 +1,6 @@
 DSE backports/cherry-picks
  * Use SASL authentication in binary protocol v2 (CASSANDRA-5545)
+ * Bind JMX to localhost unless explicitly configured otherwise (CASSANDRA-9085)
 
 1.2.19
  * Don't index tombstones (CASSANDRA-7828)
