@@ -104,11 +104,14 @@ public class IncomingTcpConnection extends Thread
     private void handleModernVersion(int version, int header) throws IOException
     {
         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+        // if this version is < the MC version the other node is trying
+        // to connect with, the other node will disconnect
         out.writeInt(MessagingService.current_version);
         out.flush();
 
         DataInputStream in = new DataInputStream(socket.getInputStream());
         int maxVersion = in.readInt();
+        assert version <= MessagingService.current_version;
         from = CompactEndpointSerializationHelper.deserialize(in);
         boolean compressed = MessagingService.getBits(header, 2, 1) == 1;
 
@@ -123,13 +126,6 @@ public class IncomingTcpConnection extends Thread
         }
 
         logger.debug("Max version for {} is {}", from, maxVersion);
-        if (version > MessagingService.current_version)
-        {
-            // save the endpoint so gossip will reconnect to it
-            Gossiper.instance.addSavedEndpoint(from);
-            logger.info("Received messages from newer protocol version {}. Ignoring", version);
-            return;
-        }
         MessagingService.instance().setVersion(from, maxVersion);
         logger.debug("Set version for {} to {} (will use {})", from, maxVersion, Math.min(MessagingService.current_version, maxVersion));
         // outbound side will reconnect if necessary to upgrade version
