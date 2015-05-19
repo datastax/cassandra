@@ -19,37 +19,34 @@ package org.apache.cassandra.hadoop;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.*;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.auth.IAuthenticator;
-import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.statements.SelectStatement.RawStatement;
+import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.thrift.AuthenticationRequest;
-import org.apache.cassandra.thrift.Cassandra;
-import org.apache.cassandra.thrift.CfSplit;
-import org.apache.cassandra.thrift.InvalidRequestException;
-import org.apache.cassandra.thrift.KeyRange;
-import org.apache.cassandra.thrift.TokenRange;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
+import org.apache.cassandra.hadoop.cql3.CqlRecordReader;
+import org.apache.cassandra.thrift.*;
+import org.apache.cassandra.utils.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.mapreduce.InputFormat;
-import org.apache.hadoop.mapreduce.InputSplit;
-import org.apache.hadoop.mapreduce.JobContext;
-import org.apache.hadoop.mapreduce.TaskAttemptContext;
-import org.apache.hadoop.mapreduce.TaskAttemptID;
+import org.apache.hadoop.mapreduce.*;
 import org.apache.thrift.TApplicationException;
 import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
@@ -73,6 +70,7 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
     private String keyspace;
     private String cfName;
     private IPartitioner partitioner;
+    private Token token;
 
     protected void validateConfiguration(Configuration conf)
     {
@@ -118,17 +116,23 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
     public List<InputSplit> getSplits(JobContext context) throws IOException
     {
         Configuration conf = HadoopCompat.getConfiguration(context);;
-
         validateConfiguration(conf);
 
         // cannonical ranges and nodes holding replicas
         List<TokenRange> masterRangeNodes = getRangeMap(conf);
-
         keyspace = ConfigHelper.getInputKeyspace(conf);
         cfName = ConfigHelper.getInputColumnFamily(conf);
         partitioner = ConfigHelper.getInputPartitioner(conf);
         logger.debug("partitioner is {}", partitioner);
 
+        try
+        {
+            token = getToken(conf);
+        }
+        catch (Exception e)
+        {
+            logger.error("Failed to get the token If where clause is passed in, and all partition keys are in EQUAL clauses.");
+        }
 
         // cannonical ranges, split into pieces, fetching the splits in parallel
         ExecutorService executor = new ThreadPoolExecutor(0, 128, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
@@ -167,6 +171,12 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
 
             for (TokenRange range : masterRangeNodes)
             {
+                Range<Token> dhtRange = new Range<Token>(partitioner.getTokenFactory().fromString(range.start_token),
+                                                         partitioner.getTokenFactory().fromString(range.end_token),
+                                                         partitioner);
+                //make sure range contains the token
+                if (token != null && !dhtRange.contains(token)) continue;
+
                 if (jobRange == null)
                 {
                     // for each range, pick a live owner and ask it to compute bite-sized splits
@@ -174,10 +184,6 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
                 }
                 else
                 {
-                    Range<Token> dhtRange = new Range<Token>(partitioner.getTokenFactory().fromString(range.start_token),
-                                                             partitioner.getTokenFactory().fromString(range.end_token),
-                                                             partitioner);
-
                     if (dhtRange.intersects(jobRange))
                     {
                         for (Range<Token> intersection: dhtRange.intersectionWith(jobRange))
@@ -256,15 +262,18 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
                 List<Range<Token>> ranges = range.isWrapAround() ? range.unwrap() : ImmutableList.of(range);
                 for (Range<Token> subrange : ranges)
                 {
-                    ColumnFamilySplit split =
+                    boolean containsToken = token != null && subrange.contains(token);
+                    if (token == null || containsToken) {
+                        ColumnFamilySplit split =
                             new ColumnFamilySplit(
-                                    factory.toString(subrange.left),
-                                    factory.toString(subrange.right),
-                                    subSplit.getRow_count(),
-                                    endpoints);
-
-                    logger.debug("adding {}", split);
-                    splits.add(split);
+                                factory.toString(subrange.left),
+                                factory.toString(subrange.right),
+                                subSplit.getRow_count(),
+                                endpoints);
+                        split.setPartitionKeyEqQuery(containsToken);
+                        logger.debug("adding {}", split);
+                        splits.add(split);
+                    }
                 }
             }
             return splits;
@@ -343,6 +352,163 @@ public abstract class AbstractColumnFamilyInputFormat<K, Y> extends InputFormat<
             throw new RuntimeException(e);
         }
         return map;
+    }
+
+    /*
+     *  If where clause is passed in, and all partition keys are in EQUAL clauses, return the row token,
+     *  otherwise returns null. Only use the split contains the token.
+     */
+    public static Token getToken(Configuration conf)
+                        throws SyntaxException,
+                        IOException,
+                        org.apache.cassandra.exceptions.InvalidRequestException,
+                        ConfigurationException,
+                        InvalidRequestException,
+                        UnavailableException,
+                        TimedOutException,
+                        SchemaDisagreementException,
+                        TException,
+                        NotFoundException
+    {
+        String keyspace = ConfigHelper.getInputKeyspace(conf);
+        String cfName = ConfigHelper.getInputColumnFamily(conf);
+        String whereStr = CqlConfigHelper.getInputWhereClauses(conf);
+        String query = CqlConfigHelper.getInputCql(conf);
+        if (query == null)
+        {
+            if (whereStr != null)
+                query = String.format("SELECT * FROM %s.%s WHERE %s ",
+                        CqlRecordReader.quote(keyspace),
+                        CqlRecordReader.quote(cfName), whereStr);
+            else
+                return null;
+        }
+        Pair<AbstractType, List<String>> keysInfo = retrieveKeys(ConfigHelper.getClientFromInputAddressList(conf), keyspace, cfName);
+        AbstractType keyValidator = keysInfo.left;
+        List<String> keys = keysInfo.right;
+
+        Map<String, AbstractType> validators = Maps.newHashMap();
+        
+        if (keyValidator instanceof CompositeType)
+        {
+           int i = 0;
+           for (AbstractType type: ((CompositeType) keyValidator).types)
+               validators.put(keys.get(i++), type);
+        }
+        else
+            validators.put(keys.get(0), keyValidator);
+
+        RawStatement rawstmt = (RawStatement) QueryProcessor.parseStatement(query);
+        List<Relation> whereClause = rawstmt.getWhereClause();
+        Map<String, ByteBuffer> eqColumns = Maps.newHashMap();
+        for (Relation rel : whereClause)
+        {
+             if ((rel instanceof SingleColumnRelation))
+             {
+                 SingleColumnRelation relation = (SingleColumnRelation) rel;
+                 if (relation.operator() == Operator.EQ)
+                 {
+                     String columnName = relation.getEntity().toString();
+                     AbstractType validator = validators.get(columnName);
+                     if (validator != null)
+                     {
+                         try
+                         {
+                             ColumnSpecification receiver = new ColumnSpecification(
+                                                                keyspace,
+                                                                cfName,
+                                                                new ColumnIdentifier(relation.getEntity().toString(), true),
+                                                                validator);
+                             Term.Raw  rawTerm = relation.getValue();
+                             Term term = rawTerm.prepare(keyspace, receiver);
+                             ByteBuffer value = term.bindAndGet(QueryOptions.DEFAULT);
+                             eqColumns.put(columnName, value);
+                         }
+                         catch (org.apache.cassandra.exceptions.InvalidRequestException e)
+                         {
+                             //not a Terminal term
+                         }
+                     }
+                 }
+             }
+        }
+
+        if (keys.size() != eqColumns.size())
+            return null;
+
+        ByteBuffer[] keyValues = new ByteBuffer[keys.size()];
+        for (int i=0; i< keys.size(); i++)
+            keyValues[i] = eqColumns.get(keys.get(i));
+        IPartitioner partitioner = ConfigHelper.getInputPartitioner(conf);
+        return keyValidator instanceof CompositeType
+                ? partitioner.getToken(((CompositeType) keyValidator).build(keyValues)) 
+                : partitioner.getToken(eqColumns.get(keys.get(0)));
+    }
+
+    /*
+     * retrieve the partition keys and key validator from system.schema_columnfamilies table
+     *
+     */
+    private static Pair<AbstractType, List<String>> retrieveKeys(Cassandra.Client client, String keyspace, String cfName) 
+                                                    throws InvalidRequestException,
+                                                    UnavailableException,
+                                                    TimedOutException,
+                                                    SchemaDisagreementException,
+                                                    TException,
+                                                    NotFoundException,
+                                                    org.apache.cassandra.exceptions.InvalidRequestException,
+                                                    ConfigurationException,
+                                                    IOException
+    {
+        String query = "select key_aliases," +
+                       "key_validator " +
+                       "from system.schema_columnfamilies " +
+                       "where keyspace_name='%s' and columnfamily_name='%s'";
+        String formatted = String.format(query, keyspace, cfName);
+        CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
+
+        if (result.rows.isEmpty()) {
+            throw new IOException(String.format("Failed to get the partitioning keys for %s.$s", keyspace, cfName));
+        }
+        CqlRow cqlRow = result.rows.get(0);
+        String keyString = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(0).getValue()));
+        logger.debug("partition keys: {}", keyString);
+        List<String> keys = FBUtilities.fromJsonList(keyString);
+
+        //Thrift table
+        if (keys.isEmpty())
+        {
+            KsDef ksDef = client.describe_keyspace(keyspace);
+            for (CfDef cfDef : ksDef.cf_defs)
+            {
+                if (cfDef.name.equals(cfName))
+                {
+                    CFMetaData cfMeta = CFMetaData.fromThrift(cfDef);
+                    for (ColumnDefinition columnDef : cfMeta.partitionKeyColumns())
+                        keys.add(columnDef.name.toString());
+                    return Pair.create(parseType(cfDef.key_validation_class), keys);
+                }
+            }
+        }
+        
+        String typeName = ByteBufferUtil.string(ByteBuffer.wrap(cqlRow.columns.get(1).getValue()));
+        AbstractType type = parseType(typeName);
+        return Pair.create(type, keys);
+    }
+
+    private static AbstractType parseType(String type) throws ConfigurationException
+    {
+        try
+        {
+            // always treat counters like longs, specifically CCT.serialize is not what we need
+            if (type != null && type.equals("org.apache.cassandra.db.marshal.CounterColumnType"))
+                return LongType.instance;
+            return TypeParser.parse(type);
+        }
+        catch (SyntaxException e)
+        {
+            throw new ConfigurationException(e.getMessage(), e);
+        }
     }
 
     //

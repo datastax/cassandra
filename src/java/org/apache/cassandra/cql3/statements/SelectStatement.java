@@ -2310,6 +2310,11 @@ public class SelectStatement implements CQLStatement
                           .add("isCount", parameters.isCount)
                           .toString();
         }
+
+        public List<Relation> getWhereClause()
+        {
+            return whereClause;
+        }
     }
 
     public static class Parameters

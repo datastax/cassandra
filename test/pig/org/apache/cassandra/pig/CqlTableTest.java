@@ -38,6 +38,8 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.google.common.collect.Iterators;
+
 public class CqlTableTest extends PigTestBase
 {    
     private static String[] statements = {
@@ -78,6 +80,15 @@ public class CqlTableTest extends PigTestBase
             "UPDATE collectiontable SET n['key2'] = 'value2' WHERE m = 'book2';",
             "UPDATE collectiontable SET n['key3'] = 'value3' WHERE m = 'book3';",
             "UPDATE collectiontable SET n['key4'] = 'value4' WHERE m = 'book4';",
+
+            "CREATE TABLE compositekeytable (key1 text, key2 int, key3 int, key4 int, column1 int, column2 float, primary key((key1, key2), key3, key4))",
+            "CREATE INDEX column1 on compositekeytable (column1);",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 100, 100, 10.1)",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 101, 100, 10.1)",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 102, 100, 10.1)",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 103, 100, 10.1)",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 104, 100, 10.1)",
+            "INSERT INTO compositekeytable (key1, key2, key3, key4, column1, column2) values ('key1', 111, 100, 105, 100, 10.1)",
     };
 
     @BeforeClass
@@ -309,5 +320,59 @@ public class CqlTableTest extends PigTestBase
         {
             Assert.fail("Can't fetch any data");
         }
+    }
+
+    @Test
+    public void testCqlStorageAllPartitionKeysEqualClauses()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
+    {
+        pig.registerQuery("rows = LOAD 'cql://cql3ks/cqltable?"  + defaultParameters + nativeParameters + "&where_clause=key1%3D%27key1%27' USING CqlNativeStorage();");
+        Iterator<Tuple> it = pig.openIterator("rows");
+        int count = 0;
+        while (it.hasNext()) {
+            Tuple t = it.next();
+            Assert.assertEquals(t.get(0).toString(), "key1");
+            Assert.assertEquals(t.get(1), 111);
+            Assert.assertEquals(t.get(2), 100);
+            Assert.assertEquals(t.get(3), 10.1f);
+            Assert.assertEquals(4, t.size());
+            count ++;
+        }
+        Assert.assertEquals(1, count);
+
+        //key1 = 'key1' and key2 = 111 and column1=100
+        pig.registerQuery("composite_rows = LOAD 'cql://cql3ks/compositekeytable?" + defaultParameters + nativeParameters +  "&where_clause=key1%20%3D%20%27key1%27%20and%20key2%20%3D%20111%20and%20column1%3D100&page_size=2' USING CqlNativeStorage();");
+        it = pig.openIterator("composite_rows");
+        count = 0;
+        while (it.hasNext())
+        {
+            it.next();
+            count ++;
+        }
+        Assert.assertEquals(6, count);
+    }
+
+    @Test
+    public void testCqlStorageAllPartitionKeysEqualClauses2()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
+    {
+        //input_cql=select * from cqltable where key1='key1'
+        pig.registerQuery("rows = LOAD 'cql://cql3ks/cqltable?"  + defaultParameters + nativeParameters + "&input_cql=select%20*%20from%20cqltable%20where%20key1%3D%27key1%27' USING CqlNativeStorage();");
+        Iterator<Tuple> it = pig.openIterator("rows");
+        int count = Iterators.size(it);
+        while (it.hasNext()) {
+            Tuple t = it.next();
+            Assert.assertEquals(t.get(0).toString(), "key1");
+            Assert.assertEquals(t.get(1), 111);
+            Assert.assertEquals(t.get(2), 100);
+            Assert.assertEquals(t.get(3), 10.1f);
+            Assert.assertEquals(4, t.size());
+        }
+        Assert.assertEquals(1, count);
+
+        //input_cql=select * from compositekeytable where key1 = 'key1' and key2 = 111 and column1=100
+        pig.registerQuery("composite_rows = LOAD 'cql://cql3ks/compositekeytable?" + defaultParameters + nativeParameters +  "&input_cql=select%20*%20from%20compositekeytable%20where%20key1%20%3D%20%27key1%27%20and%20key2%20%3D%20111%20and%20column1%3D100' USING CqlNativeStorage();");
+        it = pig.openIterator("composite_rows");
+        Assert.assertEquals(6, Iterators.size(it));
     }
 }

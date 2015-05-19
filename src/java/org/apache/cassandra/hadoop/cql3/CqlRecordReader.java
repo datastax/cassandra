@@ -24,12 +24,8 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
-import com.google.common.base.Splitter;
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
+import com.google.common.base.*;
+import com.google.common.collect.*;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -43,16 +39,9 @@ import org.apache.cassandra.hadoop.ConfigHelper;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.mapreduce.InputSplit;
-import org.apache.hadoop.mapreduce.RecordReader;
-import org.apache.hadoop.mapreduce.TaskAttemptContext;
+import org.apache.hadoop.mapreduce.*;
 
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.ColumnDefinitions;
-import com.datastax.driver.core.ColumnMetadata;
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.Row;
-import com.datastax.driver.core.Session;
+import com.datastax.driver.core.*;
 /**
  * CqlRecordReader reads the rows return from the CQL query
  * It uses CQL auto-paging.
@@ -63,6 +52,9 @@ import com.datastax.driver.core.Session;
  * 1) select clause must include partition key columns (to calculate the progress based on the actual CF row processed)
  * 2) where clause must include token(partition_key1, ...  , partition_keyn) > ? and 
  *       token(partition_key1, ... , partition_keyn) <= ?  (in the right order) 
+ * 3) if where clause has all partitioning key EQ clauses, then it doesn't include
+ *       token(partition_key1, ...  , partition_keyn) > ? and
+ *       token(partition_key1, ... , partition_keyn) <= ?
  */
 public class CqlRecordReader extends RecordReader<Long, Row>
         implements org.apache.hadoop.mapred.RecordReader<Long, Row>
@@ -256,7 +248,12 @@ public class CqlRecordReader extends RecordReader<Long, Row>
         public RowIterator()
         {
             AbstractType type = partitioner.getTokenValidator();
-            ResultSet rs = session.execute(cqlQuery, type.compose(type.fromString(split.getStartToken())), type.compose(type.fromString(split.getEndToken())) );
+            ResultSet rs;
+            if (split.isPartitionKeyEqQuery())
+                rs = session.execute(cqlQuery);
+            else
+                rs = session.execute(cqlQuery, type.compose(type.fromString(split.getStartToken())), type.compose(type.fromString(split.getEndToken())));
+
             for (ColumnMetadata meta : cluster.getMetadata().getKeyspace(quote(keyspace)).getTable(quote(cfName)).getPartitionKey())
                 partitionBoundColumns.put(meta.getName(), Boolean.TRUE);
             rows = rs.iterator();
@@ -529,15 +526,26 @@ public class CqlRecordReader extends RecordReader<Long, Row>
         String selectColumnList = columns.size() == 0 ? "*" : makeColumnList(columns);
         String partitionKeyList = makeColumnList(partitionKeys);
 
-        return String.format("SELECT %s FROM %s.%s WHERE token(%s)>? AND token(%s)<=?" + getAdditionalWhereClauses(),
-                             selectColumnList, quote(keyspace), quote(cfName), partitionKeyList, partitionKeyList);
+        if (split.isPartitionKeyEqQuery())
+        {
+            return String.format("SELECT %s FROM %s.%s WHERE " + getAdditionalWhereClauses(),
+                    selectColumnList, quote(keyspace), quote(cfName), partitionKeyList, partitionKeyList);
+        }
+        else
+        {
+            String where = getAdditionalWhereClauses();
+            if (!where.equals(""))
+                where = " AND " + where;
+            return String.format("SELECT %s FROM %s.%s WHERE token(%s)>? AND token(%s)<=? ",
+                             selectColumnList, quote(keyspace), quote(cfName), partitionKeyList, partitionKeyList) + where;
+        }
     }
 
     private String getAdditionalWhereClauses()
     {
         String whereClause = "";
         if (StringUtils.isNotEmpty(userDefinedWhereClauses))
-            whereClause += " AND " + userDefinedWhereClauses;
+            whereClause +=  userDefinedWhereClauses;
         if (StringUtils.isNotEmpty(userDefinedWhereClauses))
             whereClause += " ALLOW FILTERING";
         return whereClause;
@@ -598,7 +606,7 @@ public class CqlRecordReader extends RecordReader<Long, Row>
         partitionKeys.addAll(Arrays.asList(partitionKeyArray));
     }
 
-    private String quote(String identifier)
+    public static String quote(String identifier)
     {
         return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
     }

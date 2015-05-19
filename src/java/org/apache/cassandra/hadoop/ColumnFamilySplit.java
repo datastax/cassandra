@@ -31,6 +31,7 @@ public class ColumnFamilySplit extends InputSplit implements Writable, org.apach
     private String endToken;
     private long length;
     private String[] dataNodes;
+    private boolean partitionKeyEqQuery = false;
 
     @Deprecated
     public ColumnFamilySplit(String startToken, String endToken, String[] dataNodes)
@@ -70,6 +71,16 @@ public class ColumnFamilySplit extends InputSplit implements Writable, org.apach
         return dataNodes;
     }
 
+    public boolean isPartitionKeyEqQuery()
+    {
+        return partitionKeyEqQuery;
+    }
+
+    public void setPartitionKeyEqQuery(boolean partitionKeyEqQuery)
+    {
+        this.partitionKeyEqQuery = partitionKeyEqQuery;
+    }
+
     // This should only be used by KeyspaceSplit.read();
     protected ColumnFamilySplit() {}
 
@@ -79,6 +90,7 @@ public class ColumnFamilySplit extends InputSplit implements Writable, org.apach
     {
         out.writeUTF(startToken);
         out.writeUTF(endToken);
+        out.writeBoolean(partitionKeyEqQuery);
         out.writeInt(dataNodes.length);
         for (String endpoint : dataNodes)
         {
@@ -90,6 +102,7 @@ public class ColumnFamilySplit extends InputSplit implements Writable, org.apach
     {
         startToken = in.readUTF();
         endToken = in.readUTF();
+        partitionKeyEqQuery = in.readBoolean();
         int numOfEndpoints = in.readInt();
         dataNodes = new String[numOfEndpoints];
         for(int i = 0; i < numOfEndpoints; i++)
