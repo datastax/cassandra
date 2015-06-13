@@ -247,7 +247,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 List<ColumnFamilyStore> submitted = new ArrayList<>();
                 for (Keyspace keyspace : Keyspace.all())
                     for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                        if (CompactionManager.instance.submitBackground(cfs) != null)
+                        if (!CompactionManager.instance.submitBackground(cfs, false).isEmpty())
                             submitted.add(cfs);
 
                 while (!submitted.isEmpty() && CompactionManager.instance.getActiveCompactions() < CompactionManager.instance.getMaximumCompactorThreads())
@@ -255,11 +255,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     List<ColumnFamilyStore> submitMore = ImmutableList.copyOf(submitted);
                     submitted.clear();
                     for (ColumnFamilyStore cfs : submitMore)
-                        if (CompactionManager.instance.submitBackground(cfs) != null)
+                        if (!CompactionManager.instance.submitBackground(cfs, false).isEmpty())
                             submitted.add(cfs);
                 }
             }
-        }
+        };
     }
 
     public void setCompactionStrategyClass(String compactionStrategyClass)
