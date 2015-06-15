@@ -368,22 +368,6 @@ public class CassandraDaemon
                 }
             }
         }
-        // start compactions in five minutes (if no flushes have occurred by then to do so)
-        Runnable runnable = new Runnable()
-        {
-            public void run()
-            {
-                for (Keyspace keyspaceName : Keyspace.all())
-                {
-                    for (ColumnFamilyStore cf : keyspaceName.getColumnFamilyStores())
-                    {
-                        for (ColumnFamilyStore store : cf.concatWithIndexes())
-                            CompactionManager.instance.submitBackground(store);
-                    }
-                }
-            }
-        };
-        ScheduledExecutors.optionalTasks.schedule(runnable, 5, TimeUnit.MINUTES);
 
         SystemKeyspace.finishStartup();
 
