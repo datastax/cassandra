@@ -178,17 +178,18 @@ public class SystemKeyspace
             return null;
 
         UUID compactionId = UUIDGen.getTimeUUID();
-        String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, inputs) VALUES (%s, '%s', '%s', {%s})";
-        Iterable<Integer> generations = Iterables.transform(toCompact, new Function<SSTableReader, Integer>()
-        {
-            public Integer apply(SSTableReader sstable)
-            {
-                return sstable.descriptor.generation;
-            }
-        });
-        processInternal(String.format(req, COMPACTION_LOG, compactionId, cfs.keyspace.getName(), cfs.name, StringUtils.join(Sets.newHashSet(generations), ',')));
-        forceBlockingFlush(COMPACTION_LOG);
         return compactionId;
+//        String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, inputs) VALUES (%s, '%s', '%s', {%s})";
+//        Iterable<Integer> generations = Iterables.transform(toCompact, new Function<SSTableReader, Integer>()
+//        {
+//            public Integer apply(SSTableReader sstable)
+//            {
+//                return sstable.descriptor.generation;
+//            }
+//        });
+//        processInternal(String.format(req, COMPACTION_LOG, compactionId, cfs.keyspace.getName(), cfs.name, StringUtils.join(Sets.newHashSet(generations), ',')));
+//        forceBlockingFlush(COMPACTION_LOG);
+//        return compactionId;
     }
 
     /**
@@ -198,11 +199,11 @@ public class SystemKeyspace
      */
     public static void finishCompaction(UUID taskId)
     {
-        assert taskId != null;
-
-        String req = "DELETE FROM system.%s WHERE id = %s";
-        processInternal(String.format(req, COMPACTION_LOG, taskId));
-        forceBlockingFlush(COMPACTION_LOG);
+//        assert taskId != null;
+//
+//        String req = "DELETE FROM system.%s WHERE id = %s";
+//        processInternal(String.format(req, COMPACTION_LOG, taskId));
+//        forceBlockingFlush(COMPACTION_LOG);
     }
 
     /**
