@@ -149,6 +149,7 @@ public class MmappedSegmentedFile extends SegmentedFile
         // current length of the open segment.
         // used to allow merging multiple too-large-to-mmap segments, into a single buffered segment.
         private long currentSize = 0;
+        private long length;
 
         public Builder()
         {
@@ -187,6 +188,8 @@ public class MmappedSegmentedFile extends SegmentedFile
         {
             assert !isFinal || overrideLength <= 0;
             long length = overrideLength > 0 ? overrideLength : new File(path).length();
+            if (isFinal)
+                this.length = length;
             // create the segments
             return new MmappedSegmentedFile(path, length, createSegments(path, length));
         }
@@ -203,18 +206,7 @@ public class MmappedSegmentedFile extends SegmentedFile
                 throw new RuntimeException(e);
             }
 
-            // if we're early finishing a range that doesn't span multiple segments, but the finished file now does,
-            // we remove these from the end (we loop incase somehow this spans multiple segments, but that would
-            // be a loco dataset
-            while (length < boundaries.get(boundaries.size() - 1))
-                boundaries.remove(boundaries.size() -1);
-
-            // add a sentinel value == length
-            List<Long> boundaries = new ArrayList<>(this.boundaries);
-            if (length != boundaries.get(boundaries.size() - 1))
-                boundaries.add(length);
-
-
+            List<Long> boundaries = boundaries(length);
             int segcount = boundaries.size() - 1;
             Segment[] segments = new Segment[segcount];
 
@@ -241,10 +233,25 @@ public class MmappedSegmentedFile extends SegmentedFile
             return segments;
         }
 
+        private List<Long> boundaries(long length)
+        {
+            List<Long> boundaries = new ArrayList<>(this.boundaries);
+            // if we're early finishing a range that doesn't span multiple segments, but the finished file now does,
+            // we remove these from the end (we loop incase somehow this spans multiple segments, but that would
+            // be a loco dataset
+            while (length < boundaries.get(boundaries.size() - 1))
+                boundaries.remove(boundaries.size() -1);
+            // add a sentinel value == length
+            if (length != boundaries.get(boundaries.size() - 1))
+                boundaries.add(length);
+            return boundaries;
+        }
+
         @Override
         public void serializeBounds(DataOutput out) throws IOException
         {
             super.serializeBounds(out);
+            List<Long> boundaries = boundaries(length);
             out.writeInt(boundaries.size());
             for (long position: boundaries)
                 out.writeLong(position);
