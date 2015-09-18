@@ -203,14 +203,14 @@ public class MmappedSegmentedFile extends SegmentedFile
                 throw new RuntimeException(e);
             }
 
+            // add a sentinel value == length
+            List<Long> boundaries = new ArrayList<>(this.boundaries);
             // if we're early finishing a range that doesn't span multiple segments, but the finished file now does,
             // we remove these from the end (we loop incase somehow this spans multiple segments, but that would
             // be a loco dataset
             while (length < boundaries.get(boundaries.size() - 1))
                 boundaries.remove(boundaries.size() -1);
 
-            // add a sentinel value == length
-            List<Long> boundaries = new ArrayList<>(this.boundaries);
             if (length != boundaries.get(boundaries.size() - 1))
                 boundaries.add(length);
 
