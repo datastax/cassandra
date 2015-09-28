@@ -37,6 +37,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.UnknownColumnFamilyException;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.repair.messages.RepairMessage;
 
 public class IncomingTcpConnection extends Thread implements Closeable
 {
@@ -193,6 +194,12 @@ public class IncomingTcpConnection extends Thread implements Closeable
         }
         if (version <= MessagingService.current_version)
         {
+            if (logger.isDebugEnabled() && message.verb == MessagingService.Verb.REPAIR_MESSAGE)
+            {
+                RepairMessage rm = (RepairMessage) message.payload;
+                if (rm != null)
+                    logger.debug("Repair message {} for {} received from {}", rm.messageType, rm.desc, socket.getRemoteSocketAddress());
+            }
             MessagingService.instance().receive(message, id, timestamp);
         }
         else

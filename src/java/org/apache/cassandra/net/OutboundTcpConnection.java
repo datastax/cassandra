@@ -43,6 +43,7 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CoalescingStrategies;
@@ -284,6 +285,12 @@ public class OutboundTcpConnection extends Thread
             completed++;
             if (flush)
                 out.flush();
+            if (logger.isDebugEnabled() && qm.message.verb == MessagingService.Verb.REPAIR_MESSAGE)
+            {
+                RepairMessage rm = (RepairMessage) qm.message.payload;
+                if (rm != null)
+                    logger.debug("Repair message {} for {} is sent to {}", rm.messageType, rm.desc, socket.getRemoteSocketAddress());
+            }
         }
         catch (Exception e)
         {
@@ -522,6 +529,7 @@ public class OutboundTcpConnection extends Thread
                 return;
             iter.remove();
             dropped.incrementAndGet();
+            logger.debug("Message {} was dropped because backlog was full", qm.message.verb);
         }
     }
 
