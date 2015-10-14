@@ -69,6 +69,11 @@ public class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         };
     }
 
+    public List<ColumnSpecification> metadata()
+    {
+        return cqlRows.metadata.names;
+    }
+
     public static class Row
     {
         private final Map<String, ByteBuffer> data = new HashMap<>();
