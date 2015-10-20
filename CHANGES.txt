@@ -1,3 +1,6 @@
+DSE backports
+ * Fix sorting (ORDER BY) for queries with an IN condition on partition key columns (CASSANDRA-10363)
+
 2.0.17
  * Fix rare race where older gossip states can be shadowed (CASSANDRA-10366)
  * Fix consolidating racks violating the RF contract (CASSANDRA-10238)

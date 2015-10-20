@@ -118,7 +118,7 @@ public abstract class Selection
             if (name == null)
                 throw new InvalidRequestException(String.format("Undefined name %s in selection clause", selectable));
             if (columnMapping != null)
-                columnMapping.addMapping(alias == null ? name : makeAliasSpec(cfDef, name.type, alias), name);
+                columnMapping.addMapping(alias == null ? name : makeAliasSpec(cfDef, name.type, alias, name.name), name);
             return new SimpleSelector(name.toString(), addAndGetIndex(name, names), name.type);
         }
         else if (selectable instanceof Selectable.WritetimeOrTTL)
@@ -177,9 +177,12 @@ public abstract class Selection
                                        returnType);
     }
 
-    private static ColumnSpecification makeAliasSpec(CFDefinition cfDef, AbstractType<?> type, ColumnIdentifier alias)
+    private static ColumnSpecification makeAliasSpec(CFDefinition cfDef,
+                                                     AbstractType<?> type,
+                                                     ColumnIdentifier alias,
+                                                     ColumnIdentifier realName)
     {
-        return new ColumnSpecification(cfDef.cfm.ksName, cfDef.cfm.cfName, alias, type);
+        return new AliasedColumnSpecification(cfDef.cfm.ksName, cfDef.cfm.cfName, alias, realName, type);
     }
 
     public static Selection fromSelectors(CFDefinition cfDef, List<RawSelector> rawSelectors) throws InvalidRequestException
@@ -216,7 +219,8 @@ public abstract class Selection
                 names.add(name);
                 columnMapping.addMapping(rawSelector.alias == null ? name : makeAliasSpec(cfDef,
                                                                                           name.type,
-                                                                                          rawSelector.alias),
+                                                                                          rawSelector.alias,
+                                                                                          id),
                                          name);
             }
             return new SimpleSelection(names, columnMapping);

@@ -2199,11 +2199,14 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     else
                     {
                         boolean hasColumn = false;
-                        List<Name> selectedColumns = stmt.selection.getColumns();
+                        List<ColumnSpecification> selectedColumns = stmt.selection.getColumnMapping().getColumnSpecifications();
                         for (int i = 0; i < selectedColumns.size(); i++)
                         {
-                            Name selected = selectedColumns.get(i);
-                            if (name.equals(selected))
+                            ColumnSpecification selected = selectedColumns.get(i);
+                            ColumnIdentifier selectedId = (selected instanceof AliasedColumnSpecification)
+                                                          ? ((AliasedColumnSpecification)selected).aliasOf
+                                                          : selected.name;
+                            if (name.name.equals(selectedId))
                             {
                                 stmt.orderingIndexes.put(name, i);
                                 hasColumn = true;
