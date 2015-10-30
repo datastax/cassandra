@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.validation.operations;
 
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.TimeZone;
@@ -1627,5 +1628,31 @@ public class AggregationTest extends CQLTester
         assertRows(execute("SELECT " + aCON + "(b) FROM %s"), row("finxnullyxnullyxnully"));
         assertRows(execute("SELECT " + aRNON + "(b) FROM %s"), row("fin"));
 
+    }
+
+    @Test
+    public void testEmptyListInitcond() throws Throwable
+    {
+        String f = createFunction(KEYSPACE,
+                                      "list, int",
+                                      "CREATE FUNCTION %s(s list<text>, i int) " +
+                                      "CALLED ON NULL INPUT " +
+                                      "RETURNS list<text> " +
+                                      "LANGUAGE java " +
+                                      // The 2.2 Java Driver returns an UnmodifiableCollection from deserialize.  So you can't just call s.add.
+                                      "AS 'java.util.ArrayList t = new java.util.ArrayList(s); if (i != null) t.add(String.valueOf(i)); return t;'");
+
+        String a = createAggregate(KEYSPACE,
+                                       "int",
+                                       "CREATE AGGREGATE %s(int) " +
+                                       "SFUNC " + shortFunctionName(f) + ' ' +
+                                       "STYPE list<text> " +
+                                       "INITCOND [  ]");
+
+        createTable("CREATE TABLE %s (a int primary key, b int)");
+        execute("INSERT INTO %s (a, b) VALUES (1, 1)");
+        execute("INSERT INTO %s (a, b) VALUES (2, null)");
+        execute("INSERT INTO %s (a, b) VALUES (3, 2)");
+        assertRows(execute("SELECT " + a + "(b) FROM %s"), row(Arrays.asList("1", "2")));
     }
 }

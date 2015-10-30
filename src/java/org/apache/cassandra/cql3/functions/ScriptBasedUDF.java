@@ -105,7 +105,7 @@ public class ScriptBasedUDF extends UDFunction
             if (result == null)
                 return null;
 
-            Class<?> javaReturnType = returnDataType.asJavaClass();
+            Class<?> javaReturnType = UDHelper.asJavaClass(returnDataType);
             Class<?> resultType = result.getClass();
             if (!javaReturnType.isAssignableFrom(resultType))
             {

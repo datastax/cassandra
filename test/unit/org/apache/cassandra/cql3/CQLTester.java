@@ -608,7 +608,10 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                ByteBuffer expectedByteValue = type.serialize(expected[j], ProtocolVersion.fromInt(protocolVersion));
+                com.datastax.driver.core.TypeCodec<Object> codec = cluster[protocolVersion-1].getConfiguration()
+                                                                                           .getCodecRegistry()
+                                                                                           .codecFor(type);
+                ByteBuffer expectedByteValue = codec.serialize(expected[j], ProtocolVersion.fromInt(protocolVersion));
                 int expectedBytes = expectedByteValue.remaining();
                 ByteBuffer actualValue = actual.getBytesUnsafe(meta.getName(j));
                 int actualBytes = actualValue.remaining();
@@ -618,9 +621,9 @@ public abstract class CQLTester
                                               "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
                                               "(using protocol version %d)",
                                               i, j, meta.getName(j), type,
-                                              type.format(expected[j]),
+                                              codec.format(expected[j]),
                                               expectedBytes,
-                                              type.format(type.deserialize(actualValue, ProtocolVersion.fromInt(protocolVersion))),
+                                              codec.format(codec.deserialize(actualValue, ProtocolVersion.fromInt(protocolVersion))),
                                               actualBytes,
                                               protocolVersion));
             }
@@ -1142,6 +1145,12 @@ public abstract class CQLTester
         for (int i = 0; i < size; i++)
             m.put(values[2 * i], values[(2 * i) + 1]);
         return m;
+    }
+
+    protected com.datastax.driver.core.TupleType tupleTypeOf(int protocolVersion, DataType...types)
+    {
+        requireNetwork();
+        return cluster[protocolVersion-1].getMetadata().newTupleType(types);
     }
 
     // Attempt to find an AbstracType from a value (for serialization/printing sake).

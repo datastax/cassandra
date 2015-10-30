@@ -129,7 +129,7 @@ public final class JavaSourceUDFFactory
         // javaParamTypes is just the Java representation for argTypes resp. argDataTypes
         Class<?>[] javaParamTypes = UDHelper.javaTypes(argDataTypes, calledOnNullInput);
         // javaReturnType is just the Java representation for returnType resp. returnDataType
-        Class<?> javaReturnType = returnDataType.asJavaClass();
+        Class<?> javaReturnType = UDHelper.asJavaClass(returnDataType);
 
         String clsName = generateClassName(name);
 
