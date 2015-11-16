@@ -20,6 +20,9 @@ package org.apache.cassandra.streaming;
 import java.net.InetAddress;
 import java.util.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -32,6 +35,8 @@ import org.apache.cassandra.utils.UUIDGen;
  */
 public class StreamPlan
 {
+    private static final Logger logger = LoggerFactory.getLogger(StreamPlan.class);
+
     private final UUID planId = UUIDGen.getTimeUUID();
     private final String description;
     private final List<StreamEventHandler> handlers = new ArrayList<>();
@@ -57,6 +62,7 @@ public class StreamPlan
 
     public StreamPlan(String description, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels, boolean isIncremental)
     {
+        logger.info("Creating StreamPlan - " + description);
         this.description = description;
         this.repairedAt = repairedAt;
         this.coordinator = new StreamCoordinator(connectionsPerHost, keepSSTableLevels, isIncremental, new DefaultConnectionFactory());
