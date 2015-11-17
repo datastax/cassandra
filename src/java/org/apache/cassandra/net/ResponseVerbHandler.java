@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import org.apache.cassandra.tracing.Tracing;
 
@@ -40,10 +41,15 @@ public class ResponseVerbHandler implements IVerbHandler
             return;
         }
 
+        System.out.println(MDC.get("nodeid") + String.format("Processing response from %s", message.from));
+
+        logger.trace("Processing response from {}", message.from);
+
         Tracing.trace("Processing response from {}", message.from);
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
+            logger.trace("Message is failure");
             ((IAsyncCallbackWithFailure) cb).onFailure(message.from);
         }
         else

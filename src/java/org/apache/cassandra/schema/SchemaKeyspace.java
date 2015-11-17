@@ -30,6 +30,7 @@ import com.google.common.collect.MapDifference;
 import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.config.ColumnDefinition.ClusteringOrder;
@@ -1252,6 +1253,8 @@ public final class SchemaKeyspace
      */
     public static synchronized void mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
     {
+        logger.trace("system schema announcing version - mutations = " + mutations);
+        System.out.println(MDC.get("nodeid") + " SchemaKeyspace.mergeSchemeAndAnnounceVersion - mutations = " + mutations);
         mergeSchema(mutations);
         Schema.instance.updateVersionAndAnnounce();
     }

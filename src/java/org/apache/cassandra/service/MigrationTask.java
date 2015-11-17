@@ -70,6 +70,7 @@ class MigrationTask extends WrappedRunnable
             @Override
             public void response(MessageIn<Collection<Mutation>> message)
             {
+                logger.trace("Processing response in MigrationTask");
                 try
                 {
                     SchemaKeyspace.mergeSchemaAndAnnounceVersion(message.payload);

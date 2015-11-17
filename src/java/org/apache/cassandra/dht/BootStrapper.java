@@ -26,6 +26,8 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Keyspace;
@@ -68,6 +70,8 @@ public class BootStrapper extends ProgressEventNotifierSupport
     {
         logger.trace("Beginning bootstrap process");
 
+        System.out.println(MDC.get("nodeid") + " Starting bootstrap");
+
         RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                    tokens,
                                                    address,
@@ -76,6 +80,10 @@ public class BootStrapper extends ProgressEventNotifierSupport
                                                    DatabaseDescriptor.getEndpointSnitch(),
                                                    stateStore);
         streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
+
+        logger.trace("Adding ranges for keyspaces " + Schema.instance.getNonSystemKeyspaces());
+
+        System.out.println(MDC.get("nodeid") + " loading keyspaces " + Schema.instance.getNonSystemKeyspaces());
 
         for (String keyspaceName : Schema.instance.getNonSystemKeyspaces())
         {

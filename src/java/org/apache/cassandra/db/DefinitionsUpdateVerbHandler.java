@@ -21,6 +21,7 @@ import java.util.Collection;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -43,6 +44,7 @@ public class DefinitionsUpdateVerbHandler implements IVerbHandler<Collection<Mut
     public void doVerb(final MessageIn<Collection<Mutation>> message, int id)
     {
         logger.trace("Received schema mutation push from {}", message.from);
+        System.out.println(MDC.get("nodeid") + String.format(" Received schema mutation push from %s", message.from));
 
         StageManager.getStage(Stage.MIGRATION).submit(new WrappedRunnable()
         {

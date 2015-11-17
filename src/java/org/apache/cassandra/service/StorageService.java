@@ -132,6 +132,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -854,9 +855,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // (post CASSANDRA-1391 we don't expect this to be necessary very often, but it doesn't hurt to be careful)
             while (!MigrationManager.isReadyForBootstrap())
             {
+                System.out.println(MDC.get("nodeid") + " waiting for schema information to complete");
                 setMode(Mode.JOINING, "waiting for schema information to complete", true);
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
             }
+            System.out.println(MDC.get("nodeid") + " schema complete");
             setMode(Mode.JOINING, "schema complete, ready to bootstrap", true);
             setMode(Mode.JOINING, "waiting for pending range calculation", true);
             PendingRangeCalculatorService.instance.blockUntilFinished();

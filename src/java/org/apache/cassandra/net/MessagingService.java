@@ -40,6 +40,7 @@ import com.google.common.collect.Sets;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -732,6 +733,9 @@ public final class MessagingService implements MessagingServiceMBean
         if (logger.isTraceEnabled())
             logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddress(), message.verb, id, to);
 
+        if (message.verb == Verb.MIGRATION_REQUEST)
+            System.out.println(MDC.get("nodeid") + String.format("%s sending %s to %s@%s", FBUtilities.getBroadcastAddress(), message.verb, id, to));
+
         if (to.equals(FBUtilities.getBroadcastAddress()))
             logger.trace("Message-to-self {} going over MessagingService", message);
 
@@ -798,6 +802,9 @@ public final class MessagingService implements MessagingServiceMBean
 
     public void receive(MessageIn message, int id, long timestamp, boolean isCrossNodeTimestamp)
     {
+        if (message.verb == Verb.INTERNAL_RESPONSE)
+            System.out.println(MDC.get("nodeid") + String.format("%s message received from %s", message.verb, message.from));
+
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)
             state.trace("{} message received from {}", message.verb, message.from);

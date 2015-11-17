@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -122,6 +123,7 @@ public class Schema
      */
     public Schema loadFromDisk(boolean updateVersion)
     {
+        System.out.println(MDC.get("nodeid") + " Schema.loadFromDisk");
         load(SchemaKeyspace.fetchNonSystemKeyspaces());
         if (updateVersion)
             updateVersion();
@@ -137,6 +139,7 @@ public class Schema
      */
     public Schema load(Iterable<KeyspaceMetadata> keyspaceDefs)
     {
+        System.out.println(MDC.get("nodeid") + " Schema.load " + keyspaceDefs);
         keyspaceDefs.forEach(this::load);
         return this;
     }
@@ -150,6 +153,8 @@ public class Schema
      */
     public Schema load(KeyspaceMetadata keyspaceDef)
     {
+        logger.debug("loading keyspace " + keyspaceDef.name);
+        System.out.println(MDC.get("nodeid") + " Schema.load " + keyspaceDef);
         keyspaceDef.tables.forEach(this::load);
         keyspaceDef.views.forEach(this::load);
         setKeyspaceMetadata(keyspaceDef);
