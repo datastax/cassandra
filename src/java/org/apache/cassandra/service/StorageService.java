@@ -1733,6 +1733,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         break;
                     case SCHEMA:
                         SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(value.value));
+                        System.out.println(MDC.get("nodeid") + " onChange scheduling schema pull from " + endpoint);
+                        logger.trace("onChange scheduling schema pull from " + endpoint);
                         MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
                         break;
                     case HOST_ID:
@@ -2382,11 +2384,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             onChange(endpoint, entry.getKey(), entry.getValue());
         }
+        System.out.println(MDC.get("nodeid") + " onJoin scheduling schema pull from " + endpoint);
+        logger.trace("onJoin scheduling schema pull from " + endpoint);
         MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
     }
 
     public void onAlive(InetAddress endpoint, EndpointState state)
     {
+        System.out.println(MDC.get("nodeid") + " onAlive scheduling schema pull from " + endpoint);
+        logger.trace("onAlive scheduling schema pull from " + endpoint);
+
         MigrationManager.instance.scheduleSchemaPull(endpoint, state);
 
         if (tokenMetadata.isMember(endpoint))

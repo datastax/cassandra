@@ -734,7 +734,9 @@ public final class MessagingService implements MessagingServiceMBean
             logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddress(), message.verb, id, to);
 
         if (message.verb == Verb.MIGRATION_REQUEST)
+        {
             System.out.println(MDC.get("nodeid") + String.format("%s sending %s to %s@%s", FBUtilities.getBroadcastAddress(), message.verb, id, to));
+        }
 
         if (to.equals(FBUtilities.getBroadcastAddress()))
             logger.trace("Message-to-self {} going over MessagingService", message);

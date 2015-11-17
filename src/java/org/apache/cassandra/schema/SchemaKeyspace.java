@@ -1255,6 +1255,12 @@ public final class SchemaKeyspace
     {
         logger.trace("system schema announcing version - mutations = " + mutations);
         System.out.println(MDC.get("nodeid") + " SchemaKeyspace.mergeSchemeAndAnnounceVersion - mutations = " + mutations);
+        try
+        {
+            Thread.sleep(100);
+        }
+        catch (Throwable e)
+        {}
         mergeSchema(mutations);
         Schema.instance.updateVersionAndAnnounce();
     }

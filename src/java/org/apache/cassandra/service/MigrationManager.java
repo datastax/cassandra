@@ -60,7 +60,7 @@ public class MigrationManager
     public static final int MIGRATION_DELAY_IN_MS = 60000;
 
     private final List<MigrationListener> listeners = new CopyOnWriteArrayList<>();
-    
+
     private MigrationManager() {}
 
     public void register(MigrationListener listener)
@@ -148,6 +148,7 @@ public class MigrationManager
 
     public static boolean isReadyForBootstrap()
     {
+        logger.debug("migration stage count = " + ((ThreadPoolExecutor) StageManager.getStage(Stage.MIGRATION)).getActiveCount());
         return ((ThreadPoolExecutor) StageManager.getStage(Stage.MIGRATION)).getActiveCount() == 0;
     }
 
