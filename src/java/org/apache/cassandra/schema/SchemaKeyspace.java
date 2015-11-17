@@ -1255,14 +1255,10 @@ public final class SchemaKeyspace
     {
         logger.trace("system schema announcing version - mutations = " + mutations);
         System.out.println(MDC.get("nodeid") + " SchemaKeyspace.mergeSchemeAndAnnounceVersion - mutations = " + mutations);
-        try
-        {
-            Thread.sleep(100);
-        }
-        catch (Throwable e)
-        {}
         mergeSchema(mutations);
+        logger.trace("system schema merged");
         Schema.instance.updateVersionAndAnnounce();
+        logger.trace("system schema announce complete");
     }
 
     public static synchronized void mergeSchema(Collection<Mutation> mutations)
