@@ -1272,10 +1272,23 @@ public final class SchemaKeyspace
         // fetch the current state of schema for the affected keyspaces only
         Keyspaces before = Schema.instance.getKeyspaces(affectedKeyspaces);
 
+        logger.trace("system schema applying mutations");
         // apply the schema mutations and flush
         mutations.forEach(Mutation::apply);
         if (FLUSH_SCHEMA_TABLES)
             flush();
+        logger.trace("system schema finished applying mutations");
+
+        // try
+        // {
+        //     logger.trace("START DELAY");
+        //     System.out.println("START DELAY");
+        //     Thread.sleep(5000);
+        //     logger.trace("FINISH DELAY");
+        //     System.out.println("FINISH DELAY");
+        // }
+        // catch (Throwable e)
+        // {}
 
         // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
         Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
