@@ -148,8 +148,22 @@ public class MigrationManager
 
     public static boolean isReadyForBootstrap()
     {
-        logger.debug("migration stage count = " + ((ThreadPoolExecutor) StageManager.getStage(Stage.MIGRATION)).getActiveCount());
-        return ((ThreadPoolExecutor) StageManager.getStage(Stage.MIGRATION)).getActiveCount() == 0;
+        return MigrationTask.getInflightTasks().isEmpty();
+    }
+
+    public static void waitTillReadyForBootstrap()
+    {
+        while (!MigrationTask.getInflightTasks().isEmpty())
+        {
+            try
+            {
+                MigrationTask.getInflightTasks().poll().await();
+            }
+            catch (InterruptedException e)
+            {
+
+            }
+        }
     }
 
     public void notifyCreateKeyspace(KeyspaceMetadata ksm)

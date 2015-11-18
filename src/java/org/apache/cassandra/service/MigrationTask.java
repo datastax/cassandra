@@ -20,6 +20,8 @@ package org.apache.cassandra.service;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,11 +41,18 @@ class MigrationTask extends WrappedRunnable
 {
     private static final Logger logger = LoggerFactory.getLogger(MigrationTask.class);
 
+    private static final ConcurrentLinkedQueue<CountDownLatch> inflightTasks = new ConcurrentLinkedQueue<>();
+
     private final InetAddress endpoint;
 
     MigrationTask(InetAddress endpoint)
     {
         this.endpoint = endpoint;
+    }
+
+    public static ConcurrentLinkedQueue<CountDownLatch> getInflightTasks()
+    {
+        return inflightTasks;
     }
 
     public void runMayThrow() throws Exception
@@ -65,6 +74,8 @@ class MigrationTask extends WrappedRunnable
 
         MessageOut message = new MessageOut<>(MessagingService.Verb.MIGRATION_REQUEST, null, MigrationManager.MigrationsSerializer.instance);
 
+        final CountDownLatch completionLatch = new CountDownLatch(1);
+
         IAsyncCallback<Collection<Mutation>> cb = new IAsyncCallback<Collection<Mutation>>()
         {
             @Override
@@ -79,6 +90,10 @@ class MigrationTask extends WrappedRunnable
                 {
                     logger.error("Configuration exception merging remote schema", e);
                 }
+                finally
+                {
+                    completionLatch.countDown();
+                }
             }
 
             public boolean isLatencyForSnitch()
@@ -86,6 +101,8 @@ class MigrationTask extends WrappedRunnable
                 return false;
             }
         };
+
+        inflightTasks.add(completionLatch);
         MessagingService.instance().sendRR(message, endpoint, cb);
     }
 }
