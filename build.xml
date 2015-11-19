@@ -78,13 +78,13 @@
               value="http://repo2.maven.org/maven2/org/apache/maven/maven-ant-tasks" />
     <!-- details of how and which Maven repository we publish to -->
     <property name="maven.version" value="3.0.3" />
-    <condition property="maven-repository-url" value="http://mvn.riptano.com/content/repositories/releases">
+    <condition property="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/dse">
       <isset property="release"/>
     </condition>
     <condition property="maven-repository-id" value="datastax-release">
       <isset property="release"/>
     </condition>
-    <property name="maven-repository-url" value="http://mvn.riptano.com/content/repositories/snapshots"/>
+    <property name="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/dse"/>
     <property name="maven-repository-id" value="datastax-snapshot"/>
 
     <property name="test.timeout" value="60000" />
