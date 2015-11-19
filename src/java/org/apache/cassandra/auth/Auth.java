@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
@@ -28,9 +29,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -59,7 +60,10 @@ public class Auth
                                                                 AUTH_KS,
                                                                 USERS_CF,
                                                                 90 * 24 * 60 * 60); // 3 months.
-
+    private static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getPermissionsValidity(),
+                                                                                  DatabaseDescriptor.getPermissionsUpdateInterval(),
+                                                                                  DatabaseDescriptor.getPermissionsCacheMaxEntries(),
+                                                                                  DatabaseDescriptor.getAuthorizer());
     private static SelectStatement selectUserStatement;
 
     /**
@@ -71,6 +75,11 @@ public class Auth
     public static boolean isExistingUser(String username)
     {
         return !selectUser(username).isEmpty();
+    }
+
+    public static Set<Permission> getPermissions(AuthenticatedUser user, IResource resource)
+    {
+        return permissionsCache.getPermissions(user, resource);
     }
 
     /**

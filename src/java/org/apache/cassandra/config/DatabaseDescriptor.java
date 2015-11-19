@@ -593,6 +593,11 @@ public class DatabaseDescriptor
         }
     }
 
+    public static int getPermissionsCacheMaxEntries()
+    {
+        return conf.permissions_cache_max_entries;
+    }
+
     private static IEndpointSnitch createEndpointSnitch(String snitchClassName) throws ConfigurationException
     {
         if (!snitchClassName.contains("."))
@@ -704,6 +709,13 @@ public class DatabaseDescriptor
     public static int getPermissionsValidity()
     {
         return conf.permissions_validity_in_ms;
+    }
+
+    public static int getPermissionsUpdateInterval()
+    {
+        return conf.permissions_update_interval_in_ms == -1
+                ? conf.permissions_validity_in_ms
+                : conf.permissions_update_interval_in_ms;
     }
 
     public static int getThriftFramedTransportSize()

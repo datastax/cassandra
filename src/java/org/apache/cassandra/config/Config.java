@@ -36,6 +36,8 @@ public class Config
     public String authority; // for backwards compatibility - will log a warning.
     public String authorizer;
     public int permissions_validity_in_ms = 2000;
+    public int permissions_cache_max_entries = 1000;
+    public int permissions_update_interval_in_ms = -1;
     public String auth_replication_strategy;
     public Map<String, String> auth_replication_options;
 

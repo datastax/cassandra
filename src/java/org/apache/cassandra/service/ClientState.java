@@ -299,17 +299,6 @@ public class ClientState
 
     public Set<Permission> authorize(IResource resource)
     {
-        // AllowAllAuthorizer or manually disabled caching.
-        if (permissionsCache == null)
-            return DatabaseDescriptor.getAuthorizer().authorize(user, resource);
-
-        try
-        {
-            return permissionsCache.get(Pair.create(user, resource));
-        }
-        catch (ExecutionException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return Auth.getPermissions(user, resource);
     }
 }
