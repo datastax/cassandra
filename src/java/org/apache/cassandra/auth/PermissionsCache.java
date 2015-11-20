@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.auth;
 
 import java.util.Set;
@@ -36,25 +35,15 @@ public class PermissionsCache
 {
     private static final Logger logger = LoggerFactory.getLogger(PermissionsCache.class);
 
-    private volatile LoadingCache<Pair<AuthenticatedUser, IResource>, Set<Permission>> cache;
     private final ThreadPoolExecutor cacheRefreshExecutor = new DebuggableThreadPoolExecutor("PermissionsCacheRefresh",
                                                                                              Thread.NORM_PRIORITY);
+    private final IAuthorizer authorizer;
+    private final LoadingCache<Pair<AuthenticatedUser, IResource>, Set<Permission>> cache;
 
-    private int validityPeriod;
-    private int updateInterval;
-    private int maxEntries;
-    private IAuthorizer authorizer;
-
-    public PermissionsCache(int validityPeriod,
-                            int updateInterval,
-                            int maxEntries,
-                            IAuthorizer authorizer)
+    public PermissionsCache(int validityPeriod, int updateInterval, int maxEntries, IAuthorizer authorizer)
     {
-        this.validityPeriod = validityPeriod;
-        this.updateInterval = updateInterval;
-        this.maxEntries = maxEntries;
         this.authorizer = authorizer;
-        this.cache = initCache();
+        this.cache = initCache(validityPeriod, updateInterval, maxEntries);
     }
 
     public Set<Permission> getPermissions(AuthenticatedUser user, IResource resource)
@@ -72,7 +61,9 @@ public class PermissionsCache
         }
     }
 
-    private LoadingCache<Pair<AuthenticatedUser, IResource>, Set<Permission>> initCache()
+    private LoadingCache<Pair<AuthenticatedUser, IResource>, Set<Permission>> initCache(int validityPeriod,
+                                                                                        int updateInterval,
+                                                                                        int maxEntries)
     {
         if (authorizer instanceof AllowAllAuthorizer)
             return null;
@@ -92,7 +83,7 @@ public class PermissionsCache
                                }
 
                                public ListenableFuture<Set<Permission>> reload(final Pair<AuthenticatedUser, IResource> userResource,
-                                                                     final Set<Permission> oldValue)
+                                                                               final Set<Permission> oldValue)
                                {
                                    ListenableFutureTask<Set<Permission>> task = ListenableFutureTask.create(new Callable<Set<Permission>>()
                                    {
