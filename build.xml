@@ -25,7 +25,7 @@
     <property name="debuglevel" value="source,lines,vars"/>
 
     <!-- default version and SCM information -->
-    <property name="base.version" value="1.2.13.6"/>
+    <property name="base.version" value="1.2.13.7"/>
     <property name="scm.connection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.developerConnection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.url" value="http://git-wip-us.apache.org/repos/asf?p=cassandra.git;a=tree"/>
@@ -78,13 +78,13 @@
               value="http://repo2.maven.org/maven2/org/apache/maven/maven-ant-tasks" />
     <!-- details of how and which Maven repository we publish to -->
     <property name="maven.version" value="3.0.3" />
-    <condition property="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/dse">
+    <condition property="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/datastax-releases-local">
       <isset property="release"/>
     </condition>
     <condition property="maven-repository-id" value="datastax-release">
       <isset property="release"/>
     </condition>
-    <property name="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/dse"/>
+    <property name="maven-repository-url" value="https://datastax.artifactoryonline.com/datastax/datastax-snapshots-local"/>
     <property name="maven-repository-id" value="datastax-snapshot"/>
 
     <property name="test.timeout" value="60000" />
