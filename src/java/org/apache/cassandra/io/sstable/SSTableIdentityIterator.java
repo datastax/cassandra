@@ -17,17 +17,23 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.*;
+import java.io.DataInput;
+import java.io.IOError;
+import java.io.IOException;
 import java.util.Iterator;
 
-import org.apache.cassandra.serializers.MarshalException;
+import com.google.common.collect.AbstractIterator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.sstable.Descriptor.Version;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.serializers.MarshalException;
 
 public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterator>, OnDiskAtomIterator
 {
@@ -79,6 +85,34 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         this(sstable.metadata, file, file.getPath(), key, dataSize, checkData, sstable, ColumnSerializer.Flag.LOCAL);
     }
 
+    /**
+     * Used only by scrubber to solve problems with data written after the END_OF_ROW marker. Iterates atoms for the given dataSize only and does not accept an END_OF_ROW marker.
+     */
+    public static SSTableIdentityIterator createFragmentIterator(SSTableReader sstable, final RandomAccessReader file, DecoratedKey key, long dataSize, boolean checkData)
+    {
+        final ColumnSerializer.Flag flag = ColumnSerializer.Flag.LOCAL;
+        final int expireBefore = (int) (System.currentTimeMillis() / 1000);
+        final Version version = sstable.descriptor.version;
+        final long dataEnd = file.getFilePointer() + dataSize;
+        return new SSTableIdentityIterator(sstable.metadata, file, file.getPath(), key, dataSize, checkData, sstable, flag, DeletionTime.LIVE, expireBefore, version, Integer.MAX_VALUE,
+                                           new AbstractIterator<OnDiskAtom>()
+                                                   {
+                                                       protected OnDiskAtom computeNext()
+                                                       {
+                                                           if (file.getFilePointer() >= dataEnd)
+                                                               return endOfData();
+                                                           try
+                                                           {
+                                                               return Column.onDiskSerializer().deserializeFromSSTable(file, flag, expireBefore, version);
+                                                           }
+                                                           catch (IOException e)
+                                                           {
+                                                               throw new IOError(e);
+                                                           }
+                                                       }
+                                                   });
+    }
+
     // sstable may be null *if* checkData is false
     // If it is null, we assume the data is in the current file format
     private SSTableIdentityIterator(CFMetaData metadata,
@@ -90,23 +124,54 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
                                     SSTableReader sstable,
                                     ColumnSerializer.Flag flag)
     {
-        assert !checkData || (sstable != null);
-        this.in = in;
-        this.filename = filename;
-        this.key = key;
-        this.dataSize = dataSize;
-        this.expireBefore = (int)(System.currentTimeMillis() / 1000);
-        this.flag = flag;
-        this.validateColumns = checkData;
-        this.dataVersion = sstable == null ? Descriptor.Version.CURRENT : sstable.descriptor.version;
-        this.sstable = sstable;
+        this(metadata, in, filename, key, dataSize, checkData, sstable, flag,
+             (int)(System.currentTimeMillis() / 1000),
+             sstable == null ? Descriptor.Version.CURRENT : sstable.descriptor.version);
+    }
 
+    private SSTableIdentityIterator(CFMetaData metadata,
+                                    DataInput in,
+                                    String filename,
+                                    DecoratedKey key,
+                                    long dataSize,
+                                    boolean checkData,
+                                    SSTableReader sstable,
+                                    ColumnSerializer.Flag flag,
+                                    int expireBefore,
+                                    Version dataVersion)
+    {
+        this(metadata, in, filename, key, dataSize, checkData, sstable, flag,
+             readDeletionTime(in, sstable, filename),
+             expireBefore, dataVersion,
+             readColumnCount(in, dataVersion, sstable, filename));
+    }
+
+    private SSTableIdentityIterator(CFMetaData metadata,
+                                    DataInput in,
+                                    String filename,
+                                    DecoratedKey key,
+                                    long dataSize,
+                                    boolean checkData,
+                                    SSTableReader sstable,
+                                    ColumnSerializer.Flag flag,
+                                    DeletionTime deletionTime,
+                                    int expireBefore,
+                                    Version dataVersion,
+                                    int columnCount)
+    {
+        this(metadata, in, filename, key, dataSize, checkData, sstable, flag,
+             deletionTime,
+             expireBefore,
+             dataVersion,
+             columnCount,
+             metadata.getOnDiskIterator(in, columnCount, flag, expireBefore, dataVersion));
+    }
+
+    private static int readColumnCount(DataInput in, Version dataVersion, SSTableReader sstable, String filename)
+    {
         try
         {
-            columnFamily = EmptyColumns.factory.create(metadata);
-            columnFamily.delete(DeletionTime.serializer.deserialize(in));
-            columnCount = dataVersion.hasRowSizeAndColumnCount ? in.readInt() : Integer.MAX_VALUE;
-            atomIterator = columnFamily.metadata().getOnDiskIterator(in, columnCount, flag, expireBefore, dataVersion);
+            return dataVersion.hasRowSizeAndColumnCount ? in.readInt() : Integer.MAX_VALUE;
         }
         catch (IOException e)
         {
@@ -114,6 +179,50 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
                 sstable.markSuspect();
             throw new CorruptSSTableException(e, filename);
         }
+    }
+
+    private static DeletionTime readDeletionTime(DataInput in, SSTableReader sstable, String filename)
+    {
+        try
+        {
+            return DeletionTime.serializer.deserialize(in);
+        }
+        catch (IOException e)
+        {
+            if (sstable != null)
+                sstable.markSuspect();
+            throw new CorruptSSTableException(e, filename);
+        }
+    }
+
+    private SSTableIdentityIterator(CFMetaData metadata,
+                                    DataInput in,
+                                    String filename,
+                                    DecoratedKey key,
+                                    long dataSize,
+                                    boolean checkData,
+                                    SSTableReader sstable,
+                                    ColumnSerializer.Flag flag,
+                                    DeletionTime deletion,
+                                    int expireBefore,
+                                    Version dataVersion,
+                                    int columnCount,
+                                    Iterator<OnDiskAtom> atomIterator)
+    {
+        assert !checkData || (sstable != null);
+        this.in = in;
+        this.filename = filename;
+        this.key = key;
+        this.dataSize = dataSize;
+        this.flag = flag;
+        this.validateColumns = checkData;
+        this.sstable = sstable;
+        this.expireBefore = expireBefore;
+        this.columnCount = columnCount;
+        this.dataVersion = dataVersion;
+        columnFamily = EmptyColumns.factory.create(metadata);
+        columnFamily.delete(deletion);
+        this.atomIterator = atomIterator;
     }
 
     public DecoratedKey getKey()

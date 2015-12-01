@@ -138,6 +138,7 @@ public class ColumnIndex
                 add(tombstone);
                 tombstone = rangeIter.hasNext() ? rangeIter.next() : null;
             }
+            finishAddingAtoms();
             ColumnIndex index = build();
 
             maybeWriteEmptyRowHeader();
@@ -155,6 +156,9 @@ public class ColumnIndex
         {
             while (columns.hasNext())
                 add(columns.next());
+
+            finishAddingAtoms();
+
             return build();
         }
 
@@ -205,15 +209,19 @@ public class ColumnIndex
             }
         }
 
-        public ColumnIndex build() throws IOException
+        public void finishAddingAtoms() throws IOException
         {
-            // all columns were GC'd after all
-            if (lastColumn == null)
-                return ColumnIndex.EMPTY;
-
             long size = tombstoneTracker.writeUnwrittenTombstones(output, atomSerializer);
             endPosition += size;
             blockSize += size;
+        }
+
+        public ColumnIndex build()
+        {
+            assert !tombstoneTracker.hasUnwrittenTombstones();  // finishAddingAtoms must be called before building.
+            // all columns were GC'd after all
+            if (lastColumn == null)
+                return ColumnIndex.EMPTY;
 
             // the last column may have fallen on an index boundary already.  if not, index it explicitly.
             if (result.columnsIndex.isEmpty() || lastBlockClosing != lastColumn)

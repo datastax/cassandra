@@ -148,6 +148,22 @@ public class Scrubber implements Closeable
                 if (scrubInfo.isStopRequested())
                     throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
 
+                updateIndexKey();
+
+                if (prevKey != null && indexFile != null)
+                {
+                    long nextRowStart = currentRowPositionFromIndex == -1 ? dataFile.length() : currentRowPositionFromIndex;
+                    if (dataFile.getFilePointer() < nextRowStart)
+                    {
+                        // Encountered CASSANDRA-10791. Place post-END_OF_ROW data in the out-of-order table.
+                        saveOutOfOrderRow(prevKey,
+                                          SSTableIdentityIterator.createFragmentIterator(sstable, dataFile, prevKey, nextRowStart - dataFile.getFilePointer(), validateColumns),
+                                          String.format("Row fragment detected after END_OF_ROW at key %s", prevKey));
+                        if (dataFile.isEOF())
+                            break;
+                    }
+                }
+
                 long rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at " + rowStart);
 
@@ -167,8 +183,6 @@ public class Scrubber implements Closeable
                     throwIfFatal(th);
                     // check for null key below
                 }
-
-                updateIndexKey();
 
                 long dataStart = dataFile.getFilePointer();
                 long dataStartFromIndex = -1;
@@ -372,8 +386,13 @@ public class Scrubber implements Closeable
 
     private void saveOutOfOrderRow(DecoratedKey prevKey, DecoratedKey key, SSTableIdentityIterator atoms)
     {
+        saveOutOfOrderRow(key, atoms, String.format("Out of order row detected (%s found after %s)", key, prevKey));
+    }
+
+    void saveOutOfOrderRow(DecoratedKey key, SSTableIdentityIterator atoms, String message)
+    {
         // TODO bitch if the row is too large?  if it is there's not much we can do ...
-        outputHandler.warn(String.format("Out of order row detected (%s found after %s)", key, prevKey));
+        outputHandler.warn(message);
         // adding atoms in sorted order is worst-case for TMBSC, but we shouldn't need to do this very often
         // and there's no sense in failing on mis-sorted cells when a TreeMap could safe us
         ColumnFamily cf = atoms.getColumnFamily().cloneMeShallow(TreeMapBackedSortedColumns.factory, false);

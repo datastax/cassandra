@@ -1,4 +1,5 @@
 DSE backports
+ * Avoid writing range tombstones after END_OF_ROW marker (CASSANDRA-10791)
  * Fix streaming_socket_timeout_in_ms not enforced (CASSANDRA-11286)
  * Make paging logic consistent between searcher impls (CASSANDRA-10683)
  * Merge range tombstones during compaction (CASSANDRA-7953)
