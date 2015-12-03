@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
@@ -37,7 +38,7 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
 
     private final DateTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
-    private final Set<SSTableReader> sstables = new HashSet<>();
+    private final Set<SSTableReader> sstables = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private long lastExpiredCheck;
     private final SizeTieredCompactionStrategyOptions stcsOptions;
 
