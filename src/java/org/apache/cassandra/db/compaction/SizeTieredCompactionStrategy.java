@@ -62,7 +62,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     protected SizeTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
-    private final Set<SSTableReader> sstables = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<SSTableReader> sstables = Collections.newSetFromMap(new ConcurrentHashMap<SSTableReader,Boolean>());
 
     public SizeTieredCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {

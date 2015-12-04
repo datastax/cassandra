@@ -38,7 +38,7 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
 
     private final DateTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
-    private final Set<SSTableReader> sstables = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<SSTableReader> sstables = Collections.newSetFromMap(new ConcurrentHashMap<SSTableReader,Boolean>());
     private long lastExpiredCheck;
     private final SizeTieredCompactionStrategyOptions stcsOptions;
 
