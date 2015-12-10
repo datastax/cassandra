@@ -28,6 +28,9 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.*;
+import com.datastax.shaded.netty.util.HashedWheelTimer;
+import com.datastax.shaded.netty.util.Timer;
+
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -86,6 +89,14 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
     protected List<ColumnMetadata> partitionKeyColumns;
     protected List<ColumnMetadata> clusterColumns;
 
+    private final HashedWheelTimer timer = new HashedWheelTimer();
+    private final NettyOptions nettyOptions = new NettyOptions() {
+        @Override
+        public Timer timer(ThreadFactory threadFactory) {
+            return timer;
+        }
+    };
+
     /**
      * Upon construction, obtain the map that this writer will use to collect
      * mutations, and the ring cache for the given keyspace.
@@ -111,12 +122,13 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         this.queueSize = conf.getInt(CqlOutputFormat.QUEUE_SIZE, 32 * FBUtilities.getAvailableProcessors());
         batchThreshold = conf.getLong(CqlOutputFormat.BATCH_THRESHOLD, 32);
         this.clients = new HashMap<>();
+        Cluster cluster = CqlConfigHelper.getOutputCluster(ConfigHelper.getOutputInitialAddress(conf), conf, nettyOptions);
 
-        try (Cluster cluster = CqlConfigHelper.getOutputCluster(ConfigHelper.getOutputInitialAddress(conf), conf))
+        try
         {
             String keyspace = ConfigHelper.getOutputKeyspace(conf);
             Session client = cluster.connect(keyspace);
-            ringCache = new NativeRingCache(conf);
+            ringCache = new NativeRingCache(conf, cluster);
             if (client != null)
             {
                 TableMetadata tableMetadata = client.getCluster().getMetadata().getKeyspace(client.getLoggedKeyspace()).getTable(ConfigHelper.getOutputColumnFamily(conf));
@@ -135,6 +147,7 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         }
         catch (Exception e)
         {
+            cluster.close();
             throw new RuntimeException(e);
         }
     }
@@ -204,7 +217,7 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         if (client == null)
         {
             // haven't seen keys for this range: create new client
-            client = new RangeClient(ringCache.getEndpoints(range));
+            client = new RangeClient(ringCache.getEndpoints(range), nettyOptions);
             client.start();
             clients.put(address, client);
         }
@@ -242,14 +255,17 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         // when the client is closed.
         protected volatile IOException lastException;
 
+        private NettyOptions nettyOptions;
+
         /**
          * Constructs an {@link RangeClient} for the given endpoints.
          * @param endpoints the possible endpoints to execute the mutations on
          */
-        public RangeClient(List<InetAddress> endpoints)
+        public RangeClient(List<InetAddress> endpoints, NettyOptions nettyOptions)
         {
             super("client-" + endpoints);
             this.endpoints = endpoints;
+            this.nettyOptions = nettyOptions;
         }
 
         /**
@@ -476,11 +492,13 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         private Metadata metadata;
         private final IPartitioner partitioner;
         private final Configuration conf;
+        private Cluster cluster;
 
-        public NativeRingCache(Configuration conf)
+        public NativeRingCache(Configuration conf, Cluster cluster)
         {
             this.conf = conf;
             this.partitioner = ConfigHelper.getOutputPartitioner(conf);
+            this.cluster = cluster;
             refreshEndpointMap();
         }
 
@@ -488,14 +506,19 @@ class CqlRecordWriter extends RecordWriter<Map<String, ByteBuffer>, List<ByteBuf
         private void refreshEndpointMap()
         {
             String keyspace = ConfigHelper.getOutputKeyspace(conf);
-            try (Cluster cluster = CqlConfigHelper.getOutputCluster(ConfigHelper.getOutputInitialAddress(conf), conf))
+            Session session = null;
+            try
             {
-                Session session = cluster.connect(keyspace);
+                session = cluster.connect(keyspace);
                 rangeMap = new HashMap<>();
                 metadata = session.getCluster().getMetadata();
                 Set<TokenRange> ranges = metadata.getTokenRanges();
                 for (TokenRange range : ranges)
                     rangeMap.put(range, metadata.getReplicas(keyspace, range));
+            }
+            finally
+            {
+                session.close();
             }
         }
 

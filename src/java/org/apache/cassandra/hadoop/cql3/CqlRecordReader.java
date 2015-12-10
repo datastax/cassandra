@@ -23,15 +23,18 @@ import java.math.BigInteger;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ThreadFactory;
 
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
-
 import com.datastax.driver.core.TypeCodec;
+
 import org.apache.cassandra.utils.AbstractIterator;
+
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
+
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +44,7 @@ import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ColumnMetadata;
 import com.datastax.driver.core.LocalDate;
 import com.datastax.driver.core.Metadata;
+import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
@@ -48,7 +52,10 @@ import com.datastax.driver.core.TableMetadata;
 import com.datastax.driver.core.Token;
 import com.datastax.driver.core.TupleValue;
 import com.datastax.driver.core.UDTValue;
+import com.datastax.shaded.netty.util.HashedWheelTimer;
+import com.datastax.shaded.netty.util.Timer;
 import com.google.common.reflect.TypeToken;
+
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.hadoop.ColumnFamilySplit;
@@ -94,6 +101,13 @@ public class CqlRecordReader extends RecordReader<Long, Row>
     private IPartitioner partitioner;
     private String inputColumns;
     private String userDefinedWhereClauses;
+    private final HashedWheelTimer timer = new HashedWheelTimer();
+    private final NettyOptions nettyOptions = new NettyOptions() {
+        @Override
+        public Timer timer(ThreadFactory threadFactory) {
+            return timer;
+        }
+    };
 
     private List<String> partitionKeys = new ArrayList<>();
 
@@ -127,7 +141,7 @@ public class CqlRecordReader extends RecordReader<Long, Row>
 
             // create a Cluster instance
             String[] locations = split.getLocations();
-            cluster = CqlConfigHelper.getInputCluster(locations, conf);
+            cluster = CqlConfigHelper.getInputCluster(locations, conf, nettyOptions);
         }
         catch (Exception e)
         {

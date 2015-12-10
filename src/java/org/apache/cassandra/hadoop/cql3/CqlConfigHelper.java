@@ -35,11 +35,13 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
 import com.google.common.base.Optional;
+
 import org.apache.commons.lang3.StringUtils;
 
 import com.datastax.driver.core.AuthProvider;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.HostDistance;
+import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.PlainTextAuthProvider;
 import com.datastax.driver.core.ProtocolVersion;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
@@ -48,6 +50,7 @@ import com.datastax.driver.core.ProtocolOptions;
 import com.datastax.driver.core.QueryOptions;
 import com.datastax.driver.core.SSLOptions;
 import com.datastax.driver.core.SocketOptions;
+
 import org.apache.cassandra.hadoop.ConfigHelper;
 import org.apache.hadoop.conf.Configuration;
 
@@ -292,15 +295,32 @@ public class CqlConfigHelper
         return getInputCluster(new String[] {host}, conf);
     }
 
+    public static Cluster getInputCluster(String host, Configuration conf, NettyOptions nettyOptions)
+    {
+        // this method has been left for backward compatibility
+        return getInputCluster(new String[] {host}, conf, nettyOptions);
+    }
+
     public static Cluster getInputCluster(String[] hosts, Configuration conf)
     {
         int port = getInputNativePort(conf);
         return getCluster(hosts, conf, port);
     }
 
+    public static Cluster getInputCluster(String[] hosts, Configuration conf, NettyOptions nettyOptions)
+    {
+        int port = getInputNativePort(conf);
+        return getCluster(hosts, conf, port, nettyOptions);
+    }
+
     public static Cluster getOutputCluster(String host, Configuration conf)
     {
         return getOutputCluster(new String[]{host}, conf);
+    }
+
+    public static Cluster getOutputCluster(String host, Configuration conf, NettyOptions nettyOptions)
+    {
+        return getOutputCluster(new String[]{host}, conf, nettyOptions);
     }
 
     public static Cluster getOutputCluster(String[] hosts, Configuration conf)
@@ -309,7 +329,23 @@ public class CqlConfigHelper
         return getCluster(hosts, conf, port);
     }
 
+    public static Cluster getOutputCluster(String[] hosts, Configuration conf, NettyOptions nettyOptions)
+    {
+        int port = getOutputNativePort(conf);
+        return getCluster(hosts, conf, port, nettyOptions);
+    }
+
     public static Cluster getCluster(String[] hosts, Configuration conf, int port)
+    {
+        return getClusterBuilder(hosts, conf, port, null).build();
+    }
+
+    public static Cluster getCluster(String[] hosts, Configuration conf, int port, NettyOptions nettyOptions)
+    {
+        return getClusterBuilder(hosts, conf, port, nettyOptions).build();
+    }
+
+    private static Cluster.Builder getClusterBuilder(String[] hosts, Configuration conf, int port, NettyOptions nettyOptions)
     {
         Optional<AuthProvider> authProvider = getAuthProvider(conf);
         Optional<SSLOptions> sslOptions = getSSLOptions(conf);
@@ -332,12 +368,17 @@ public class CqlConfigHelper
         if (protocolVersion.isPresent()) {
             builder.withProtocolVersion(ProtocolVersion.fromInt(protocolVersion.get()));
         }
+
+        if (nettyOptions != null)
+        {
+            builder.withNettyOptions(nettyOptions);
+        }
         builder.withLoadBalancingPolicy(loadBalancingPolicy)
                 .withSocketOptions(socketOptions)
                 .withQueryOptions(queryOptions)
                 .withPoolingOptions(poolingOptions);
 
-        return builder.build();
+        return builder;
     }
 
     public static void setInputCoreConnections(Configuration conf, String connections)
