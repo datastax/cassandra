@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.yammer.metrics.Metrics;
 import com.yammer.metrics.core.Meter;
+import com.yammer.metrics.core.Timer;
 
 import org.apache.cassandra.net.MessagingService;
 
@@ -32,12 +33,18 @@ public class DroppedMessageMetrics
     /** Number of dropped messages */
     public final Meter dropped;
 
+    /** The dropped latency within node */
+    public final Timer internalDroppedLatency;
     private long lastDropped = 0;
+    /** The cross node dropped latency */
+    public final Timer crossNodeDroppedLatency;
 
     public DroppedMessageMetrics(MessagingService.Verb verb)
     {
         MetricNameFactory factory = new DefaultNameFactory("DroppedMessage", verb.toString());
         dropped = Metrics.newMeter(factory.createMetricName("Dropped"), "dropped", TimeUnit.SECONDS);
+        internalDroppedLatency = Metrics.newTimer(factory.createMetricName("InternalDroppedLatency"), TimeUnit.NANOSECONDS, TimeUnit.SECONDS);
+        crossNodeDroppedLatency = Metrics.newTimer(factory.createMetricName("CrossNodeDroppedLatency"), TimeUnit.NANOSECONDS, TimeUnit.SECONDS);
     }
 
     @Deprecated

@@ -45,10 +45,11 @@ public class MessageDeliveryTask implements Runnable
     public void run()
     {
         MessagingService.Verb verb = message.verb;
+        long timeTaken = System.currentTimeMillis() - constructionTime;
         if (MessagingService.DROPPABLE_VERBS.contains(verb)
-            && System.currentTimeMillis() > constructionTime + message.getTimeout())
+                && timeTaken > message.getTimeout())
         {
-            MessagingService.instance().incrementDroppedMessages(verb, isCrossNodeTimestamp);
+            MessagingService.instance().incrementDroppedMessages(verb, timeTaken, isCrossNodeTimestamp);
             return;
         }
 

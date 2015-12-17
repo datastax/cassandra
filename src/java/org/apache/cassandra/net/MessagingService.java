@@ -893,11 +893,32 @@ public final class MessagingService implements MessagingServiceMBean
         incrementDroppedMessages(verb, false);
     }
 
+    public void incrementDroppedMessages(Verb verb, long timeTaken)
+    {
+        incrementDroppedMessages(verb, timeTaken, false);
+    }
+
+    public void incrementDroppedMessages(Verb verb, long timeTaken, boolean isCrossNodeTimeout)
+    {
+        assert DROPPABLE_VERBS.contains(verb) : "Verb " + verb + " should not legally be dropped";
+        incrementDroppedMessages(droppedMessagesMap.get(verb), timeTaken, isCrossNodeTimeout);
+    }
+
     public void incrementDroppedMessages(Verb verb, boolean isCrossNodeTimeout)
     {
         assert DROPPABLE_VERBS.contains(verb) : "Verb " + verb + " should not legally be dropped";
         incrementDroppedMessages(droppedMessagesMap.get(verb), isCrossNodeTimeout);
     }
+
+    private void incrementDroppedMessages(DroppedMessages droppedMessages, long timeTaken, boolean isCrossNodeTimeout)
+    {
+        if (isCrossNodeTimeout)
+            droppedMessages.metrics.crossNodeDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
+        else
+            droppedMessages.metrics.internalDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
+        incrementDroppedMessages(droppedMessages, isCrossNodeTimeout);
+    }
+
 
     /**
      * Same as incrementDroppedMessages(), but allows non-droppable verbs. Called for IMessageSink-caused message drops.
@@ -945,11 +966,14 @@ public final class MessagingService implements MessagingServiceMBean
             int droppedCrossNodeTimeout = droppedMessages.droppedCrossNodeTimeout.getAndSet(0);
             if (droppedInternalTimeout > 0 || droppedCrossNodeTimeout > 0)
             {
-                ret.add(String.format("%s messages were dropped in last %d ms: %d for internal timeout and %d for cross node timeout",
+                ret.add(String.format("%s messages were dropped in last %d ms: %d for internal timeout and %d for cross node timeout." +
+                                      " Median internal dropped latency: %d ms and Median cross-node dropped latency: %d ms",
                                       verb,
                                       LOG_DROPPED_INTERVAL_IN_MS,
                                       droppedInternalTimeout,
-                                      droppedCrossNodeTimeout));
+                                      droppedCrossNodeTimeout,
+                                      TimeUnit.NANOSECONDS.toMillis((long)droppedMessages.metrics.internalDroppedLatency.getSnapshot().getMedian()),
+                                      TimeUnit.NANOSECONDS.toMillis((long)droppedMessages.metrics.crossNodeDroppedLatency.getSnapshot().getMedian())));
             }
         }
         return ret;

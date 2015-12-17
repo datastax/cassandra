@@ -2230,10 +2230,10 @@ public class StorageProxy implements StorageProxyMBean
 
         public final void run()
         {
-
-            if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - constructionTime) > DatabaseDescriptor.getTimeout(verb))
+            long timeTaken = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - constructionTime);
+            if (timeTaken > DatabaseDescriptor.getTimeout(verb))
             {
-                MessagingService.instance().incrementDroppedMessages(verb);
+                MessagingService.instance().incrementDroppedMessages(verb, timeTaken);
                 return;
             }
             try
@@ -2259,10 +2259,13 @@ public class StorageProxy implements StorageProxyMBean
         public final void run()
         {
             final MessagingService.Verb verb = verb();
-            if (System.currentTimeMillis() > constructionTime + DatabaseDescriptor.getTimeout(verb))
+            long mutationTimeout = DatabaseDescriptor.getTimeout(verb);
+            long timeTaken = System.currentTimeMillis() - constructionTime;
+            if (timeTaken > mutationTimeout)
+
             {
                 if (MessagingService.DROPPABLE_VERBS.contains(verb()))
-                    MessagingService.instance().incrementDroppedMessages(verb);
+                    MessagingService.instance().incrementDroppedMessages(verb, timeTaken);
                 HintRunnable runnable = new HintRunnable(FBUtilities.getBroadcastAddress())
                 {
                     protected void runMayThrow() throws Exception
