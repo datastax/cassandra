@@ -1,4 +1,5 @@
 DSE backports
+ * Make paging logic consistent between searcher impls (CASSANDRA-10683)
  * Merge range tombstones during compaction (CASSANDRA-7953)
  * Fix pending range calculation during moves (CASSANDRA-10887)
  * Gossiper#isEnabled is not thread safe (CASSANDRA-11116)
