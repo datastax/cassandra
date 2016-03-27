@@ -21,11 +21,9 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -36,70 +34,56 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.AbstractDirectorySizer;
+import org.apache.cassandra.utils.DirectorySizeCalculator;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
     static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentManagerCDC.class);
 
-    private AtomicLong cdc_overflow_size = new AtomicLong(0);
-    private final CDCSizeSummer cdcSizeSummer;
-    private final ExecutorService cdcSizeCalculationExecutor;
+    private AtomicLong cdcOverflowSize = new AtomicLong(0);
+    private final CDCSizeCalculator cdcSizeCalculator;
+    private ExecutorService cdcSizeCalculationExecutor;
 
-    // We don't want every failed allocation thread to trigger the management thread to repeatedly slam the executor
-    // with dummy runnables that will just be discarded, so we guard w/an atomic bool that we flip if we're in the process
-    // of recalculating and flip off when we're done. We need the CAS / ownership aspect to avoid checking a volatile and
-    // possibly racing
+    // We don't want every failed allocation to create a runnable for the queue, so we so we guard w/an atomic bool
     private AtomicBoolean reCalculating = new AtomicBoolean(false);
 
     public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
     {
         super(commitLog, storageDirectory);
-        cdcSizeSummer = new CDCSizeSummer(new File(DatabaseDescriptor.getCDCOverflowLocation()));
-        cdcSizeCalculationExecutor = new ThreadPoolExecutor(1, 1, 1000, TimeUnit.SECONDS, new SynchronousQueue<Runnable>(), new ThreadPoolExecutor.DiscardPolicy());
+        cdcSizeCalculator = new CDCSizeCalculator(new File(DatabaseDescriptor.getCDCOverflowLocation()));
     }
 
-    /**
-     * Update on-disk size used by cdc_overflow, and check if our total active + overflow is >= limit. If so, return false.
-     *
-     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_overflow, as synchronous size
-     * tracking on each allocation call is cpu-bound without an upper limit and could lead to very long delays in
-     * new segment allocation, thus long delays in thread signaling to wake waiting allocation / writer threads.
-     *
-     * While we can race and have our discard logic incorrectly add a discarded segment's size to this value, it will
-     * be corrected on the next pass at allocation when a new re-calculation task is submit. Essentially, if you're
-     * flirting with the edge of your possible allocation space for CDC, it's possible that some mutations will be
-     * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 8G CDC space
-     * and 32MB segment, that should be a sub-ms re-calc process on a respectable modern CPU. "Should".
-     *
-     * Reference DirectorySizerBench for more information about performance of this recalc.
-     */
     @Override
-    public boolean canAllocateNewSegments()
+    void start()
     {
-        // In order to prevent repeatedly hammering the executor with Runnables just to be dropped if we're at heavy
-        // allocation rates and the management thread is repeatedly being awakened by failed mutation allocations, we
-        // guard it with an atomic boolean.
+        cdcSizeCalculationExecutor = Executors.newSingleThreadExecutor();
+        super.start();
+    }
 
-        // That being said, if we're on a new segment allocation and not currently in progress on recalculating this,
-        // we want to go ahead and kick off another. It's a pretty time-consuming process depending on # of files, env,
-        // and CPU speed so it's quite possible for us to get behind here even during the run of a single recalc.
+    private void maybeUpdateCDCSizeCounterAsync()
+    {
         if (reCalculating.compareAndSet(false, true))
         {
-            asyncUpdateCDCOnDiskSize();
+            try
+            {
+                cdcSizeCalculationExecutor.submit(() -> updateCDCDirectorySize());
+            }
+            catch (Exception e)
+            {
+                reCalculating.compareAndSet(true, false);
+                if (!(e instanceof RejectedExecutionException))
+                    JVMStabilityInspector.inspectCommitLogThrowable(e);
+            }
         }
-        return !atCapacity();
-    }
-
-    private void asyncUpdateCDCOnDiskSize()
-    {
-        cdcSizeCalculationExecutor.submit(() -> updateCDCDirectorySize());
     }
 
     private void updateCDCDirectorySize()
     {
         try
         {
+            // Rather than burning CPU by allowing spinning on this recalc if we have long-running or intermittent CDC
+            // consumption, we sleep the size calculation thread based on user configuration.
             Thread.sleep(DatabaseDescriptor.getCDCDiskCheckInterval());
         }
         catch (InterruptedException ie)
@@ -110,17 +94,17 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 
         try
         {
-            cdcSizeSummer.calculateSize();
-            cdc_overflow_size.set(cdcSizeSummer.getAllocatedSize());
+            cdcSizeCalculator.calculateSize();
+            cdcOverflowSize.set(cdcSizeCalculator.getAllocatedSize());
         }
         catch (IOException ie)
         {
             CommitLog.instance.handleCommitError("IEXception trying to calculate size for CDC folder.", ie);
         }
 
+        wakeManager();
         if (!reCalculating.compareAndSet(true, false))
             throw new AssertionError();
-        wakeManager();
     }
 
     /**
@@ -134,9 +118,11 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         FileUtils.renameWithConfirm(segment.logFile.getAbsolutePath(), DatabaseDescriptor.getCDCOverflowLocation() + File.separator + segment.logFile.getName());
         addSize(-segment.onDiskSize());
 
-        // This will race with a canAllocateNewSegments call and thus over-increment our view of our size
-        // on disk. The actual size on disk should be updated on the next manager wake call and rectified.
-        cdc_overflow_size.addAndGet(segment.onDiskSize());
+        // This can race with an atCapacity check and thus over-increment our view of our size on disk. The actual size
+        // on disk should be updated async on the next failed allocate() call and rectified, so while we can lose a sub-ms
+        // window of mutations during that recalc due to a race w/overprovisioning of size, it's preferable compared to
+        // a synchronous check of this on every allocation.
+        cdcOverflowSize.addAndGet(segment.onDiskSize());
     }
 
     /**
@@ -146,28 +132,8 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     public void shutdown()
     {
         run = false;
-        cdcSizeCalculationExecutor.shutdownNow();
+        cdcSizeCalculationExecutor.shutdown();
         wakeManager();
-    }
-
-    private class CDCSizeSummer extends AbstractDirectorySizer
-    {
-        CDCSizeSummer(File path)
-        {
-            super(path);
-        }
-
-        public void calculateSize() throws IOException
-        {
-            rebuildFileList();
-            Files.walkFileTree(path.toPath(), this);
-        }
-
-        public boolean isAcceptable(Path file)
-        {
-            // Add up everything in there. Don't care what it is - if it's in this folder, we consider it fair game.
-            return true;
-        }
     }
 
     /**
@@ -179,18 +145,27 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     @Override
     public CommitLogSegment.Allocation allocate(Mutation mutation, int size)
     {
+        /*
+         * We can race and have multiple writers in allocate, check atCapacity, and show that they can successfully
+         * continue at this point, leading to allocation of an extra segment(s) in advanceAllocatingFrom, thus violating
+         * our bounds on allowable CDC space taken up on disk. This shouldn't lead to too much excess due to limitations
+         * on max mutation size + thread writer pool amount, but we may want to revisit if this becomes an issue in the
+         * future.
+         *
+         * The reason we allow this is because advanceAllocatingFrom and the management thread have an invariant that
+         * all attempts at allocation must succeed.
+        */
+        if (atCapacity())
+        {
+            maybeUpdateCDCSizeCounterAsync();
+            return null;
+        }
+
         CommitLogSegment segment = allocatingFrom();
 
         CommitLogSegment.Allocation alloc;
         while ( null == (alloc = segment.allocate(mutation, size)) )
         {
-            if (atCapacity())
-            {
-                // Try and get a recount if anything's been deleted and we haven't caught it
-                asyncUpdateCDCOnDiskSize();
-                return null;
-            }
-
             // Failed to allocate, so move to a new segment with enough room if possible.
             advanceAllocatingFrom(segment);
             segment = allocatingFrom;
@@ -199,19 +174,65 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         return alloc;
     }
 
-    private boolean atCapacity()
+    /**
+     * Returns total size allowed by yaml for this segment type less the commitlog size of this manager
+     */
+    long unusedCapacity()
     {
-        return (cdc_overflow_size.get() + size.get()) >= (long)DatabaseDescriptor.getTotalCDCSpaceInMB() * 1024 * 1024;
+        long total = DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
+        long currentSize = size.get();
+        long overflowSize = cdcOverflowSize.get();
+        logger.trace("Total cdc commitlog segment space used is {} out of {}. Active segments: {} Overflow: {}", currentSize + overflowSize, total, currentSize, overflowSize);
+        return total - (currentSize + overflowSize);
+    }
+
+    /*
+     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_overflow, as synchronous size
+     * tracking on each allocation call is cpu-bound without an upper limit and could lead to very long delays in
+     * new segment allocation, thus long delays in thread signaling to wake waiting allocation / writer threads.
+     *
+     * While we can race and have our discard logic incorrectly add a discarded segment's size to this value, it will
+     * be corrected on the next pass at allocation when a new re-calculation task is submit. Essentially, if you're
+     * flirting with the edge of your possible allocation space for CDC, it's possible that some mutations will be
+     * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 8G CDC space
+     * and 32MB segment, that should be a sub-ms re-calc process on a respectable modern CPU. "Should".
+     *
+     * Reference DirectorySizerBench for more information about performance of this recalc.
+     */
+    @VisibleForTesting
+    public boolean atCapacity()
+    {
+        return (cdcOverflowSize.get() + size.get()) >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
+    }
+
+    private class CDCSizeCalculator extends DirectorySizeCalculator
+    {
+        CDCSizeCalculator(File path)
+        {
+            super(path);
+        }
+
+        public void calculateSize() throws IOException
+        {
+            rebuildFileList();
+            Files.walkFileTree(path.toPath(), this);
+        }
     }
 
     /**
      * Only use for testing / validation that size summer is working. Not for production use.
      */
     @VisibleForTesting
-    public long checkCDCOverflowSizeOnDisk()
+    public long updateCDCOverflowSize()
     {
+        boolean set = false;
+        while (!set) set = reCalculating.compareAndSet(false, true);
         updateCDCDirectorySize();
-        return cdc_overflow_size.get();
+        return cdcOverflowSize.get();
+    }
+
+    public SegmentManagerType getSegmentManagerType()
+    {
+        return SegmentManagerType.CDC;
     }
 }
-

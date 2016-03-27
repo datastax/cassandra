@@ -233,13 +233,6 @@ public class CommitLogReplayer implements ICommitLogReadHandler
                         if (Schema.instance.getCF(update.metadata().cfId) == null)
                             continue; // dropped
 
-                        assert commitLogReplayer != null;
-                        assert commitLogReplayer.cfPositions != null;
-                        assert update != null;
-                        assert update.metadata() != null;
-                        assert update.metadata().cfId != null;
-                        assert commitLogReplayer.cfPositions.containsKey(update.metadata().cfId);
-
                         CommitLogSegmentPosition rp = commitLogReplayer.cfPositions.get(update.metadata().cfId);
 
                         // replay if current segment is newer than last flushed one or,
@@ -422,7 +415,7 @@ public class CommitLogReplayer implements ICommitLogReadHandler
 
     public boolean shouldStopOnError(CommitLogReadException exception) throws IOException
     {
-        if (exception.tolerateErrorsInSection)
+        if (exception.permissable)
             logger.error("Ignoring commit log replay error likely due to incomplete flush to disk", exception);
         else if (Boolean.getBoolean(IGNORE_REPLAY_ERRORS_PROPERTY))
             logger.error("Ignoring commit log replay error", exception);

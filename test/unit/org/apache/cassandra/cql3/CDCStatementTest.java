@@ -31,22 +31,22 @@ public class CDCStatementTest extends CQLTester
     @After
     public void after() throws Throwable
     {
-        try { execute("ALTER KEYSPACE cdc DROP cdc_log;"); }
-        catch (Exception e) {} catch (Throwable t) {}
-
-        execute("DROP KEYSPACE IF EXISTS cdc;");
+        try { execute("ALTER KEYSPACE cdc_test DROP CDCLOG;"); }
+        catch (Exception e) { }
+        catch (Throwable t) { }
+        execute("DROP KEYSPACE IF EXISTS cdc_test;");
     }
 
     @Test
     public void testKeyspaceSimpleWithCDC() throws Throwable
     {
-        execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1} AND cdc_datacenters = {'dc_1'};");
+        execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1} AND cdc_datacenters = {'dc_1'};");
     }
 
     @Test
     public void testKeyspaceNTSWithMatchingCDC() throws Throwable
     {
-        execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc_1' : 1, 'dc_2' : 3} AND cdc_datacenters = {'dc_1', 'dc_2'};");
+        execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc_1' : 1, 'dc_2' : 3} AND cdc_datacenters = {'dc_1', 'dc_2'};");
     }
 
     @Test
@@ -54,7 +54,7 @@ public class CDCStatementTest extends CQLTester
     {
         try
         {
-            execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc_1' : 1, 'dc_2' : 3} AND cdc_datacenters = {'AAAdc_1', 'dc_2'};");
+            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc_1' : 1, 'dc_2' : 3} AND cdc_datacenters = {'AAAdc_1', 'dc_2'};");
         }
         catch (ConfigurationException ce)
         {
@@ -67,7 +67,7 @@ public class CDCStatementTest extends CQLTester
     {
         try
         {
-            execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1} AND cdc_datacenters = {'dc_1', 'dc_2'};");
+            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1} AND cdc_datacenters = {'dc_1', 'dc_2'};");
         }
         catch (ConfigurationException ce)
         {
@@ -78,15 +78,15 @@ public class CDCStatementTest extends CQLTester
     @Test
     public void testAlterAddCDCSimple() throws Throwable
     {
-        execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1};");
-        execute("ALTER KEYSPACE cdc WITH cdc_datacenters = {'dc1'}");
+        execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1};");
+        execute("ALTER KEYSPACE cdc_test WITH cdc_datacenters = {'dc1'}");
     }
 
     @Test
     public void testAlterAddCDCNts() throws Throwable
     {
-        execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
-        execute("ALTER KEYSPACE cdc WITH cdc_datacenters = {'dc1'}");
+        execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
+        execute("ALTER KEYSPACE cdc_test WITH cdc_datacenters = {'dc1'}");
     }
 
     @Test
@@ -94,8 +94,8 @@ public class CDCStatementTest extends CQLTester
     {
         try
         {
-            execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
-            execute("ALTER KEYSPACE cdc WITH cdc_datacenters = {'AAAdc1'}");
+            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
+            execute("ALTER KEYSPACE cdc_test WITH cdc_datacenters = {'AAAdc1'}");
         }
         catch (ConfigurationException ce)
         {
@@ -108,8 +108,8 @@ public class CDCStatementTest extends CQLTester
     {
         try
         {
-            execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
-            execute("DROP KEYSPACE cdc;");
+            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
+            execute("DROP KEYSPACE cdc_test;");
         }
         catch (ConfigurationException ce)
         {
@@ -120,9 +120,9 @@ public class CDCStatementTest extends CQLTester
     @Test
     public void testDropCDCStatementSucceeds() throws Throwable
     {
-        execute("CREATE KEYSPACE cdc WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
-        execute("ALTER KEYSPACE cdc WITH cdc_datacenters = {'dc1'}");
-        execute("ALTER KEYSPACE cdc DROP cdc_log");
-        execute("DROP KEYSPACE cdc;");
+        execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
+        execute("ALTER KEYSPACE cdc_test WITH cdc_datacenters = {'dc1'}");
+        execute("ALTER KEYSPACE cdc_test DROP CDCLOG");
+        execute("DROP KEYSPACE cdc_test;");
     }
 }

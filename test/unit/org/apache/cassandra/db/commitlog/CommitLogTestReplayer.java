@@ -57,18 +57,16 @@ public class CommitLogTestReplayer extends CommitLogReplayer
     {
         @Override
         protected void readMutation(ICommitLogReadHandler handler,
-                          byte[] inputBuffer,
-                          int size,
-                          final long entryLocation,
-                          final CommitLogDescriptor desc) throws IOException
+                                    byte[] inputBuffer,
+                                    int size,
+                                    final long entryLocation,
+                                    final CommitLogDescriptor desc) throws IOException
         {
             RebufferingInputStream bufIn = new DataInputBuffer(inputBuffer, 0, size);
             Mutation mutation;
             try
             {
-                mutation = Mutation.serializer.deserialize(bufIn,
-                                                               desc.getMessagingVersion(),
-                                                               SerializationHelper.Flag.LOCAL);
+                mutation = Mutation.serializer.deserialize(bufIn, desc.getMessagingVersion(), SerializationHelper.Flag.LOCAL);
                 Assert.assertTrue(processor.apply(mutation));
             }
             catch (IOException e)

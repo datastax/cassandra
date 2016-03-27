@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentPosition;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -125,13 +126,13 @@ public class Memtable implements Comparable<Memtable>
 
     // ONLY to be used for testing, to create a mock Memtable
     @VisibleForTesting
-    public Memtable(CFMetaData metadata)
+    public Memtable(CFMetaData metadata, AbstractCommitLogSegmentManager.SegmentManagerType segmentType)
     {
         this.initialComparator = metadata.comparator;
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.partitionColumns());
-        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition(metadata.ksName);
+        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition(segmentType);
     }
 
     public MemtableAllocator getAllocator()

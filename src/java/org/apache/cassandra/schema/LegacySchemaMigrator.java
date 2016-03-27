@@ -218,12 +218,7 @@ public final class LegacySchemaMigrator
         Map<String, String> replication = new HashMap<>();
         replication.putAll(fromJsonMap(row.getString("strategy_options")));
         replication.put(ReplicationParams.CLASS, row.getString("strategy_class"));
-
-        // TODO: See if I can't actually store this thing in cdc_dcs so I can retrieve it here
-        Set<String> cdc_dcs = new HashSet<>();
-        cdc_dcs.addAll(fromJsonList(row.getString("cdc_dcs")));
-
-        return KeyspaceParams.create(durableWrites, replication, cdc_dcs);
+        return KeyspaceParams.create(durableWrites, replication);
     }
 
     /*

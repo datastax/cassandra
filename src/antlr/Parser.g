@@ -814,11 +814,11 @@ alterKeyspaceStatement returns [AlterKeyspaceStatement expr]
     ;
 
 /**
- * ALTER KEYSPACE <KS> DROP cdc;
+ * ALTER KEYSPACE <KS> DROP CDC LOG;
  */
 dropCDCStatement returns [DropCDCStatement expr]
     : K_ALTER K_KEYSPACE ks=keyspaceName
-        K_DROP K_CDC { $expr = new DropCDCStatement(ks); }
+        K_DROP K_CDCLOG { $expr = new DropCDCStatement(ks); }
     ;
 
 /**
@@ -1701,5 +1701,3 @@ basic_unreserved_keyword returns [String str]
         ) { $str = $k.text; }
     ;
 
-
-K_CDC:         'cdc_log';

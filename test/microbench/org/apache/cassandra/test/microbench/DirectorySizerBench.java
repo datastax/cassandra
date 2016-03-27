@@ -22,12 +22,11 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.AbstractDirectorySizer;
+import org.apache.cassandra.utils.DirectorySizeCalculator;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -53,7 +52,7 @@ import org.openjdk.jmh.infra.Blackhole;
 public class DirectorySizerBench
 {
     private File tempDir;
-    private EasyDirectorySizer sizer;
+    private DirectorySizeCalculator sizer;
 
     @Setup(Level.Trial)
     public void setUp() throws IOException
@@ -84,7 +83,7 @@ public class DirectorySizerBench
 
         // Test w/25,600 files, 100x the load of a full default CommitLog (8192) div size (32 per)
         populateRandomFiles(tempDir, 25600);
-        sizer = new EasyDirectorySizer(tempDir);
+        sizer = new DirectorySizeCalculator(tempDir);
     }
 
     @TearDown
@@ -106,19 +105,6 @@ public class DirectorySizerBench
     private String randString()
     {
         return UUID.randomUUID().toString();
-    }
-
-    class EasyDirectorySizer extends AbstractDirectorySizer
-    {
-        public EasyDirectorySizer(File dir)
-        {
-            super(dir);
-        }
-
-        public boolean isAcceptable(Path file)
-        {
-            return true;
-        }
     }
 
     @Benchmark

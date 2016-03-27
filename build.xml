@@ -1250,7 +1250,7 @@
       <fail unless="fileSep">Failed to set File Separator. This shouldn't happen.</fail>
 
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/commitlog${fileSep}@{poffset}"/>
-      <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/commitlog/cdc${fileSep}@{poffset}"/>
+      <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/cdc${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/cdc_overflow${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/data${fileSep}@{poffset}"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/saved_caches${fileSep}@{poffset}"/>

@@ -192,7 +192,7 @@ public class Config
     public Integer commitlog_sync_period_in_ms;
     public int commitlog_segment_size_in_mb = 32;
     public ParameterizedClass commitlog_compression;
-    public int commitlog_max_compression_buffers_in_pool = 3;
+    public int commitlog_max_compression_buffers_per_pool = 3;
     public TransparentDataEncryptionOptions transparent_data_encryption_options = new TransparentDataEncryptionOptions();
 
     public Integer max_mutation_size_in_kb;
@@ -200,7 +200,7 @@ public class Config
     // Change-data-capture logs
     public String cdc_directory;
     public String cdc_overflow_directory;
-    public Integer cdc_total_space_in_mb = 8192;
+    public Integer cdc_total_space_in_mb;
     public Integer cdc_free_space_check_interval_ms = 250;
 
     @Deprecated

@@ -899,7 +899,10 @@ public final class SchemaKeyspace
         UntypedResultSet.Row row = query(query, keyspaceName).one();
         boolean durableWrites = row.getBoolean(KeyspaceParams.Option.DURABLE_WRITES.toString());
         Map<String, String> replication = row.getFrozenTextMap(KeyspaceParams.Option.REPLICATION.toString());
-        Set<String> cdc = row.getFrozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), UTF8Type.instance);
+
+        Set<String> cdc = row.has(KeyspaceParams.Option.CDC_DATACENTERS.toString())
+            ? row.getFrozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), UTF8Type.instance)
+            : Collections.emptySet();
 
         return KeyspaceParams.create(durableWrites, replication, cdc);
     }

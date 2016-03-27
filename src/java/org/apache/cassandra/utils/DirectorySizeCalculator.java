@@ -35,28 +35,34 @@ import static com.google.common.collect.Sets.newHashSet;
 /**
  * Walks directory recursively, summing up total contents of files within.
  */
-public abstract class AbstractDirectorySizer extends SimpleFileVisitor<Path>
+public class DirectorySizeCalculator extends SimpleFileVisitor<Path>
 {
     protected final AtomicLong size = new AtomicLong(0);
     protected Set<String> visited = newHashSet(); //count each file only once
     protected Set<String> alive = newHashSet();
     protected final File path;
 
-    protected AbstractDirectorySizer(File path)
+    public DirectorySizeCalculator(File path)
     {
         super();
         this.path = path;
         rebuildFileList();
     }
 
-    protected AbstractDirectorySizer(List<File> files)
+    public DirectorySizeCalculator(List<File> files)
     {
         super();
         this.path = null;
-        rebuildFileList();
+        ImmutableSet.Builder<String> builder = ImmutableSet.builder();
+        for (File file : files)
+            builder.add(file.getName());
+        alive = builder.build();
     }
 
-    public abstract boolean isAcceptable(Path file);
+    public boolean isAcceptable(Path file)
+    {
+        return true;
+    }
 
     public void rebuildFileList()
     {

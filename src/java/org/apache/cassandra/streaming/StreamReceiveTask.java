@@ -133,6 +133,7 @@ public class StreamReceiveTask extends StreamTask
         public void run()
         {
             boolean hasViews = false;
+            boolean hasCDC = false;
             ColumnFamilyStore cfs = null;
             try
             {
@@ -145,18 +146,24 @@ public class StreamReceiveTask extends StreamTask
                     task.session.taskCompleted(task);
                     return;
                 }
-                cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
+                Keyspace ks = Keyspace.open(kscf.left);
+                cfs = ks.getColumnFamilyStore(kscf.right);
                 hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
+                hasCDC = ks.getMetadata().hasCDCEnabled();
 
                 Collection<SSTableReader> readers = task.sstables;
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    //We have a special path for views.
-                    //Since the view requires cleaning up any pre-existing state, we must put
-                    //all partitions through the same write path as normal mutations.
-                    //This also ensures any 2is are also updated
-                    if (hasViews)
+                    // We have a special path for views and for CDC.
+                    //
+                    // For views, Since the view requires cleaning up any pre-existing state, we must put all partitions
+                    // through the same write path as normal mutations. This also ensures any 2is are also updated.
+                    //
+                    // For CDC-enabled keyspaces, we want to ensure that the mutations are routed to the appropriate
+                    // CommitLogSegmentManager on disk, so rather than just bulk loading the SSTables into the CFS' view
+                    // we need to replay the mutations through the CommitLog.
+                    if (hasViews || hasCDC)
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -166,8 +173,18 @@ public class StreamReceiveTask extends StreamTask
                                 {
                                     try (UnfilteredRowIterator rowIterator = scanner.next())
                                     {
-                                        //Apply unsafe (we will flush below before transaction is done)
-                                        new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata))).applyUnsafe();
+                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata)));
+
+                                        // MV *can* be applied unsafe if there's no CDC on the keyspace as we flush below
+                                        // before transaction is done.
+                                        //
+                                        // If the KS has CDC, however, these updates need to be written to the CommitLog
+                                        // so they filter into the appropriate CLSM and segments on disk regardless of
+                                        // whether there's an MV on the CF or not.
+                                        if (hasCDC)
+                                            m.apply();
+                                        else
+                                            m.applyUnsafe();
                                     }
                                 }
                             }
@@ -218,9 +235,9 @@ public class StreamReceiveTask extends StreamTask
             }
             finally
             {
-                //We don't keep the streamed sstables since we've applied them manually
-                //So we abort the txn and delete the streamed sstables
-                if (hasViews)
+                // We don't keep the streamed sstables since we've applied them manually so we abort the txn and delete
+                // the streamed sstables.
+                if (hasViews || hasCDC)
                 {
                     if (cfs != null)
                         cfs.forceBlockingFlush();

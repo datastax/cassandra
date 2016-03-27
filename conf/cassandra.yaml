@@ -197,8 +197,8 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # keyspaces with CDC enabled. This, like the primary standard commitlog, should be
 # places on a separate spindle than the data directories. You can also separate
 # this from the commitlog directories for further performance optimization.
-# If not set, the default directory is $CASSANDRA_HOME/data/commitlog/cdc.
-# cdc_directory: /var/lib/cassandra/commitlog/cdc
+# If not set, the default directory is $CASSANDRA_HOME/data/cdc.
+# cdc_directory: /var/lib/cassandra/cdc
 
 # policy for data disk failures:
 # die: shut down gossip and client transports and kill the JVM for any fs errors or
@@ -491,8 +491,11 @@ memtable_allocation_type: heap_buffers
 # on tables with CDC enabled. Client daemons are responsible for parsing
 # CDC logs and deleting them when parsing is completed.
 #
-# The default value is 8192 mb
-# cdc_total_space_in_mb: 8192
+# The default value is the min of 4096 mb and 1/8th of the total space
+# of the cdc_directory. NOTE: This estimate does not include the available
+# space on the cdc_overflow volume if it's configured separately, so if you
+# have these files on split volumes take that into account.
+# cdc_total_space_in_mb: 4096
 
 # When we hit our cdc disk limit and an external consumer is potentailly
 # consuming logs slowly, we check at the following interval to see if any

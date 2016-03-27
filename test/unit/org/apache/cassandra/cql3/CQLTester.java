@@ -185,7 +185,6 @@ public abstract class CQLTester
     public static void cleanup()
     {
         // clean up commitlog
-        System.err.println("cleanup, cl location: " + DatabaseDescriptor.getCommitLogLocation());
         String[] directoryNames = { DatabaseDescriptor.getCommitLogLocation(), };
         for (String dirName : directoryNames)
         {
@@ -201,7 +200,9 @@ public abstract class CQLTester
         if (cdcDir.exists())
             FileUtils.deleteRecursive(cdcDir);
 
-        FileUtils.deleteRecursive(new File(DatabaseDescriptor.getCDCOverflowLocation()));
+        File cdcODir = new File(DatabaseDescriptor.getCDCOverflowLocation());
+        if (cdcODir.exists())
+            FileUtils.deleteRecursive(cdcODir);
 
         cleanupSavedCaches();
 

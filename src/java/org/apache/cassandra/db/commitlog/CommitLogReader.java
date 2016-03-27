@@ -97,6 +97,7 @@ public class CommitLogReader
      * @param startPosition Optional CommitLogSegmentPosition to serve as starting point for mutation replay, CommitLogSegmentPosition.NONE if all
      * @param mutationLimit Optional limit on # of mutations to replay. Local ALL_MUTATIONS serves as marker to play all.
      * @param tolerateTruncation Whether or not we should allow truncation of this file or throw if EOF found
+     *
      * @throws IOException
      */
     public void readCommitLogSegment(ICommitLogReadHandler handler,
@@ -126,15 +127,21 @@ public class CommitLogReader
             final long segmentId = desc.id;
             try
             {
+                // The following call can either throw or legitimately return null. For either case, we need to check
+                // desc outside this block and set it to null in the exception case.
                 desc = CommitLogDescriptor.readHeader(reader, DatabaseDescriptor.getEncryptionContext());
             }
             catch (Exception e)
+            {
+                desc = null;
+            }
+            if (desc == null)
             {
                 // don't care about whether or not the handler thinks we can continue. We can't w/out descriptor.
                 handler.shouldStopOnError(new CommitLogReadException(
                     String.format("Could not read commit log descriptor in file %s", file),
                     CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
-                    tolerateTruncation));
+                    false));
                 return;
             }
 
@@ -143,7 +150,7 @@ public class CommitLogReader
                 if (handler.shouldStopOnError(new CommitLogReadException(String.format(
                     "Segment id mismatch (filename %d, descriptor %d) in file %s", segmentId, desc.id, file),
                     CommitLogReadErrorReason.RECOVERABLE_DESCRIPTOR_ERROR,
-                    tolerateTruncation)))
+                    false)))
                 {
                     return;
                 }
@@ -157,7 +164,7 @@ public class CommitLogReader
                                   startPosition.segmentId,
                                   file),
                     CommitLogReadErrorReason.RECOVERABLE_DESCRIPTOR_ERROR,
-                    tolerateTruncation)))
+                    false)))
                 {
                     return;
                 }
@@ -176,7 +183,7 @@ public class CommitLogReader
             catch(Exception e)
             {
                 handler.shouldStopOnError(new CommitLogReadException(
-                    String.format("unable to create segment reader for commit log file: %s", e),
+                    String.format("Unable to create segment reader for commit log file: %s", e),
                     CommitLogReadErrorReason.UNKNOWN_ERROR,
                     tolerateTruncation));
                 return;
@@ -192,7 +199,7 @@ public class CommitLogReader
                     if (handler.shouldSkipSegment(desc.id, syncSegment.endPosition))
                         continue;
 
-                    statusTracker.errorContext = String.format("next section at %d in %s", syncSegment.fileStartPosition, desc.fileName());
+                    statusTracker.errorContext = String.format("Next section at %d in %s", syncSegment.fileStartPosition, desc.fileName());
                     readSection(handler, syncSegment.input, startPosition.position, syncSegment.endPosition, statusTracker, desc);
                     if (!statusTracker.shouldContinue())
                         break;
@@ -243,7 +250,7 @@ public class CommitLogReader
                 {
                     logger.trace("Encountered end of segment marker at {}", reader.getFilePointer());
                     statusTracker.flagError();
-                    continue;
+                    return;
                 }
 
                 // Skip mutations that are before the requested offset
@@ -272,8 +279,8 @@ public class CommitLogReader
                                                     statusTracker.tolerateErrorsInSection)))
                     {
                         statusTracker.flagError();
-                        continue;
                     }
+                    return;
                 }
 
                 long claimedSizeChecksum = CommitLogFormat.calculateClaimedChecksum(reader, desc.version);
@@ -288,8 +295,8 @@ public class CommitLogReader
                                                     statusTracker.tolerateErrorsInSection)))
                     {
                         statusTracker.flagError();
-                        continue;
                     }
+                    return;
                 }
 
                 if (serializedSize > buffer.length)
@@ -306,7 +313,7 @@ public class CommitLogReader
                                                 statusTracker.tolerateErrorsInSection)))
                 {
                     statusTracker.flagError();
-                    continue;
+                    return;
                 }
             }
 
@@ -319,8 +326,8 @@ public class CommitLogReader
                                                 statusTracker.tolerateErrorsInSection)))
                 {
                     statusTracker.flagError();
-                    continue;
                 }
+                continue;
             }
             readMutation(handler, buffer, serializedSize, reader.getFilePointer(), desc);
             statusTracker.addProcessedMutation();
