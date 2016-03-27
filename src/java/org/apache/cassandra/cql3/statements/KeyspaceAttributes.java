@@ -64,10 +64,19 @@ public final class KeyspaceAttributes extends PropertyDefinitions
              : replication;
     }
 
+   public Set<String> getCDCDatacenters()
+    {
+        Set<String> cdc_datacenters = getSet(Option.CDC_DATACENTERS.toString());
+        return cdc_datacenters == null
+             ? Collections.emptySet()
+             : cdc_datacenters;
+    }
+
     public KeyspaceParams asNewKeyspaceParams()
     {
         boolean durableWrites = getBoolean(Option.DURABLE_WRITES.toString(), KeyspaceParams.DEFAULT_DURABLE_WRITES);
-        return KeyspaceParams.create(durableWrites, getAllReplicationOptions());
+        // TODO: Determine whether or not we want empty cdc_set here, since it appears to be used during schema announcement
+        return KeyspaceParams.create(durableWrites, getAllReplicationOptions(), getCDCDatacenters());
     }
 
     public KeyspaceParams asAlteredKeyspaceParams(KeyspaceParams previous)
@@ -76,6 +85,6 @@ public final class KeyspaceAttributes extends PropertyDefinitions
         ReplicationParams replication = getReplicationStrategyClass() == null
                                       ? previous.replication
                                       : ReplicationParams.fromMap(getAllReplicationOptions());
-        return new KeyspaceParams(durableWrites, replication);
+        return new KeyspaceParams(durableWrites, replication, getCDCDatacenters());
     }
 }

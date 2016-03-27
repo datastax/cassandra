@@ -469,7 +469,7 @@ public interface StorageServiceMBean extends NotificationEmitter
     // allows a user to forcibly 'kill' a sick node
     public void stopGossiping();
 
-    // allows a user to recover a forcibly 'killed' node
+    // allows a user to recoverPath a forcibly 'killed' node
     public void startGossiping();
 
     // allows a user to see whether gossip is running or not

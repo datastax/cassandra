@@ -17,56 +17,66 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.MigrationManager;
-import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
 
 public class DropKeyspaceStatement extends SchemaAlteringStatement
 {
-    private final String keyspace;
+    private final String name;
     private final boolean ifExists;
 
-    public DropKeyspaceStatement(String keyspace, boolean ifExists)
+    public DropKeyspaceStatement(String name, boolean ifExists)
     {
         super();
-        this.keyspace = keyspace;
+        this.name = name;
         this.ifExists = ifExists;
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace, Permission.DROP);
+        state.hasKeyspaceAccess(name, Permission.DROP);
     }
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        ThriftValidation.validateKeyspaceNotSystem(keyspace);
+        // If we have CDC enabled on this keyspace, don't allow dropping until CDC is dropped.
+        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name);
+        if (ksm == null && !ifExists)
+            throw new InvalidRequestException("Unknown keyspace " + name);
+        else if (ksm == null && ifExists)
+        {
+            ClientWarn.instance.warn(String.format("Keyspace %s not found. Ignoring request.", name));
+            return;
+        }
+        if (Schema.isSystemKeyspace(ksm.name))
+            throw new InvalidRequestException("Cannot drop system keyspace");
+
+        if (ksm.params.hasCDCEnabled())
+            throw new InvalidRequestException("Cannot drop keyspace with active CDC log. Remove CDC log before dropping Keyspace.");
     }
 
     @Override
     public String keyspace()
     {
-        return keyspace;
+        return name;
     }
 
     public Event.SchemaChange announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-        try
-        {
-            MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace());
-        }
-        catch(ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            throw e;
-        }
+        KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(name);
+        if (ifExists && oldKsm == null)
+            return null;
+
+        MigrationManager.announceKeyspaceDrop(name, isLocalOnly);
+        return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace());
     }
 }

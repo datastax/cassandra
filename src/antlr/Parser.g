@@ -95,12 +95,28 @@ options {
             listeners.get(i).syntaxError(this, msg);
     }
 
-    public Map<String, String> convertPropertyMap(Maps.Literal map)
+    /**
+     * Used to allow either sets or maps to be cleaned and passed into PropertyDefinitions.
+     * Subsequent conversion from Term.Raw to String is performed in that class, with the
+     * expectation that all entries are Constant.Literal and not AbstractMarker.Raw values
+     */
+    public Map<String, String> normalizeSetOrMapLiteral(Term.Raw input)
+    {
+        if (input instanceof Maps.Literal)
+            return cleanMap((Maps.Literal)input);
+        if (input instanceof Sets.Literal)
+            return cleanSet((Sets.Literal)input);
+        String msg = "Unknown collection type in normalizeSetOrMapLiteral: " + input;
+        addRecognitionError(msg);
+        return null;
+    }
+
+    public Map<String, String> cleanMap(Maps.Literal map)
     {
         if (map == null || map.entries == null || map.entries.isEmpty())
             return Collections.<String, String>emptyMap();
 
-        Map<String, String> res = new HashMap<String, String>(map.entries.size());
+        Map<String, String> res = new HashMap<>(map.entries.size());
 
         for (Pair<Term.Raw, Term.Raw> entry : map.entries)
         {
@@ -128,6 +144,41 @@ options {
             }
 
             res.put(((Constants.Literal)entry.left).getRawText(), ((Constants.Literal)entry.right).getRawText());
+        }
+
+        return res;
+    }
+
+    /**
+     * Convert a Sets.Literal into a Map w/only keys being relevant. Slightly hackish workaround to prevent having to
+     * instantiate an interim Term.Raw that we then convert to the subsequent derived type in C* space rather than in
+     * the CqlParser
+     */
+    public Map<String, String> cleanSet(Sets.Literal set)
+    {
+        if (set == null || set.elements == null || set.elements.isEmpty())
+            return Collections.<String, String>emptyMap();
+
+        Map<String, String> res = new HashMap<>(set.elements.size());
+
+        for (Term.Raw entry : set.elements)
+        {
+            // Because the parser tries to be smart and recover on error (to
+            // allow displaying more than one error I suppose), we have null
+            // entries in there. Just skip those, a proper error will be thrown in the end.
+            if (entry == null)
+                break;
+
+            if (!(entry instanceof Constants.Literal))
+            {
+                String msg = "Invalid property name: " + entry;
+                if (entry instanceof AbstractMarker.Raw)
+                    msg += " (bind variables are not supported in DDL queries)";
+                addRecognitionError(msg);
+                break;
+            }
+
+            res.put(((Constants.Literal)entry).getRawText(), "1");
         }
 
         return res;
@@ -227,6 +278,7 @@ cqlStatement returns [ParsedStatement stmt]
     | st38=createMaterializedViewStatement { $stmt = st38; }
     | st39=dropMaterializedViewStatement   { $stmt = st39; }
     | st40=alterMaterializedViewStatement  { $stmt = st40; }
+    | st41=dropCDCStatement                { $stmt = st41; }
     ;
 
 /*
@@ -761,6 +813,13 @@ alterKeyspaceStatement returns [AlterKeyspaceStatement expr]
         K_WITH properties[attrs] { $expr = new AlterKeyspaceStatement(ks, attrs); }
     ;
 
+/**
+ * ALTER KEYSPACE <KS> DROP cdc;
+ */
+dropCDCStatement returns [DropCDCStatement expr]
+    : K_ALTER K_KEYSPACE ks=keyspaceName
+        K_DROP K_CDC { $expr = new DropCDCStatement(ks); }
+    ;
 
 /**
  * ALTER COLUMN FAMILY <CF> ALTER <column> TYPE <newtype>;
@@ -1129,7 +1188,7 @@ roleOptions[RoleOptions opts]
 
 roleOption[RoleOptions opts]
     :  K_PASSWORD '=' v=STRING_LITERAL { opts.setOption(IRoleManager.Option.PASSWORD, $v.text); }
-    |  K_OPTIONS '=' m=mapLiteral { opts.setOption(IRoleManager.Option.OPTIONS, convertPropertyMap(m)); }
+    |  K_OPTIONS '=' m=mapLiteral { opts.setOption(IRoleManager.Option.OPTIONS, normalizeSetOrMapLiteral(m)); }
     |  K_SUPERUSER '=' b=BOOLEAN { opts.setOption(IRoleManager.Option.SUPERUSER, Boolean.valueOf($b.text)); }
     |  K_LOGIN '=' b=BOOLEAN { opts.setOption(IRoleManager.Option.LOGIN, Boolean.valueOf($b.text)); }
     ;
@@ -1396,7 +1455,18 @@ properties[PropertyDefinitions props]
 
 property[PropertyDefinitions props]
     : k=noncol_ident '=' simple=propertyValue { try { $props.addProperty(k.toString(), simple); } catch (SyntaxException e) { addRecognitionError(e.getMessage()); } }
-    | k=noncol_ident '=' map=mapLiteral { try { $props.addProperty(k.toString(), convertPropertyMap(map)); } catch (SyntaxException e) { addRecognitionError(e.getMessage()); } }
+    | k=noncol_ident '=' '{' t=term val=setOrMapLiteral[t] '}' {
+            try
+            {
+                $props.addProperty(k.toString(), normalizeSetOrMapLiteral(val));
+            }
+            catch (SyntaxException e)
+            {
+                addRecognitionError(e.getMessage());
+            }
+        }
+    // Since we don't support Sets in properties, only maps, treat {} as an empty map
+    | k=noncol_ident '=' '{' '}' { $props.addProperty(k.toString(), new HashMap<String, String>()); }
     ;
 
 propertyValue returns [String str]
@@ -1630,3 +1700,6 @@ basic_unreserved_keyword returns [String str]
         | K_PARTITION
         ) { $str = $k.text; }
     ;
+
+
+K_CDC:         'cdc_log';

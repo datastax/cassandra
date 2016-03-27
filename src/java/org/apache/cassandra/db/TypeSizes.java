@@ -27,11 +27,11 @@ public final class TypeSizes
 
     private TypeSizes(){}
 
-    private static final int BOOL_SIZE = 1;
-    private static final int SHORT_SIZE = 2;
-    private static final int INT_SIZE = 4;
-    private static final int LONG_SIZE = 8;
-    private static final int UUID_SIZE = 16;
+    public static final int BOOL_SIZE = 1;
+    public static final int SHORT_SIZE = 2;
+    public static final int INT_SIZE = 4;
+    public static final int LONG_SIZE = 8;
+    public static final int UUID_SIZE = 16;
 
     /** assumes UTF8 */
     public static int sizeof(String value)

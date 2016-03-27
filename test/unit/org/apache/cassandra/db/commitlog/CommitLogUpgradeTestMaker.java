@@ -39,6 +39,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.FileUtils;
@@ -219,7 +220,7 @@ public class CommitLogUpgradeTestMaker
         int dataSize = 0;
         final CommitLog commitLog;
 
-        volatile ReplayPosition rp;
+        volatile CommitLogSegmentPosition rp;
 
         public CommitlogExecutor(CommitLog commitLog)
         {
@@ -248,7 +249,7 @@ public class CommitLogUpgradeTestMaker
                     dataSize += sz;
                 }
 
-                rp = commitLog.add((Mutation)builder.makeMutation());
+                rp = commitLog.add(Keyspace.open(KEYSPACE), (Mutation)builder.makeMutation());
                 counter.incrementAndGet();
             }
         }

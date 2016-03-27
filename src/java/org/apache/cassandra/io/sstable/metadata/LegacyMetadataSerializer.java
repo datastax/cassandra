@@ -24,7 +24,7 @@ import java.util.*;
 import com.google.common.collect.Maps;
 
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.db.commitlog.CommitLogSegmentPosition;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.Version;
@@ -55,7 +55,7 @@ public class LegacyMetadataSerializer extends MetadataSerializer
 
         EstimatedHistogram.serializer.serialize(stats.estimatedPartitionSize, out);
         EstimatedHistogram.serializer.serialize(stats.estimatedColumnCount, out);
-        ReplayPosition.serializer.serialize(stats.commitLogUpperBound, out);
+        CommitLogSegmentPosition.serializer.serialize(stats.commitLogSegmentPosition, out);
         out.writeLong(stats.minTimestamp);
         out.writeLong(stats.maxTimestamp);
         out.writeInt(stats.maxLocalDeletionTime);
@@ -94,7 +94,7 @@ public class LegacyMetadataSerializer extends MetadataSerializer
             {
                 EstimatedHistogram partitionSizes = EstimatedHistogram.serializer.deserialize(in);
                 EstimatedHistogram columnCounts = EstimatedHistogram.serializer.deserialize(in);
-                ReplayPosition commitLogLowerBound = ReplayPosition.NONE;
+                CommitLogSegmentPosition commitLogSegmentPosition = CommitLogSegmentPosition.serializer.deserialize(in);
                 ReplayPosition commitLogUpperBound = ReplayPosition.serializer.deserialize(in);
                 long minTimestamp = in.readLong();
                 long maxTimestamp = in.readLong();
@@ -129,7 +129,7 @@ public class LegacyMetadataSerializer extends MetadataSerializer
                     components.put(MetadataType.STATS,
                                    new StatsMetadata(partitionSizes,
                                                      columnCounts,
-                                                     commitLogLowerBound,
+                                                     commitLogSegmentPosition,
                                                      commitLogUpperBound,
                                                      minTimestamp,
                                                      maxTimestamp,

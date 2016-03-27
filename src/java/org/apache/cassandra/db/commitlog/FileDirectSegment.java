@@ -61,9 +61,9 @@ public abstract class FileDirectSegment extends CommitLogSegment
 
     private final Runnable onClose;
 
-    FileDirectSegment(CommitLog commitLog, Runnable onClose)
+    FileDirectSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager, Runnable onClose)
     {
-        super(commitLog);
+        super(commitLog, manager);
         this.onClose = onClose;
     }
 
@@ -73,7 +73,7 @@ public abstract class FileDirectSegment extends CommitLogSegment
         try
         {
             channel.write((ByteBuffer) buffer.duplicate().flip());
-            commitLog.allocator.addSize(lastWrittenPos = buffer.position());
+            manager.addSize(lastWrittenPos = buffer.position());
         }
         catch (IOException e)
         {

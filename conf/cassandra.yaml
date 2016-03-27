@@ -193,6 +193,13 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # If not set, the default directory is $CASSANDRA_HOME/data/commitlog.
 # commitlog_directory: /var/lib/cassandra/commitlog
 
+# change-data-capture log. This is a secondary commit log that stores data for
+# keyspaces with CDC enabled. This, like the primary standard commitlog, should be
+# places on a separate spindle than the data directories. You can also separate
+# this from the commitlog directories for further performance optimization.
+# If not set, the default directory is $CASSANDRA_HOME/data/commitlog/cdc.
+# cdc_directory: /var/lib/cassandra/commitlog/cdc
+
 # policy for data disk failures:
 # die: shut down gossip and client transports and kill the JVM for any fs errors or
 #      single-sstable errors, so the node can be replaced.
@@ -473,6 +480,24 @@ memtable_allocation_type: heap_buffers
 # If your data directories are backed by SSD, you can increase this, but
 # avoid having memtable_flush_writers * data_file_directories > number of cores
 #memtable_flush_writers: 1
+
+# Directories where Cassandra should store change-data-capture logs on disk.
+# If not set, the default directory is $CASSANDRA_HOME/data/cdc.
+# cdc_overflow_directory: /var/lib/cassandra/cdc_overflow
+
+# Total space to use for change-data-capture logs on disk.
+#
+# If space gets above this value, Cassandra will throw UnavailableException
+# on tables with CDC enabled. Client daemons are responsible for parsing
+# CDC logs and deleting them when parsing is completed.
+#
+# The default value is 8192 mb
+# cdc_total_space_in_mb: 8192
+
+# When we hit our cdc disk limit and an external consumer is potentailly
+# consuming logs slowly, we check at the following interval to see if any
+# new space for cdc-tracked keyspaces has been freed up. Default to 250ms
+# cdc_free_space_check_interval_ms: 250
 
 # A fixed memory pool size in MB for for SSTable index summaries. If left
 # empty, this will default to 5% of the heap size. If the memory usage of

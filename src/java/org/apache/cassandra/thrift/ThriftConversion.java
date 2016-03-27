@@ -21,6 +21,7 @@ import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 
 import org.apache.cassandra.config.*;
@@ -159,7 +160,8 @@ public class ThriftConversion
             replicationMap.putAll(ksd.strategy_options);
         replicationMap.put(ReplicationParams.CLASS, cls.getName());
 
-        return KeyspaceMetadata.create(ksd.name, KeyspaceParams.create(ksd.durable_writes, replicationMap), Tables.of(cfDefs));
+        // TODO: Determine whether or not we need to modify thrift schema to support CDC or just assume all fromThrift will be w/out it
+        return KeyspaceMetadata.create(ksd.name, KeyspaceParams.create(ksd.durable_writes, replicationMap, ImmutableSet.of()), Tables.of(cfDefs));
     }
 
     public static KsDef toThrift(KeyspaceMetadata ksm)

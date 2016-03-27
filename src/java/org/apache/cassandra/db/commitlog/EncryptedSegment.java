@@ -65,9 +65,9 @@ public class EncryptedSegment extends FileDirectSegment
     private final EncryptionContext encryptionContext;
     private final Cipher cipher;
 
-    public EncryptedSegment(CommitLog commitLog, EncryptionContext encryptionContext, Runnable onClose)
+    public EncryptedSegment(CommitLog commitLog, EncryptionContext encryptionContext, AbstractCommitLogSegmentManager manager, Runnable onClose)
     {
-        super(commitLog, onClose);
+        super(commitLog, manager, onClose);
         this.encryptionContext = encryptionContext;
 
         try
@@ -127,7 +127,7 @@ public class EncryptedSegment extends FileDirectSegment
                 buffer = EncryptionUtils.encryptAndWrite(buffer, channel, true, cipher);
 
                 contentStart += nextBlockSize;
-                commitLog.allocator.addSize(buffer.limit() + ENCRYPTED_BLOCK_HEADER_SIZE);
+                manager.addSize(buffer.limit() + ENCRYPTED_BLOCK_HEADER_SIZE);
             }
 
             lastWrittenPos = channel.position();
@@ -138,7 +138,7 @@ public class EncryptedSegment extends FileDirectSegment
             writeSyncMarker(buffer, 0, (int) syncMarkerPosition, (int) lastWrittenPos);
             buffer.putInt(SYNC_MARKER_SIZE, length);
             buffer.position(0).limit(ENCRYPTED_SECTION_HEADER_SIZE);
-            commitLog.allocator.addSize(buffer.limit());
+            manager.addSize(buffer.limit());
 
             channel.position(syncMarkerPosition);
             channel.write(buffer);

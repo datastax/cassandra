@@ -75,11 +75,11 @@ public class CommitLogSegmentManagerTest
         Thread dummyThread = new Thread( () ->
         {
             for (int i = 0; i < 20; i++)
-                CommitLog.instance.add(m);
+                CommitLog.instance.add(Keyspace.open(KEYSPACE1), m);
         });
         dummyThread.start();
 
-        CommitLogSegmentManager clsm = CommitLog.instance.allocator;
+        AbstractCommitLogSegmentManager clsm = CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD);
 
         //Protect against delay, but still break out as fast as possible
         long start = System.currentTimeMillis();

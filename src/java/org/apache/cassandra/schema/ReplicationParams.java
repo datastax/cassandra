@@ -18,7 +18,9 @@
 package org.apache.cassandra.schema;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
@@ -33,6 +35,11 @@ public final class ReplicationParams
     public static final String CLASS = "class";
 
     public final Class<? extends AbstractReplicationStrategy> klass;
+
+    public enum ReplicationParamKeywords
+    {
+        replication_factor
+    }
     public final ImmutableMap<String, String> options;
 
     private ReplicationParams(Class<? extends AbstractReplicationStrategy> klass, Map<String, String> options)
@@ -64,6 +71,14 @@ public final class ReplicationParams
         }
 
         return new ReplicationParams(NetworkTopologyStrategy.class, options);
+    }
+
+    public Set<String> getReplicationDataCenters()
+    {
+        Set<String> results = new HashSet<>(options.keySet());
+        for (ReplicationParamKeywords rpks : ReplicationParams.ReplicationParamKeywords.values())
+            results.remove(rpks.toString());
+        return results;
     }
 
     public void validate(String name)

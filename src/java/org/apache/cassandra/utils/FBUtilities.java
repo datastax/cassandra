@@ -662,6 +662,18 @@ public class FBUtilities
         checksum.update((v >>> 0) & 0xFF);
     }
 
+    public static void updateChecksumLong(Checksum checksum, long v)
+    {
+        checksum.update((int)(v >>> 56) & 0xFF);
+        checksum.update((int)(v >>> 48) & 0xFF);
+        checksum.update((int)(v >>> 40) & 0xFF);
+        checksum.update((int)(v >>> 32) & 0xFF);
+        checksum.update((int)(v >>> 24) & 0xFF);
+        checksum.update((int)(v >>> 16) & 0xFF);
+        checksum.update((int)(v >>> 8) & 0xFF);
+        checksum.update((int)(v >>> 0) & 0xFF);
+    }
+
     /**
       * Updates checksum with the provided ByteBuffer at the given offset + length.
       * Resets position and limit back to their original values on return.

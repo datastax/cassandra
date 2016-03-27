@@ -49,7 +49,6 @@ public class Config
      */
     public static final String PROPERTY_PREFIX = "cassandra.";
 
-
     public String cluster_name = "Test Cluster";
     public String authenticator;
     public String authorizer;
@@ -197,6 +196,12 @@ public class Config
     public TransparentDataEncryptionOptions transparent_data_encryption_options = new TransparentDataEncryptionOptions();
 
     public Integer max_mutation_size_in_kb;
+
+    // Change-data-capture logs
+    public String cdc_directory;
+    public String cdc_overflow_directory;
+    public Integer cdc_total_space_in_mb = 8192;
+    public Integer cdc_free_space_check_interval_ms = 250;
 
     @Deprecated
     public int commitlog_periodic_queue_size = -1;

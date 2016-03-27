@@ -199,9 +199,9 @@ public class CommitLogUpgradeTest
         }
 
         Hasher hasher = new Hasher();
-        CommitLogTestReplayer replayer = new CommitLogTestReplayer(CommitLog.instance, hasher);
+        CommitLogTestReplayer replayer = new CommitLogTestReplayer(hasher);
         File[] files = new File(location).listFiles((file, name) -> name.endsWith(".log"));
-        replayer.recover(files);
+        replayer.replayFiles(files);
 
         Assert.assertEquals(cells, hasher.cells);
         Assert.assertEquals(hash, hasher.hash);
