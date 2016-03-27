@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -388,7 +389,7 @@ public class DefsTest
         replicationMap.put(ReplicationParams.CLASS, OldNetworkTopologyStrategy.class.getName());
         replicationMap.put("replication_factor", "1");
 
-        KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.create(true, replicationMap));
+        KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.create(true, replicationMap, ImmutableSet.of()));
         MigrationManager.announceKeyspaceUpdate(newKs);
 
         KeyspaceMetadata newFetchedKs = Schema.instance.getKSMetaData(newKs.name);

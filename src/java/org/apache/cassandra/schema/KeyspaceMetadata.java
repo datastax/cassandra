@@ -175,4 +175,9 @@ public final class KeyspaceMetadata
         params.validate(name);
         tablesAndViews().forEach(CFMetaData::validate);
     }
+
+    public boolean hasCDCEnabled()
+    {
+        return params.hasCDCEnabled();
+    }
 }

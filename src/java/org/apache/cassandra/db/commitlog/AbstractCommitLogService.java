@@ -29,7 +29,6 @@ import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 
 public abstract class AbstractCommitLogService
 {
-
     private Thread thread;
     private volatile boolean shutdown = false;
 

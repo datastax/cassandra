@@ -64,6 +64,7 @@ import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.hsqldb.Database;
 
 import static junit.framework.Assert.assertNotNull;
 
@@ -184,6 +185,7 @@ public abstract class CQLTester
     public static void cleanup()
     {
         // clean up commitlog
+        System.err.println("cleanup, cl location: " + DatabaseDescriptor.getCommitLogLocation());
         String[] directoryNames = { DatabaseDescriptor.getCommitLogLocation(), };
         for (String dirName : directoryNames)
         {
@@ -192,6 +194,14 @@ public abstract class CQLTester
                 throw new RuntimeException("No such directory: " + dir.getAbsolutePath());
             FileUtils.deleteRecursive(dir);
         }
+
+        // if CL cleanup didn't get it, clean up cdc log location. If someone changes local test .yaml so CDC isn't a
+        // subdir of commitlog, this could happen
+        File cdcDir = new File(DatabaseDescriptor.getCDCLogLocation());
+        if (cdcDir.exists())
+            FileUtils.deleteRecursive(cdcDir);
+
+        FileUtils.deleteRecursive(new File(DatabaseDescriptor.getCDCOverflowLocation()));
 
         cleanupSavedCaches();
 

@@ -82,7 +82,7 @@ public final class SchemaKeyspace
     public static final String INDEXES = "indexes";
 
     public static final List<String> ALL =
-        ImmutableList.of(KEYSPACES, TABLES, COLUMNS, DROPPED_COLUMNS, TRIGGERS, VIEWS, TYPES, FUNCTIONS, AGGREGATES, INDEXES);
+        ImmutableList.of(KEYSPACES, TABLES, COLUMNS, TRIGGERS, VIEWS, TYPES, FUNCTIONS, AGGREGATES, INDEXES);
 
     private static final CFMetaData Keyspaces =
         compile(KEYSPACES,
@@ -91,6 +91,7 @@ public final class SchemaKeyspace
                 + "keyspace_name text,"
                 + "durable_writes boolean,"
                 + "replication frozen<map<text, text>>,"
+                + "cdc_datacenters frozen<set<text>>,"
                 + "PRIMARY KEY ((keyspace_name)))");
 
     private static final CFMetaData Tables =
@@ -297,11 +298,6 @@ public final class SchemaKeyspace
 
         for (String table : ALL)
         {
-            // Due to CASSANDRA-11050 we want to exclude DROPPED_COLUMNS for schema digest computation. We can and
-            // should remove that in the next major release (so C* 4.0).
-            if (table.equals(DROPPED_COLUMNS))
-                continue;
-
             ReadCommand cmd = getReadCommandForTableSchema(table);
             try (ReadExecutionController executionController = cmd.executionController();
                  PartitionIterator schema = cmd.executeInternal(executionController))
@@ -394,6 +390,7 @@ public final class SchemaKeyspace
         RowUpdateBuilder adder = new RowUpdateBuilder(Keyspaces, timestamp, name).clustering();
         return adder.add(KeyspaceParams.Option.DURABLE_WRITES.toString(), params.durableWrites)
                     .frozenMap(KeyspaceParams.Option.REPLICATION.toString(), params.replication.asMap())
+                    .frozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), params.getCDCDataCenters())
                     .build();
     }
 
@@ -902,7 +899,9 @@ public final class SchemaKeyspace
         UntypedResultSet.Row row = query(query, keyspaceName).one();
         boolean durableWrites = row.getBoolean(KeyspaceParams.Option.DURABLE_WRITES.toString());
         Map<String, String> replication = row.getFrozenTextMap(KeyspaceParams.Option.REPLICATION.toString());
-        return KeyspaceParams.create(durableWrites, replication);
+        Set<String> cdc = row.getFrozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), UTF8Type.instance);
+
+        return KeyspaceParams.create(durableWrites, replication, cdc);
     }
 
     private static Types fetchTypes(String keyspaceName)

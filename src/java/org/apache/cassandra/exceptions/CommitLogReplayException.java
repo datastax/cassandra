@@ -15,16 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db;
 
-public enum WriteType
+package org.apache.cassandra.exceptions;
+
+import java.io.File;
+import java.io.IOException;
+
+public class CommitLogReplayException extends IOException
 {
-    SIMPLE,
-    BATCH,
-    UNLOGGED_BATCH,
-    COUNTER,
-    BATCH_LOG,
-    CAS,
-    VIEW,
-    CDC;
+    public final File file;
+
+    public CommitLogReplayException(File file, String message, Throwable cause)
+    {
+        super(message, cause);
+        this.file = file;
+    }
 }

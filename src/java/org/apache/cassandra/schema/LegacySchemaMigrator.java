@@ -45,6 +45,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.apache.cassandra.utils.FBUtilities.fromJsonList;
 import static org.apache.cassandra.utils.FBUtilities.fromJsonMap;
 
 /**
@@ -218,7 +219,11 @@ public final class LegacySchemaMigrator
         replication.putAll(fromJsonMap(row.getString("strategy_options")));
         replication.put(ReplicationParams.CLASS, row.getString("strategy_class"));
 
-        return KeyspaceParams.create(durableWrites, replication);
+        // TODO: See if I can't actually store this thing in cdc_dcs so I can retrieve it here
+        Set<String> cdc_dcs = new HashSet<>();
+        cdc_dcs.addAll(fromJsonList(row.getString("cdc_dcs")));
+
+        return KeyspaceParams.create(durableWrites, replication, cdc_dcs);
     }
 
     /*

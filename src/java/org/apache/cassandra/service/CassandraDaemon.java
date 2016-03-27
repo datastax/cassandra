@@ -306,17 +306,17 @@ public class CassandraDaemon
             logger.warn("Unable to start GCInspector (currently only supported on the Sun JVM)");
         }
 
-        // replay the log if necessary
+        // Replay any CommitLogSegments found on disk
         try
         {
-            CommitLog.instance.recover();
+            CommitLog.instance.recoverSegmentsOnDisk();
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
 
-        // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
+        // Re-populate token metadata after commit log recoverPath (new peers might be loaded onto system keyspace #10293)
         StorageService.instance.populateTokenMetadata();
 
         // migrate any legacy (pre-3.0) hints from system.hints table into the new store

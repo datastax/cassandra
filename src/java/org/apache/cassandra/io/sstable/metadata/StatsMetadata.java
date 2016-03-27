@@ -26,7 +26,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.db.commitlog.CommitLogSegmentPosition;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -43,6 +43,7 @@ public class StatsMetadata extends MetadataComponent
     public final EstimatedHistogram estimatedPartitionSize;
     public final EstimatedHistogram estimatedColumnCount;
     public final ReplayPosition commitLogLowerBound;
+    public final CommitLogSegmentPosition commitLogSegmentPosition;
     public final ReplayPosition commitLogUpperBound;
     public final long minTimestamp;
     public final long maxTimestamp;
@@ -62,7 +63,7 @@ public class StatsMetadata extends MetadataComponent
 
     public StatsMetadata(EstimatedHistogram estimatedPartitionSize,
                          EstimatedHistogram estimatedColumnCount,
-                         ReplayPosition commitLogLowerBound,
+                         CommitLogSegmentPosition commitLogSegmentPosition,
                          ReplayPosition commitLogUpperBound,
                          long minTimestamp,
                          long maxTimestamp,
@@ -82,6 +83,7 @@ public class StatsMetadata extends MetadataComponent
     {
         this.estimatedPartitionSize = estimatedPartitionSize;
         this.estimatedColumnCount = estimatedColumnCount;
+        this.commitLogSegmentPosition = commitLogSegmentPosition;
         this.commitLogLowerBound = commitLogLowerBound;
         this.commitLogUpperBound = commitLogUpperBound;
         this.minTimestamp = minTimestamp;
@@ -135,6 +137,7 @@ public class StatsMetadata extends MetadataComponent
         return new StatsMetadata(estimatedPartitionSize,
                                  estimatedColumnCount,
                                  commitLogLowerBound,
+                                 commitLogSegmentPosition,
                                  commitLogUpperBound,
                                  minTimestamp,
                                  maxTimestamp,
@@ -158,6 +161,7 @@ public class StatsMetadata extends MetadataComponent
         return new StatsMetadata(estimatedPartitionSize,
                                  estimatedColumnCount,
                                  commitLogLowerBound,
+                                 commitLogSegmentPosition,
                                  commitLogUpperBound,
                                  minTimestamp,
                                  maxTimestamp,
@@ -187,6 +191,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(estimatedPartitionSize, that.estimatedPartitionSize)
                        .append(estimatedColumnCount, that.estimatedColumnCount)
                        .append(commitLogLowerBound, that.commitLogLowerBound)
+                       .append(commitLogSegmentPosition, that.commitLogSegmentPosition)
                        .append(commitLogUpperBound, that.commitLogUpperBound)
                        .append(minTimestamp, that.minTimestamp)
                        .append(maxTimestamp, that.maxTimestamp)
@@ -213,6 +218,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(estimatedPartitionSize)
                        .append(estimatedColumnCount)
                        .append(commitLogLowerBound)
+                       .append(commitLogSegmentPosition)
                        .append(commitLogUpperBound)
                        .append(minTimestamp)
                        .append(maxTimestamp)
@@ -239,7 +245,7 @@ public class StatsMetadata extends MetadataComponent
             int size = 0;
             size += EstimatedHistogram.serializer.serializedSize(component.estimatedPartitionSize);
             size += EstimatedHistogram.serializer.serializedSize(component.estimatedColumnCount);
-            size += ReplayPosition.serializer.serializedSize(component.commitLogUpperBound);
+            size += CommitLogSegmentPosition.serializer.serializedSize(component.commitLogSegmentPosition);
             if (version.storeRows())
                 size += 8 + 8 + 4 + 4 + 4 + 4 + 8 + 8; // mix/max timestamp(long), min/maxLocalDeletionTime(int), min/max TTL, compressionRatio(double), repairedAt (long)
             else
@@ -266,7 +272,7 @@ public class StatsMetadata extends MetadataComponent
         {
             EstimatedHistogram.serializer.serialize(component.estimatedPartitionSize, out);
             EstimatedHistogram.serializer.serialize(component.estimatedColumnCount, out);
-            ReplayPosition.serializer.serialize(component.commitLogUpperBound, out);
+            CommitLogSegmentPosition.serializer.serialize(component.commitLogSegmentPosition, out);
             out.writeLong(component.minTimestamp);
             out.writeLong(component.maxTimestamp);
             if (version.storeRows())
@@ -304,6 +310,7 @@ public class StatsMetadata extends MetadataComponent
             EstimatedHistogram partitionSizes = EstimatedHistogram.serializer.deserialize(in);
             EstimatedHistogram columnCounts = EstimatedHistogram.serializer.deserialize(in);
             ReplayPosition commitLogLowerBound = ReplayPosition.NONE, commitLogUpperBound;
+            CommitLogSegmentPosition commitLogSegmentPosition = CommitLogSegmentPosition.serializer.deserialize(in);
             commitLogUpperBound = ReplayPosition.serializer.deserialize(in);
             long minTimestamp = in.readLong();
             long maxTimestamp = in.readLong();
@@ -342,6 +349,7 @@ public class StatsMetadata extends MetadataComponent
             return new StatsMetadata(partitionSizes,
                                      columnCounts,
                                      commitLogLowerBound,
+                                     commitLogSegmentPosition,
                                      commitLogUpperBound,
                                      minTimestamp,
                                      maxTimestamp,

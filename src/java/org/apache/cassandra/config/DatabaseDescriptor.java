@@ -531,6 +531,22 @@ public class DatabaseDescriptor
             conf.hints_directory += File.separator + "hints";
         }
 
+        if (conf.cdc_directory == null)
+        {
+            conf.cdc_directory = System.getProperty("cassandra.storagedir", null);
+            if (conf.cdc_directory == null)
+                throw new ConfigurationException("commitlog_directory is missing and -Dcassandra.storagedir is not set", false);
+            conf.cdc_directory += File.separator + "commitlog" + File.separator + "cdc";
+        }
+
+        if (conf.cdc_overflow_directory == null)
+        {
+            conf.cdc_overflow_directory = System.getProperty("cassandra.storagedir", null);
+            if (conf.cdc_overflow_directory == null)
+                throw new ConfigurationException("cdc_overflow_directory is missing and -Dcassandra.storagedir is not set", false);
+            conf.cdc_overflow_directory += File.separator + "cdc_overflow";
+        }
+
         if (conf.commitlog_total_space_in_mb == null)
         {
             int preferredSize = 8192;
@@ -933,6 +949,14 @@ public class DatabaseDescriptor
             if (conf.saved_caches_directory == null)
                 throw new ConfigurationException("saved_caches_directory must be specified", false);
             FileUtils.createDirectory(conf.saved_caches_directory);
+
+            if (conf.cdc_directory == null)
+                throw new ConfigurationException("cdc_directory must be specified", false);
+            FileUtils.createDirectory(conf.cdc_directory);
+
+            if (conf.cdc_overflow_directory == null)
+                throw new ConfigurationException("cdc_overflow_directory must be specified", false);
+            FileUtils.createDirectory(conf.cdc_overflow_directory);
         }
         catch (ConfigurationException e)
         {
@@ -1334,6 +1358,11 @@ public class DatabaseDescriptor
     public static String getCommitLogLocation()
     {
         return conf.commitlog_directory;
+    }
+
+    public static void setCommitLogLocation(String input)
+    {
+        conf.commitlog_directory = input;
     }
 
     public static ParameterizedClass getCommitLogCompression()
@@ -2102,6 +2131,32 @@ public class DatabaseDescriptor
     public static long getGCWarnThreshold()
     {
         return conf.gc_warn_threshold_in_ms;
+    }
+
+    public static String getCDCLogLocation()
+    {
+        return conf.cdc_directory;
+    }
+
+    public static String getCDCOverflowLocation()
+    {
+        return conf.cdc_overflow_directory;
+    }
+
+    public static Integer getTotalCDCSpaceInMB()
+    {
+        return conf.cdc_total_space_in_mb;
+    }
+
+    @VisibleForTesting
+    public static void setTotalCDCSpaceInMB(Integer input)
+    {
+        conf.cdc_total_space_in_mb = input;
+    }
+
+    public static Integer getCDCDiskCheckInterval()
+    {
+        return conf.cdc_free_space_check_interval_ms;
     }
 
     @VisibleForTesting

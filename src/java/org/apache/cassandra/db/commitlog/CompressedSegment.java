@@ -44,9 +44,9 @@ public class CompressedSegment extends FileDirectSegment
     /**
      * Constructs a new segment file.
      */
-    CompressedSegment(CommitLog commitLog, Runnable onClose)
+    CompressedSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager, Runnable onClose)
     {
-        super(commitLog, onClose);
+        super(commitLog, manager, onClose);
         this.compressor = commitLog.compressor;
     }
 
@@ -91,7 +91,7 @@ public class CompressedSegment extends FileDirectSegment
             // Only one thread can be here at a given time.
             // Protected by synchronization on CommitLogSegment.sync().
             writeSyncMarker(compressedBuffer, 0, (int) channel.position(), (int) channel.position() + compressedBuffer.remaining());
-            commitLog.allocator.addSize(compressedBuffer.limit());
+            manager.addSize(compressedBuffer.limit());
             channel.write(compressedBuffer);
             assert channel.position() - lastWrittenPos == compressedBuffer.limit();
             lastWrittenPos = channel.position();
