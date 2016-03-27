@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,7 +26,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -52,7 +55,12 @@ public class DropRecreateAndRestoreTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"), row(1, 0, 2), row(1, 1, 3), row(0, 0, 0), row(0, 1, 1));
 
         // Drop will flush and clean segments. Hard-link them so that they can be restored later.
-        List<String> segments = CommitLog.instance.getActiveSegmentNames();
+        List<String> segments = new ArrayList<>();
+        for (CommitLogSegment segment: CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD).getActiveSegments())
+        {
+            segments.add(segment.getName());
+        }
+
         File logPath = new File(DatabaseDescriptor.getCommitLogLocation());
         for (String segment: segments)
             FileUtils.createHardLink(new File(logPath, segment), new File(logPath, segment + ".save"));

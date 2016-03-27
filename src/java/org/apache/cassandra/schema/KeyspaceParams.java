@@ -48,7 +48,7 @@ public final class KeyspaceParams
 
     public final boolean durableWrites;
     public final ReplicationParams replication;
-    private Set<String> cdc_datacenters;
+    private final Set<String> cdc_datacenters;
 
     public KeyspaceParams(boolean durableWrites, ReplicationParams replication)
     {
@@ -59,12 +59,13 @@ public final class KeyspaceParams
     {
         this.durableWrites = durableWrites;
         this.replication = replication;
-        this.cdc_datacenters = cdc_datacenters == null ? new HashSet<>() : cdc_datacenters;
+        assert cdc_datacenters != null : "Don't allow null in cdc_datacenters.";
+        this.cdc_datacenters = cdc_datacenters;
     }
 
     public static KeyspaceParams create(boolean durableWrites, Map<String, String> replication)
     {
-        return create(durableWrites, replication, null);
+        return create(durableWrites, replication, new HashSet<>());
     }
 
     public static KeyspaceParams create(boolean durableWrites, Map<String, String> replication, Set<String> cdc_datacenters)

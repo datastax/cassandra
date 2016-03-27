@@ -154,6 +154,7 @@ public abstract class CommitLogSegment
     {
         this.commitLog = commitLog;
         this.manager = manager;
+
         id = getNextId();
         descriptor = new CommitLogDescriptor(id, commitLog.compressorClass, commitLog.encryptionContext);
         logFile = new File(manager.storageDirectory, descriptor.fileName());
@@ -351,14 +352,6 @@ public abstract class CommitLogSegment
     public boolean isStillAllocating()
     {
         return allocatePosition.get() < endOfBuffer;
-    }
-
-    void move()
-    {
-        close();
-        System.err.println("Moving file to cdc_overflow. Src: " + logFile.getAbsolutePath());
-        FileUtils.renameWithConfirm(logFile.getAbsolutePath(), DatabaseDescriptor.getCDCOverflowLocation() + File.separator + logFile.getName());
-        manager.addSize(-onDiskSize());
     }
 
     /**

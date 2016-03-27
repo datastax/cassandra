@@ -311,7 +311,7 @@ public class CommitLog implements CommitLogMBean
         }
 
         AbstractCommitLogSegmentManager segmentManager = getSegmentManager(AbstractCommitLogSegmentManager.getSegmentManagerType(keyspace));
-        Allocation alloc = segmentManager.allocate(mutation, (int) totalSize);
+        Allocation alloc = segmentManager.allocate(mutation, totalSize);
 
         // CDC allocations can fail if we're at our allowable on-disk threshold
         if (alloc == null)
@@ -419,7 +419,7 @@ public class CommitLog implements CommitLogMBean
     public List<String> getActiveSegmentNames()
     {
         List<String> segmentNames = new ArrayList<>();
-        segmentManagers.forEach(sm -> sm.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName())));
+        segmentManagers.forEach(mgr -> mgr.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName())));
         return segmentNames;
     }
 
@@ -528,29 +528,13 @@ public class CommitLog implements CommitLogMBean
     }
 
     /**
-     * Used by tests.
-     *
-     * @return the number of active segments (segments with unflushed data in them)
+     * Maximum number of buffers in the compression pool. The default value is 3 per segment manager, it should not be
+     * set lower than that (one segment in compression, one written to, one in reserve); delays in compression may cause
+     * the log to use more, depending on how soon the sync policy stops all writing threads.
      */
-    public int activeSegments()
+    public int calculateCompressionBufferPoolCount()
     {
-        int size = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers)
-            size += clsm.getActiveSegments().size();
-        return size;
-    }
-
-    /**
-     * Returns total size allowed by yaml less the commitlog size of all segment managers
-     */
-    public long unusedCapacity()
-    {
-        long total = DatabaseDescriptor.getTotalCommitlogSpaceInMB() * 1024 * 1024;
-        long currentSize = 0;
-        for (AbstractCommitLogSegmentManager mgr : segmentManagers)
-            currentSize += mgr.onDiskSize();
-        logger.trace("Total active commitlog segment space used is {} out of {}", currentSize, total);
-        return total - currentSize;
+        return segmentManagers.size() * 3;
     }
 
     @VisibleForTesting

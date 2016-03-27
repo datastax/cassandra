@@ -103,15 +103,18 @@ public abstract class AbstractCommitLogSegmentManager
     protected volatile boolean run = true;
     private final CommitLog commitLog;
 
+    private final SimpleCachedBufferPool bufferPool;
+
     AbstractCommitLogSegmentManager(final CommitLog commitLog, String storageDirectory)
     {
         this.commitLog = commitLog;
         this.storageDirectory = storageDirectory;
+        this.bufferPool = new SimpleCachedBufferPool(DatabaseDescriptor.getCommitLogMaxCompressionBuffersPerPool(), DatabaseDescriptor.getCommitLogSegmentSize());
     }
 
     void start()
     {
-        AbstractCommitLogSegmentManager parent = this;
+        final AbstractCommitLogSegmentManager parent = this;
 
         // The run loop for the manager thread
         Runnable runnable = new WrappedRunnable()
@@ -125,25 +128,19 @@ public abstract class AbstractCommitLogSegmentManager
                         Runnable task = segmentManagementTasks.poll();
                         if (task == null)
                         {
-                            if (!canAllocateNewSegments())
-                            {
-                                // Wake listeners so they can WriteTimeout for lack of available space in segment manager
-                                hasAvailableSegments.signalAll();
-                            }
                             // if we have no more work to do, check if we should create a new segment
-                            else if (!atSegmentLimit() &&
+                            if (!atSegmentLimit() &&
                                 availableSegments.isEmpty() &&
                                 (activeSegments.isEmpty() || createReserveSegments))
                             {
                                 logger.trace("No segments in reserve; creating a fresh one");
                                 // TODO : some error handling in case we fail to create a new segment
-                                CommitLogSegment newSegment = CommitLogSegment.createSegment(commitLog, parent, () -> wakeManager());
-                                availableSegments.add(newSegment);
+                                availableSegments.add(CommitLogSegment.createSegment(commitLog, parent, () -> wakeManager() ));
                                 hasAvailableSegments.signalAll();
                             }
 
-                            // flush old Cfs if we're full
-                            long unused = CommitLog.instance.unusedCapacity();
+                            // flush old Cfs if we're full or can't allocate
+                            long unused = unusedCapacity();
                             if (unused < 0)
                             {
                                 List<CommitLogSegment> segmentsToRecycle = new ArrayList<>();
@@ -186,7 +183,7 @@ public abstract class AbstractCommitLogSegmentManager
 
             private boolean atSegmentLimit()
             {
-                return CommitLogSegment.usesBufferPool(commitLog) && CompressedSegment.hasReachedPoolLimit();
+                return CommitLogSegment.usesBufferPool(commitLog) && bufferPool.atLimit();
             }
         };
 
@@ -196,10 +193,33 @@ public abstract class AbstractCommitLogSegmentManager
         managerThread.start();
     }
 
+    /**
+     * Indicates that a segment file has been flushed and is no longer needed.
+     *
+     * @param segment segment to be discarded
+     * @param delete  whether or not the segment is safe to be deleted.
+     */
     abstract void discard(CommitLogSegment segment, boolean delete);
-    abstract boolean canAllocateNewSegments();
+
+    /**
+     * Shut down the CLSM. Used both during testing and during regular shutdown, so needs to stop everything.
+     */
     public abstract void shutdown();
+
+    /**
+     * Allocate a segment within this CLSM. Should either succeed or throw.
+     */
     public abstract Allocation allocate(Mutation mutation, int size);
+
+    /**
+     * ColumnFamilyStore flushes are triggered when the management thread determines we have no unused capacity left
+     */
+    abstract long unusedCapacity();
+
+    /**
+     * Available for debugging and tests.
+     */
+    abstract SegmentManagerType getSegmentManagerType();
 
     /**
      * Grab the current CommitLogSegment we're allocating from. Also serves as a utility method to block while the allocator
@@ -217,7 +237,7 @@ public abstract class AbstractCommitLogSegmentManager
     }
 
     /**
-     * Fetches a new segment from the queue, signaling the management thread to create a new one if necessary, and activates it
+     * Fetches a new segment from the queue, signaling the management thread to create a new one if necessary, and "activates" it.
      */
     protected void advanceAllocatingFrom(CommitLogSegment old)
     {
@@ -321,8 +341,10 @@ public abstract class AbstractCommitLogSegmentManager
             // if the previous active segment was the only one to recycle (since an active segment isn't
             // necessarily dirty, and we only call dCS after a flush).
             for (CommitLogSegment segment : activeSegments)
+            {
                 if (segment.isUnused())
                     recycleSegment(segment);
+            }
 
             CommitLogSegment first;
             if ((first = activeSegments.peek()) != null && first.id <= last.id)
@@ -394,6 +416,7 @@ public abstract class AbstractCommitLogSegmentManager
     {
         return size.get();
     }
+
 
     /**
      * @param name the filename to check
@@ -534,7 +557,7 @@ public abstract class AbstractCommitLogSegmentManager
         for (CommitLogSegment segment : availableSegments)
             segment.close();
 
-        FileDirectSegment.shutdown();
+        bufferPool.shutdown();
     }
 
     /**
@@ -569,6 +592,14 @@ public abstract class AbstractCommitLogSegmentManager
     }
 
     /**
+     * Used by compressed and encrypted segments to share a buffer pool across the CLSM. Pulled from manager when constructed.
+     */
+    SimpleCachedBufferPool getBufferPool()
+    {
+        return bufferPool;
+    }
+
+    /**
      * From a given keyspace input, return what Segment Manager type should be used for CL writes
      */
     public static SegmentManagerType getSegmentManagerType(String ksName)
@@ -582,6 +613,5 @@ public abstract class AbstractCommitLogSegmentManager
             ? SegmentManagerType.CDC
             : SegmentManagerType.STANDARD;
     }
-
 }
 

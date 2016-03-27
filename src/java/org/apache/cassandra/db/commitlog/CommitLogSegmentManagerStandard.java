@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.commitlog;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -28,13 +29,6 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
         super(commitLog, storageDirectory);
     }
 
-    /**
-     * Never block new segment allocation for the standard CommitLog segments
-     */
-    @Override
-    public boolean canAllocateNewSegments() { return true; }
-
-    @Override
     public void discard(CommitLogSegment segment, boolean delete)
     {
         segment.close();
@@ -46,7 +40,6 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
     /**
      * Initiates the shutdown process for the management thread.
      */
-    @Override
     public void shutdown()
     {
         run = false;
@@ -59,7 +52,6 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      *
      * @return the provided Allocation object
      */
-    @Override
     public CommitLogSegment.Allocation allocate(Mutation mutation, int size)
     {
         CommitLogSegment segment = allocatingFrom();
@@ -74,5 +66,20 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
 
         return alloc;
     }
-}
 
+     /**
+     * Returns total size allowed by yaml for this segment type less the commitlog size of this manager
+     */
+    long unusedCapacity()
+    {
+        long total = DatabaseDescriptor.getCommitLogSpaceInMBStandard() * 1024 * 1024;
+        long currentSize = size.get();
+        logger.trace("Total standard commitlog segment space used is {} out of {}", currentSize, total);
+        return total - currentSize;
+    }
+
+    public SegmentManagerType getSegmentManagerType()
+    {
+        return SegmentManagerType.STANDARD;
+    }
+}

@@ -535,8 +535,8 @@ public class DatabaseDescriptor
         {
             conf.cdc_directory = System.getProperty("cassandra.storagedir", null);
             if (conf.cdc_directory == null)
-                throw new ConfigurationException("commitlog_directory is missing and -Dcassandra.storagedir is not set", false);
-            conf.cdc_directory += File.separator + "commitlog" + File.separator + "cdc";
+                throw new ConfigurationException("cdc_directory is missing and -Dcassandra.storagedir is not set", false);
+            conf.cdc_directory += File.separator + "cdc";
         }
 
         if (conf.cdc_overflow_directory == null)
@@ -571,6 +571,33 @@ public class DatabaseDescriptor
             else
             {
                 conf.commitlog_total_space_in_mb = preferredSize;
+            }
+        }
+
+        if (conf.cdc_total_space_in_mb == null)
+        {
+            int preferredSize = 4096;
+            int minSize = 0;
+            try
+            {
+                // use 1/8th of available space.  See discussion on #10013 and #10199 on the CL, taking half that for CDC
+                minSize = Ints.checkedCast((guessFileStore(conf.cdc_directory).getTotalSpace() / 1048576) / 8);
+            }
+            catch (IOException e)
+            {
+                logger.debug("Error checking disk space", e);
+                throw new ConfigurationException(String.format("Unable to check disk space available to %s. Perhaps the Cassandra user does not have the necessary permissions",
+                                                               conf.cdc_directory), e);
+            }
+            if (minSize < preferredSize)
+            {
+                logger.warn("Small cdc volume detected at {}; setting cdc_total_space_in_mb to {}.  You can override this in cassandra.yaml",
+                            conf.cdc_directory, minSize);
+                conf.cdc_total_space_in_mb = minSize;
+            }
+            else
+            {
+                conf.cdc_total_space_in_mb = preferredSize;
             }
         }
 
@@ -1375,9 +1402,14 @@ public class DatabaseDescriptor
         conf.commitlog_compression = compressor;
     }
 
-    public static int getCommitLogMaxCompressionBuffersInPool()
+   /**
+    * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
+    * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
+    * more, depending on how soon the sync policy stops all writing threads.
+    */
+    public static int getCommitLogMaxCompressionBuffersPerPool()
     {
-        return conf.commitlog_max_compression_buffers_in_pool;
+        return conf.commitlog_max_compression_buffers_per_pool;
     }
 
     public static int getMaxMutationSize()
@@ -1847,7 +1879,7 @@ public class DatabaseDescriptor
         conf.disk_optimization_page_cross_chance = chance;
     }
 
-    public static long getTotalCommitlogSpaceInMB()
+    public static long getCommitLogSpaceInMBStandard()
     {
         return conf.commitlog_total_space_in_mb;
     }
@@ -2143,13 +2175,13 @@ public class DatabaseDescriptor
         return conf.cdc_overflow_directory;
     }
 
-    public static Integer getTotalCDCSpaceInMB()
+    public static Integer getCommitLogSpaceInMBCDC()
     {
         return conf.cdc_total_space_in_mb;
     }
 
     @VisibleForTesting
-    public static void setTotalCDCSpaceInMB(Integer input)
+    public static void setCommitLogSpaceInMBCDC(Integer input)
     {
         conf.cdc_total_space_in_mb = input;
     }
@@ -2157,6 +2189,12 @@ public class DatabaseDescriptor
     public static Integer getCDCDiskCheckInterval()
     {
         return conf.cdc_free_space_check_interval_ms;
+    }
+
+    @VisibleForTesting
+    public static void setCDCDiskCheckInterval(Integer value)
+    {
+        conf.cdc_free_space_check_interval_ms = value;
     }
 
     @VisibleForTesting

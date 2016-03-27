@@ -25,20 +25,10 @@ public class KillerForTests extends JVMStabilityInspector.Killer
 {
     private boolean killed = false;
     private boolean quiet = false;
-    private boolean aggressive = false;
-
-    /**
-     * Actively throw test failure assertions on any of the kill methods if we're "aggressive"
-     */
-    public void makeAggressive() { aggressive = true; }
-    public void makePassive() { aggressive = false; }
 
     @Override
     protected void killCurrentJVM(Throwable t, boolean quiet)
     {
-        if (aggressive)
-            throw new AssertionError("Unexpectedly hit JVMStability killer killCurrentJVM.");
-
         this.killed = true;
         this.quiet = quiet;
     }
@@ -55,7 +45,6 @@ public class KillerForTests extends JVMStabilityInspector.Killer
 
     public void reset()
     {
-        aggressive = false;
         killed = false;
     }
 }

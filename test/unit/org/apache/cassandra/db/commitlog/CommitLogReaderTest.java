@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -31,9 +30,9 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -42,15 +41,9 @@ import static org.junit.Assert.assertEquals;
 
 public class CommitLogReaderTest extends CQLTester
 {
-    private static boolean _initialized = false;
     private static String KEYSPACE = "clr_test";
     private static String TABLE = "clr_test_table";
-
-    @After
-    public void after() throws Throwable
-    {
-        execute(String.format("TRUNCATE TABLE %s;", TABLE));
-    }
+    private static boolean _initialized = false;
 
     /**
      * Intentionally not using static @BeforeClass since we need access to CQLTester internal methods here and we want
@@ -61,11 +54,14 @@ public class CommitLogReaderTest extends CQLTester
     {
         if (!_initialized)
         {
-            execute(String.format("DROP KEYSPACE IF EXISTS %s;", KEYSPACE));
             execute(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};", KEYSPACE));
             execute(String.format("USE %s;", KEYSPACE));
             execute(String.format("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));", TABLE));
             _initialized = true;
+        }
+        else
+        {
+            execute(String.format("TRUNCATE TABLE %s;", TABLE));
         }
     }
 
@@ -89,11 +85,19 @@ public class CommitLogReaderTest extends CQLTester
         return result;
     }
 
-    private File getFirstCommitLogFile()
+    static ArrayList<File> getCommitLogs(SegmentManagerType type)
     {
-        File dir = new File(CommitLog.instance.getSegmentManager(SegmentManagerType.STANDARD).storageDirectory);
+        File dir = new File(CommitLog.instance.getSegmentManager(type).storageDirectory);
         File[] files = dir.listFiles();
-        return files[0];
+        ArrayList<File> results = new ArrayList<>();
+        for (File f : files)
+        {
+            if (f.isDirectory())
+                continue;
+            results.add(f);
+        }
+        assert results.size() != 0 : "Didn't find any commit log files of type: " + type;
+        return results;
     }
 
     private CFMetaData testCFM()
@@ -101,7 +105,7 @@ public class CommitLogReaderTest extends CQLTester
         return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata;
     }
 
-    private class TestCLRHandler implements ICommitLogReadHandler
+    static class TestCLRHandler implements ICommitLogReadHandler
     {
         public List<Mutation> seenMutations = new ArrayList<Mutation>();
         public boolean sawStopOnErrorCheck = false;
@@ -140,9 +144,12 @@ public class CommitLogReaderTest extends CQLTester
 
         public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc)
         {
-            if ((cfm == null) || (cfm != null && m.get(cfm) != null))
+            if ((cfm == null) || (cfm != null && m.get(cfm) != null)) {
                 seenMutations.add(m);
+            }
         }
+
+        public int seenMutationCount() { return seenMutations.size(); }
     }
 
     @Test
@@ -150,43 +157,35 @@ public class CommitLogReaderTest extends CQLTester
     {
         int samples = 1000;
         populateData(samples);
-        File toCheck = getFirstCommitLogFile();
+        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
 
-        /*
         CommitLogReader reader = new CommitLogReader();
 
         CFMetaData cfm = testCFM();
         TestCLRHandler testHandler = new TestCLRHandler(cfm);
-        reader.readCommitLogSegment(testHandler, toCheck, false);
+        for (File f : toCheck)
+            reader.readCommitLogSegment(testHandler, f, false);
 
         ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
 
         assert testHandler.seenMutations.size() == 1000 : "Expected 1000 seen mutations, got: " + testHandler.seenMutations.size();
 
-        // Confirm that we got back in expected order
-        for (int i = 0; i < samples; i++)
-        {
-            PartitionUpdate pu = testHandler.seenMutations.get(i).get(cfm);
-            for (Row r : pu)
-                assertEquals(ByteBuffer.wrap(Integer.toString(i).getBytes()), r.getCell(cd).value());
-        }
-        */
+        confirmReadOrder(testHandler, testCFM(), 0);
     }
 
-    /*
     @Test
     public void testReadCount() throws Throwable
     {
         int samples = 50;
         int readCount = 10;
         populateData(samples);
-        File toCheck = getFirstCommitLogFile();
+        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
 
         CommitLogReader reader = new CommitLogReader();
-        CFMetaData cfm = testCFM();
         TestCLRHandler testHandler = new TestCLRHandler();
 
-        reader.readCommitLogSegment(testHandler, toCheck, readCount, false);
+        for (File f : toCheck)
+            reader.readCommitLogSegment(testHandler, f, readCount - testHandler.seenMutationCount(), false);
         assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
     }
 
@@ -196,25 +195,19 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 500;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        File toCheck = getFirstCommitLogFile();
+        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
 
         CommitLogReader reader = new CommitLogReader();
-        CFMetaData cfm = testCFM();
         TestCLRHandler testHandler = new TestCLRHandler();
 
-        reader.readCommitLogSegment(testHandler, toCheck, midpoint, readCount, false);
+        // Will skip on incorrect segments due to id mismatch on midpoint
+        for (File f : toCheck)
+            reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
         // Confirm correct count on replay
         assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
 
-        ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
-        // Confirm correct ordering on replay, should be 500-1000 on data
-        for (int i = 0; i < readCount; i++)
-        {
-            PartitionUpdate pu = testHandler.seenMutations.get(i).get(cfm);
-            for (Row r : pu)
-                assertEquals(ByteBuffer.wrap(Integer.toString(i + samples / 2).getBytes()), r.getCell(cd).value());
-        }
+        confirmReadOrder(testHandler, testCFM(), samples / 2);
     }
 
     @Test
@@ -223,25 +216,20 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 5000;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        File toCheck = getFirstCommitLogFile();
+        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
 
         CommitLogReader reader = new CommitLogReader();
         CFMetaData cfm = testCFM();
         TestCLRHandler testHandler = new TestCLRHandler(cfm);
 
         // Reading from mid to overflow by 4.5k
-        reader.readCommitLogSegment(testHandler, toCheck, midpoint, readCount, false);
+        // Will skip on incorrect segments due to id mismatch on midpoint
+        for (File f : toCheck)
+            reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
         assert testHandler.seenMutations.size() == samples / 2 : "Expected " + samples / 2 + " seen mutations, got: " + testHandler.seenMutations.size();
 
-        ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
-        // Confirm correct ordering on replay, should be 500-1000 on data
-        for (int i = 0; i < samples / 2; i++)
-        {
-            PartitionUpdate pu = testHandler.seenMutations.get(i).get(cfm);
-            for (Row r : pu)
-                assertEquals(ByteBuffer.wrap(Integer.toString(i + samples / 2).getBytes()), r.getCell(cd).value());
-        }
+        confirmReadOrder(testHandler, testCFM(), samples / 2);
     }
 
     @Test
@@ -250,28 +238,46 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 10;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        File toCheck = getFirstCommitLogFile();
+        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
 
         CommitLogReader reader = new CommitLogReader();
         CFMetaData cfm = testCFM();
-        TestCLRHandler testHandler = new TestCLRHandler();
+        TestCLRHandler testHandler = new TestCLRHandler(cfm);
 
-        reader.readCommitLogSegment(testHandler, toCheck, midpoint, readCount, false);
+        for (File f: toCheck)
+            reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
         assert testHandler.seenMutations.size() == readCount;
-
-        ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
 
         // Confirm correct count on replay
         assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
 
-        // Confirm correct ordering on replay, should be 500-510 on data
-        for (int i = 0; i < readCount; i++)
+        confirmReadOrder(testHandler, testCFM(), samples / 2);
+    }
+
+    /**
+     * Since we have both cfm and non mixed into the CL, we ignore updates that aren't for the cfm the test handler
+     * is configured to check.
+     * @param handler
+     * @param offset integer offset of count we expect to see in record
+     */
+    private void confirmReadOrder(TestCLRHandler handler, CFMetaData toMatch, int offset)
+    {
+        ColumnDefinition cd = testCFM().getColumnDefinition(new ColumnIdentifier("data", false));
+        int i = 0;
+        int j = 0;
+        while (i + j < handler.seenMutationCount())
         {
-            PartitionUpdate pu = testHandler.seenMutations.get(i).get(cfm);
+            PartitionUpdate pu = handler.seenMutations.get(i + j).get(toMatch);
+            if (pu == null)
+            {
+                j++;
+                continue;
+            }
+
             for (Row r : pu)
-                assertEquals(ByteBuffer.wrap(Integer.toString(i + samples / 2).getBytes()), r.getCell(cd).value());
+                assertEquals(ByteBuffer.wrap(Integer.toString(i + offset).getBytes()), r.getCell(cd).value());
+            i++;
         }
     }
-    */
 }
