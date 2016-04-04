@@ -248,9 +248,6 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                           | <alterTableStatement>
                           | <alterKeyspaceStatement>
                           | <alterUserTypeStatement>
-                          | <createCDCLogStatement>
-                          | <alterCDCLogStatement>
-                          | <dropCDCLogStatement>
                           ;
 
 <authenticationStatement> ::= <createUserStatement>
@@ -1260,11 +1257,6 @@ syntax_rules += r'''
                             ( "INITCOND" <term> )?
                          ;
 
-<createCDCLogStatement> ::= "CREATE" "CDC_LOG" ("IF" "NOT" "EXISTS")?
-                            "ON" <columnFamilyName>?
-                            "WITH" "DCS" "=" "(" ("dc")* ")"
-                         ;
-
 '''
 
 explain_completion('createIndexStatement', 'indexname', '<new_index_name>')
@@ -1307,10 +1299,6 @@ syntax_rules += r'''
 
 <dropAggregateStatement> ::= "DROP" "AGGREGATE" ( "IF" "EXISTS" )? <userAggregateName>
                           ;
-
-<dropCDCLogStatement> ::= "DROP" "CDC_LOG" ("IF" "EXISTS")?
-                            "ON" <columnFamilyName>?
-                         ;
 
 '''
 
@@ -1361,11 +1349,6 @@ syntax_rules += r'''
                            | "RENAME" existcol=<cident> "TO" newcol=<cident>
                               ( "AND" existcol=<cident> "TO" newcol=<cident> )*
                            ;
-
-<alterCDCLogStatement> ::= "ALTER" "CDC_LOG" ("IF" "EXISTS")?
-                            "ON" <columnFamilyName>?
-                            "SET" "DCS" "=" "(" ("dc")* ")"
-                         ;
 '''
 
 

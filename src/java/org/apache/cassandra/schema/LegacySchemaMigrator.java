@@ -45,7 +45,6 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
-import static org.apache.cassandra.utils.FBUtilities.fromJsonList;
 import static org.apache.cassandra.utils.FBUtilities.fromJsonMap;
 
 /**
@@ -218,6 +217,7 @@ public final class LegacySchemaMigrator
         Map<String, String> replication = new HashMap<>();
         replication.putAll(fromJsonMap(row.getString("strategy_options")));
         replication.put(ReplicationParams.CLASS, row.getString("strategy_class"));
+
         return KeyspaceParams.create(durableWrites, replication);
     }
 

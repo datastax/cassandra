@@ -27,7 +27,7 @@ import com.google.common.collect.Maps;
 
 public final class Keyspaces implements Iterable<KeyspaceMetadata>
 {
-    public final ImmutableMap<String, KeyspaceMetadata> keyspaces;
+    private final ImmutableMap<String, KeyspaceMetadata> keyspaces;
 
     private Keyspaces(Builder builder)
     {

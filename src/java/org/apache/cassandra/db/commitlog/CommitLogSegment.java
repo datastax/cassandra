@@ -149,7 +149,6 @@ public abstract class CommitLogSegment
 
     /**
      * Constructs a new segment file.
-     * @param commitLog not null, recycles the existing file by renaming it and truncating it to CommitLog.SEGMENT_SIZE.
      */
     CommitLogSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
     {

@@ -160,7 +160,6 @@ public class ThriftConversion
             replicationMap.putAll(ksd.strategy_options);
         replicationMap.put(ReplicationParams.CLASS, cls.getName());
 
-        // TODO: Determine whether or not we need to modify thrift schema to support CDC or just assume all fromThrift will be w/out it
         return KeyspaceMetadata.create(ksd.name, KeyspaceParams.create(ksd.durable_writes, replicationMap, ImmutableSet.of()), Tables.of(cfDefs));
     }
 

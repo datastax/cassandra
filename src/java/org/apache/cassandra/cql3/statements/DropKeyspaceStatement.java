@@ -27,6 +27,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
 
 public class DropKeyspaceStatement extends SchemaAlteringStatement
@@ -57,8 +58,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
             ClientWarn.instance.warn(String.format("Keyspace %s not found. Ignoring request.", name));
             return;
         }
-        if (Schema.isSystemKeyspace(ksm.name))
-            throw new InvalidRequestException("Cannot drop system keyspace");
+        ThriftValidation.validateKeyspaceNotSystem(name);
 
         if (ksm.params.hasCDCEnabled())
             throw new InvalidRequestException("Cannot drop keyspace with active CDC log. Remove CDC log before dropping Keyspace.");

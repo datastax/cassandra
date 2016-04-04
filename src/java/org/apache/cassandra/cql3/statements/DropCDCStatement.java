@@ -18,22 +18,16 @@
 
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.commons.configuration.Configuration;
-
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.transport.Event;
-import org.omg.CORBA.DynAnyPackage.Invalid;
 
 public class DropCDCStatement extends SchemaAlteringStatement
 {

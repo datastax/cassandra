@@ -77,7 +77,7 @@ public interface ICommitLogReadHandler
      *
      * @param exception
      * @return boolean indicating whether to continue reading or not
-     * @throws CommitLogReadException if things are unrecoverable
+     * @throws IOException
      */
     boolean shouldStopOnError(CommitLogReadException exception) throws IOException;
 

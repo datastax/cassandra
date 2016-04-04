@@ -17,9 +17,7 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
-import java.io.FilenameFilter;
-import java.io.IOException;
+import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -35,10 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
@@ -62,7 +57,7 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
 /*
  * Commit Log tracks every write operation into the system. The aim of the commit log is to be able to
- * successfully recoverPath data that was not stored to disk via the Memtable.
+ * successfully recover data that was not stored to disk via the Memtable.
  */
 public class CommitLog implements CommitLogMBean
 {
@@ -165,8 +160,8 @@ public class CommitLog implements CommitLogMBean
             public boolean accept(File dir, String name)
             {
                 // we used to try to avoid instantiating commitlog (thus creating an empty segment ready for writes)
-                // until after recoverPath was finished.  this turns out to be fragile; it is less error-prone to go
-                // ahead and allow writes before recoverPath(), and just skip active segments when we do.
+                // until after recover was finished.  this turns out to be fragile; it is less error-prone to go
+                // ahead and allow writes before recover, and just skip active segments when we do.
                 return CommitLogDescriptor.isValid(name) && CommitLogSegment.shouldReplay(name);
             }
         };
@@ -514,22 +509,12 @@ public class CommitLog implements CommitLogMBean
             // Workaround for a class of races that keeps showing up on Windows tests.
             // stop/start/reset path on Windows with segment deletion is very touchy/brittle
             // and the timing keeps getting screwed up. Rather than chasing our tail further
-            // or rewriting the CLSM, just report that we didn't recoverPath anything back up
+            // or rewriting the CLSM, just report that we didn't recover anything back up
             // the chain. This will silence most intermittent test failures on Windows
             // and appropriately fail tests that expected segments to be recovered that
             // were not.
             return 0;
         }
-    }
-
-    /**
-     * Maximum number of buffers in the compression pool. The default value is 3 per segment manager, it should not be
-     * set lower than that (one segment in compression, one written to, one in reserve); delays in compression may cause
-     * the log to use more, depending on how soon the sync policy stops all writing threads.
-     */
-    public int calculateCompressionBufferPoolCount()
-    {
-        return segmentManagers.size() * 3;
     }
 
     @VisibleForTesting

@@ -89,7 +89,6 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
             {
                 try
                 {
-                    SyncSegment result;
                     final int currentStart = end;
                     end = readSyncMarker(descriptor, currentStart, reader);
                     if (end == -1)

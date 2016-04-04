@@ -168,7 +168,6 @@ public class CommitLogReplayer implements ICommitLogReadHandler
      */
     public int blockForWrites()
     {
-        // TODO: Change to using local CLR list of invalidMutations
         for (Map.Entry<UUID, AtomicInteger> entry : commitLogReader.getInvalidMutations())
             logger.warn(String.format("Skipped %d mutations from unknown (probably removed) CF with id %s", entry.getValue().intValue(), entry.getKey()));
 
@@ -403,8 +402,8 @@ public class CommitLogReplayer implements ICommitLogReadHandler
                                                          size,
                                                          entryLocation,
                                                          this));
-        //If there are finished mutations, or too many outstanding bytes/mutations
-        //drain the futures in the queue
+        // If there are finished mutations, or too many outstanding bytes/mutations
+        // drain the futures in the queue
         while (futures.size() > MAX_OUTSTANDING_REPLAY_COUNT
                || pendingMutationBytes > MAX_OUTSTANDING_REPLAY_BYTES
                || (!futures.isEmpty() && futures.peek().isDone()))
