@@ -19,26 +19,13 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.Runnables;
-import com.google.common.util.concurrent.Uninterruptibles;
+import com.google.common.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -238,6 +225,10 @@ public abstract class AbstractCommitLogSegmentManager
 
     /**
      * Fetches a new segment from the queue, signaling the management thread to create a new one if necessary, and "activates" it.
+     * Blocks until a new segment is allocated and the thread requesting an advanceAllocatingFrom is signalled.
+     *
+     * INVARIANT: Segment management thread always succeeds in allocating a new segment or kills the JVM.
+     *
      */
     protected void advanceAllocatingFrom(CommitLogSegment old)
     {
@@ -592,7 +583,7 @@ public abstract class AbstractCommitLogSegmentManager
     }
 
     /**
-     * Used by compressed and encrypted segments to share a buffer pool across the CLSM. Pulled from manager when constructed.
+     * Used by compressed and encrypted segments to share a buffer pool across the CLSM.
      */
     SimpleCachedBufferPool getBufferPool()
     {

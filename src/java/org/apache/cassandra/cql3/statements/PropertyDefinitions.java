@@ -17,10 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;

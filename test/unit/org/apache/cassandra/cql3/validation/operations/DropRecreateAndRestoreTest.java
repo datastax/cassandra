@@ -57,9 +57,7 @@ public class DropRecreateAndRestoreTest extends CQLTester
         // Drop will flush and clean segments. Hard-link them so that they can be restored later.
         List<String> segments = new ArrayList<>();
         for (CommitLogSegment segment: CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD).getActiveSegments())
-        {
             segments.add(segment.getName());
-        }
 
         File logPath = new File(DatabaseDescriptor.getCommitLogLocation());
         for (String segment: segments)

@@ -86,8 +86,6 @@ public class SettingsSchema implements Serializable
             client.execute("USE \""+keyspace+"\"", org.apache.cassandra.db.ConsistencyLevel.LOCAL_ONE);
 
             //Add standard1 and counter1
-            String breaking = createStandard1StatementCQL3(settings);
-            System.err.println("Breaking text: [" + breaking + "]");
             client.execute(createStandard1StatementCQL3(settings), org.apache.cassandra.db.ConsistencyLevel.LOCAL_ONE);
             client.execute(createCounter1StatementCQL3(settings), org.apache.cassandra.db.ConsistencyLevel.LOCAL_ONE);
 

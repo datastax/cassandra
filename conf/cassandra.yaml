@@ -195,7 +195,7 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 
 # change-data-capture log. This is a secondary commit log that stores data for
 # keyspaces with CDC enabled. This, like the primary standard commitlog, should be
-# places on a separate spindle than the data directories. You can also separate
+# placed on a separate spindle than the data directories. You can also separate
 # this from the commitlog directories for further performance optimization.
 # If not set, the default directory is $CASSANDRA_HOME/data/cdc.
 # cdc_directory: /var/lib/cassandra/cdc
@@ -482,7 +482,7 @@ memtable_allocation_type: heap_buffers
 #memtable_flush_writers: 1
 
 # Directories where Cassandra should store change-data-capture logs on disk.
-# If not set, the default directory is $CASSANDRA_HOME/data/cdc.
+# If not set, the default directory is $CASSANDRA_HOME/data/cdc_overflow.
 # cdc_overflow_directory: /var/lib/cassandra/cdc_overflow
 
 # Total space to use for change-data-capture logs on disk.

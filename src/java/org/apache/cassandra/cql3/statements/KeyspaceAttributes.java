@@ -75,7 +75,6 @@ public final class KeyspaceAttributes extends PropertyDefinitions
     public KeyspaceParams asNewKeyspaceParams()
     {
         boolean durableWrites = getBoolean(Option.DURABLE_WRITES.toString(), KeyspaceParams.DEFAULT_DURABLE_WRITES);
-        // TODO: Determine whether or not we want empty cdc_set here, since it appears to be used during schema announcement
         return KeyspaceParams.create(durableWrites, getAllReplicationOptions(), getCDCDatacenters());
     }
 

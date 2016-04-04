@@ -17,15 +17,8 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import java.io.DataOutputStream;
-import java.io.EOFException;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.io.*;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
@@ -41,11 +34,7 @@ import org.apache.cassandra.db.UnknownColumnFamilyException;
 import org.apache.cassandra.db.commitlog.ICommitLogReadHandler.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.SerializationHelper;
-import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.io.util.RebufferingInputStream;
+import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 
@@ -205,8 +194,8 @@ public class CommitLogReader
                         break;
                 }
             }
-            // unfortunately, AbstractIterator cannot throw a checked exception,
-            // so check to see if a RuntimeException is wrapping an IOException
+            // unfortunately AbstractIterator cannot throw a checked exception, so we check to see if a RuntimeException
+            // is wrapping an IOException
             catch (RuntimeException re)
             {
                 if (re.getCause() instanceof IOException)
@@ -385,12 +374,13 @@ public class CommitLogReader
             }
 
             // Checksum passed so this error can't be permissible.
-            handler.shouldStopOnError(new CommitLogReadException(String.format(
+            handler.shouldStopOnError(new CommitLogReadException(
+                String.format(
                     "Unexpected error deserializing mutation; saved to %s.  " +
                     "This may be caused by replaying a mutation against a table with the same name but incompatible schema.  " +
                     "Exception follows: %s", f.getAbsolutePath(), t),
-                                                                 CommitLogReadErrorReason.MUTATION_ERROR,
-                                                                 false));
+                CommitLogReadErrorReason.MUTATION_ERROR,
+                false));
             return;
         }
 

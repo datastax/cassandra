@@ -46,9 +46,8 @@ public class SimpleCachedBufferPool
     private AtomicInteger usedBuffers = new AtomicInteger(0);
 
     /**
-     * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
-     * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
-     * more, depending on how soon the sync policy stops all writing threads.
+     * Maximum number of buffers in the compression pool. Any buffers above this count that are allocated will be cleaned
+     * upon release rather than held and re-used.
      */
     private final int maxBufferPoolSize;
 

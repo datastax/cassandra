@@ -83,7 +83,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         {
             public void run()
             {
-                // we do this so that a host considered bad has a chance to recoverPath, otherwise would we never try
+                // we do this so that a host considered bad has a chance to recover, otherwise would we never try
                 // to read from it, which would cause its score to never change
                 reset();
             }

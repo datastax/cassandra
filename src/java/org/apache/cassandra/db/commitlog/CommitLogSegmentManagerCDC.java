@@ -21,9 +21,7 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -41,11 +39,11 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
     static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentManagerCDC.class);
 
-    private AtomicLong cdcOverflowSize = new AtomicLong(0);
+    private final AtomicLong cdcOverflowSize = new AtomicLong(0);
     private final CDCSizeCalculator cdcSizeCalculator;
     private ExecutorService cdcSizeCalculationExecutor;
 
-    // We don't want every failed allocation to create a runnable for the queue, so we so we guard w/an atomic bool
+    // We don't want every failed allocation to create a runnable for the queue, so we guard
     private AtomicBoolean reCalculating = new AtomicBoolean(false);
 
     public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
@@ -188,14 +186,15 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 
     /*
      * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_overflow, as synchronous size
-     * tracking on each allocation call is cpu-bound without an upper limit and could lead to very long delays in
-     * new segment allocation, thus long delays in thread signaling to wake waiting allocation / writer threads.
+     * tracking on each allocation call to try and catch when consumers delete files is cpu-bound and linear and could
+     * lead to very long delays in new segment allocation, thus long delays in thread signaling to wake waiting
+     * allocation / writer threads.
      *
      * While we can race and have our discard logic incorrectly add a discarded segment's size to this value, it will
      * be corrected on the next pass at allocation when a new re-calculation task is submit. Essentially, if you're
      * flirting with the edge of your possible allocation space for CDC, it's possible that some mutations will be
-     * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 8G CDC space
-     * and 32MB segment, that should be a sub-ms re-calc process on a respectable modern CPU. "Should".
+     * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 4G CDC space
+     * and 32MB segment, that should be a sub-half-ms re-calc process on a respectable modern CPU. "Should".
      *
      * Reference DirectorySizerBench for more information about performance of this recalc.
      */

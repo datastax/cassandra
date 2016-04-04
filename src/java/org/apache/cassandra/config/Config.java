@@ -49,6 +49,7 @@ public class Config
      */
     public static final String PROPERTY_PREFIX = "cassandra.";
 
+
     public String cluster_name = "Test Cluster";
     public String authenticator;
     public String authorizer;

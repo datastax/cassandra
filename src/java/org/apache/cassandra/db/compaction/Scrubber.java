@@ -118,7 +118,7 @@ public class Scrubber implements Closeable
             hasIndexFile ? SSTableReader.getApproximateKeyCount(toScrub) : 0);
 
         // loop through each row, deserializing to check for damage.
-        // we'll also loop through the index at the same time, using the position from the index to recoverPath if the
+        // we'll also loop through the index at the same time, using the position from the index to recover if the
         // row header (key or data size) is corrupt. (This means our position in the index file will be one row
         // "ahead" of the data file.)
         this.dataFile = transaction.isOffline()
