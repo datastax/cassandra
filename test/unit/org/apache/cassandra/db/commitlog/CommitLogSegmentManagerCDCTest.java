@@ -22,8 +22,7 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.*;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -209,6 +208,53 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         {
             DatabaseDescriptor.setCommitLogSpaceInMBCDC(originalCDCSize);
             DatabaseDescriptor.setCDCDiskCheckInterval(originalCheckInterval);
+        }
+    }
+
+    @Test
+    public void testDCRestriction() throws Throwable
+    {
+        execute(String.format("ALTER KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 1, 'dc2': 1}", KEYSPACE));
+        execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
+        execute(String.format("USE %s;", KEYSPACE));
+
+        CommitLog.instance.resetUnsafe(true);
+
+        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager(SegmentManagerType.CDC);
+
+        int samples = 50;
+
+        // Confirm CommitLogSegmentPosition increments on mutation application
+        CommitLogSegmentPosition cdcStart = cdcMgr.getCurrentSegmentPosition();
+
+        String originalDC = DatabaseDescriptor.getLocalDataCenter();
+        try
+        {
+            // First, set to dc1 and make sure CDC picks it up. Have to drop and recreated cdc log, since the has local check
+            // occurs at time of keyspace alter and we need our DC to match at that time. Only relevant for tests as we won't
+            // be changing DC names on the fly in production.
+            execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE));
+            DatabaseDescriptor.setLocalDataCenter("dc1");
+            execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
+            populateData(samples);
+            CommitLogSegmentPosition cdcEnd = cdcMgr.getCurrentSegmentPosition();
+
+            // Can't really check standard mgr for position change since other things (system tables) can be written to it during test
+            // We can reliably check the CDC segment position, however, since no system tables have CDC enabled.
+            Assert.assertTrue(cdcEnd.position > cdcStart.position);
+
+            // Change and confirm future mutations don't go CDC
+            execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE));
+            DatabaseDescriptor.setLocalDataCenter("dc2");
+            execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
+            cdcStart = cdcMgr.getCurrentSegmentPosition();
+            populateData(samples);
+            cdcEnd = cdcMgr.getCurrentSegmentPosition();
+            Assert.assertTrue(cdcEnd.position == cdcStart.position);
+        }
+        finally
+        {
+            DatabaseDescriptor.setLocalDataCenter(originalDC);
         }
     }
 

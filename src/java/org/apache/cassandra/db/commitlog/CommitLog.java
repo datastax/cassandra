@@ -300,7 +300,10 @@ public class CommitLog implements CommitLogMBean
                                                              FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE)));
         }
 
-        AbstractCommitLogSegmentManager segmentManager = getSegmentManager(AbstractCommitLogSegmentManager.getSegmentManagerType(keyspace));
+        AbstractCommitLogSegmentManager segmentManager = keyspace.hasLocalCDC()
+            ? getSegmentManager(SegmentManagerType.CDC)
+            : getSegmentManager(SegmentManagerType.STANDARD);
+
         Allocation alloc = segmentManager.allocate(mutation, totalSize);
 
         // CDC allocations can fail if we're at our allowable on-disk threshold

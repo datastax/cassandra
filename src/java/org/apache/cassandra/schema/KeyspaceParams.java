@@ -130,9 +130,9 @@ public final class KeyspaceParams
         return cdc_datacenters;
     }
 
-    public boolean hasCDCEnabled()
+    public boolean hasCDCEnabled(String datacenter)
     {
-        return cdc_datacenters.size() != 0;
+        return cdc_datacenters.contains(datacenter);
     }
 
     @Override

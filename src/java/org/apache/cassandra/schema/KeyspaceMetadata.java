@@ -31,6 +31,8 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.SimpleStrategy;
 
 /**
  * An immutable representation of keyspace metadata (name, params, tables, types, and functions).
@@ -176,8 +178,9 @@ public final class KeyspaceMetadata
         tablesAndViews().forEach(CFMetaData::validate);
     }
 
-    public boolean hasCDCEnabled()
+    public boolean hasCDCForDatacenter(AbstractReplicationStrategy strategy, String datacenter)
     {
-        return params.hasCDCEnabled();
+        // Any entry in CDC on SimpleStrategy qualifies as we don't specify dc-names for RF and don't have them in our params
+        return (strategy instanceof SimpleStrategy && params.getCDCDataCenters().size() != 0) || params.hasCDCEnabled(datacenter);
     }
 }
