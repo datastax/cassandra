@@ -59,7 +59,7 @@ public class DropCDCStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("Cannot alter system keyspace");
 
         // Confirm we have CDC logs on this ks
-        if (!ksm.params.hasCDCEnabled())
+        if (ksm.params.getCDCDataCenters().size() == 0)
         {
             throw new InvalidRequestException("Cannot drop CDC Datacenters from Keyspace without CDC configured.");
         }

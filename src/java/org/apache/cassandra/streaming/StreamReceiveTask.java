@@ -149,7 +149,6 @@ public class StreamReceiveTask extends StreamTask
                 Keyspace ks = Keyspace.open(kscf.left);
                 cfs = ks.getColumnFamilyStore(kscf.right);
                 hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
-                hasCDC = ks.getMetadata().hasCDCEnabled();
 
                 Collection<SSTableReader> readers = task.sstables;
 
@@ -163,7 +162,7 @@ public class StreamReceiveTask extends StreamTask
                     // For CDC-enabled keyspaces, we want to ensure that the mutations are routed to the appropriate
                     // CommitLogSegmentManager on disk, so rather than just bulk loading the SSTables into the CFS' view
                     // we need to replay the mutations through the CommitLog.
-                    if (hasViews || hasCDC)
+                    if (hasViews || ks.hasLocalCDC())
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -181,7 +180,7 @@ public class StreamReceiveTask extends StreamTask
                                         // If the KS has CDC, however, these updates need to be written to the CommitLog
                                         // so they filter into the appropriate CLSM and segments on disk regardless of
                                         // whether there's an MV on the CF or not.
-                                        if (hasCDC)
+                                        if (ks.hasLocalCDC())
                                             m.apply();
                                         else
                                             m.applyUnsafe();

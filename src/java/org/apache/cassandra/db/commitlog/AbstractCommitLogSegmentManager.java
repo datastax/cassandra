@@ -600,7 +600,7 @@ public abstract class AbstractCommitLogSegmentManager
 
     public static SegmentManagerType getSegmentManagerType(Keyspace ks)
     {
-        return ks.getMetadata().hasCDCEnabled()
+        return ks.hasLocalCDC()
             ? SegmentManagerType.CDC
             : SegmentManagerType.STANDARD;
     }
