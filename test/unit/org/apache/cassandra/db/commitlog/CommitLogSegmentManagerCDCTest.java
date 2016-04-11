@@ -21,16 +21,14 @@ package org.apache.cassandra.db.commitlog;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Random;
 
 import org.junit.*;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -45,6 +43,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     private static boolean _initialized = false;
     private static String KEYSPACE = "clr_test";
     private static String TABLE = "clr_test_table";
+    private static Random random = new Random();
 
     /**
      * Intentionally not using static @BeforeClass since we need access to CQLTester internal methods here and we want
@@ -53,20 +52,15 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     @Before
     public void before() throws Throwable
     {
-        // Since we don't have an "ALTER KEYSPACE IF EXISTS" to drop CDC log before test run, just run it once and work with it.
-        if (!_initialized)
-        {
-            execute(String.format("DROP KEYSPACE IF EXISTS %s;", KEYSPACE));
-            execute(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};", KEYSPACE));
-            execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'test1'};", KEYSPACE));
-            execute(String.format("USE %s;", KEYSPACE));
-            execute(String.format("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));", TABLE));
-            _initialized = true;
-        }
-        else
-        {
-            execute(String.format("TRUNCATE TABLE %s;", TABLE));
-        }
+        // Swallow since we don't care about failure to drop CDCLOG on test prep
+        try { execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE)); }
+        catch (Exception e) {}
+
+        execute(String.format("DROP KEYSPACE IF EXISTS %s;", KEYSPACE));
+        execute(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};", KEYSPACE));
+        execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'test1'};", KEYSPACE));
+        execute(String.format("USE %s;", KEYSPACE));
+        execute(String.format("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));", TABLE));
     }
 
     /**
@@ -163,22 +157,30 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         {
             DatabaseDescriptor.setCDCDiskCheckInterval(0);
 
+            // Populate some initial data for atCapacity confirmation
+            for (int i = 0; i < 100; i++)
+            {
+                new RowUpdateBuilder(cfm, 0, i)
+                    .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                    .build().apply();
+            }
+
+            // Confirm atCapacity is performing as expected
             assert !cdcMgr.atCapacity() : "Expected to be able to allocate new CDC segments but apparently can't.";
-            DatabaseDescriptor.setCommitLogSpaceInMBCDC(1);
-            assert cdcMgr.atCapacity() : "Expected inability to allocate new CLSegments within CDC after changing descriptor value to 1";
+            DatabaseDescriptor.setCommitLogSpaceInMBCDC(0);
+            assert cdcMgr.atCapacity() : "Expected inability to allocate new CLSegments within CDC after changing apace max value to 1";
 
-            DatabaseDescriptor.setCommitLogSpaceInMBCDC(64);
-            // Fill the segment and verify subsequent write calls get timeouts
-            Mutation m = new RowUpdateBuilder(cfm, 0, 1)
-                                 .add("data", ByteBuffer.allocate(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
-                                 .build();
-
+            DatabaseDescriptor.setCommitLogSpaceInMBCDC(16);
             // Spin until we hit CDC capacity and make sure we get a WriteTimeout
             boolean pass = false;
             try
             {
-                for (int i = 0; i < 50; i++) {
-                    m.apply();
+                // Should trigger on anything < 20:1 compression ratio during compressed test
+                for (int i = 0; i < 1000; i++)
+                {
+                    new RowUpdateBuilder(cfm, 0, i)
+                        .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                        .build().apply();
                 }
             }
             catch (WriteTimeoutException e)
@@ -188,27 +190,39 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             }
             assert pass : "Expected WriteTimeoutException from full CDC but did not receive it.";
 
-            assert getCDCOverflowCount() == 0 : "Did not expect to have cdc segments in overflow.";
             Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).forceBlockingFlush();
             CommitLog.instance.forceRecycleAllSegments();
             assert getCDCOverflowCount() > 0 : "Expected files to be moved to overflow.";
 
-            // Simulate a CDC consumer reading files then deleting them
-            for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
-                FileUtils.deleteWithConfirm(f);
-
             // Force an update - this would normally be handled by failed allocate() calls within CommitLogSegmentManagerCDC,
             // but I'm using a test hook here to isolate it to a sequential operation.
-            cdcMgr.updateCDCOverflowSize();
+            long newSize;
+            while ((newSize = cdcMgr.updateCDCOverflowSize()) > 0)
+            {
+                // Simulate a CDC consumer reading files then deleting them
+                for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
+                    FileUtils.deleteWithConfirm(f);
+            }
+            assert newSize == 0 : "Expected empty overflow, instead found: " + newSize + " bytes on disk.";
 
+            cdcMgr.atCapacity();
             // After updating the size, we should now again be able to allocate mutations within CDC
-            m.apply();
+            new RowUpdateBuilder(cfm, 0, 1024)
+                .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                .build().apply();
         }
         finally
         {
             DatabaseDescriptor.setCommitLogSpaceInMBCDC(originalCDCSize);
             DatabaseDescriptor.setCDCDiskCheckInterval(originalCheckInterval);
         }
+    }
+
+    private ByteBuffer randomizeBuffer(int size)
+    {
+        byte[] toWrap = new byte[size];
+        random.nextBytes(toWrap);
+        return ByteBuffer.wrap(toWrap);
     }
 
     @Test

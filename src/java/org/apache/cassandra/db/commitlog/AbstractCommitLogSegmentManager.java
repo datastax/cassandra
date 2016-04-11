@@ -408,7 +408,6 @@ public abstract class AbstractCommitLogSegmentManager
         return size.get();
     }
 
-
     /**
      * @param name the filename to check
      * @return true if file is managed by this manager.

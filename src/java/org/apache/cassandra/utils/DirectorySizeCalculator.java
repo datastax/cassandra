@@ -70,6 +70,7 @@ public class DirectorySizeCalculator extends SimpleFileVisitor<Path>
         ImmutableSet.Builder<String> builder = ImmutableSet.builder();
         for (File file : path.listFiles())
             builder.add(file.getName());
+        size.set(0);
         alive = builder.build();
     }
 
