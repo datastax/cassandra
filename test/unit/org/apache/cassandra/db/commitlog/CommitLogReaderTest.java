@@ -23,8 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.*;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -70,7 +69,7 @@ public class CommitLogReaderTest extends CQLTester
      */
     private CommitLogSegmentPosition populateData(int entryCount) throws Throwable
     {
-        assert entryCount % 2 == 0 : "entryCount must be an even number.";
+        Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
         int midpoint = entryCount / 2;
 
         for (int i = 0; i < midpoint; i++)
@@ -96,7 +95,7 @@ public class CommitLogReaderTest extends CQLTester
                 continue;
             results.add(f);
         }
-        assert results.size() != 0 : "Didn't find any commit log files of type: " + type;
+        Assert.assertTrue("Didn't find any commit log files of type: " + type, 0 != results.size());
         return results;
     }
 
@@ -105,7 +104,7 @@ public class CommitLogReaderTest extends CQLTester
         return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata;
     }
 
-    static class TestCLRHandler implements ICommitLogReadHandler
+    static class TestCLRHandler implements CommitLogReadHandler
     {
         public List<Mutation> seenMutations = new ArrayList<Mutation>();
         public boolean sawStopOnErrorCheck = false;
@@ -142,6 +141,11 @@ public class CommitLogReaderTest extends CQLTester
             return false;
         }
 
+        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
+        {
+            sawStopOnErrorCheck = true;
+        }
+
         public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc)
         {
             if ((cfm == null) || (cfm != null && m.get(cfm) != null)) {
@@ -166,9 +170,8 @@ public class CommitLogReaderTest extends CQLTester
         for (File f : toCheck)
             reader.readCommitLogSegment(testHandler, f, false);
 
-        ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
-
-        assert testHandler.seenMutations.size() == 1000 : "Expected 1000 seen mutations, got: " + testHandler.seenMutations.size();
+        Assert.assertEquals("Expected 1000 seen mutations, got: " + testHandler.seenMutationCount(),
+                            1000, testHandler.seenMutationCount());
 
         confirmReadOrder(testHandler, testCFM(), 0);
     }
@@ -186,7 +189,9 @@ public class CommitLogReaderTest extends CQLTester
 
         for (File f : toCheck)
             reader.readCommitLogSegment(testHandler, f, readCount - testHandler.seenMutationCount(), false);
-        assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
+
+        Assert.assertEquals("Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size(),
+                            readCount, testHandler.seenMutationCount());
     }
 
     @Test
@@ -205,7 +210,8 @@ public class CommitLogReaderTest extends CQLTester
             reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
         // Confirm correct count on replay
-        assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
+        Assert.assertEquals("Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size(),
+                            readCount, testHandler.seenMutationCount());
 
         confirmReadOrder(testHandler, testCFM(), samples / 2);
     }
@@ -227,7 +233,8 @@ public class CommitLogReaderTest extends CQLTester
         for (File f : toCheck)
             reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
-        assert testHandler.seenMutations.size() == samples / 2 : "Expected " + samples / 2 + " seen mutations, got: " + testHandler.seenMutations.size();
+        Assert.assertEquals("Expected " + samples / 2 + " seen mutations, got: " + testHandler.seenMutations.size(),
+                            samples / 2, testHandler.seenMutationCount());
 
         confirmReadOrder(testHandler, testCFM(), samples / 2);
     }
@@ -247,10 +254,9 @@ public class CommitLogReaderTest extends CQLTester
         for (File f: toCheck)
             reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
 
-        assert testHandler.seenMutations.size() == readCount;
-
         // Confirm correct count on replay
-        assert testHandler.seenMutations.size() == readCount : "Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size();
+        Assert.assertEquals("Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size(),
+            readCount, testHandler.seenMutationCount());
 
         confirmReadOrder(testHandler, testCFM(), samples / 2);
     }

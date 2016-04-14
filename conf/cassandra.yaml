@@ -497,7 +497,7 @@ memtable_allocation_type: heap_buffers
 # have these files on split volumes take that into account.
 # cdc_total_space_in_mb: 4096
 
-# When we hit our cdc disk limit and an external consumer is potentailly
+# When we hit our cdc disk limit and an external consumer is potentially
 # consuming logs slowly, we check at the following interval to see if any
 # new space for cdc-tracked keyspaces has been freed up. Default to 250ms
 # cdc_free_space_check_interval_ms: 250

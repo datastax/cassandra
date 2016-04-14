@@ -50,17 +50,17 @@ public final class KeyspaceParams
     public final ReplicationParams replication;
     private final Set<String> cdc_datacenters;
 
-    public KeyspaceParams(boolean durableWrites, ReplicationParams replication)
-    {
-        this(durableWrites, replication, new HashSet<>());
-    }
-
     public KeyspaceParams(boolean durableWrites, ReplicationParams replication, Set<String> cdc_datacenters)
     {
         this.durableWrites = durableWrites;
         this.replication = replication;
         assert cdc_datacenters != null : "Don't allow null in cdc_datacenters.";
         this.cdc_datacenters = cdc_datacenters;
+    }
+
+    public static KeyspaceParams create(boolean durableWrites, ReplicationParams replication)
+    {
+        return new KeyspaceParams(durableWrites, replication, new HashSet<>());
     }
 
     public static KeyspaceParams create(boolean durableWrites, Map<String, String> replication)
@@ -76,17 +76,17 @@ public final class KeyspaceParams
     // The various static builders are used in schema table creation and testing and thus have no support for CDC included
     public static KeyspaceParams local()
     {
-        return new KeyspaceParams(true, ReplicationParams.local());
+        return KeyspaceParams.create(true, ReplicationParams.local());
     }
 
     public static KeyspaceParams simple(int replicationFactor)
     {
-        return new KeyspaceParams(true, ReplicationParams.simple(replicationFactor));
+        return KeyspaceParams.create(true, ReplicationParams.simple(replicationFactor));
     }
 
     public static KeyspaceParams simpleTransient(int replicationFactor)
     {
-        return new KeyspaceParams(false, ReplicationParams.simple(replicationFactor));
+        return KeyspaceParams.create(false, ReplicationParams.simple(replicationFactor));
     }
 
     /**
@@ -94,7 +94,7 @@ public final class KeyspaceParams
      */
     public static KeyspaceParams nts(Object... args)
     {
-        return new KeyspaceParams(true, ReplicationParams.nts(args));
+        return KeyspaceParams.create(true, ReplicationParams.nts(args));
     }
 
     public void validate(String name)
@@ -107,7 +107,6 @@ public final class KeyspaceParams
         // In the event we're not nts and have only a single datacenter, we don't pass in a DC name in params so we cannot
         // confirm that the name they entered is correct. That being said, we also don't really care. If it's a single
         // datacenter and you provide a single CDC DC name, that's good enough for us.
-
         if (dcs.size() == 0 && cdc_datacenters.size() > 1)
         {
             throw new ConfigurationException("Single datacenter for replication needs 0 or 1 CDC datacenters specified.");

@@ -72,11 +72,16 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
 
     public Event.SchemaChange announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-        KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(name);
-        if (ifExists && oldKsm == null)
-            return null;
-
-        MigrationManager.announceKeyspaceDrop(name, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace());
+        try
+        {
+            MigrationManager.announceKeyspaceDrop(name, isLocalOnly);
+            return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace());
+        }
+        catch(ConfigurationException e)
+        {
+            if (ifExists)
+                return null;
+            throw e;
+        }
     }
 }

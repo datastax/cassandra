@@ -69,7 +69,7 @@ public class DirectorySizerBench
         // [java]   Statistics: (min, avg, max) = (291.245, 298.628, 412.881), stdev = 22.085
         // [java]   Confidence interval (99.9%): [283.873, 313.383]
 
-        // Test w/25,600 files, 100x the load of a full default CommitLog (8192) div size (32 per)
+        // Test w/25,600 files, 100x the load of a full default CommitLog (8192) divided by size (32 per)
         populateRandomFiles(tempDir, 25600);
         sizer = new DirectorySizeCalculator(tempDir);
     }

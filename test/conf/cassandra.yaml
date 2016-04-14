@@ -9,6 +9,8 @@ commitlog_sync: batch
 commitlog_sync_batch_window_in_ms: 1.0
 commitlog_segment_size_in_mb: 5
 commitlog_directory: build/test/cassandra/commitlog
+# Don't move this to a folder w/out cdc in the name as we rely on regex checking the name to confirm cdc is working in a utest
+# see CommitLogSegmentManagerCDCTest.testCDCFunctionality
 cdc_directory: build/test/cassandra/cdc
 cdc_overflow_directory: build/test/cassandra/cdc_overflow
 hints_directory: build/test/cassandra/hints

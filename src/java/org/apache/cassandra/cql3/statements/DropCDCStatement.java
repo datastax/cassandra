@@ -72,7 +72,7 @@ public class DropCDCStatement extends SchemaAlteringStatement
         if (oldKsm == null)
             throw new InvalidRequestException("Unknown keyspace " + name);
 
-        KeyspaceParams newParams = new KeyspaceParams(oldKsm.params.durableWrites, oldKsm.params.replication);
+        KeyspaceParams newParams = KeyspaceParams.create(oldKsm.params.durableWrites, oldKsm.params.replication);
         KeyspaceMetadata newKsm = oldKsm.withSwapped(newParams);
         MigrationManager.announceKeyspaceUpdate(newKsm, isLocalOnly);
         return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace());

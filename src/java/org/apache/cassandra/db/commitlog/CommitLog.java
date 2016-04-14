@@ -190,7 +190,7 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayed);
 
             for (File f : files)
-                manager.deleteUntrackedCommitLogSegment(f);
+                manager.handleReplayedSegment(f);
         }
 
         manager.enableReserveSegmentCreation();
