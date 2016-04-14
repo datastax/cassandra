@@ -59,7 +59,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
 
-public class CommitLogReplayer implements ICommitLogReadHandler
+public class CommitLogReplayer implements CommitLogReadHandler
 {
     @VisibleForTesting
     public static long MAX_OUTSTANDING_REPLAY_BYTES = Long.getLong("cassandra.commitlog_max_outstanding_replay_bytes", 1024 * 1024 * 64);
@@ -87,8 +87,10 @@ public class CommitLogReplayer implements ICommitLogReadHandler
                                                    final int entryLocation,
                         if (clr.shouldReplay(update.metadata().cfId, new ReplayPosition(segmentId, entryLocation)))
 
-    CommitLogReplayer(CommitLog commitLog, ReplayPosition globalPosition, Map<UUID, ReplayPosition.ReplayFilter> cfPersisted, ReplayFilter replayFilter)
-    CommitLogReplayer(CommitLog commitLog, CommitLogSegmentPosition globalPosition, Map<UUID, CommitLogSegmentPosition> cfPositions, ReplayFilter replayFilter)
+    CommitLogReplayer(CommitLog commitLog,
+                      CommitLogSegmentPosition globalPosition,
+                      Map<UUID, CommitLogSegmentPosition> cfPositions,
+                      ReplayFilter replayFilter)
     {
         this.keyspacesReplayed = new NonBlockingHashSet<Keyspace>();
         this.futures = new ArrayDeque<Future<Integer>>();
@@ -111,7 +113,7 @@ public class CommitLogReplayer implements ICommitLogReadHandler
         ReplayPosition globalPosition = null;
         for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
         {
-            CommitLogSegmentPosition rp = CommitLogSegmentPosition.getCommitLogSegmentPosition(cfs.getSSTables(SSTableSet.CANONICAL));
+            CommitLogSegmentPosition clsp = CommitLogSegmentPosition.getCommitLogSegmentPosition(cfs.getSSTables(SSTableSet.CANONICAL));
             // but, if we've truncated the cf in question, then we need to need to start replay after the truncation
             CommitLogSegmentPosition truncatedAt = SystemKeyspace.getTruncatedPosition(cfs.metadata.cfId);
             if (truncatedAt != null)
@@ -132,7 +134,7 @@ public class CommitLogReplayer implements ICommitLogReadHandler
                         truncatedAt = null;
                     }
                 }
-                    rp = commitLogSegmentPositionOrdering.max(Arrays.asList(rp, truncatedAt));
+                    clsp = commitLogSegmentPositionOrdering.max(Arrays.asList(clsp, truncatedAt));
             }
 
             ReplayPosition.ReplayFilter filter = new ReplayPosition.ReplayFilter(cfs.getSSTables(), truncatedAt);
@@ -232,11 +234,11 @@ public class CommitLogReplayer implements ICommitLogReadHandler
                         if (Schema.instance.getCF(update.metadata().cfId) == null)
                             continue; // dropped
 
-                        CommitLogSegmentPosition rp = commitLogReplayer.cfPositions.get(update.metadata().cfId);
+                        CommitLogSegmentPosition clsp = commitLogReplayer.cfPositions.get(update.metadata().cfId);
 
                         // replay if current segment is newer than last flushed one or,
                         // if it is the last known segment, if we are after the commit log segment position
-                        if (segmentId > rp.segmentId || (segmentId == rp.segmentId && entryLocation > rp.position))
+                        if (segmentId > clsp.segmentId || (segmentId == clsp.segmentId && entryLocation > clsp.position))
                         {
                             if (newMutation == null)
                                 newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
@@ -426,6 +428,15 @@ public class CommitLogReplayer implements ICommitLogReadHandler
             throw new CommitLogReplayException(exception.getMessage(), exception);
         }
         return false;
+    }
+
+    /**
+     * The logic for whether or not we throw on an error is identical for the replayer between recoverable or non.
+     */
+    public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
+    {
+        // Don't care about return value, use this simply to throw exception as appropriate.
+        shouldStopOnError(exception);
     }
 
     @SuppressWarnings("serial")

@@ -128,10 +128,10 @@ public class CommitLogSegmentPosition implements Comparable<CommitLogSegmentPosi
 
     public static class CommitLogSegmentPositionSerializer implements ISerializer<CommitLogSegmentPosition>
     {
-        public void serialize(CommitLogSegmentPosition rp, DataOutputPlus out) throws IOException
+        public void serialize(CommitLogSegmentPosition clsp, DataOutputPlus out) throws IOException
         {
-            out.writeLong(rp.segmentId);
-            out.writeInt(rp.position);
+            out.writeLong(clsp.segmentId);
+            out.writeInt(clsp.position);
         }
 
         public CommitLogSegmentPosition deserialize(DataInputPlus in) throws IOException
@@ -139,9 +139,9 @@ public class CommitLogSegmentPosition implements Comparable<CommitLogSegmentPosi
             return new CommitLogSegmentPosition(in.readLong(), in.readInt());
         }
 
-        public long serializedSize(CommitLogSegmentPosition rp)
+        public long serializedSize(CommitLogSegmentPosition clsp)
         {
-            return TypeSizes.sizeof(rp.segmentId) + TypeSizes.sizeof(rp.position);
+            return TypeSizes.sizeof(clsp.segmentId) + TypeSizes.sizeof(clsp.position);
         }
     }
 }

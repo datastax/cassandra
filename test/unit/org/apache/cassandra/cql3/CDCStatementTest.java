@@ -18,10 +18,10 @@
 
 package org.apache.cassandra.cql3;
 
-import org.junit.After;
-import org.junit.Test;
+import org.junit.*;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -96,6 +96,7 @@ public class CDCStatementTest extends CQLTester
         {
             execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
             execute("ALTER KEYSPACE cdc_test WITH cdc_datacenters = {'AAAdc1'}");
+            Assert.fail("Expected ConfigurationException.");
         }
         catch (ConfigurationException ce)
         {
@@ -108,12 +109,13 @@ public class CDCStatementTest extends CQLTester
     {
         try
         {
-            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2};");
+            execute("CREATE KEYSPACE cdc_test WITH replication = { 'class' : 'NetworkTopologyStrategy', 'dc1' : 1, 'dc2' : 2} AND cdc_datacenters = {'dc1'};");
             execute("DROP KEYSPACE cdc_test;");
+            Assert.fail("Expected ConfigurationException.");
         }
-        catch (ConfigurationException ce)
+        catch (InvalidRequestException ire)
         {
-            assertTrue(ce.getMessage().contains("Cannot drop keyspace with active CDC log"));
+            assertTrue(ire.getMessage().contains("Cannot drop keyspace with active CDC log"));
         }
     }
 

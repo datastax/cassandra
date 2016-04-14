@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.commitlog;
 
+import java.io.File;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
@@ -65,6 +67,18 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
         }
 
         return alloc;
+    }
+
+    /**
+     * Simply delete untracked segment files w/standard, as it'll be flushed to sstables during recovery
+     *
+     * @param file segment file that is no longer in use.
+     */
+    void handleReplayedSegment(final File file)
+    {
+        // (don't decrease managed size, since this was never a "live" segment)
+        logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
+        FileUtils.deleteWithConfirm(file);
     }
 
      /**

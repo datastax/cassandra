@@ -258,8 +258,8 @@ public class CommitLogStressTest
             for (CommitlogThread t: threads)
             {
                 t.join();
-                if (t.rp.compareTo(discardedPos) > 0)
-                    discardedPos = t.rp;
+                if (t.clsp.compareTo(discardedPos) > 0)
+                    discardedPos = t.clsp;
             }
             verifySizes(commitLog);
 
@@ -429,7 +429,7 @@ public class CommitLogStressTest
         final CommitLog commitLog;
         final Random random;
 
-        volatile CommitLogSegmentPosition rp;
+        volatile CommitLogSegmentPosition clsp;
 
         public CommitlogThread(CommitLog commitLog, Random rand)
         {
@@ -459,7 +459,7 @@ public class CommitLogStressTest
                 }
 
                 Keyspace ks = Keyspace.open("Keyspace1");
-                rp = commitLog.add(ks, new Mutation(builder.build()));
+                clsp = commitLog.add(ks, new Mutation(builder.build()));
                 counter.incrementAndGet();
             }
         }
@@ -473,7 +473,7 @@ public class CommitLogStressTest
         int skipped;
 
         @Override
-        protected void readMutation(ICommitLogReadHandler handler,
+        protected void readMutation(CommitLogReadHandler handler,
                                     byte[] inputBuffer,
                                     int size,
                                     final long entryLocation,
@@ -527,7 +527,7 @@ public class CommitLogStressTest
         }
     }
 
-    class DummyHandler implements ICommitLogReadHandler
+    class DummyHandler implements CommitLogReadHandler
     {
         public void prepReader(CommitLogDescriptor desc, RandomAccessReader reader) { }
 
@@ -536,6 +536,8 @@ public class CommitLogStressTest
         public boolean shouldSkipSegment(long id, int position) { return false; }
 
         public boolean shouldStopOnError(CommitLogReadException exception) throws IOException { return false; }
+
+        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }
 
         public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc) { }
     }

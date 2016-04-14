@@ -31,7 +31,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.UnknownColumnFamilyException;
-import org.apache.cassandra.db.commitlog.ICommitLogReadHandler.*;
+import org.apache.cassandra.db.commitlog.CommitLogReadHandler.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.io.util.*;
@@ -45,7 +45,9 @@ public class CommitLogReader
     private static final Logger logger = LoggerFactory.getLogger(CommitLogReader.class);
 
     private static final int LEGACY_END_OF_SEGMENT_MARKER = 0;
-    private static final int ALL_MUTATIONS = -1;
+
+    @VisibleForTesting
+    public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
     private final Map<UUID, AtomicInteger> invalidMutations;
 
@@ -63,33 +65,35 @@ public class CommitLogReader
         return invalidMutations.entrySet();
     }
 
-    public void readAllFiles(ICommitLogReadHandler handler, File[] files) throws IOException
+    public void readAllFiles(CommitLogReadHandler handler, File[] files) throws IOException
     {
         for (int i = 0; i < files.length; i++)
             readCommitLogSegment(handler, files[i], i + 1 == files.length);
     }
 
-    public void readCommitLogSegment(ICommitLogReadHandler handler, File file, int mutationLimit, boolean tolerateTruncation) throws IOException
+    @VisibleForTesting
+    public void readCommitLogSegment(CommitLogReadHandler handler, File file, int mutationLimit, boolean tolerateTruncation) throws IOException
     {
         readCommitLogSegment(handler, file, CommitLogSegmentPosition.NONE, mutationLimit, tolerateTruncation);
     }
 
-    public void readCommitLogSegment(ICommitLogReadHandler handler, File file, boolean tolerateTruncation) throws IOException
+    @VisibleForTesting
+    public void readCommitLogSegment(CommitLogReadHandler handler, File file, boolean tolerateTruncation) throws IOException
     {
         readCommitLogSegment(handler, file, CommitLogSegmentPosition.NONE, ALL_MUTATIONS, tolerateTruncation);
     }
 
     /**
      * Reads mutations from file, handing them off to handler
-     * @param handler -
-     * @param file -
+     * @param handler Handler that will take action based on deserialized Mutations
+     * @param file Commit Log Segment file to read
      * @param startPosition Optional CommitLogSegmentPosition to serve as starting point for mutation replay, CommitLogSegmentPosition.NONE if all
      * @param mutationLimit Optional limit on # of mutations to replay. Local ALL_MUTATIONS serves as marker to play all.
      * @param tolerateTruncation Whether or not we should allow truncation of this file or throw if EOF found
      *
      * @throws IOException
      */
-    public void readCommitLogSegment(ICommitLogReadHandler handler,
+    public void readCommitLogSegment(CommitLogReadHandler handler,
                                      File file,
                                      CommitLogSegmentPosition startPosition,
                                      int mutationLimit,
@@ -127,7 +131,7 @@ public class CommitLogReader
             if (desc == null)
             {
                 // don't care about whether or not the handler thinks we can continue. We can't w/out descriptor.
-                handler.shouldStopOnError(new CommitLogReadException(
+                handler.handleUnrecoverableError(new CommitLogReadException(
                     String.format("Could not read commit log descriptor in file %s", file),
                     CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
                     false));
@@ -171,9 +175,9 @@ public class CommitLogReader
             }
             catch(Exception e)
             {
-                handler.shouldStopOnError(new CommitLogReadException(
+                handler.handleUnrecoverableError(new CommitLogReadException(
                     String.format("Unable to create segment reader for commit log file: %s", e),
-                    CommitLogReadErrorReason.UNKNOWN_ERROR,
+                    CommitLogReadErrorReason.UNRECOVERABLE_UNKNOWN_ERROR,
                     tolerateTruncation));
                 return;
             }
@@ -209,14 +213,14 @@ public class CommitLogReader
     /**
      * Reads a section of a file containing mutations
      *
-     * @param handler       -
-     * @param reader        FileDataInput / logical buffer containing commitlog mutations
-     * @param startOffset   Offset within the file to start handing mutations off to handler
-     * @param end           logical numeric end of the segment being read
+     * @param handler Handler that will take action based on deserialized Mutations
+     * @param reader FileDataInput / logical buffer containing commitlog mutations
+     * @param startOffset Offset within the file to start handing mutations off to handler
+     * @param end logical numeric end of the segment being read
      * @param statusTracker ReadStatusTracker with current state of mutation count, error state, etc
-     * @param desc          Descriptor for CommitLog serialization
+     * @param desc Descriptor for CommitLog serialization
      */
-    private void readSection(ICommitLogReadHandler handler,
+    private void readSection(CommitLogReadHandler handler,
                              FileDataInput reader,
                              int startOffset,
                              int end,
@@ -326,14 +330,14 @@ public class CommitLogReader
     /**
      * Deserializes and passes a Mutation to the ICommitLogReadHandler requested
      *
-     * @param handler
-     * @param inputBuffer   raw byte array w/Mutation data
-     * @param size          deserialized size of mutation
+     * @param handler Handler that will take action based on deserialized Mutations
+     * @param inputBuffer raw byte array w/Mutation data
+     * @param size deserialized size of mutation
      * @param entryLocation filePointer offset of mutation within CommitLogSegment
-     * @param desc          CommitLogDescriptor being worked on
+     * @param desc CommitLogDescriptor being worked on
      */
     @VisibleForTesting
-    protected void readMutation(ICommitLogReadHandler handler,
+    protected void readMutation(CommitLogReadHandler handler,
                               byte[] inputBuffer,
                               int size,
                               final long entryLocation,
@@ -374,7 +378,7 @@ public class CommitLogReader
             }
 
             // Checksum passed so this error can't be permissible.
-            handler.shouldStopOnError(new CommitLogReadException(
+            handler.handleUnrecoverableError(new CommitLogReadException(
                 String.format(
                     "Unexpected error deserializing mutation; saved to %s.  " +
                     "This may be caused by replaying a mutation against a table with the same name but incompatible schema.  " +

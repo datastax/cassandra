@@ -24,14 +24,14 @@ import java.io.IOException;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.RandomAccessReader;
 
-public interface ICommitLogReadHandler
+public interface CommitLogReadHandler
 {
     enum CommitLogReadErrorReason
     {
         RECOVERABLE_DESCRIPTOR_ERROR,
         UNRECOVERABLE_DESCRIPTOR_ERROR,
         MUTATION_ERROR,
-        UNKNOWN_ERROR,
+        UNRECOVERABLE_UNKNOWN_ERROR,
         EOF
     }
 
@@ -49,10 +49,7 @@ public interface ICommitLogReadHandler
     }
 
     /**
-     * Allow consumers to prepare a file before replay. Immediate use-case: seeking on replayer on desc that's globalPosition
-     *
-     * @param desc
-     * @param reader
+     * Allow consumers to prepare a file before replay.
      */
     void prepReader(CommitLogDescriptor desc, RandomAccessReader reader);
 
@@ -68,7 +65,7 @@ public interface ICommitLogReadHandler
     /**
      * Another skipping approach - based on how far along we are in the segment rather than the file as a whole.
      *
-     * @param position  position of sync segment candidate
+     * @param position position of sync segment candidate
      */
     boolean shouldSkipSegment(long id, int position);
 
@@ -82,12 +79,20 @@ public interface ICommitLogReadHandler
     boolean shouldStopOnError(CommitLogReadException exception) throws IOException;
 
     /**
+     * In instances where we cannot recover from a specific error and don't care what the reader thinks
+     *
+     * @param exception
+     * @throws IOException
+     */
+    void handleUnrecoverableError(CommitLogReadException exception) throws IOException;
+
+    /**
      * Process a deserialized mutation
      *
-     * @param m             deserialized mutation
-     * @param size          serialized size of the mutation
+     * @param m deserialized mutation
+     * @param size serialized size of the mutation
      * @param entryLocation filePointer offset inside the CommitLogSegment for the record
-     * @param desc          CommitLogDescriptor for mutation being processed
+     * @param desc CommitLogDescriptor for mutation being processed
      */
     void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc);
 }

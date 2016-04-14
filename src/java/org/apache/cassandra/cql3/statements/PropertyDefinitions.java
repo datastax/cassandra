@@ -90,7 +90,7 @@ public class PropertyDefinitions
             return null;
         if (!(val instanceof Map))
             throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a map.", name));
-        return new HashSet<>(((Map)val).keySet());
+        return ((Map)val).keySet();
     }
 
     public Boolean hasProperty(String name)

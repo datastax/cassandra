@@ -176,7 +176,7 @@ public abstract class AbstractCommitLogSegmentManager
 
         run = true;
 
-        managerThread = new Thread(runnable, "COMMIT-LOG-ALLOCATOR");
+        managerThread = new Thread(runnable, "COMMIT-LOG-ALLOCATOR-" + getSegmentManagerType());
         managerThread.start();
     }
 
@@ -204,8 +204,11 @@ public abstract class AbstractCommitLogSegmentManager
     abstract long unusedCapacity();
 
     /**
-     * Available for debugging and tests.
+     * The recovery and replay process replays mutations into memtables and flushes them to disk. Individual CLSM
+     * decide what to do with those segments on disk after they've been replayed.
      */
+    abstract void handleReplayedSegment(final File file);
+
     abstract SegmentManagerType getSegmentManagerType();
 
     /**
@@ -343,7 +346,7 @@ public abstract class AbstractCommitLogSegmentManager
         }
         catch (Throwable t)
         {
-            // for now just log the error and return false, indicating that we failed
+            // for now just log the error
             logger.error("Failed waiting for a forced recycle of in-use commit log segments", t);
         }
     }
@@ -365,19 +368,6 @@ public abstract class AbstractCommitLogSegmentManager
         {
             logger.warn("segment {} not found in activeSegments queue", segment);
         }
-    }
-
-    /**
-     * Differs from the above because it can work on any file instead of just existing
-     * commit log segments managed by this manager.
-     *
-     * @param file segment file that is no longer in use.
-     */
-    static void deleteUntrackedCommitLogSegment(final File file)
-    {
-        // (don't decrease managed size, since this was never a "live" segment)
-        logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
-        FileUtils.deleteWithConfirm(file);
     }
 
     /**

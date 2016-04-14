@@ -53,10 +53,9 @@ public class MetadataSerializerTest
 
         MetadataSerializer serializer = new MetadataSerializer();
         File statsFile = serialize(originalMetadata, serializer, BigFormat.latestVersion);
-        CommitLogSegmentPosition rp = new CommitLogSegmentPosition(11L, 12);
+        CommitLogSegmentPosition clsp = new CommitLogSegmentPosition(11L, 12);
 
         Descriptor desc = new Descriptor( statsFile.getParentFile(), "", "", 0);
-        MetadataCollector collector = new MetadataCollector(cfm.comparator).commitLogSegmentPosition(rp);
         try (RandomAccessReader in = RandomAccessReader.open(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));

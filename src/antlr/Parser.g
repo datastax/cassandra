@@ -178,7 +178,7 @@ options {
                 break;
             }
 
-            res.put(((Constants.Literal)entry).getRawText(), "1");
+            res.put(((Constants.Literal)entry).getRawText(), null);
         }
 
         return res;

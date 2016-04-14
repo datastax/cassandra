@@ -220,7 +220,7 @@ public class CommitLogUpgradeTestMaker
         int dataSize = 0;
         final CommitLog commitLog;
 
-        volatile CommitLogSegmentPosition rp;
+        volatile CommitLogSegmentPosition clsp;
 
         public CommitlogExecutor(CommitLog commitLog)
         {
@@ -249,7 +249,7 @@ public class CommitLogUpgradeTestMaker
                     dataSize += sz;
                 }
 
-                rp = commitLog.add(Keyspace.open(KEYSPACE), (Mutation)builder.makeMutation());
+                clsp = commitLog.add(Keyspace.open(KEYSPACE), (Mutation)builder.makeMutation());
                 counter.incrementAndGet();
             }
         }

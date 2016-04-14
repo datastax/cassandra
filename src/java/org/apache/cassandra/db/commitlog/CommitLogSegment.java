@@ -586,8 +586,6 @@ public abstract class CommitLogSegment
 
     /**
      * A simple class for tracking information about the portion of a segment that has been allocated to a log write.
-     * The constructor leaves the fields uninitialized for population by CommitlogManager, so that it can be
-     * stack-allocated by escape analysis in CommitLog.add.
      */
     protected static class Allocation
     {

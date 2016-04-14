@@ -157,7 +157,7 @@ public class CommitLog implements CommitLogMBean
 
         // Allocator could be in the process of initial startup with 0 active and available segments. We need to wait for
         // the allocation manager to finish allocation and add it to available segments so we don't get an invalid response
-        // on segmentManagerStandard.manages(...) below by grabbing a file off the filesystem before it's added to the CLQ.
+        // on manager.manages(...) below by grabbing a file off the filesystem before it's added to the CLQ.
         manager.allocatingFrom();
 
         FilenameFilter unmanagedFilesFilter = new FilenameFilter()
@@ -195,7 +195,7 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayed);
 
             for (File f : files)
-                manager.deleteUntrackedCommitLogSegment(f);
+                manager.handleReplayedSegment(f);
         }
 
         manager.enableReserveSegmentCreation();

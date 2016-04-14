@@ -56,7 +56,7 @@ public class CommitLogTestReplayer extends CommitLogReplayer
     private class CommitLogTestReader extends CommitLogReader
     {
         @Override
-        protected void readMutation(ICommitLogReadHandler handler,
+        protected void readMutation(CommitLogReadHandler handler,
                                     byte[] inputBuffer,
                                     int size,
                                     final long entryLocation,
