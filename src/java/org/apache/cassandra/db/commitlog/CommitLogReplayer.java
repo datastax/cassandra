@@ -416,7 +416,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     public boolean shouldStopOnError(CommitLogReadException exception) throws IOException
     {
-        if (exception.permissable)
+        if (exception.permissible)
             logger.error("Ignoring commit log replay error likely due to incomplete flush to disk", exception);
         else if (Boolean.getBoolean(IGNORE_REPLAY_ERRORS_PROPERTY))
             logger.error("Ignoring commit log replay error", exception);

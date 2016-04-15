@@ -22,88 +22,35 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.DirectorySizeCalculator;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 {
     static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentManagerCDC.class);
-
-    private final AtomicLong cdcOverflowSize = new AtomicLong(0);
     private final CDCSizeCalculator cdcSizeCalculator;
-    private ExecutorService cdcSizeCalculationExecutor;
-
-    // We don't want every failed allocation to create a runnable for the queue, so we guard
-    private AtomicBoolean reCalculating = new AtomicBoolean(false);
 
     public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
     {
         super(commitLog, storageDirectory);
         cdcSizeCalculator = new CDCSizeCalculator(new File(DatabaseDescriptor.getCDCOverflowLocation()));
+        cdcSizeCalculator.start();
     }
 
     @Override
     void start()
     {
-        cdcSizeCalculationExecutor = Executors.newSingleThreadExecutor();
         super.start();
-    }
-
-    private void maybeUpdateCDCSizeCounterAsync(int sleepDuration)
-    {
-        if (reCalculating.compareAndSet(false, true))
-        {
-            try
-            {
-                cdcSizeCalculationExecutor.submit(() -> updateCDCDirectorySize(sleepDuration));
-            }
-            catch (Exception e)
-            {
-                reCalculating.compareAndSet(true, false);
-                if (!(e instanceof RejectedExecutionException))
-                    JVMStabilityInspector.inspectCommitLogThrowable(e);
-            }
-        }
-    }
-
-    private void updateCDCDirectorySize(int sleepDurationMS)
-    {
-        try
-        {
-            // Rather than burning CPU by allowing spinning on this recalc if we have long-running or intermittent CDC
-            // consumption, we sleep the size calculation thread based on user configuration.
-            Thread.sleep(sleepDurationMS);
-            try
-            {
-                cdcSizeCalculator.calculateSize();
-                cdcOverflowSize.set(cdcSizeCalculator.getAllocatedSize());
-            }
-            catch (IOException ie)
-            {
-                CommitLog.instance.handleCommitError("IEXception trying to calculate size for CDC folder.", ie);
-            }
-        }
-        catch (InterruptedException ie)
-        {
-            // Do nothing if we're interrupted. It's a shutdown.
-            return;
-        }
-        finally
-        {
-            wakeManager();
-            if (!reCalculating.compareAndSet(true, false))
-                throw new AssertionError();
-        }
+        cdcSizeCalculator.start();
     }
 
     /**
@@ -121,11 +68,11 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         // on disk should be updated async on the next failed allocate() call and rectified, so while we can lose a sub-ms
         // window of mutations during that recalc due to a race w/overprovisioning of size, it's preferable compared to
         // a synchronous check of this on every allocation.
-        cdcOverflowSize.addAndGet(segment.onDiskSize());
+        cdcSizeCalculator.addAndGet(segment.onDiskSize());
 
-        // kick off an async check of the overflow size here as this isn't critical path. Don't sleep before check here
-        // or throttle - if consumers have been reading CDC files, we want to update that immediately.
-        maybeUpdateCDCSizeCounterAsync(0);
+        // Submit a recalculation of the actual on-disk size on the executor to get a more accurate picture and take
+        // into account any changes prompted by user consumption.
+        cdcSizeCalculator.submitOverflowSizeRecalculation();
     }
 
     /**
@@ -135,7 +82,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     public void shutdown()
     {
         run = false;
-        cdcSizeCalculationExecutor.shutdown();
+        cdcSizeCalculator.shutdown();
         wakeManager();
     }
 
@@ -160,8 +107,8 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         */
         if (atCapacity())
         {
-            maybeUpdateCDCSizeCounterAsync(DatabaseDescriptor.getCDCDiskCheckInterval());
-            return null;
+            cdcSizeCalculator.submitOverflowSizeRecalculation();
+            throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
         }
 
         CommitLogSegment segment = allocatingFrom();
@@ -184,7 +131,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     {
         long total = DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
         long currentSize = size.get();
-        long overflowSize = cdcOverflowSize.get();
+        long overflowSize = cdcSizeCalculator.getAllocatedSize();
         logger.trace("Total cdc commitlog segment space used is {} out of {}. Active segments: {} Overflow: {}", currentSize + overflowSize, total, currentSize, overflowSize);
         return total - (currentSize + overflowSize);
     }
@@ -217,20 +164,63 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     @VisibleForTesting
     public boolean atCapacity()
     {
-        return (cdcOverflowSize.get() + size.get()) >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
+        return (cdcSizeCalculator.getAllocatedSize() + size.get()) >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
     }
 
     private class CDCSizeCalculator extends DirectorySizeCalculator
     {
+        private final RateLimiter rateLimiter = RateLimiter.create(4);
+        private ExecutorService cdcSizeCalculationExecutor;
+
         CDCSizeCalculator(File path)
         {
             super(path);
         }
 
-        public void calculateSize() throws IOException
+        /**
+         * Needed for stop/restart during unit tests
+         */
+        public void start()
         {
-            rebuildFileList();
-            Files.walkFileTree(path.toPath(), this);
+            cdcSizeCalculationExecutor = Executors.newSingleThreadExecutor();
+        }
+
+        public void submitOverflowSizeRecalculation()
+        {
+            try
+            {
+                cdcSizeCalculationExecutor.submit(() -> {
+                        rateLimiter.acquire();
+                        calculateSize();
+                });
+            }
+            catch (RejectedExecutionException e)
+            {
+                // Do nothing. Means we have one in flight so this req. should be satisfied when it completes.
+            }
+        }
+
+        private void calculateSize()
+        {
+            try
+            {
+                rebuildFileList();
+                Files.walkFileTree(path.toPath(), this);
+            }
+            catch (IOException ie)
+            {
+                CommitLog.instance.handleCommitError("Failed CDC Size Calculation", ie);
+            }
+        }
+
+        public long addAndGet(long toAdd)
+        {
+            return size.addAndGet(toAdd);
+        }
+
+        public void shutdown()
+        {
+            cdcSizeCalculationExecutor.shutdown();
         }
     }
 
@@ -238,12 +228,18 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * Only use for testing / validation that size summer is working. Not for production use.
      */
     @VisibleForTesting
-    public long updateCDCOverflowSize(int sleepDurationMS)
+    public long updateCDCOverflowSize()
     {
-        boolean set = false;
-        while (!set) set = reCalculating.compareAndSet(false, true);
-        updateCDCDirectorySize(sleepDurationMS);
-        return cdcOverflowSize.get();
+        cdcSizeCalculator.submitOverflowSizeRecalculation();
+
+        // Give the update time to run
+        try
+        {
+            Thread.sleep(250);
+        }
+        catch (InterruptedException e) {}
+
+        return cdcSizeCalculator.getAllocatedSize();
     }
 
     public SegmentManagerType getSegmentManagerType()

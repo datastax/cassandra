@@ -69,9 +69,7 @@ public class CommitLog implements CommitLogMBean
     // empty segments when writing large records
     final long MAX_MUTATION_SIZE = DatabaseDescriptor.getMaxMutationSize();
 
-    private final AbstractCommitLogSegmentManager segmentManagerStandard;
-    private final AbstractCommitLogSegmentManager segmentManagerCDC;
-    private final List<AbstractCommitLogSegmentManager> segmentManagers = new ArrayList<>();
+    private final EnumMap<SegmentManagerType, AbstractCommitLogSegmentManager> segmentManagers = new EnumMap<>(SegmentManagerType.class);
 
     public final CommitLogArchiver archiver;
     final CommitLogMetrics metrics;
@@ -113,21 +111,19 @@ public class CommitLog implements CommitLogMBean
                 ? new BatchCommitLogService(this)
                 : new PeriodicCommitLogService(this);
 
-        segmentManagerStandard = new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation());
-        segmentManagerCDC = new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCDCLogLocation());
-
-        // Addition order matching SegmentManagerType enum for later ordinal() access
-        segmentManagers.add(segmentManagerStandard);
-        segmentManagers.add(segmentManagerCDC);
+        segmentManagers.put(SegmentManagerType.STANDARD, new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation()));
+        segmentManagers.put(SegmentManagerType.CDC, new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCDCLogLocation()));
 
         // register metrics
-        metrics.attach(executor, segmentManagerStandard, segmentManagerCDC);
+        metrics.attach(executor,
+                       segmentManagers.get(SegmentManagerType.STANDARD),
+                       segmentManagers.get(SegmentManagerType.CDC));
     }
 
     CommitLog start()
     {
         executor.start();
-        segmentManagers.forEach(AbstractCommitLogSegmentManager::start);
+        segmentManagers.values().forEach(AbstractCommitLogSegmentManager::start);
         return this;
     }
 
@@ -139,7 +135,7 @@ public class CommitLog implements CommitLogMBean
     public int recoverSegmentsOnDisk() throws IOException
     {
         int result = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers)
+        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
             result += recoverSegmentManager(clsm);
         return result;
     }
@@ -231,7 +227,7 @@ public class CommitLog implements CommitLogMBean
      */
     public CommitLogSegmentPosition getCurrentSegmentPosition(SegmentManagerType type)
     {
-        return segmentManagers.get(type.ordinal()).getCurrentSegmentPosition();
+        return segmentManagers.get(type).getCurrentSegmentPosition();
     }
 
     /**
@@ -252,7 +248,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void forceRecycleAllSegments(Iterable<UUID> droppedCfs)
     {
-        segmentManagers.forEach(x -> x.forceRecycleAll(droppedCfs));
+        segmentManagers.values().forEach(x -> x.forceRecycleAll(droppedCfs));
     }
 
     /**
@@ -260,7 +256,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void forceRecycleAllSegments()
     {
-        segmentManagers.forEach(x -> x.forceRecycleAll(Collections.<UUID>emptyList()));
+        segmentManagers.values().forEach(x -> x.forceRecycleAll(Collections.<UUID>emptyList()));
     }
 
     /**
@@ -268,7 +264,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void sync(boolean syncAllSegments) throws IOException
     {
-        for (AbstractCommitLogSegmentManager mgr : segmentManagers)
+        for (AbstractCommitLogSegmentManager mgr : segmentManagers.values())
             mgr.sync(syncAllSegments);
     }
 
@@ -304,14 +300,8 @@ public class CommitLog implements CommitLogMBean
             ? getSegmentManager(SegmentManagerType.CDC)
             : getSegmentManager(SegmentManagerType.STANDARD);
 
+        assert segmentManager != null;
         Allocation alloc = segmentManager.allocate(mutation, totalSize);
-
-        // CDC allocations can fail if we're at our allowable on-disk threshold
-        if (alloc == null)
-        {
-            assert AbstractCommitLogSegmentManager.getSegmentManagerType(keyspace) == SegmentManagerType.CDC;
-            throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
-        }
 
         CRC32 checksum = new CRC32();
         final ByteBuffer buffer = alloc.getBuffer();
@@ -412,7 +402,7 @@ public class CommitLog implements CommitLogMBean
     public List<String> getActiveSegmentNames()
     {
         List<String> segmentNames = new ArrayList<>();
-        segmentManagers.forEach(mgr -> mgr.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName())));
+        segmentManagers.values().forEach(mgr -> mgr.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName())));
         return segmentNames;
     }
 
@@ -425,7 +415,7 @@ public class CommitLog implements CommitLogMBean
     public long getActiveContentSize()
     {
         int size = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers)
+        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
             for (CommitLogSegment seg : clsm.getActiveSegments())
                 size += seg.contentSize();
         return size;
@@ -435,7 +425,7 @@ public class CommitLog implements CommitLogMBean
     public long getActiveOnDiskSize()
     {
         int size = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers)
+        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
             size += clsm.onDiskSize();
         return size;
     }
@@ -444,7 +434,7 @@ public class CommitLog implements CommitLogMBean
     public Map<String, Double> getActiveSegmentCompressionRatios()
     {
         Map<String, Double> segmentRatios = new TreeMap<>();
-        segmentManagers.forEach(clsm -> clsm.getActiveSegments().forEach(
+        segmentManagers.values().forEach(clsm -> clsm.getActiveSegments().forEach(
             seg -> segmentRatios.put(seg.getName(), 1.0 * seg.onDiskSize() / seg.contentSize())));
         return segmentRatios;
     }
@@ -457,11 +447,9 @@ public class CommitLog implements CommitLogMBean
         executor.shutdown();
         executor.awaitTermination();
 
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers)
-        {
-            clsm.shutdown();
+        segmentManagers.values().forEach(clsm -> clsm.shutdown());
+        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
             clsm.awaitTermination();
-        }
     }
 
     /**
@@ -488,7 +476,7 @@ public class CommitLog implements CommitLogMBean
         {
             throw new RuntimeException(e);
         }
-        segmentManagers.forEach(x -> x.stopUnsafe(deleteSegments));
+        segmentManagers.values().forEach(x -> x.stopUnsafe(deleteSegments));
         CommitLogSegment.resetReplayLimit();
         if (deleteSegments)
             for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
@@ -501,7 +489,7 @@ public class CommitLog implements CommitLogMBean
      */
     public int restartUnsafe() throws IOException
     {
-        segmentManagers.forEach(AbstractCommitLogSegmentManager::start);
+        segmentManagers.values().forEach(AbstractCommitLogSegmentManager::start);
         executor.restartUnsafe();
         try
         {
@@ -545,6 +533,6 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public AbstractCommitLogSegmentManager getSegmentManager(SegmentManagerType type)
     {
-        return segmentManagers.get(type.ordinal());
+        return segmentManagers.get(type);
     }
 }

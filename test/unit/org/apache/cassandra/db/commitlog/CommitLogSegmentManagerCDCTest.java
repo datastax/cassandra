@@ -94,7 +94,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         CommitLog.instance.resetUnsafe(true);
 
         CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager(SegmentManagerType.CDC);
-        long startSize = cdcMgr.updateCDCOverflowSize(0);
+        long startSize = cdcMgr.updateCDCOverflowSize();
 
         int samples = 1000;
 
@@ -133,13 +133,13 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
                 assertEquals(ByteBuffer.wrap(Integer.toString(i).getBytes()), r.getCell(cd).value());
         }
 
-        Assert.assertEquals("Expected no change in overflow folder size.", startSize, cdcMgr.updateCDCOverflowSize(0));
+        Assert.assertEquals("Expected no change in overflow folder size.", startSize, cdcMgr.updateCDCOverflowSize());
 
         // Recycle, confirm files are moved to cdc overflow.
         int fileCount = new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles().length;
         Assert.assertEquals("Expected there to be no files in cdc_overflow but found: " + fileCount, 0, fileCount);
         CommitLog.instance.forceRecycleAllSegments();
-        Assert.assertTrue("Expected change in overflow size on forced segment recycle", cdcMgr.updateCDCOverflowSize(250) != startSize);
+        Assert.assertTrue("Expected change in overflow size on forced segment recycle", cdcMgr.updateCDCOverflowSize() != startSize);
         fileCount = new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles().length;
         Assert.assertEquals("Expected to have 1 segment in cdc_overflow. Got " + fileCount, 1, fileCount);
     }
@@ -197,11 +197,13 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             // Force an update - this would normally be handled by failed allocate() calls within CommitLogSegmentManagerCDC,
             // but I'm using a test hook here to isolate it to a sequential operation.
             long newSize;
-            while ((newSize = cdcMgr.updateCDCOverflowSize(0)) > 0)
+            while ((newSize = cdcMgr.updateCDCOverflowSize()) > 0)
             {
                 // Simulate a CDC consumer reading files then deleting them
                 for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
+                {
                     FileUtils.deleteWithConfirm(f);
+                }
             }
             Assert.assertEquals("Expected empty overflow, instead found: " + newSize + " bytes on disk.", 0, newSize);
 

@@ -90,13 +90,13 @@ public abstract class AbstractCommitLogSegmentManager
     protected volatile boolean run = true;
     private final CommitLog commitLog;
 
-    private final SimpleCachedBufferPool bufferPool;
+    private static final SimpleCachedBufferPool bufferPool =
+        new SimpleCachedBufferPool(DatabaseDescriptor.getCommitLogMaxCompressionBuffersPerPool(), DatabaseDescriptor.getCommitLogSegmentSize());
 
     AbstractCommitLogSegmentManager(final CommitLog commitLog, String storageDirectory)
     {
         this.commitLog = commitLog;
         this.storageDirectory = storageDirectory;
-        this.bufferPool = new SimpleCachedBufferPool(DatabaseDescriptor.getCommitLogMaxCompressionBuffersPerPool(), DatabaseDescriptor.getCommitLogSegmentSize());
     }
 
     void start()
