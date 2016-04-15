@@ -38,13 +38,13 @@ public interface CommitLogReadHandler
     class CommitLogReadException extends IOException
     {
         public final CommitLogReadErrorReason reason;
-        public final boolean permissable;
+        public final boolean permissible;
 
-        CommitLogReadException(String message, CommitLogReadErrorReason reason, boolean permissable)
+        CommitLogReadException(String message, CommitLogReadErrorReason reason, boolean permissible)
         {
             super(message);
             this.reason = reason;
-            this.permissable = permissable;
+            this.permissible = permissible;
         }
     }
 
