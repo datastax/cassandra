@@ -44,6 +44,7 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
@@ -71,8 +72,6 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
-
-import static com.google.common.collect.Iterables.contains;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -929,7 +928,7 @@ public class StorageProxy implements StorageProxyMBean
         WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints.all,
                                                                      Collections.<InetAddress>emptyList(),
                                                                      endpoints.all.size() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO,
-                                                                     Keyspace.open(SystemKeyspace.NAME),
+                                                                     Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
                                                                      null,
                                                                      WriteType.BATCH_LOG);
 
@@ -1480,7 +1479,7 @@ public class StorageProxy implements StorageProxyMBean
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
     {
         for (ReadCommand cmd : cmds)
-            if (!Schema.isSystemKeyspace(cmd.metadata().ksName))
+            if (!SchemaConstants.isSystemKeyspace(cmd.metadata().ksName))
                 return false;
         return true;
     }
@@ -1790,7 +1789,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             try
             {
-                command.setMonitoringTime(new ConstructionTime(constructionTime), timeout);
+                command.setMonitoringTime(new ConstructionTime(constructionTime), verb.getTimeout());
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController();
@@ -2444,19 +2443,17 @@ public class StorageProxy implements StorageProxyMBean
     {
         final long constructionTime;
         final MessagingService.Verb verb;
-        final long timeout;
 
         public DroppableRunnable(MessagingService.Verb verb)
         {
             this.constructionTime = System.currentTimeMillis();
             this.verb = verb;
-            this.timeout = DatabaseDescriptor.getTimeout(verb);
         }
 
         public final void run()
         {
             long timeTaken = System.currentTimeMillis() - constructionTime;
-            if (timeTaken > timeout)
+            if (timeTaken > verb.getTimeout())
             {
                 MessagingService.instance().incrementDroppedMessages(verb, timeTaken);
                 return;
@@ -2497,7 +2494,7 @@ public class StorageProxy implements StorageProxyMBean
         public final void run()
         {
             final MessagingService.Verb verb = verb();
-            long mutationTimeout = DatabaseDescriptor.getTimeout(verb);
+            long mutationTimeout = verb.getTimeout();
             long timeTaken = System.currentTimeMillis() - constructionTime;
             if (timeTaken > mutationTimeout)
             {

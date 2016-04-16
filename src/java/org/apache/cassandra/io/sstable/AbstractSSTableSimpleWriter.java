@@ -44,7 +44,7 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
     protected final File directory;
     protected final CFMetaData metadata;
     protected final PartitionColumns columns;
-    protected SSTableFormat.Type formatType = DatabaseDescriptor.getSSTableFormat();
+    protected SSTableFormat.Type formatType = SSTableFormat.Type.current();
     protected static AtomicInteger generation = new AtomicInteger(0);
 
     protected AbstractSSTableSimpleWriter(File directory, CFMetaData metadata, PartitionColumns columns)

@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -35,8 +36,6 @@ public final class TraceKeyspace
     private TraceKeyspace()
     {
     }
-
-    public static final String NAME = "system_traces";
 
     public static final String SESSIONS = "sessions";
     public static final String EVENTS = "events";
@@ -69,13 +68,13 @@ public final class TraceKeyspace
 
     private static CFMetaData compile(String name, String description, String schema)
     {
-        return CFMetaData.compile(String.format(schema, name), NAME)
+        return CFMetaData.compile(String.format(schema, name), SchemaConstants.TRACE_KEYSPACE_NAME)
                          .comment(description);
     }
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(NAME, KeyspaceParams.simple(2), Tables.of(Sessions, Events));
+        return KeyspaceMetadata.create(SchemaConstants.TRACE_KEYSPACE_NAME, KeyspaceParams.simple(2), Tables.of(Sessions, Events));
     }
 
     static Mutation makeStartSessionMutation(ByteBuffer sessionId,

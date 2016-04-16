@@ -29,6 +29,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.functions.*;
@@ -81,7 +82,7 @@ public class LegacySchemaMigratorTest
         // verify that nothing's left in the old schema tables
         for (CFMetaData table : LegacySchemaMigrator.LegacySchemaTables)
         {
-            String query = format("SELECT * FROM %s.%s", SystemKeyspace.NAME, table.cfName);
+            String query = format("SELECT * FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, table.cfName);
             //noinspection ConstantConditions
             assertTrue(executeOnceInternal(query).isEmpty());
         }
@@ -97,7 +98,7 @@ public class LegacySchemaMigratorTest
 
     private static void loadLegacySchemaTables()
     {
-        KeyspaceMetadata systemKeyspace = Schema.instance.getKSMetaData(SystemKeyspace.NAME);
+        KeyspaceMetadata systemKeyspace = Schema.instance.getKSMetaData(SchemaConstants.SYSTEM_KEYSPACE_NAME);
 
         Tables systemTables = systemKeyspace.tables;
         for (CFMetaData table : LegacySchemaMigrator.LegacySchemaTables)

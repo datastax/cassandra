@@ -36,8 +36,10 @@ import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 import com.googlecode.concurrentlinkedhashmap.EntryWeigher;
 import org.antlr.runtime.*;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.statements.*;
@@ -155,7 +157,7 @@ public class QueryProcessor implements QueryHandler
         InternalStateInstance()
         {
             ClientState state = ClientState.forInternalCalls();
-            state.setKeyspace(SystemKeyspace.NAME);
+            state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             this.queryState = new QueryState(state);
         }
     }

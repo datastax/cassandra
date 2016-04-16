@@ -192,7 +192,7 @@ final class HintsDispatcher implements AutoCloseable
 
         Outcome await()
         {
-            long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getTimeout(MessagingService.Verb.HINT)) - (System.nanoTime() - start);
+            long timeout = TimeUnit.MILLISECONDS.toNanos(MessagingService.Verb.HINT.getTimeout()) - (System.nanoTime() - start);
             boolean timedOut;
 
             try

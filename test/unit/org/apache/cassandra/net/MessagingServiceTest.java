@@ -2,12 +2,21 @@ package org.apache.cassandra.net;
 
 import java.util.List;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.junit.Assert.assertEquals;
 
 public class MessagingServiceTest
 {
+    @BeforeClass
+    public static void initDD()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     private final MessagingService messagingService = MessagingService.test();
 
     @Test

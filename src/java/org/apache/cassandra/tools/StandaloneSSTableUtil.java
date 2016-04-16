@@ -19,6 +19,7 @@
 package org.apache.cassandra.tools;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -47,6 +48,7 @@ public class StandaloneSSTableUtil
         try
         {
             // load keyspace descriptions.
+            Util.initDatabaseDescriptor();
             Schema.instance.loadFromDisk(false);
 
             CFMetaData metadata = Schema.instance.getCFMetaData(options.keyspaceName, options.cfName);

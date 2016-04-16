@@ -79,8 +79,10 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.CounterMutationVerbHandler;
 import org.apache.cassandra.db.DecoratedKey;
@@ -317,6 +319,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         legacyProgressSupport = new LegacyJMXProgressSupport(this, jmxObjectName);
+
+        // TODO only register verb handlers (and implicity startup messaging service) when in daemon mode - how??
 
         /* register the verb handlers */
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MUTATION, new MutationVerbHandler());
@@ -711,7 +715,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }, "StorageServiceShutdownHook");
         Runtime.getRuntime().addShutdownHook(drainOnShutdown);
 
-        replacing = DatabaseDescriptor.isReplacing();
+        replacing = isReplacing();
 
         if (!Boolean.parseBoolean(System.getProperty("cassandra.start_gossip", "true")))
         {
@@ -779,6 +783,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
             }
         }
+    }
+
+    private boolean isReplacing()
+    {
+        if (System.getProperty("cassandra.replace_address_first_boot", null) != null && SystemKeyspace.bootstrapComplete())
+        {
+            logger.info("Replace address on first boot requested; this node is already bootstrapped");
+            return false;
+        }
+        return DatabaseDescriptor.getReplaceAddress() != null;
     }
 
     /**
@@ -923,7 +937,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (int i = 0; i < delay; i += 1000)
             {
                 // if we see schema, we can proceed to the next check directly
-                if (!Schema.instance.getVersion().equals(Schema.emptyVersion))
+                if (!Schema.instance.getVersion().equals(SchemaConstants.emptyVersion))
                 {
                     logger.debug("got schema: {}", Schema.instance.getVersion());
                     break;
@@ -2820,7 +2834,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int forceKeyspaceCleanup(int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
-        if (Schema.isSystemKeyspace(keyspaceName))
+        if (SchemaConstants.isSystemKeyspace(keyspaceName))
             throw new RuntimeException("Cleanup of the system keyspace is neither necessary nor wise");
 
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
@@ -3119,7 +3133,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Map<String, TabularData> snapshotMap = new HashMap<>();
         for (Keyspace keyspace : Keyspace.all())
         {
-            if (Schema.isSystemKeyspace(keyspace.getName()))
+            if (SchemaConstants.isSystemKeyspace(keyspace.getName()))
                 continue;
 
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())
@@ -3145,7 +3159,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         long total = 0;
         for (Keyspace keyspace : Keyspace.all())
         {
-            if (Schema.isSystemKeyspace(keyspace.getName()))
+            if (SchemaConstants.isSystemKeyspace(keyspace.getName()))
                 continue;
 
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())

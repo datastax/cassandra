@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.util;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.Config;
@@ -27,6 +28,12 @@ import static org.junit.Assert.assertEquals;
 
 public class SegmentedFileTest
 {
+    @BeforeClass
+    public static void setupDD()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testRoundingBufferSize()
     {

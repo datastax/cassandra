@@ -47,7 +47,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
@@ -55,6 +54,8 @@ import org.apache.cassandra.net.AsyncOneResponse;
 
 import org.codehaus.jackson.JsonFactory;
 import org.codehaus.jackson.map.ObjectMapper;
+
+// DO NOT USE ANYTHING IN THIS CLASS THAT REFERENCES ANYTHING THAT LAZILY INITIALIZES SOMETHING
 
 public class FBUtilities
 {
@@ -688,20 +689,6 @@ public class FBUtilities
         int position = buffer.position();
         checksum.update(buffer);
         buffer.position(position);
-    }
-
-    private static final ThreadLocal<byte[]> threadLocalScratchBuffer = new ThreadLocal<byte[]>()
-    {
-        @Override
-        protected byte[] initialValue()
-        {
-            return new byte[CompressionParams.DEFAULT_CHUNK_LENGTH];
-        }
-    };
-
-    public static byte[] getThreadLocalScratchBuffer()
-    {
-        return threadLocalScratchBuffer.get();
     }
 
     public static long abs(long index)

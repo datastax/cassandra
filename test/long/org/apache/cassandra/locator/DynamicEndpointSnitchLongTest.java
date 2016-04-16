@@ -23,8 +23,10 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.auth.AuthSetup;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
@@ -35,6 +37,11 @@ import static org.junit.Assert.assertEquals;
 
 public class DynamicEndpointSnitchLongTest
 {
+    static
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testConcurrency() throws InterruptedException, IOException, ConfigurationException
     {

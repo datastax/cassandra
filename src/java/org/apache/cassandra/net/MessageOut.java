@@ -90,7 +90,7 @@ public class MessageOut<T>
 
     public long getTimeout()
     {
-        return DatabaseDescriptor.getTimeout(verb);
+        return verb.getTimeout();
     }
 
     public String toString()

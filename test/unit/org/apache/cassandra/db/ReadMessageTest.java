@@ -30,6 +30,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogTestReplayer;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -56,6 +57,8 @@ public class ReadMessageTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        DatabaseDescriptor.daemonInitialization();
+
         CFMetaData cfForReadMetadata = CFMetaData.Builder.create(KEYSPACE1, CF_FOR_READ_TEST)
                                                             .addPartitionKey("key", BytesType.instance)
                                                             .addClusteringColumn("col1", AsciiType.instance)

@@ -28,10 +28,12 @@ import static org.apache.commons.io.FileUtils.readFileToByteArray;
 import static org.junit.Assert.assertEquals;
 
 import org.junit.After;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BytesType;
@@ -47,6 +49,12 @@ import org.apache.cassandra.utils.ChecksumType;
 public class CompressedSequentialWriterTest extends SequentialWriterTest
 {
     private CompressionParams compressionParameters;
+
+    @BeforeClass
+    public static void setupDD()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     private void runTests(String testName) throws IOException
     {

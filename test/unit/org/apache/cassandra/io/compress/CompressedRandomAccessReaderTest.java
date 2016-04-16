@@ -23,7 +23,10 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Random;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -45,6 +48,12 @@ import static org.junit.Assert.assertTrue;
 
 public class CompressedRandomAccessReaderTest
 {
+    @BeforeClass
+    public static void setupDD()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testResetAndTruncate() throws IOException
     {

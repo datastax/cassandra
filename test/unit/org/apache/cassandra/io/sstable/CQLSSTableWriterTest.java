@@ -33,6 +33,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.auth.AuthSetup;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.UDHelper;
@@ -51,6 +52,12 @@ import static org.junit.Assert.assertEquals;
 
 public class CQLSSTableWriterTest
 {
+    static
+    {
+        DatabaseDescriptor.daemonInitialization();
+        AuthSetup.applyAuthz();
+    }
+
     @BeforeClass
     public static void setup() throws Exception
     {

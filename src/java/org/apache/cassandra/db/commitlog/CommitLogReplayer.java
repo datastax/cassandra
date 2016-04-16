@@ -55,6 +55,7 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -244,7 +245,7 @@ public class CommitLogReplayer
         List<Future<?>> futures = new ArrayList<Future<?>>();
         for (Keyspace keyspace : keyspacesRecovered)
         {
-            if (keyspace.getName().equals(SystemKeyspace.NAME))
+            if (keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 flushingSystem = true;
 
             futures.addAll(keyspace.flush());
@@ -252,7 +253,7 @@ public class CommitLogReplayer
 
         // also flush batchlog incase of any MV updates
         if (!flushingSystem)
-            futures.add(Keyspace.open(SystemKeyspace.NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
+            futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
         FBUtilities.waitOnFutures(futures);
 

@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.math.BigDecimal;
-import java.math.MathContext;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
@@ -41,14 +40,13 @@ import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet.Row;
 import org.apache.cassandra.cql3.functions.UDAggregate;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.DynamicCompositeType;
 import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -1396,7 +1394,7 @@ public class AggregationTest extends CQLTester
                              "CREATE AGGREGATE " + KEYSPACE_PER_TEST + ".test_wrong_ks(int) " +
                              "SFUNC " + shortFunctionName(fState) + ' ' +
                              "STYPE " + type + ' ' +
-                             "FINALFUNC " + SystemKeyspace.NAME + ".min " +
+                             "FINALFUNC " + SchemaConstants.SYSTEM_KEYSPACE_NAME + ".min " +
                              "INITCOND 1");
     }
 

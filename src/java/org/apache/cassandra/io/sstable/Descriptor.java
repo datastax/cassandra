@@ -68,7 +68,7 @@ public class Descriptor
     @VisibleForTesting
     public Descriptor(File directory, String ksname, String cfname, int generation)
     {
-        this(DatabaseDescriptor.getSSTableFormat().info.getLatestVersion(), directory, ksname, cfname, generation, DatabaseDescriptor.getSSTableFormat(), null);
+        this(SSTableFormat.Type.current().info.getLatestVersion(), directory, ksname, cfname, generation, SSTableFormat.Type.current(), null);
     }
 
     /**

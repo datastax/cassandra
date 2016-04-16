@@ -32,6 +32,7 @@ import javax.management.ObjectName;
 
 import com.google.common.util.concurrent.Futures;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;

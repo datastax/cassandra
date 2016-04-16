@@ -783,7 +783,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public String getSSTablePath(File directory)
     {
-        return getSSTablePath(directory, DatabaseDescriptor.getSSTableFormat().info.getLatestVersion(), DatabaseDescriptor.getSSTableFormat());
+        return getSSTablePath(directory, SSTableFormat.Type.current().info.getLatestVersion(), SSTableFormat.Type.current());
     }
 
     public String getSSTablePath(File directory, SSTableFormat.Type format)

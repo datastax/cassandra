@@ -25,11 +25,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class RecoveryManagerFlushedTest
@@ -55,8 +55,8 @@ public class RecoveryManagerFlushedTest
     public void testWithFlush() throws Exception
     {
         // Flush everything that may be in the commit log now to start fresh
-        FBUtilities.waitOnFutures(Keyspace.open(SystemKeyspace.NAME).flush());
-        FBUtilities.waitOnFutures(Keyspace.open(SchemaKeyspace.NAME).flush());
+        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush());
+        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush());
 
 
         CompactionManager.instance.disableAutoCompaction();

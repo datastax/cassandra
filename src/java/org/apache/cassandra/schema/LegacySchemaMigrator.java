@@ -86,7 +86,7 @@ public final class LegacySchemaMigrator
         // write metadata to the new schema tables
         logger.info("Moving {} keyspaces from legacy schema tables to the new schema keyspace ({})",
                     keyspaces.size(),
-                    SchemaKeyspace.NAME);
+                    SchemaConstants.SCHEMA_KEYSPACE_NAME);
         keyspaces.forEach(LegacySchemaMigrator::storeKeyspaceInNewSchemaTables);
         keyspaces.forEach(LegacySchemaMigrator::migrateBuiltIndexesForKeyspace);
 
@@ -126,7 +126,7 @@ public final class LegacySchemaMigrator
 
     static void unloadLegacySchemaTables()
     {
-        KeyspaceMetadata systemKeyspace = Schema.instance.getKSMetaData(SystemKeyspace.NAME);
+        KeyspaceMetadata systemKeyspace = Schema.instance.getKSMetaData(SchemaConstants.SYSTEM_KEYSPACE_NAME);
 
         Tables systemTables = systemKeyspace.tables;
         for (CFMetaData table : LegacySchemaTables)
@@ -168,10 +168,10 @@ public final class LegacySchemaMigrator
      */
     private static Collection<Keyspace> readSchema()
     {
-        String query = format("SELECT keyspace_name FROM %s.%s", SystemKeyspace.NAME, SystemKeyspace.LEGACY_KEYSPACES);
+        String query = format("SELECT keyspace_name FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_KEYSPACES);
         Collection<String> keyspaceNames = new ArrayList<>();
         query(query).forEach(row -> keyspaceNames.add(row.getString("keyspace_name")));
-        keyspaceNames.removeAll(Schema.SYSTEM_KEYSPACE_NAMES);
+        keyspaceNames.removeAll(SchemaConstants.SYSTEM_KEYSPACE_NAMES);
 
         Collection<Keyspace> keyspaces = new ArrayList<>();
         keyspaceNames.forEach(name -> keyspaces.add(readKeyspace(name)));
@@ -200,7 +200,7 @@ public final class LegacySchemaMigrator
     private static long readKeyspaceTimestamp(String keyspaceName)
     {
         String query = format("SELECT writeTime(durable_writes) AS timestamp FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_KEYSPACES);
         return query(query, keyspaceName).one().getLong("timestamp");
     }
@@ -208,7 +208,7 @@ public final class LegacySchemaMigrator
     private static KeyspaceParams readKeyspaceParams(String keyspaceName)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_KEYSPACES);
         UntypedResultSet.Row row = query(query, keyspaceName).one();
 
@@ -228,7 +228,7 @@ public final class LegacySchemaMigrator
     private static Collection<Table> readTables(String keyspaceName)
     {
         String query = format("SELECT columnfamily_name FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_COLUMNFAMILIES);
         Collection<String> tableNames = new ArrayList<>();
         query(query, keyspaceName).forEach(row -> tableNames.add(row.getString("columnfamily_name")));
@@ -248,7 +248,7 @@ public final class LegacySchemaMigrator
     private static long readTableTimestamp(String keyspaceName, String tableName)
     {
         String query = format("SELECT writeTime(type) AS timestamp FROM %s.%s WHERE keyspace_name = ? AND columnfamily_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_COLUMNFAMILIES);
         return query(query, keyspaceName, tableName).one().getLong("timestamp");
     }
@@ -256,17 +256,17 @@ public final class LegacySchemaMigrator
     private static CFMetaData readTableMetadata(String keyspaceName, String tableName)
     {
         String tableQuery = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND columnfamily_name = ?",
-                                   SystemKeyspace.NAME,
+                                   SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                    SystemKeyspace.LEGACY_COLUMNFAMILIES);
         UntypedResultSet.Row tableRow = query(tableQuery, keyspaceName, tableName).one();
 
         String columnsQuery = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND columnfamily_name = ?",
-                                     SystemKeyspace.NAME,
+                                     SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.LEGACY_COLUMNS);
         UntypedResultSet columnRows = query(columnsQuery, keyspaceName, tableName);
 
         String triggersQuery = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND columnfamily_name = ?",
-                                      SystemKeyspace.NAME,
+                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                       SystemKeyspace.LEGACY_TRIGGERS);
         UntypedResultSet triggerRows = query(triggersQuery, keyspaceName, tableName);
 
@@ -774,7 +774,7 @@ public final class LegacySchemaMigrator
     private static Collection<Type> readTypes(String keyspaceName)
     {
         String query = format("SELECT type_name FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_USERTYPES);
         Collection<String> typeNames = new ArrayList<>();
         query(query, keyspaceName).forEach(row -> typeNames.add(row.getString("type_name")));
@@ -797,7 +797,7 @@ public final class LegacySchemaMigrator
      */
     private static long readTypeTimestamp(String keyspaceName, String typeName)
     {
-        ColumnFamilyStore store = org.apache.cassandra.db.Keyspace.open(SystemKeyspace.NAME)
+        ColumnFamilyStore store = org.apache.cassandra.db.Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
                                                                   .getColumnFamilyStore(SystemKeyspace.LEGACY_USERTYPES);
 
         ClusteringComparator comparator = store.metadata.comparator;
@@ -816,7 +816,7 @@ public final class LegacySchemaMigrator
     private static UserType readTypeMetadata(String keyspaceName, String typeName)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND type_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_USERTYPES);
         UntypedResultSet.Row row = query(query, keyspaceName, typeName).one();
 
@@ -842,7 +842,7 @@ public final class LegacySchemaMigrator
     private static Collection<Function> readFunctions(String keyspaceName)
     {
         String query = format("SELECT function_name, signature FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_FUNCTIONS);
         HashMultimap<String, List<String>> functionSignatures = HashMultimap.create();
         query(query, keyspaceName).forEach(row -> functionSignatures.put(row.getString("function_name"), row.getList("signature", UTF8Type.instance)));
@@ -864,7 +864,7 @@ public final class LegacySchemaMigrator
         String query = format("SELECT writeTime(return_type) AS timestamp " +
                               "FROM %s.%s " +
                               "WHERE keyspace_name = ? AND function_name = ? AND signature = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_FUNCTIONS);
         return query(query, keyspaceName, functionName, signature).one().getLong("timestamp");
     }
@@ -872,7 +872,7 @@ public final class LegacySchemaMigrator
     private static UDFunction readFunctionMetadata(String keyspaceName, String functionName, List<String> signature)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND function_name = ? AND signature = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_FUNCTIONS);
         UntypedResultSet.Row row = query(query, keyspaceName, functionName, signature).one();
 
@@ -911,7 +911,7 @@ public final class LegacySchemaMigrator
     private static Collection<Aggregate> readAggregates(Functions functions, String keyspaceName)
     {
         String query = format("SELECT aggregate_name, signature FROM %s.%s WHERE keyspace_name = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_AGGREGATES);
         HashMultimap<String, List<String>> aggregateSignatures = HashMultimap.create();
         query(query, keyspaceName).forEach(row -> aggregateSignatures.put(row.getString("aggregate_name"), row.getList("signature", UTF8Type.instance)));
@@ -933,7 +933,7 @@ public final class LegacySchemaMigrator
         String query = format("SELECT writeTime(return_type) AS timestamp " +
                               "FROM %s.%s " +
                               "WHERE keyspace_name = ? AND aggregate_name = ? AND signature = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_AGGREGATES);
         return query(query, keyspaceName, aggregateName, signature).one().getLong("timestamp");
     }
@@ -941,7 +941,7 @@ public final class LegacySchemaMigrator
     private static UDAggregate readAggregateMetadata(Functions functions, String keyspaceName, String functionName, List<String> signature)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND aggregate_name = ? AND signature = ?",
-                              SystemKeyspace.NAME,
+                              SchemaConstants.SYSTEM_KEYSPACE_NAME,
                               SystemKeyspace.LEGACY_AGGREGATES);
         UntypedResultSet.Row row = query(query, keyspaceName, functionName, signature).one();
 

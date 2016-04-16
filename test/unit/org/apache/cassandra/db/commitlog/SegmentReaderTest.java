@@ -29,8 +29,10 @@ import java.util.Random;
 import javax.crypto.Cipher;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.SegmentReader.CompressedSegmenter;
 import org.apache.cassandra.db.commitlog.SegmentReader.EncryptedSegmenter;
 import org.apache.cassandra.db.commitlog.SegmentReader.SyncSegment;
@@ -49,6 +51,12 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 public class SegmentReaderTest
 {
     static final Random random = new Random();
+
+    @BeforeClass
+    public static void setupDD()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     @Test
     public void compressedSegmenter_LZ4() throws IOException

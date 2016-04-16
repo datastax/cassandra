@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.*;
@@ -81,8 +82,6 @@ public final class SystemKeyspace
     // Used to indicate that no previous version information was found. When encountered, we assume that
     // Cassandra was not previously installed and we're in the process of starting a fresh node.
     public static final CassandraVersion NULL_VERSION = new CassandraVersion("0.0.0-absent");
-
-    public static final String NAME = "system";
 
     public static final String BATCHES = "batches";
     public static final String PAXOS = "paxos";
@@ -409,13 +408,13 @@ public final class SystemKeyspace
 
     private static CFMetaData compile(String name, String description, String schema)
     {
-        return CFMetaData.compile(String.format(schema, name), NAME)
+        return CFMetaData.compile(String.format(schema, name), SchemaConstants.SYSTEM_KEYSPACE_NAME)
                          .comment(description);
     }
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(NAME, KeyspaceParams.local(), tables(), Views.none(), Types.none(), functions());
+        return KeyspaceMetadata.create(SchemaConstants.SYSTEM_KEYSPACE_NAME, KeyspaceParams.local(), tables(), Views.none(), Types.none(), functions());
     }
 
     private static Tables tables()
@@ -533,14 +532,14 @@ public final class SystemKeyspace
     public static boolean isViewBuilt(String keyspaceName, String viewName)
     {
         String req = "SELECT view_name FROM %s.\"%s\" WHERE keyspace_name=? AND view_name=?";
-        UntypedResultSet result = executeInternal(String.format(req, NAME, BUILT_VIEWS), keyspaceName, viewName);
+        UntypedResultSet result = executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
         return !result.isEmpty();
     }
 
     public static boolean isViewStatusReplicated(String keyspaceName, String viewName)
     {
         String req = "SELECT status_replicated FROM %s.\"%s\" WHERE keyspace_name=? AND view_name=?";
-        UntypedResultSet result = executeInternal(String.format(req, NAME, BUILT_VIEWS), keyspaceName, viewName);
+        UntypedResultSet result = executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
 
         if (result.isEmpty())
             return false;
@@ -551,18 +550,18 @@ public final class SystemKeyspace
     public static void setViewBuilt(String keyspaceName, String viewName, boolean replicated)
     {
         String req = "INSERT INTO %s.\"%s\" (keyspace_name, view_name, status_replicated) VALUES (?, ?, ?)";
-        executeInternal(String.format(req, NAME, BUILT_VIEWS), keyspaceName, viewName, replicated);
+        executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName, replicated);
         forceBlockingFlush(BUILT_VIEWS);
     }
 
     public static void setViewRemoved(String keyspaceName, String viewName)
     {
         String buildReq = "DELETE FROM %S.%s WHERE keyspace_name = ? AND view_name = ?";
-        executeInternal(String.format(buildReq, NAME, VIEWS_BUILDS_IN_PROGRESS), keyspaceName, viewName);
+        executeInternal(String.format(buildReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, VIEWS_BUILDS_IN_PROGRESS), keyspaceName, viewName);
         forceBlockingFlush(VIEWS_BUILDS_IN_PROGRESS);
 
         String builtReq = "DELETE FROM %s.\"%s\" WHERE keyspace_name = ? AND view_name = ?";
-        executeInternal(String.format(builtReq, NAME, BUILT_VIEWS), keyspaceName, viewName);
+        executeInternal(String.format(builtReq, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_VIEWS), keyspaceName, viewName);
         forceBlockingFlush(BUILT_VIEWS);
     }
 
@@ -785,7 +784,7 @@ public final class SystemKeyspace
     public static void forceBlockingFlush(String cfname)
     {
         if (!Boolean.getBoolean("cassandra.unsafesystem"))
-            FBUtilities.waitOnFuture(Keyspace.open(NAME).getColumnFamilyStore(cfname).forceFlush());
+            FBUtilities.waitOnFuture(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(cfname).forceFlush());
     }
 
     /**
@@ -901,7 +900,7 @@ public final class SystemKeyspace
         Keyspace keyspace;
         try
         {
-            keyspace = Keyspace.open(NAME);
+            keyspace = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
         }
         catch (AssertionError err)
         {
@@ -1012,21 +1011,21 @@ public final class SystemKeyspace
     public static boolean isIndexBuilt(String keyspaceName, String indexName)
     {
         String req = "SELECT index_name FROM %s.\"%s\" WHERE table_name=? AND index_name=?";
-        UntypedResultSet result = executeInternal(String.format(req, NAME, BUILT_INDEXES), keyspaceName, indexName);
+        UntypedResultSet result = executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
         return !result.isEmpty();
     }
 
     public static void setIndexBuilt(String keyspaceName, String indexName)
     {
         String req = "INSERT INTO %s.\"%s\" (table_name, index_name) VALUES (?, ?)";
-        executeInternal(String.format(req, NAME, BUILT_INDEXES), keyspaceName, indexName);
+        executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
         forceBlockingFlush(BUILT_INDEXES);
     }
 
     public static void setIndexRemoved(String keyspaceName, String indexName)
     {
         String req = "DELETE FROM %s.\"%s\" WHERE table_name = ? AND index_name = ?";
-        executeInternal(String.format(req, NAME, BUILT_INDEXES), keyspaceName, indexName);
+        executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, indexName);
         forceBlockingFlush(BUILT_INDEXES);
     }
 
@@ -1034,7 +1033,7 @@ public final class SystemKeyspace
     {
         List<String> names = new ArrayList<>(indexNames);
         String req = "SELECT index_name from %s.\"%s\" WHERE table_name=? AND index_name IN ?";
-        UntypedResultSet results = executeInternal(String.format(req, NAME, BUILT_INDEXES), keyspaceName, names);
+        UntypedResultSet results = executeInternal(String.format(req, SchemaConstants.SYSTEM_KEYSPACE_NAME, BUILT_INDEXES), keyspaceName, names);
         return StreamSupport.stream(results.spliterator(), false)
                             .map(r -> r.getString("index_name"))
                             .collect(Collectors.toList());
@@ -1244,7 +1243,7 @@ public final class SystemKeyspace
      */
     public static void clearSizeEstimates(String keyspace, String table)
     {
-        String cql = String.format("DELETE FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", NAME, SIZE_ESTIMATES);
+        String cql = String.format("DELETE FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SYSTEM_KEYSPACE_NAME, SIZE_ESTIMATES);
         executeInternal(cql, keyspace, table);
     }
 
@@ -1277,7 +1276,7 @@ public final class SystemKeyspace
 
     public static void resetAvailableRanges()
     {
-        ColumnFamilyStore availableRanges = Keyspace.open(NAME).getColumnFamilyStore(AVAILABLE_RANGES);
+        ColumnFamilyStore availableRanges = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(AVAILABLE_RANGES);
         availableRanges.truncateBlocking();
     }
 
@@ -1301,7 +1300,7 @@ public final class SystemKeyspace
             String snapshotName = Keyspace.getTimestampedSnapshotName(String.format("upgrade-%s-%s",
                                                                                     previous,
                                                                                     next));
-            Keyspace systemKs = Keyspace.open(SystemKeyspace.NAME);
+            Keyspace systemKs = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             systemKs.snapshot(snapshotName, null);
             return true;
         }
@@ -1330,7 +1329,7 @@ public final class SystemKeyspace
             // the current version is. If we couldn't read a previous version from system.local we check for
             // the existence of the legacy system.Versions table. We don't actually attempt to read a version
             // from there, but it informs us that this isn't a completely new node.
-            for (File dataDirectory : Directories.getKSChildDirectories(SystemKeyspace.NAME))
+            for (File dataDirectory : Directories.getKSChildDirectories(SchemaConstants.SYSTEM_KEYSPACE_NAME))
             {
                 if (dataDirectory.getName().equals("Versions") && dataDirectory.listFiles().length > 0)
                 {

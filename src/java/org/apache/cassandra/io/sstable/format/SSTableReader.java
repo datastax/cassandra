@@ -42,8 +42,10 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -134,11 +136,18 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
-    private static final ScheduledThreadPoolExecutor syncExecutor = new ScheduledThreadPoolExecutor(1);
-    static
+    private static final ScheduledThreadPoolExecutor syncExecutor = initSyncExecutor();
+    private static ScheduledThreadPoolExecutor initSyncExecutor()
     {
+        if (Config.isClientOrToolsMode())
+            return null;
+
+        // Do NOT start this thread pool in client mode
+
+        ScheduledThreadPoolExecutor syncExecutor = new ScheduledThreadPoolExecutor(1);
         // Immediately remove readMeter sync task when cancelled.
         syncExecutor.setRemoveOnCancelPolicy(true);
+        return syncExecutor;
     }
     private static final RateLimiter meterSyncThrottle = RateLimiter.create(100.0);
 
@@ -2270,7 +2279,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
             // Don't track read rates for tables in the system keyspace and don't bother trying to load or persist
             // the read meter when in client mode.
-            if (Schema.isSystemKeyspace(desc.ksname))
+            if (SchemaConstants.isSystemKeyspace(desc.ksname))
             {
                 readMeter = null;
                 readMeterSyncFuture = NULL;

@@ -213,7 +213,7 @@ public class FileMessageHeader
         {
             UUID cfId = UUIDSerializer.serializer.deserialize(in, MessagingService.current_version);
             int sequenceNumber = in.readInt();
-            Version sstableVersion = DatabaseDescriptor.getSSTableFormat().info.getVersion(in.readUTF());
+            Version sstableVersion = SSTableFormat.Type.current().info.getVersion(in.readUTF());
 
             SSTableFormat.Type format = SSTableFormat.Type.LEGACY;
             if (version >= StreamMessage.VERSION_22)
