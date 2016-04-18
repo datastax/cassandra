@@ -49,7 +49,7 @@ public interface CommitLogReadHandler
     }
 
     /**
-     * Allow consumers to prepare a file before replay.
+     * Pre 2.1: Allow consumers to prepare a file before replay.
      */
     void prepReader(CommitLogDescriptor desc, RandomAccessReader reader);
 
@@ -65,9 +65,9 @@ public interface CommitLogReadHandler
     /**
      * Another skipping approach - based on how far along we are in the segment rather than the file as a whole.
      *
-     * @param position position of sync segment candidate
+     * @param endPosition logical end position of sync segment candidate
      */
-    boolean shouldSkipSegment(long id, int position);
+    boolean shouldSkipSegment(long id, int endPosition);
 
     /**
      * Handle an error during segment read, signaling whether or not you want the reader to continue based on the error.
