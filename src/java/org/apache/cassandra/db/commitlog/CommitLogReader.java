@@ -117,7 +117,7 @@ public class CommitLogReader
                 return;
             }
 
-            final long segmentId = desc.id;
+            final long segmentIdFromFilename = desc.id;
             try
             {
                 // The following call can either throw or legitimately return null. For either case, we need to check
@@ -138,10 +138,10 @@ public class CommitLogReader
                 return;
             }
 
-            if (segmentId != desc.id)
+            if (segmentIdFromFilename != desc.id)
             {
                 if (handler.shouldStopOnError(new CommitLogReadException(String.format(
-                    "Segment id mismatch (filename %d, descriptor %d) in file %s", segmentId, desc.id, file),
+                    "Segment id mismatch (filename %d, descriptor %d) in file %s", segmentIdFromFilename, desc.id, file),
                     CommitLogReadErrorReason.RECOVERABLE_DESCRIPTOR_ERROR,
                     false)))
                 {
@@ -242,11 +242,13 @@ public class CommitLogReader
                 if (serializedSize == LEGACY_END_OF_SEGMENT_MARKER)
                 {
                     logger.trace("Encountered end of segment marker at {}", reader.getFilePointer());
-                    statusTracker.flagError();
+                    statusTracker.requestTermination();
                     return;
                 }
 
-                // Skip mutations that are before the requested offset
+                // Skip mutations that are before the requested offset. While the CommitLogSegments can be encrypted or
+                // compressed, we're working on the SyncSegment.input FileDataInput in this method, and the respective
+                // FileSegmentInputStream implementations take their offsets into account on the getFilePointer call.
                 if (mutationStart < startOffset)
                 {
                     reader.seek(reader.getFilePointer() +
@@ -271,7 +273,7 @@ public class CommitLogReader
                                                     CommitLogReadErrorReason.MUTATION_ERROR,
                                                     statusTracker.tolerateErrorsInSection)))
                     {
-                        statusTracker.flagError();
+                        statusTracker.requestTermination();
                     }
                     return;
                 }
@@ -287,7 +289,7 @@ public class CommitLogReader
                                                     CommitLogReadErrorReason.MUTATION_ERROR,
                                                     statusTracker.tolerateErrorsInSection)))
                     {
-                        statusTracker.flagError();
+                        statusTracker.requestTermination();
                     }
                     return;
                 }
@@ -305,9 +307,9 @@ public class CommitLogReader
                                                 CommitLogReadErrorReason.EOF,
                                                 statusTracker.tolerateErrorsInSection)))
                 {
-                    statusTracker.flagError();
-                    return;
+                    statusTracker.requestTermination();
                 }
+                return;
             }
 
             checksum.update(buffer, 0, serializedSize);
@@ -318,7 +320,7 @@ public class CommitLogReader
                                                 CommitLogReadErrorReason.MUTATION_ERROR,
                                                 statusTracker.tolerateErrorsInSection)))
                 {
-                    statusTracker.flagError();
+                    statusTracker.requestTermination();
                 }
                 continue;
             }
@@ -492,7 +494,7 @@ public class CommitLogReader
             return !error && (mutationsLeft != 0 || mutationsLeft == ALL_MUTATIONS);
         }
 
-        public void flagError()
+        public void requestTermination()
         {
             error = true;
         }
