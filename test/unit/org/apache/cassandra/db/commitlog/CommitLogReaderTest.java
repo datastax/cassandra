@@ -168,7 +168,7 @@ public class CommitLogReaderTest extends CQLTester
         CFMetaData cfm = testCFM();
         TestCLRHandler testHandler = new TestCLRHandler(cfm);
         for (File f : toCheck)
-            reader.readCommitLogSegment(testHandler, f, false);
+            reader.readCommitLogSegment(testHandler, f, CommitLogReader.ALL_MUTATIONS, false);
 
         Assert.assertEquals("Expected 1000 seen mutations, got: " + testHandler.seenMutationCount(),
                             1000, testHandler.seenMutationCount());

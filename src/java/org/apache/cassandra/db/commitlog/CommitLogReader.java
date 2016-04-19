@@ -65,29 +65,45 @@ public class CommitLogReader
         return invalidMutations.entrySet();
     }
 
+    /**
+     * Reads all passed in files with no minimum, no start, and no mutation limit.
+     */
     public void readAllFiles(CommitLogReadHandler handler, File[] files) throws IOException
     {
-        for (int i = 0; i < files.length; i++)
-            readCommitLogSegment(handler, files[i], i + 1 == files.length);
+        readAllFiles(handler, files, CommitLogSegmentPosition.NONE);
     }
 
+    /**
+     * Reads all passed in files with minPosition, no hard start, and no mutation limit.
+     */
+    public void readAllFiles(CommitLogReadHandler handler, File[] files, CommitLogSegmentPosition minPosition) throws IOException
+    {
+        for (int i = 0; i < files.length; i++)
+            readCommitLogSegment(handler, files[i], minPosition, ALL_MUTATIONS, i + 1 == files.length);
+    }
+
+    /**
+     * Reads passed in file fully
+     */
+    public void readcommitLogSegment(CommitLogReadHandler handler, File file, boolean tolerateTruncation) throws IOException
+    {
+        readCommitLogSegment(handler, file, CommitLogSegmentPosition.NONE, ALL_MUTATIONS, tolerateTruncation);
+    }
+
+    /**
+     * Reads passed in file fully, up to mutationLimit count
+     */
     @VisibleForTesting
     public void readCommitLogSegment(CommitLogReadHandler handler, File file, int mutationLimit, boolean tolerateTruncation) throws IOException
     {
         readCommitLogSegment(handler, file, CommitLogSegmentPosition.NONE, mutationLimit, tolerateTruncation);
     }
 
-    @VisibleForTesting
-    public void readCommitLogSegment(CommitLogReadHandler handler, File file, boolean tolerateTruncation) throws IOException
-    {
-        readCommitLogSegment(handler, file, CommitLogSegmentPosition.NONE, ALL_MUTATIONS, tolerateTruncation);
-    }
-
     /**
      * Reads mutations from file, handing them off to handler
      * @param handler Handler that will take action based on deserialized Mutations
      * @param file Commit Log Segment file to read
-     * @param startPosition Optional CommitLogSegmentPosition to serve as starting point for mutation replay, CommitLogSegmentPosition.NONE if all
+     * @param minPosition Optional minimum CommitLogSegmentPosition - all segments with id > or matching w/greater position will be read
      * @param mutationLimit Optional limit on # of mutations to replay. Local ALL_MUTATIONS serves as marker to play all.
      * @param tolerateTruncation Whether or not we should allow truncation of this file or throw if EOF found
      *
@@ -95,7 +111,7 @@ public class CommitLogReader
      */
     public void readCommitLogSegment(CommitLogReadHandler handler,
                                      File file,
-                                     CommitLogSegmentPosition startPosition,
+                                     CommitLogSegmentPosition minPosition,
                                      int mutationLimit,
                                      boolean tolerateTruncation) throws IOException
     {
@@ -107,12 +123,13 @@ public class CommitLogReader
         {
             if (desc.version < CommitLogDescriptor.VERSION_21)
             {
-                if (!handler.logAndCheckIfShouldSkip(file, desc))
+                if (!shouldSkipSegmentId(file, desc, minPosition))
                 {
-                    handler.prepReader(desc, reader);
+                    if (minPosition.segmentId == desc.id)
+                        reader.seek(minPosition.position);
                     ReadStatusTracker statusTracker = new ReadStatusTracker(ALL_MUTATIONS, tolerateTruncation);
                     statusTracker.errorContext = desc.fileName();
-                    readSection(handler, reader, 0, (int) reader.length(), statusTracker, desc);
+                    readSection(handler, reader, (int) reader.length(), statusTracker, desc);
                 }
                 return;
             }
@@ -149,23 +166,7 @@ public class CommitLogReader
                 }
             }
 
-            if (startPosition != CommitLogSegmentPosition.NONE && desc.id != startPosition.segmentId)
-            {
-                if (handler.shouldStopOnError(new CommitLogReadException(
-                    String.format("Descriptor parsed segmentId (%d) mismatch with CommitLogSegmentPosition id (%d) on file %s",
-                                  desc.id,
-                                  startPosition.segmentId,
-                                  file),
-                    CommitLogReadErrorReason.RECOVERABLE_DESCRIPTOR_ERROR,
-                    false)))
-                {
-                    return;
-                }
-                // continue processing if no exception, but set offset to zero so we don't skip anything
-                startPosition = new CommitLogSegmentPosition(-1, 0);
-            }
-
-            if (handler.logAndCheckIfShouldSkip(file, desc))
+            if (shouldSkipSegmentId(file, desc, minPosition))
                 return;
 
             CommitLogSegmentReader segmentReader;
@@ -189,11 +190,11 @@ public class CommitLogReader
                 {
                     statusTracker.tolerateErrorsInSection &= syncSegment.toleratesErrorsInSection;
 
-                    if (handler.shouldSkipSegment(desc.id, syncSegment.endPosition))
+                    if (desc.id == minPosition.segmentId && syncSegment.endPosition < minPosition.position)
                         continue;
 
                     statusTracker.errorContext = String.format("Next section at %d in %s", syncSegment.fileStartPosition, desc.fileName());
-                    readSection(handler, syncSegment.input, startPosition.position, syncSegment.endPosition, statusTracker, desc);
+                    readSection(handler, syncSegment.input, syncSegment.endPosition, statusTracker, desc);
                     if (!statusTracker.shouldContinue())
                         break;
                 }
@@ -211,18 +212,35 @@ public class CommitLogReader
     }
 
     /**
+     * Any segment with id >= minPosition.segmentId is a candidate for read.
+     */
+    private boolean shouldSkipSegmentId(File file, CommitLogDescriptor desc, CommitLogSegmentPosition minPosition)
+    {
+        logger.debug("Reading {} (CL version {}, messaging version {}, compression {})",
+            file.getPath(),
+            desc.version,
+            desc.getMessagingVersion(),
+            desc.compression);
+
+        if (minPosition.segmentId > desc.id)
+        {
+            logger.trace("Skipping read of fully-flushed {}", file);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Reads a section of a file containing mutations
      *
      * @param handler Handler that will take action based on deserialized Mutations
      * @param reader FileDataInput / logical buffer containing commitlog mutations
-     * @param startOffset Offset within the file to start handing mutations off to handler
      * @param end logical numeric end of the segment being read
      * @param statusTracker ReadStatusTracker with current state of mutation count, error state, etc
      * @param desc Descriptor for CommitLog serialization
      */
     private void readSection(CommitLogReadHandler handler,
                              FileDataInput reader,
-                             int startOffset,
                              int end,
                              ReadStatusTracker statusTracker,
                              CommitLogDescriptor desc) throws IOException
@@ -244,22 +262,6 @@ public class CommitLogReader
                     logger.trace("Encountered end of segment marker at {}", reader.getFilePointer());
                     statusTracker.requestTermination();
                     return;
-                }
-
-                // Skip mutations that are before the requested offset. While the CommitLogSegments can be encrypted or
-                // compressed, we're working on the SyncSegment.input FileDataInput in this method, and the respective
-                // FileSegmentInputStream implementations take their offsets into account on the getFilePointer call.
-                if (mutationStart < startOffset)
-                {
-                    reader.seek(reader.getFilePointer() +
-                                serializedSize +
-                                CommitLogFormat.claimedChecksumSerializedSize(desc.version) +
-                                CommitLogFormat.claimedCRC32SerializedSize(desc.version));
-                    logger.debug("Skipping mutation before offset. Mutation start: {} Skipped to: {} startOffset: {}",
-                                 mutationStart,
-                                 reader.getFilePointer(),
-                                 startOffset);
-                    continue;
                 }
 
                 // Mutation must be at LEAST 10 bytes:
