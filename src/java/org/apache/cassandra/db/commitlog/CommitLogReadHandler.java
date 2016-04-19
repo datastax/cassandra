@@ -18,11 +18,9 @@
 
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
 import java.io.IOException;
 
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.io.util.RandomAccessReader;
 
 public interface CommitLogReadHandler
 {
@@ -47,27 +45,6 @@ public interface CommitLogReadHandler
             this.permissible = permissible;
         }
     }
-
-    /**
-     * Pre 2.1: Allow consumers to prepare a file before replay.
-     */
-    void prepReader(CommitLogDescriptor desc, RandomAccessReader reader);
-
-    /**
-     *  Rather than opening CommitLogSegmentReaders for all files, this allows handlers to specify files that should be skipped
-     *
-     *  @param file File object for candidate
-     *  @param desc CommitLogDescriptor for candidate
-     *  @return boolean representing whether we should skip or not
-     */
-    boolean logAndCheckIfShouldSkip(File file, CommitLogDescriptor desc);
-
-    /**
-     * Another skipping approach - based on how far along we are in the segment rather than the file as a whole.
-     *
-     * @param endPosition logical end position of sync segment candidate
-     */
-    boolean shouldSkipSegment(long id, int endPosition);
 
     /**
      * Handle an error during segment read, signaling whether or not you want the reader to continue based on the error.

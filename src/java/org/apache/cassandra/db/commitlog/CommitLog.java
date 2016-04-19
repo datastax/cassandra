@@ -111,6 +111,8 @@ public class CommitLog implements CommitLogMBean
                 ? new BatchCommitLogService(this)
                 : new PeriodicCommitLogService(this);
 
+        // On addition of new segment managers, CommitLogSegment's static initializer needs to have the new directory
+        // added during determination of idBase for new segments.
         segmentManagers.put(SegmentManagerType.STANDARD, new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation()));
         segmentManagers.put(SegmentManagerType.CDC, new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCDCLogLocation()));
 

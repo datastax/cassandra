@@ -22,14 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,13 +33,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Timer;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CLibrary;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
@@ -63,17 +53,30 @@ public abstract class CommitLogSegment
     private static final Logger logger = LoggerFactory.getLogger(CommitLogSegment.class);
 
     private final static long idBase;
+
+    // With multiple CommitLogSegmentManagers and interleaved id assignment, we need to make sure we use a static atomic
+    // assignment method in order to ensure that a single "global position" used to mark a point in time in the collective
+    // commitlog is valid across multiple CLSM.
     private final static AtomicInteger nextId = new AtomicInteger(1);
     private static long replayLimitId;
     static
     {
         long maxId = Long.MIN_VALUE;
-        for (File file : new File(DatabaseDescriptor.getCommitLogLocation()).listFiles())
+        // Any future additional CommitLogSegmentManagers will need to have their location checked here on startup
+        maxId = Math.max(getMaxId(DatabaseDescriptor.getCommitLogLocation()), maxId);
+        maxId = Math.max(getMaxId(DatabaseDescriptor.getCDCLogLocation()), maxId);
+        idBase = Math.max(System.currentTimeMillis(), maxId + 1);
+    }
+
+    private static long getMaxId(String location)
+    {
+        long result = 0;
+        for (File file : new File(location).listFiles())
         {
             if (CommitLogDescriptor.isValid(file.getName()))
-                maxId = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, maxId);
+                result = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, result);
         }
-        replayLimitId = idBase = Math.max(System.currentTimeMillis(), maxId + 1);
+        return result;
     }
 
     // The commit log entry overhead in bytes (int: length + int: head checksum + int: tail checksum)

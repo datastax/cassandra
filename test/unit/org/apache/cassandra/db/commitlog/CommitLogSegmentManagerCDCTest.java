@@ -117,7 +117,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
 
         CommitLogReader reader = new CommitLogReader();
         for (File f : toCheck)
-            reader.readCommitLogSegment(testHandler, f, false);
+            reader.readCommitLogSegment(testHandler, f, CommitLogReader.ALL_MUTATIONS, false);
 
         ColumnDefinition cd = cfm.getColumnDefinition(new ColumnIdentifier("data", false));
 
