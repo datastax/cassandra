@@ -21,45 +21,25 @@ package org.apache.cassandra.db.commitlog;
  *
  */
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.util.concurrent.RateLimiter;
+import org.junit.*;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
-import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.*;
 import org.apache.cassandra.config.Config.CommitLogSync;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.SerializationHelper;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 
@@ -75,8 +55,6 @@ public class CommitLogStressTest
     public static int runTimeMs = 10000;
 
     public static String location;
-
-    private static AbstractCommitLogSegmentManager segmentManager;
 
     public static int hash(int hash, ByteBuffer bytes)
     {
@@ -154,7 +132,6 @@ public class CommitLogStressTest
 
         SchemaLoader.loadSchema();
         SchemaLoader.schemaDefinition(""); // leave def. blank to maintain old behaviour
-        segmentManager = CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD);
     }
 
     @Before
@@ -241,7 +218,7 @@ public class CommitLogStressTest
                            commitLog.executor.getClass().getSimpleName(),
                            randomSize ? " random size" : "",
                            discardedRun ? " with discarded run" : "");
-        segmentManager.enableReserveSegmentCreation();
+        CommitLog.instance.segmentManager.enableReserveSegmentCreation();
         
         final List<CommitlogThread> threads = new ArrayList<>();
         ScheduledExecutorService scheduled = startThreads(commitLog, threads);
@@ -263,9 +240,7 @@ public class CommitLogStressTest
             }
             verifySizes(commitLog);
 
-            commitLog.discardCompletedSegments(Schema.instance.getCFMetaData("Keyspace1", "Standard1").cfId,
-                                               discardedPos,
-                                               AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD);
+            commitLog.discardCompletedSegments(Schema.instance.getCFMetaData("Keyspace1", "Standard1").cfId, discardedPos);
             threads.clear();
 
             System.out.format("Discarded at %s\n", discardedPos);
@@ -328,7 +303,7 @@ public class CommitLogStressTest
         // FIXME: The executor should give us a chance to await completion of the sync we requested.
         commitLog.executor.requestExtraSync().awaitUninterruptibly();
         // Wait for any pending deletes or segment allocations to complete.
-        segmentManager.awaitManagementTasksCompletion();
+        CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
 
         long combinedSize = 0;
         for (File f : new File(location).listFiles())
@@ -337,7 +312,7 @@ public class CommitLogStressTest
 
         List<String> logFileNames = commitLog.getActiveSegmentNames();
         Map<String, Double> ratios = commitLog.getActiveSegmentCompressionRatios();
-        Collection<CommitLogSegment> segments = segmentManager.getActiveSegments();
+        Collection<CommitLogSegment> segments = CommitLog.instance.segmentManager.getActiveSegments();
 
         for (CommitLogSegment segment : segments)
         {
@@ -529,12 +504,6 @@ public class CommitLogStressTest
 
     class DummyHandler implements CommitLogReadHandler
     {
-        public void prepReader(CommitLogDescriptor desc, RandomAccessReader reader) { }
-
-        public boolean logAndCheckIfShouldSkip(File file, CommitLogDescriptor desc) { return false; }
-
-        public boolean shouldSkipSegment(long id, int position) { return false; }
-
         public boolean shouldStopOnError(CommitLogReadException exception) throws IOException { return false; }
 
         public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }

@@ -204,7 +204,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name,
@@ -247,7 +247,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddress.getByName("127.0.0.1"));
@@ -284,7 +284,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         // endpoints in DC1 should not have primary range
@@ -323,7 +323,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         // endpoints in DC1 should not have primary range
@@ -375,7 +375,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         // endpoints in DC1 should not have primary range
@@ -442,7 +442,7 @@ public class StorageServiceServerTest
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         Schema.instance.setKeyspaceMetadata(meta);
 
         // endpoints in DC1 should have primary ranges which also cover DC2

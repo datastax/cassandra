@@ -61,6 +61,8 @@ public class Mutation implements IMutation
     // keep track of when mutation has started waiting for a MV partition lock
     public final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
+    private boolean cdcEnabled = false;
+
     public Mutation(String keyspaceName, DecoratedKey key)
     {
         this(keyspaceName, key, new HashMap<>());
@@ -123,10 +125,24 @@ public class Mutation implements IMutation
         return modifications.get(cfId);
     }
 
+    /**
+     * Adds PartitionUpdate to the local set of modifications.
+     * Assumes no updates for the Table this PartitionUpdate impacts.
+     *
+     * @param update PartitionUpdate to append to Modifications list
+     * @throws IllegalArgumentException If PartitionUpdate for duplicate table is passed as argument
+     */
     public Mutation add(PartitionUpdate update)
     {
         assert update != null;
         assert update.partitionKey().getPartitioner() == key.getPartitioner();
+
+        if (DatabaseDescriptor.isCDCEnabled() &&
+            Keyspace.open(update.metadata().ksName).getColumnFamilyStore(update.metadata().cfName).hasCDCEnabled())
+        {
+            cdcEnabled = true;
+        }
+
         PartitionUpdate prev = modifications.put(update.metadata().cfId, update);
         if (prev != null)
             // developer error
@@ -254,6 +270,11 @@ public class Mutation implements IMutation
         for (PartitionUpdate update : getPartitionUpdates())
             gcgs = Math.min(gcgs, update.metadata().params.gcGraceSeconds);
         return gcgs;
+    }
+
+    public boolean trackedByCDC()
+    {
+        return cdcEnabled;
     }
 
     public String toString()

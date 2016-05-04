@@ -81,19 +81,5 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
         FileUtils.deleteWithConfirm(file);
     }
 
-     /**
-     * Returns total size allowed by yaml for this segment type less the commitlog size of this manager
-     */
-    long unusedCapacity()
-    {
-        long total = DatabaseDescriptor.getCommitLogSpaceInMBStandard() * 1024 * 1024;
-        long currentSize = size.get();
-        logger.trace("Total standard commitlog segment space used is {} out of {}", currentSize, total);
-        return total - currentSize;
-    }
 
-    public SegmentManagerType getSegmentManagerType()
-    {
-        return SegmentManagerType.STANDARD;
-    }
 }

@@ -59,9 +59,6 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
             return;
         }
         ThriftValidation.validateKeyspaceNotSystem(name);
-
-        if (ksm.params.getCDCDataCenters().size() != 0)
-            throw new InvalidRequestException("Cannot drop keyspace with active CDC log. Remove CDC log before dropping Keyspace.");
     }
 
     @Override

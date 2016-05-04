@@ -197,10 +197,6 @@ public abstract class CQLTester
         if (cdcDir.exists())
             FileUtils.deleteRecursive(cdcDir);
 
-        File cdcODir = new File(DatabaseDescriptor.getCDCOverflowLocation());
-        if (cdcODir.exists())
-            FileUtils.deleteRecursive(cdcODir);
-
         cleanupSavedCaches();
 
         // clean up data directory which are stored as data directory/keyspace/data files

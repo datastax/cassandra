@@ -34,7 +34,6 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -69,7 +68,8 @@ public class CommitLog implements CommitLogMBean
     // empty segments when writing large records
     final long MAX_MUTATION_SIZE = DatabaseDescriptor.getMaxMutationSize();
 
-    private final EnumMap<SegmentManagerType, AbstractCommitLogSegmentManager> segmentManagers = new EnumMap<>(SegmentManagerType.class);
+    // TODO: Change back to final, remove switchToCDCSegmentManager
+    public AbstractCommitLogSegmentManager segmentManager;
 
     public final CommitLogArchiver archiver;
     final CommitLogMetrics metrics;
@@ -111,21 +111,17 @@ public class CommitLog implements CommitLogMBean
                 ? new BatchCommitLogService(this)
                 : new PeriodicCommitLogService(this);
 
-        // On addition of new segment managers, CommitLogSegment's static initializer needs to have the new directory
-        // added during determination of idBase for new segments.
-        segmentManagers.put(SegmentManagerType.STANDARD, new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation()));
-        segmentManagers.put(SegmentManagerType.CDC, new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCDCLogLocation()));
-
+        segmentManager = DatabaseDescriptor.isCDCEnabled()
+                         ? new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCommitLogLocation())
+                         : new CommitLogSegmentManagerStandard(this, DatabaseDescriptor.getCommitLogLocation());
         // register metrics
-        metrics.attach(executor,
-                       segmentManagers.get(SegmentManagerType.STANDARD),
-                       segmentManagers.get(SegmentManagerType.CDC));
+        metrics.attach(executor, segmentManager);
     }
 
     CommitLog start()
     {
         executor.start();
-        segmentManagers.values().forEach(AbstractCommitLogSegmentManager::start);
+        segmentManager.start();
         return this;
     }
 
@@ -136,10 +132,7 @@ public class CommitLog implements CommitLogMBean
      */
     public int recoverSegmentsOnDisk() throws IOException
     {
-        int result = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
-            result += recoverSegmentManager(clsm);
-        return result;
+        return recoverSegmentManager(segmentManager);
     }
 
     /**
@@ -227,22 +220,9 @@ public class CommitLog implements CommitLogMBean
      * @return a CommitLogSegmentPosition which, if {@code >= one} returned from add(), implies add() was started
      * (but not necessarily finished) prior to this call
      */
-    public CommitLogSegmentPosition getCurrentSegmentPosition(SegmentManagerType type)
+    public CommitLogSegmentPosition getCurrentSegmentPosition()
     {
-        return segmentManagers.get(type).getCurrentSegmentPosition();
-    }
-
-    /**
-     * Return CommitLogSegmentPosition for Keyspace
-     */
-    public CommitLogSegmentPosition getCurrentSegmentPosition(Keyspace ks)
-    {
-        return getCurrentSegmentPosition(AbstractCommitLogSegmentManager.getSegmentManagerType(ks));
-    }
-
-    public CommitLogSegmentPosition getCurrentSegmentPosition(String ks)
-    {
-        return getCurrentSegmentPosition(AbstractCommitLogSegmentManager.getSegmentManagerType(ks));
+        return segmentManager.getCurrentSegmentPosition();
     }
 
     /**
@@ -250,7 +230,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void forceRecycleAllSegments(Iterable<UUID> droppedCfs)
     {
-        segmentManagers.values().forEach(x -> x.forceRecycleAll(droppedCfs));
+        segmentManager.forceRecycleAll(droppedCfs);
     }
 
     /**
@@ -258,7 +238,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void forceRecycleAllSegments()
     {
-        segmentManagers.values().forEach(x -> x.forceRecycleAll(Collections.<UUID>emptyList()));
+        segmentManager.forceRecycleAll(Collections.<UUID>emptyList());
     }
 
     /**
@@ -266,8 +246,7 @@ public class CommitLog implements CommitLogMBean
      */
     public void sync(boolean syncAllSegments) throws IOException
     {
-        for (AbstractCommitLogSegmentManager mgr : segmentManagers.values())
-            mgr.sync(syncAllSegments);
+        segmentManager.sync(syncAllSegments);
     }
 
     /**
@@ -298,11 +277,6 @@ public class CommitLog implements CommitLogMBean
                                                              FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE)));
         }
 
-        AbstractCommitLogSegmentManager segmentManager = keyspace.hasLocalCDC()
-            ? getSegmentManager(SegmentManagerType.CDC)
-            : getSegmentManager(SegmentManagerType.STANDARD);
-
-        assert segmentManager != null;
         Allocation alloc = segmentManager.allocate(mutation, totalSize);
 
         CRC32 checksum = new CRC32();
@@ -339,16 +313,15 @@ public class CommitLog implements CommitLogMBean
      * @param cfId    the column family ID that was flushed
      * @param context the commit log segment position of the flush
      */
-    public void discardCompletedSegments(final UUID cfId, final CommitLogSegmentPosition context, SegmentManagerType type)
+    public void discardCompletedSegments(final UUID cfId, final CommitLogSegmentPosition context)
     {
         logger.trace("discard completed log segments for {}, table {}", context, cfId);
-        AbstractCommitLogSegmentManager targetSegmentManager = getSegmentManager(type);
 
         // Go thru the active segment files, which are ordered oldest to newest, marking the
         // flushed CF as clean, until we reach the segment file containing the CommitLogSegmentPosition passed
         // in the arguments. Any segments that become unused after they are marked clean will be
         // recycled or discarded.
-        for (Iterator<CommitLogSegment> iter = targetSegmentManager.getActiveSegments().iterator(); iter.hasNext();)
+        for (Iterator<CommitLogSegment> iter = segmentManager.getActiveSegments().iterator(); iter.hasNext();)
         {
             CommitLogSegment segment = iter.next();
             segment.markClean(cfId, context);
@@ -356,7 +329,7 @@ public class CommitLog implements CommitLogMBean
             if (segment.isUnused())
             {
                 logger.trace("Commit log segment {} is unused", segment);
-                targetSegmentManager.recycleSegment(segment);
+                segmentManager.recycleSegment(segment);
             }
             else
             {
@@ -404,7 +377,7 @@ public class CommitLog implements CommitLogMBean
     public List<String> getActiveSegmentNames()
     {
         List<String> segmentNames = new ArrayList<>();
-        segmentManagers.values().forEach(mgr -> mgr.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName())));
+        segmentManager.getActiveSegments().forEach(seg -> segmentNames.add(seg.getName()));
         return segmentNames;
     }
 
@@ -417,27 +390,22 @@ public class CommitLog implements CommitLogMBean
     public long getActiveContentSize()
     {
         int size = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
-            for (CommitLogSegment seg : clsm.getActiveSegments())
-                size += seg.contentSize();
+        for (CommitLogSegment seg : segmentManager.getActiveSegments())
+            size += seg.contentSize();
         return size;
     }
 
     @Override
     public long getActiveOnDiskSize()
     {
-        int size = 0;
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
-            size += clsm.onDiskSize();
-        return size;
+        return segmentManager.onDiskSize();
     }
 
     @Override
     public Map<String, Double> getActiveSegmentCompressionRatios()
     {
         Map<String, Double> segmentRatios = new TreeMap<>();
-        segmentManagers.values().forEach(clsm -> clsm.getActiveSegments().forEach(
-            seg -> segmentRatios.put(seg.getName(), 1.0 * seg.onDiskSize() / seg.contentSize())));
+        segmentManager.getActiveSegments().forEach(seg -> segmentRatios.put(seg.getName(), 1.0 * seg.onDiskSize() / seg.contentSize()));
         return segmentRatios;
     }
 
@@ -448,10 +416,8 @@ public class CommitLog implements CommitLogMBean
     {
         executor.shutdown();
         executor.awaitTermination();
-
-        segmentManagers.values().forEach(clsm -> clsm.shutdown());
-        for (AbstractCommitLogSegmentManager clsm : segmentManagers.values())
-            clsm.awaitTermination();
+        segmentManager.shutdown();
+        segmentManager.awaitTermination();
     }
 
     /**
@@ -478,10 +444,10 @@ public class CommitLog implements CommitLogMBean
         {
             throw new RuntimeException(e);
         }
-        segmentManagers.values().forEach(x -> x.stopUnsafe(deleteSegments));
+        segmentManager.stopUnsafe(deleteSegments);
         CommitLogSegment.resetReplayLimit();
-        if (deleteSegments)
-            for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
+        if (DatabaseDescriptor.isCDCEnabled() && deleteSegments)
+            for (File f : new File(DatabaseDescriptor.getCDCLogLocation()).listFiles())
                 FileUtils.delete(f);
 
     }
@@ -491,7 +457,7 @@ public class CommitLog implements CommitLogMBean
      */
     public int restartUnsafe() throws IOException
     {
-        segmentManagers.values().forEach(AbstractCommitLogSegmentManager::start);
+        segmentManager.start();
         executor.restartUnsafe();
         try
         {
@@ -532,9 +498,15 @@ public class CommitLog implements CommitLogMBean
         }
     }
 
+    /**
+     * Hook for CDC-specific tests to swap in CDC CLSM.
+     * TODO: Remove this in favor of having a test .yaml that runs commitlog tests on CDC-enabled CLSM
+     */
     @VisibleForTesting
-    public AbstractCommitLogSegmentManager getSegmentManager(SegmentManagerType type)
+    public void switchToCDCSegmentManager()
     {
-        return segmentManagers.get(type);
+        segmentManager.stopUnsafe(true);
+        segmentManager = new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCommitLogLocation());
+        segmentManager.start();
     }
 }

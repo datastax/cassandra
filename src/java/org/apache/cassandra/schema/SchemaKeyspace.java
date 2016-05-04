@@ -91,7 +91,6 @@ public final class SchemaKeyspace
                 + "keyspace_name text,"
                 + "durable_writes boolean,"
                 + "replication frozen<map<text, text>>,"
-                + "cdc_datacenters frozen<set<text>>,"
                 + "PRIMARY KEY ((keyspace_name)))");
 
     private static final CFMetaData Tables =
@@ -117,6 +116,7 @@ public final class SchemaKeyspace
                 + "min_index_interval int,"
                 + "read_repair_chance double,"
                 + "speculative_retry text,"
+                + "cdc boolean,"
                 + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final CFMetaData Columns =
@@ -180,6 +180,7 @@ public final class SchemaKeyspace
                 + "min_index_interval int,"
                 + "read_repair_chance double,"
                 + "speculative_retry text,"
+                + "cdc boolean," // Not used, but needed for parity on addTableParamsToSchemaMutation
                 + "PRIMARY KEY ((keyspace_name), view_name))");
 
     private static final CFMetaData Indexes =
@@ -395,7 +396,6 @@ public final class SchemaKeyspace
         RowUpdateBuilder adder = new RowUpdateBuilder(Keyspaces, timestamp, name).clustering();
         return adder.add(KeyspaceParams.Option.DURABLE_WRITES.toString(), params.durableWrites)
                     .frozenMap(KeyspaceParams.Option.REPLICATION.toString(), params.replication.asMap())
-                    .frozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), params.getCDCDataCenters())
                     .build();
     }
 
@@ -510,7 +510,8 @@ public final class SchemaKeyspace
              .frozenMap("caching", params.caching.asMap())
              .frozenMap("compaction", params.compaction.asMap())
              .frozenMap("compression", params.compression.asMap())
-             .frozenMap("extensions", params.extensions);
+             .frozenMap("extensions", params.extensions)
+             .add("cdc", params.cdc);
     }
 
     public static Mutation makeUpdateTableMutation(KeyspaceMetadata keyspace,
@@ -904,12 +905,7 @@ public final class SchemaKeyspace
         UntypedResultSet.Row row = query(query, keyspaceName).one();
         boolean durableWrites = row.getBoolean(KeyspaceParams.Option.DURABLE_WRITES.toString());
         Map<String, String> replication = row.getFrozenTextMap(KeyspaceParams.Option.REPLICATION.toString());
-
-        Set<String> cdc = row.has(KeyspaceParams.Option.CDC_DATACENTERS.toString())
-            ? row.getFrozenSet(KeyspaceParams.Option.CDC_DATACENTERS.toString(), UTF8Type.instance)
-            : Collections.emptySet();
-
-        return KeyspaceParams.create(durableWrites, replication, cdc);
+        return KeyspaceParams.create(durableWrites, replication);
     }
 
     private static Types fetchTypes(String keyspaceName)
@@ -993,6 +989,7 @@ public final class SchemaKeyspace
                           .readRepairChance(row.getDouble("read_repair_chance"))
                           .crcCheckChance(row.getDouble("crc_check_chance"))
                           .speculativeRetry(SpeculativeRetryParam.fromString(row.getString("speculative_retry")))
+                          .cdc(row.getBoolean("cdc"))
                           .build();
     }
 

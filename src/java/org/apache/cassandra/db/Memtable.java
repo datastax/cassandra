@@ -121,18 +121,18 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = cfs.metadata.comparator;
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata.partitionColumns());
-        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition(cfs.keyspace);
+        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition();
     }
 
     // ONLY to be used for testing, to create a mock Memtable
     @VisibleForTesting
-    public Memtable(CFMetaData metadata, AbstractCommitLogSegmentManager.SegmentManagerType segmentType)
+    public Memtable(CFMetaData metadata)
     {
         this.initialComparator = metadata.comparator;
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.partitionColumns());
-        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition(segmentType);
+        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition();
     }
 
     public MemtableAllocator getAllocator()

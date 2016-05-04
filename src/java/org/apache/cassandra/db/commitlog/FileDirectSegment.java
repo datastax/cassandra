@@ -20,7 +20,6 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.io.FSWriteError;
 
 /**
@@ -29,7 +28,6 @@ import org.apache.cassandra.io.FSWriteError;
  */
 public abstract class FileDirectSegment extends CommitLogSegment
 {
-    protected static final FastThreadLocal<ByteBuffer> reusableBufferHolder = new FastThreadLocal<ByteBuffer>()
     volatile long lastWrittenPos = 0;
     private final Runnable onClose;
 

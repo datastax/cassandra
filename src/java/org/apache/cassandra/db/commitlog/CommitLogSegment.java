@@ -25,6 +25,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
@@ -53,6 +54,8 @@ public abstract class CommitLogSegment
     private static final Logger logger = LoggerFactory.getLogger(CommitLogSegment.class);
 
     private final static long idBase;
+
+    public final AtomicBoolean containsCDCMutations = new AtomicBoolean(false);
 
     // With multiple CommitLogSegmentManagers and interleaved id assignment, we need to make sure we use a static atomic
     // assignment method in order to ensure that a single "global position" used to mark a point in time in the collective

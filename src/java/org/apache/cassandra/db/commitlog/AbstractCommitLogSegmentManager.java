@@ -31,13 +31,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
@@ -49,12 +44,6 @@ import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 public abstract class AbstractCommitLogSegmentManager
 {
     static final Logger logger = LoggerFactory.getLogger(AbstractCommitLogSegmentManager.class);
-
-    public enum SegmentManagerType
-    {
-        STANDARD,
-        CDC
-    }
 
     // Queue of work to be done by the manager thread, also used to wake the thread to perform segment allocation.
     private final BlockingQueue<Runnable> segmentManagementTasks = new LinkedBlockingQueue<>();
@@ -176,7 +165,7 @@ public abstract class AbstractCommitLogSegmentManager
 
         run = true;
 
-        managerThread = new Thread(runnable, "COMMIT-LOG-ALLOCATOR-" + getSegmentManagerType());
+        managerThread = new Thread(runnable, "COMMIT-LOG-ALLOCATOR");
         managerThread.start();
     }
 
@@ -199,17 +188,10 @@ public abstract class AbstractCommitLogSegmentManager
     public abstract Allocation allocate(Mutation mutation, int size);
 
     /**
-     * ColumnFamilyStore flushes are triggered when the management thread determines we have no unused capacity left
-     */
-    abstract long unusedCapacity();
-
-    /**
      * The recovery and replay process replays mutations into memtables and flushes them to disk. Individual CLSM
      * decide what to do with those segments on disk after they've been replayed.
      */
     abstract void handleReplayedSegment(final File file);
-
-    abstract SegmentManagerType getSegmentManagerType();
 
     /**
      * Grab the current CommitLogSegment we're allocating from. Also serves as a utility method to block while the allocator
@@ -398,6 +380,14 @@ public abstract class AbstractCommitLogSegmentManager
         return size.get();
     }
 
+    private long unusedCapacity()
+    {
+        long total = DatabaseDescriptor.getCommitLogSpaceInMBStandard() * 1024 * 1024;
+        long currentSize = size.get();
+        logger.trace("Total standard commitlog segment space used is {} out of {}", currentSize, total);
+        return total - currentSize;
+    }
+
     /**
      * @param name the filename to check
      * @return true if file is managed by this manager.
@@ -577,21 +567,6 @@ public abstract class AbstractCommitLogSegmentManager
     SimpleCachedBufferPool getBufferPool()
     {
         return bufferPool;
-    }
-
-    /**
-     * From a given keyspace input, return what Segment Manager type should be used for CL writes
-     */
-    public static SegmentManagerType getSegmentManagerType(String ksName)
-    {
-        return getSegmentManagerType(Keyspace.open(ksName));
-    }
-
-    public static SegmentManagerType getSegmentManagerType(Keyspace ks)
-    {
-        return ks.hasLocalCDC()
-            ? SegmentManagerType.CDC
-            : SegmentManagerType.STANDARD;
     }
 }
 

@@ -837,7 +837,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         synchronized (data)
         {
             logFlush();
-            Flush flush = new Flush(false, AbstractCommitLogSegmentManager.getSegmentManagerType(keyspace));
+            Flush flush = new Flush(false);
             flushExecutor.execute(flush);
             ListenableFutureTask<ReplayPosition> task = ListenableFutureTask.create(flush.postFlush);
             postFlushExecutor.submit(task);
@@ -945,19 +945,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         final CountDownLatch latch = new CountDownLatch(1);
         final CommitLogSegmentPosition lastCommitLogSegmentPosition;
         volatile Throwable flushFailure = null;
-        final AbstractCommitLogSegmentManager.SegmentManagerType segmentType;
         final List<Memtable> memtables;
         final List<Collection<SSTableReader>> readers;
 
         private PostFlush(boolean flushSecondaryIndexes,
                           OpOrder.Barrier writeBarrier,
-                          CommitLogSegmentPosition lastCommitLogSegmentPosition,
-                          AbstractCommitLogSegmentManager.SegmentManagerType segmentType)
+                          CommitLogSegmentPosition lastCommitLogSegmentPosition)
         {
             this.writeBarrier = writeBarrier;
             this.flushSecondaryIndexes = flushSecondaryIndexes;
             this.lastCommitLogSegmentPosition = lastCommitLogSegmentPosition;
-            this.segmentType = segmentType;
             this.readers = readers;
         }
 
@@ -1029,7 +1026,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         final PostFlush postFlush;
         final boolean truncate;
 
-        private Flush(boolean truncate, AbstractCommitLogSegmentManager.SegmentManagerType segmentType)
+        private Flush(boolean truncate)
         {
             // if true, we won't flush, we'll just wait for any outstanding writes, switch the memtable, and discard
             this.truncate = truncate;
@@ -1629,6 +1626,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return nowInSec - metadata.params.gcGraceSeconds;
     }
 
+    public boolean hasCDCEnabled()
+    {
+        return metadata.params.cdc;
+    }
+
     @SuppressWarnings("resource")
     public RefViewFragment selectAndReference(Function<View, Iterable<SSTableReader>> filter)
     {
@@ -2176,7 +2178,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         synchronized (data)
         {
-            final Flush flush = new Flush(true, AbstractCommitLogSegmentManager.getSegmentManagerType(keyspace));
+            final Flush flush = new Flush(true);
             flushExecutor.execute(flush);
             return postFlushExecutor.submit(flush.postFlush);
         }

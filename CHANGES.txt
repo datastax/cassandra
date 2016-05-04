@@ -8,6 +8,7 @@
  * Faster streaming (CASSANDRA-9766)
  * Add prepared query parameter to trace for "Execute CQL3 prepared query" session (CASSANDRA-11425)
  * Add repaired percentage metric (CASSANDRA-11503)
+ * Add Change-Data-Capture (CASSANDRA-8844)
 
 
 3.7
@@ -61,7 +62,6 @@ Merged from 2.1:
  * Make number of cores used by cqlsh COPY visible to testing code (CASSANDRA-11437)
  * Allow filtering on clustering columns for queries without secondary indexes (CASSANDRA-11310)
  * Refactor Restriction hierarchy (CASSANDRA-11354)
- * Add Change-Data-Capture (CASSANDRA-8844)
  * Eliminate allocations in R/W path (CASSANDRA-11421)
  * Update Netty to 4.0.36 (CASSANDRA-11567)
  * Fix PER PARTITION LIMIT for queries requiring post-query ordering (CASSANDRA-11556)

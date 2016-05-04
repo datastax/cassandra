@@ -79,7 +79,7 @@ public class CommitLogSegmentManagerTest
         });
         dummyThread.start();
 
-        AbstractCommitLogSegmentManager clsm = CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD);
+        AbstractCommitLogSegmentManager clsm = CommitLog.instance.segmentManager;
 
         // Protect against delay, but still break out as fast as possible
         long start = System.currentTimeMillis();
@@ -90,12 +90,10 @@ public class CommitLogSegmentManagerTest
         }
         Thread.sleep(1000);
 
-        // Should only be able to create 4 segments not 7 because it blocks waiting for truncation that never comes. "Steals"
-        // one of the 6 available buffers from the CDC CLSM's allotment of 3, but since they're shared it's allowable.
-        Assert.assertEquals(4, clsm.getActiveSegments().size());
+        Assert.assertEquals(3, clsm.getActiveSegments().size());
 
-        clsm.getActiveSegments().forEach( segment -> clsm.recycleSegment(segment));
+        clsm.getActiveSegments().forEach(segment -> clsm.recycleSegment(segment));
 
-        Util.spinAssertEquals(4, () -> clsm.getActiveSegments().size(), 5);
+        Util.spinAssertEquals(3, () -> clsm.getActiveSegments().size(), 5);
     }
 }

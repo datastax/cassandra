@@ -389,7 +389,7 @@ public class DefsTest
         replicationMap.put(ReplicationParams.CLASS, OldNetworkTopologyStrategy.class.getName());
         replicationMap.put("replication_factor", "1");
 
-        KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.create(true, replicationMap, ImmutableSet.of()));
+        KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.create(true, replicationMap));
         MigrationManager.announceKeyspaceUpdate(newKs);
 
         KeyspaceMetadata newFetchedKs = Schema.instance.getKSMetaData(newKs.name);

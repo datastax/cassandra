@@ -26,7 +26,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
@@ -56,7 +55,7 @@ public class DropRecreateAndRestoreTest extends CQLTester
 
         // Drop will flush and clean segments. Hard-link them so that they can be restored later.
         List<String> segments = new ArrayList<>();
-        for (CommitLogSegment segment: CommitLog.instance.getSegmentManager(AbstractCommitLogSegmentManager.SegmentManagerType.STANDARD).getActiveSegments())
+        for (CommitLogSegment segment: CommitLog.instance.segmentManager.getActiveSegments())
             segments.add(segment.getName());
 
         File logPath = new File(DatabaseDescriptor.getCommitLogLocation());

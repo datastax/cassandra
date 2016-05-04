@@ -160,7 +160,7 @@ public class ThriftConversion
             replicationMap.putAll(ksd.strategy_options);
         replicationMap.put(ReplicationParams.CLASS, cls.getName());
 
-        return KeyspaceMetadata.create(ksd.name, KeyspaceParams.create(ksd.durable_writes, replicationMap, ImmutableSet.of()), Tables.of(cfDefs));
+        return KeyspaceMetadata.create(ksd.name, KeyspaceParams.create(ksd.durable_writes, replicationMap), Tables.of(cfDefs));
     }
 
     public static KsDef toThrift(KeyspaceMetadata ksm)
