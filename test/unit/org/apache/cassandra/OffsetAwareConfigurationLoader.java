@@ -57,8 +57,7 @@ public class OffsetAwareConfigurationLoader extends YamlConfigurationLoader
         config.saved_caches_directory += sep + offset;
         config.hints_directory += sep + offset;
 
-        config.cdc_directory += sep + offset;
-        config.cdc_overflow_directory += sep + offset;
+        config.cdc_raw_directory += sep + offset;
 
         for (int i = 0; i < config.data_file_directories.length; i++)
             config.data_file_directories[i] += sep + offset;

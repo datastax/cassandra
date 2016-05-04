@@ -73,7 +73,7 @@ public class ViewUtilsTest
         replicationMap.put("DC2", "1");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
         Schema.instance.setKeyspaceMetadata(meta);
 
         Optional<InetAddress> naturalEndpoint = ViewUtils.getViewNaturalEndpoint("Keyspace1",
@@ -106,7 +106,7 @@ public class ViewUtilsTest
         replicationMap.put("DC2", "2");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
         Schema.instance.setKeyspaceMetadata(meta);
 
         Optional<InetAddress> naturalEndpoint = ViewUtils.getViewNaturalEndpoint("Keyspace1",
@@ -138,7 +138,7 @@ public class ViewUtilsTest
         replicationMap.put("DC2", "1");
 
         Keyspace.clear("Keyspace1");
-        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap, ImmutableSet.of()));
+        KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
         Schema.instance.setKeyspaceMetadata(meta);
 
         Optional<InetAddress> naturalEndpoint = ViewUtils.getViewNaturalEndpoint("Keyspace1",

@@ -340,11 +340,6 @@ public class CommitLogReplayer implements CommitLogReadHandler
     }
 
     @SuppressWarnings("resource")
-    public boolean shouldSkipSegment(long id, int position)
-    {
-        return (id == globalPosition.segmentId && position < globalPosition.position);
-    }
-
     protected boolean pointInTimeExceeded(Mutation fm)
     {
         long restoreTarget = archiver.restorePointInTime;

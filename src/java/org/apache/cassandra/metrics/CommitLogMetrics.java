@@ -48,9 +48,7 @@ public class CommitLogMetrics
         waitingOnCommit = Metrics.timer(factory.createMetricName("WaitingOnCommit"));
     }
 
-    public void attach(final AbstractCommitLogService service,
-                       final AbstractCommitLogSegmentManager segmentManagerStandard,
-                       final AbstractCommitLogSegmentManager segmentManagerCDC)
+    public void attach(final AbstractCommitLogService service, final AbstractCommitLogSegmentManager segmentManager)
     {
         completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
         {
@@ -70,7 +68,7 @@ public class CommitLogMetrics
         {
             public Long getValue()
             {
-                return segmentManagerStandard.onDiskSize() + segmentManagerCDC.onDiskSize();
+                return segmentManager.onDiskSize();
             }
         });
     }

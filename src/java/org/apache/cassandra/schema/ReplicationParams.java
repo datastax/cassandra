@@ -36,10 +36,6 @@ public final class ReplicationParams
 
     public final Class<? extends AbstractReplicationStrategy> klass;
 
-    public enum ReplicationParamKeywords
-    {
-        replication_factor
-    }
     public final ImmutableMap<String, String> options;
 
     private ReplicationParams(Class<? extends AbstractReplicationStrategy> klass, Map<String, String> options)
@@ -71,18 +67,6 @@ public final class ReplicationParams
         }
 
         return new ReplicationParams(NetworkTopologyStrategy.class, options);
-    }
-
-    /**
-     * We have a map of DC name to RF, so we strip out the known legit params (replication_factor, etc), leaving behind
-     * just DC name in our results.
-     */
-    public Set<String> getReplicationDataCenters()
-    {
-        Set<String> results = new HashSet<>(options.keySet());
-        for (ReplicationParamKeywords rpks : ReplicationParams.ReplicationParamKeywords.values())
-            results.remove(rpks.toString());
-        return results;
     }
 
     public void validate(String name)

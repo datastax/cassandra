@@ -25,13 +25,11 @@ import java.util.List;
 
 import org.junit.*;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -75,7 +73,7 @@ public class CommitLogReaderTest extends CQLTester
         for (int i = 0; i < midpoint; i++)
             execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
 
-        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition(SegmentManagerType.STANDARD);
+        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
 
         for (int i = midpoint; i < entryCount; i++)
             execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
@@ -84,9 +82,9 @@ public class CommitLogReaderTest extends CQLTester
         return result;
     }
 
-    static ArrayList<File> getCommitLogs(SegmentManagerType type)
+    static ArrayList<File> getCommitLogs()
     {
-        File dir = new File(CommitLog.instance.getSegmentManager(type).storageDirectory);
+        File dir = new File(DatabaseDescriptor.getCommitLogLocation());
         File[] files = dir.listFiles();
         ArrayList<File> results = new ArrayList<>();
         for (File f : files)
@@ -95,7 +93,7 @@ public class CommitLogReaderTest extends CQLTester
                 continue;
             results.add(f);
         }
-        Assert.assertTrue("Didn't find any commit log files of type: " + type, 0 != results.size());
+        Assert.assertTrue("Didn't find any commit log files.", 0 != results.size());
         return results;
     }
 
@@ -120,19 +118,6 @@ public class CommitLogReaderTest extends CQLTester
         public TestCLRHandler(CFMetaData cfm)
         {
             this.cfm = cfm;
-        }
-
-        public void prepReader(CommitLogDescriptor desc, RandomAccessReader reader)
-        { }
-
-        public boolean logAndCheckIfShouldSkip(File file, CommitLogDescriptor desc)
-        {
-            return false;
-        }
-
-        public boolean shouldSkipSegment(long id, int position)
-        {
-            return false;
         }
 
         public boolean shouldStopOnError(CommitLogReadException exception) throws IOException
@@ -161,7 +146,7 @@ public class CommitLogReaderTest extends CQLTester
     {
         int samples = 1000;
         populateData(samples);
-        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
+        ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
 
@@ -182,7 +167,7 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 50;
         int readCount = 10;
         populateData(samples);
-        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
+        ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
         TestCLRHandler testHandler = new TestCLRHandler();
@@ -200,7 +185,7 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 500;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
+        ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
         TestCLRHandler testHandler = new TestCLRHandler();
@@ -222,7 +207,7 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 5000;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
+        ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
         CFMetaData cfm = testCFM();
@@ -245,7 +230,7 @@ public class CommitLogReaderTest extends CQLTester
         int samples = 1000;
         int readCount = 10;
         CommitLogSegmentPosition midpoint = populateData(samples);
-        ArrayList<File> toCheck = getCommitLogs(SegmentManagerType.STANDARD);
+        ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
         CFMetaData cfm = testCFM();

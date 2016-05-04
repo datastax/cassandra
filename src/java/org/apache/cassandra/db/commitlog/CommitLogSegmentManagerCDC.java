@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
@@ -42,8 +43,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
     {
         super(commitLog, storageDirectory);
-        cdcSizeCalculator = new CDCSizeCalculator(new File(DatabaseDescriptor.getCDCOverflowLocation()));
-        cdcSizeCalculator.start();
+        cdcSizeCalculator = new CDCSizeCalculator(new File(DatabaseDescriptor.getCDCLogLocation()));
     }
 
     @Override
@@ -53,26 +53,25 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         cdcSizeCalculator.start();
     }
 
-    /**
-     * We don't care about the "delete" parameter on CDC as we always keep the segments around until consumers
-     * delete them.
-     */
     @Override
     public void discard(CommitLogSegment segment, boolean delete)
     {
         segment.close();
-        FileUtils.renameWithConfirm(segment.logFile.getAbsolutePath(), DatabaseDescriptor.getCDCOverflowLocation() + File.separator + segment.logFile.getName());
         addSize(-segment.onDiskSize());
+        if (segment.containsCDCMutations.get())
+        {
+            // Remove the worst-case full segment size we track in allocate()
+            cdcSizeCalculator.removeUnflushedSize(DatabaseDescriptor.getCommitLogSegmentSize());
+            FileUtils.renameWithConfirm(segment.logFile.getAbsolutePath(), DatabaseDescriptor.getCDCLogLocation() + File.separator + segment.logFile.getName());
 
-        // This can race with an atCapacity check and thus over-increment our view of our size on disk. The actual size
-        // on disk should be updated async on the next failed allocate() call and rectified, so while we can lose a sub-ms
-        // window of mutations during that recalc due to a race w/overprovisioning of size, it's preferable compared to
-        // a synchronous check of this on every allocation.
-        cdcSizeCalculator.addAndGet(segment.onDiskSize());
-
-        // Submit a recalculation of the actual on-disk size on the executor to get a more accurate picture and take
-        // into account any changes prompted by user consumption.
-        cdcSizeCalculator.submitOverflowSizeRecalculation();
+            cdcSizeCalculator.addFlushedSize(segment.onDiskSize());
+            cdcSizeCalculator.submitOverflowSizeRecalculation();
+        }
+        else
+        {
+            if (delete)
+                FileUtils.deleteWithConfirm(segment.logFile);
+        }
     }
 
     /**
@@ -88,87 +87,90 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
 
     /**
      * Reserve space in the current segment for the provided mutation or, if there isn't space available,
-     * create a new segment. For CDC segments, allocation can, and will, fail if we're at CDC capacity.
+     * create a new segment. For CDC mutations, allocation is expected to throw WTE if we're at CDC capacity.
+     *
+     * We allow advancement of non-CDC enabled segments as all CDC mutations should be rejected until space is cleared
+     * in cdc_raw. Subsequent non-cdc mutations won't flag cdc on the CommitLogSegment and thus the segment will be deleted
+     * on discard() rather than further pushing the total CDC on disk footprint.
      *
      * @return the provided Allocation object, or null if we are at allowable allocated CDC capacity on disk
+     * @throws WriteTimeoutException If CDC directory is at configured limit, we throw an exception rather than allocate.
      */
     @Override
-    public CommitLogSegment.Allocation allocate(Mutation mutation, int size)
+    public CommitLogSegment.Allocation allocate(Mutation mutation, int size) throws WriteTimeoutException
     {
-        /*
-         * We can race and have multiple writers in allocate, check atCapacity, and show that they can successfully
-         * continue at this point, leading to allocation of an extra segment(s) in advanceAllocatingFrom, thus violating
-         * our bounds on allowable CDC space taken up on disk. This shouldn't lead to too much excess due to limitations
-         * on max mutation size + thread writer pool amount, but we may want to revisit if this becomes an issue in the
-         * future.
-         *
-         * The reason we allow this is because advanceAllocatingFrom and the management thread have an invariant that
-         * all attempts at allocation must succeed.
-        */
-        if (atCapacity())
-        {
-            cdcSizeCalculator.submitOverflowSizeRecalculation();
-            throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
-        }
-
         CommitLogSegment segment = allocatingFrom();
-
         CommitLogSegment.Allocation alloc;
         while ( null == (alloc = segment.allocate(mutation, size)) )
         {
+            if (mutation.trackedByCDC() && atCapacity())
+            {
+                cdcSizeCalculator.submitOverflowSizeRecalculation();
+                throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
+            }
+
             // Failed to allocate, so move to a new segment with enough room if possible.
             advanceAllocatingFrom(segment);
             segment = allocatingFrom;
         }
 
+        // Operate with a worst-case estimate of full DBD.getCommitLogSegmentSize as being our final size of CDC CLS
+        if (mutation.trackedByCDC() && segment.containsCDCMutations.compareAndSet(false, true))
+            cdcSizeCalculator.addUnflushedSize(DatabaseDescriptor.getCommitLogSegmentSize());
+
         return alloc;
     }
 
     /**
-     * Returns total size allowed by yaml for this segment type less the commitlog size of this manager
-     */
-    long unusedCapacity()
-    {
-        long total = DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
-        long currentSize = size.get();
-        long overflowSize = cdcSizeCalculator.getAllocatedSize();
-        logger.trace("Total cdc commitlog segment space used is {} out of {}. Active segments: {} Overflow: {}", currentSize + overflowSize, total, currentSize, overflowSize);
-        return total - (currentSize + overflowSize);
-    }
-
-    /**
-     * Move files to cdc_overflow after replay, since recovery will flush to SSTable and these mutations won't be available
+     * Move files to cdc_raw after replay, since recovery will flush to SSTable and these mutations won't be available
      * in the CL subsystem otherwise.
      */
     void handleReplayedSegment(final File file)
     {
-        // (don't decrease managed size, since this was never a "live" segment)
-        logger.trace("Moving (Unopened) segment {} to cdc overflow after replay", file);
-        FileUtils.renameWithConfirm(file.getAbsolutePath(), DatabaseDescriptor.getCDCOverflowLocation() + File.separator + file.getName());
+        logger.trace("Moving (Unopened) segment {} to cdc_raw directory after replay", file);
+        FileUtils.renameWithConfirm(file.getAbsolutePath(), DatabaseDescriptor.getCDCLogLocation() + File.separator + file.getName());
+        cdcSizeCalculator.addFlushedSize(file.length());
     }
 
     /*
-     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_overflow, as synchronous size
-     * tracking on each allocation call to try and catch when consumers delete files is cpu-bound and linear and could
-     * lead to very long delays in new segment allocation, thus long delays in thread signaling to wake waiting
-     * allocation / writer threads.
+     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_raw. While we deterministically
+     * increment the size of the cdc_raw directory on each segment discard, we cannot afford to synchronously process the full
+     * directory size to decrement based on file consumption. Similarly, adding piping for a consumer to notify the C*
+     * process is a large complexity burden and would introduce a longer delay between deletion and C*'s view of the dir
+     * size rather than just recalculating it ourselves.
+     *
+     * Synchronous size recalculation on each allocation call could lead to very long delays in new segment allocation,
+     * thus long delays in thread signaling to wake waiting allocation / writer threads. Similarly, kicking off an async
+     * recalc of the directory on each allocation would lead to unnecessary garbage generation in the form of canceled futures.
      *
      * While we can race and have our discard logic incorrectly add a discarded segment's size to this value, it will
      * be corrected on the next pass at allocation when a new re-calculation task is submitted. Essentially, if you're
-     * flirting with the edge of your possible allocation space for CDC, it's possible that some mutations will be
+     * flirting with the edge of your possible allocation space for CDC, it's likely that some mutations will be
      * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 4G CDC space
-     * and 32MB segment, that should be a sub-half-ms re-calc process on a respectable modern CPU. "Should".
+     * and 32MB segment, most trivial local benchmarks place that at < 500 usec.
      *
-     * Reference DirectorySizerBench for more information about performance of this recalc.
+     * Reference DirectorySizerBench for more information about performance of the directory size recalc.
      */
     @VisibleForTesting
     public boolean atCapacity()
     {
-        return (cdcSizeCalculator.getAllocatedSize() + size.get()) >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
+        return cdcSizeCalculator.getTotalCDCSizeOnDisk() >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
     }
 
+    /**
+     * Tracks total disk usage of CDC subsystem, defined by the summation of all unflushed CommitLogSegments with CDC
+     * data in them and all segments archived into cdc_raw.
+     *
+     * Allows atomic increment/decrement of unflushed size, however only allows increment on flushed and requires a full
+     * directory walk to determine actual on-disk size of cdc_raw as we have an external consumer deleting those files.
+     *
+     * TODO: linux performs approximately 25% better with the following one-liner instead of this walker:
+     *      Arrays.stream(path.listFiles()).mapToLong(File::length).sum();
+     * However this solution is 375% slower on Windows. Revisit this and split logic to per-OS
+     */
     private class CDCSizeCalculator extends DirectorySizeCalculator
     {
+        private AtomicLong unflushedCDCSizeOnDisk = new AtomicLong(0);
         private final RateLimiter rateLimiter = RateLimiter.create(4);
         private ExecutorService cdcSizeCalculationExecutor;
 
@@ -183,6 +185,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         public void start()
         {
             cdcSizeCalculationExecutor = Executors.newSingleThreadExecutor();
+            unflushedCDCSizeOnDisk.set(0);
         }
 
         public void submitOverflowSizeRecalculation()
@@ -213,9 +216,24 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
             }
         }
 
-        public long addAndGet(long toAdd)
+        public long addFlushedSize(long toAdd)
         {
             return size.addAndGet(toAdd);
+        }
+
+        public void addUnflushedSize(long value)
+        {
+            unflushedCDCSizeOnDisk.addAndGet(value);
+        }
+
+        public void removeUnflushedSize(long value)
+        {
+            unflushedCDCSizeOnDisk.addAndGet(-value);
+        }
+
+        public long getTotalCDCSizeOnDisk()
+        {
+            return size.get() + unflushedCDCSizeOnDisk.get();
         }
 
         public void shutdown()
@@ -235,15 +253,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         // Give the update time to run
         try
         {
-            Thread.sleep(250);
+            Thread.sleep(DatabaseDescriptor.getCDCDiskCheckInterval() + 10);
         }
         catch (InterruptedException e) {}
 
         return cdcSizeCalculator.getAllocatedSize();
-    }
-
-    public SegmentManagerType getSegmentManagerType()
-    {
-        return SegmentManagerType.CDC;
     }
 }

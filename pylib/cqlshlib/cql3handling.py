@@ -51,6 +51,7 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         ('default_time_to_live', None),
         ('speculative_retry', None),
         ('memtable_flush_period_in_ms', None),
+        ('cdc', None)
     )
 
     columnfamily_layout_map_options = (
@@ -389,9 +390,7 @@ def ks_prop_name_completer(ctxt, cass):
     optsseen = ctxt.get_binding('propname', ())
     if 'replication' not in optsseen:
         return ['replication']
-    if 'durable_writes' not in optsseen:
-        return ['durable_writes']
-    return ["cdc_datacenters"]
+    return ['durable_writes']
 
 
 def ks_prop_val_completer(ctxt, cass):
@@ -400,8 +399,6 @@ def ks_prop_val_completer(ctxt, cass):
         return ["'true'", "'false'"]
     if optname == 'replication':
         return ["{'class': '"]
-    if optname == 'cdc_datacenters':
-        return ["{'"]
     return ()
 
 
@@ -476,6 +473,8 @@ def cf_prop_val_completer(ctxt, cass):
     if this_opt in ('min_compaction_threshold', 'max_compaction_threshold',
                     'gc_grace_seconds', 'min_index_interval', 'max_index_interval'):
         return [Hint('<integer>')]
+    if this_opt in ('cdc'):
+        return [Hint('<true|false>')]
     return [Hint('<option_value>')]
 
 
@@ -1115,7 +1114,7 @@ syntax_rules += r'''
                                 ;
 
 <cfamProperty> ::= <property>
-                 | "COMPACT" "STORAGE"
+                 | "COMPACT" "STORAGE" "CDC"
                  | "CLUSTERING" "ORDER" "BY" "(" <cfamOrdering>
                                                  ( "," <cfamOrdering> )* ")"
                  ;

@@ -162,7 +162,7 @@ public class StreamReceiveTask extends StreamTask
                     // For CDC-enabled keyspaces, we want to ensure that the mutations are routed to the appropriate
                     // CommitLogSegmentManager on disk, so rather than just bulk loading the SSTables into the CFS' view
                     // we need to replay the mutations through the CommitLog.
-                    if (hasViews || ks.hasLocalCDC())
+                    if (hasViews || cfs.metadata.params.cdc)
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -174,13 +174,12 @@ public class StreamReceiveTask extends StreamTask
                                     {
                                         Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata)));
 
-                                        // MV *can* be applied unsafe if there's no CDC on the keyspace as we flush below
+                                        // MV *can* be applied unsafe if there's no CDC on the CFS as we flush below
                                         // before transaction is done.
                                         //
-                                        // If the KS has CDC, however, these updates need to be written to the CommitLog
-                                        // so they filter into the appropriate CLSM and segments on disk regardless of
-                                        // whether there's an MV on the CF or not.
-                                        if (ks.hasLocalCDC())
+                                        // If the CFS has CDC, however, these updates need to be written to the CommitLog
+                                        // so they get archived into the cdc_raw folder
+                                        if (cfs.metadata.params.cdc)
                                             m.apply();
                                         else
                                             m.applyUnsafe();

@@ -197,8 +197,6 @@ K_REPLACE:     R E P L A C E;
 K_JSON:        J S O N;
 K_LIKE:        L I K E;
 
-K_CDCLOG:      C D C L O G;
-
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');
 fragment B: ('b'|'B');

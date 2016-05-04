@@ -26,6 +26,8 @@ import java.util.concurrent.locks.Lock;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -43,17 +45,12 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * It represents a Keyspace.
@@ -85,8 +82,6 @@ public class Keyspace
     private final ConcurrentMap<UUID, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
     private volatile AbstractReplicationStrategy replicationStrategy;
     public final ViewManager viewManager;
-
-    private boolean hasLocalCDC;
 
     public static final Function<String,Keyspace> keyspaceTransformer = new Function<String, Keyspace>()
     {
@@ -182,7 +177,6 @@ public class Keyspace
     {
         this.metadata = metadata;
         createReplicationStrategy(metadata);
-        this.hasLocalCDC = metadata.hasCDCForDatacenter(getReplicationStrategy(), DatabaseDescriptor.getLocalDataCenter());
     }
 
     public KeyspaceMetadata getMetadata()
@@ -323,7 +317,6 @@ public class Keyspace
             initCf(cfm, loadSSTables);
         }
         this.viewManager.reload();
-        this.hasLocalCDC = metadata.hasCDCForDatacenter(getReplicationStrategy(), DatabaseDescriptor.getLocalDataCenter());
     }
 
     private Keyspace(KeyspaceMetadata metadata)
@@ -332,7 +325,6 @@ public class Keyspace
         createReplicationStrategy(metadata);
         this.metric = new KeyspaceMetrics(this);
         this.viewManager = new ViewManager(this);
-        this.hasLocalCDC = metadata.hasCDCForDatacenter(getReplicationStrategy(), DatabaseDescriptor.getLocalDataCenter());
     }
 
     public static Keyspace mockKS(KeyspaceMetadata metadata)
@@ -646,11 +638,6 @@ public class Keyspace
             stores.add(indexCfs);
         }
         return stores;
-    }
-
-    public boolean hasLocalCDC()
-    {
-        return hasLocalCDC;
     }
 
     public static Iterable<Keyspace> all()

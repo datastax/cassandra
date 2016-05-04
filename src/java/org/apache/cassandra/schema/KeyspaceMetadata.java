@@ -177,10 +177,4 @@ public final class KeyspaceMetadata
         params.validate(name);
         tablesAndViews().forEach(CFMetaData::validate);
     }
-
-    public boolean hasCDCForDatacenter(AbstractReplicationStrategy strategy, String datacenter)
-    {
-        // Any entry in CDC on SimpleStrategy qualifies as we don't specify dc-names for RF and don't have them in our params
-        return (strategy instanceof SimpleStrategy && params.getCDCDataCenters().size() != 0) || params.hasCDCEnabled(datacenter);
-    }
 }

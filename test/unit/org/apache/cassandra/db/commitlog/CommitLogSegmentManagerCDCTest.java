@@ -30,7 +30,6 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager.SegmentManagerType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -40,26 +39,12 @@ import static org.junit.Assert.assertEquals;
 
 public class CommitLogSegmentManagerCDCTest extends CQLTester
 {
-    private static String KEYSPACE = "clr_test";
-    private static String TABLE = "clr_test_table";
     private static Random random = new Random();
 
-    /**
-     * Intentionally not using static @BeforeClass since we need access to CQLTester internal methods here and we want
-     * the convenience of access to its guts for the following tests.
-     */
-    @Before
-    public void before() throws Throwable
+    @BeforeClass
+    public static void beforeClass()
     {
-        // Swallow since we don't care about failure to drop CDCLOG on test prep
-        try { execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE)); }
-        catch (Exception e) {}
-
-        execute(String.format("DROP KEYSPACE IF EXISTS %s;", KEYSPACE));
-        execute(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};", KEYSPACE));
-        execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'test1'};", KEYSPACE));
-        execute(String.format("USE %s;", KEYSPACE));
-        execute(String.format("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));", TABLE));
+        CommitLog.instance.switchToCDCSegmentManager();
     }
 
     /**
@@ -71,21 +56,16 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         int midpoint = entryCount / 2;
 
         for (int i = 0; i < midpoint; i++) {
-            execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
         }
 
-        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition(SegmentManagerType.STANDARD);
+        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
 
         for (int i = midpoint; i < entryCount; i++)
-            execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
 
-        Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).forceBlockingFlush();
+        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
         return result;
-    }
-
-    private CFMetaData testCFM()
-    {
-        return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata;
     }
 
     @Test
@@ -93,7 +73,8 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     {
         CommitLog.instance.resetUnsafe(true);
 
-        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager(SegmentManagerType.CDC);
+        createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
+        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.segmentManager;
         long startSize = cdcMgr.updateCDCOverflowSize();
 
         int samples = 1000;
@@ -105,17 +86,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         Assert.assertTrue("CommitLogSegmentPosition for CDC Segment Manager did not increment. start: " + start + " end: " + end,
                           start.position < end.position);
 
-        // Confirm directory structure appropriately placing segments in a folder w/cdc in the name.
-        // Note: this could break if people change this in the test .yaml. So don't.
-        ArrayList<File> toCheck = CommitLogReaderTest.getCommitLogs(SegmentManagerType.CDC);
-        for (File f : toCheck)
-            if (!f.toString().contains("cdc"))
-                throw new AssertionError("Expected name of allocated CommitLogSegment to contain cdc.");
-
-        CFMetaData cfm = testCFM();
+        CFMetaData cfm = currentTableMetadata();
         CommitLogReaderTest.TestCLRHandler testHandler = new CommitLogReaderTest.TestCLRHandler(cfm);
 
         CommitLogReader reader = new CommitLogReader();
+        ArrayList<File> toCheck = CommitLogReaderTest.getCommitLogs();
         for (File f : toCheck)
             reader.readCommitLogSegment(testHandler, f, CommitLogReader.ALL_MUTATIONS, false);
 
@@ -136,20 +111,22 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         Assert.assertEquals("Expected no change in overflow folder size.", startSize, cdcMgr.updateCDCOverflowSize());
 
         // Recycle, confirm files are moved to cdc overflow.
-        int fileCount = new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles().length;
-        Assert.assertEquals("Expected there to be no files in cdc_overflow but found: " + fileCount, 0, fileCount);
+        int fileCount = new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length;
+        Assert.assertEquals("Expected there to be no files in cdc_raw but found: " + fileCount, 0, fileCount);
         CommitLog.instance.forceRecycleAllSegments();
         Assert.assertTrue("Expected change in overflow size on forced segment recycle", cdcMgr.updateCDCOverflowSize() != startSize);
-        fileCount = new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles().length;
-        Assert.assertEquals("Expected to have 1 segment in cdc_overflow. Got " + fileCount, 1, fileCount);
+        fileCount = new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length;
+        Assert.assertEquals("Expected to have 1 segment in cdc_raw. Got " + fileCount, 1, fileCount);
     }
 
     @Test
     public void testCDCWriteTimeout() throws Throwable
     {
         CommitLog.instance.resetUnsafe(true);
-        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager(SegmentManagerType.CDC);
-        CFMetaData cfm = testCFM();
+
+        createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
+        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.segmentManager;
+        CFMetaData cfm = currentTableMetadata();
 
         // Confirm that logic to check for whether or not we can allocate new CDC segments works
         Integer originalCDCSize = DatabaseDescriptor.getCommitLogSpaceInMBCDC();
@@ -190,7 +167,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
                 // expected, do nothing
             }
 
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).forceBlockingFlush();
+            // Confirm we can create a non-cdc table and write to it even while at cdc capacity
+            createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=false;");
+            execute("INSERT INTO %s (idx, data) VALUES (1, '1');");
+
+            Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
             CommitLog.instance.forceRecycleAllSegments();
             Assert.assertTrue("Expected files to be moved to overflow.", getCDCOverflowCount() > 0);
 
@@ -200,7 +181,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             while ((newSize = cdcMgr.updateCDCOverflowSize()) > 0)
             {
                 // Simulate a CDC consumer reading files then deleting them
-                for (File f : new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles())
+                for (File f : new File(DatabaseDescriptor.getCDCLogLocation()).listFiles())
                 {
                     FileUtils.deleteWithConfirm(f);
                 }
@@ -220,6 +201,32 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         }
     }
 
+    @Test
+    public void testCLSMCDCDiscardLogic() throws Throwable
+    {
+        CommitLog.instance.resetUnsafe(true);
+
+        createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=false;");
+        for (int i = 0; i < 8; i++)
+        {
+            new RowUpdateBuilder(currentTableMetadata(), 0, i)
+                .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                .build().apply();
+        }
+        CommitLog.instance.forceRecycleAllSegments();
+        Assert.assertEquals(0, new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length);
+
+        createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
+        for (int i = 0; i < 8; i++)
+        {
+            new RowUpdateBuilder(currentTableMetadata(), 0, i)
+                .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                .build().apply();
+        }
+        CommitLog.instance.forceRecycleAllSegments();
+        Assert.assertTrue(new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length > 0);
+    }
+
     private ByteBuffer randomizeBuffer(int size)
     {
         byte[] toWrap = new byte[size];
@@ -227,55 +234,8 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         return ByteBuffer.wrap(toWrap);
     }
 
-    @Test
-    public void testDCRestriction() throws Throwable
-    {
-        execute(String.format("ALTER KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 1, 'dc2': 1}", KEYSPACE));
-        execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
-        execute(String.format("USE %s;", KEYSPACE));
-
-        CommitLog.instance.resetUnsafe(true);
-
-        CommitLogSegmentManagerCDC cdcMgr = (CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager(SegmentManagerType.CDC);
-
-        int samples = 50;
-
-        // Confirm CommitLogSegmentPosition increments on mutation application
-        CommitLogSegmentPosition cdcStart = cdcMgr.getCurrentSegmentPosition();
-
-        String originalDC = DatabaseDescriptor.getLocalDataCenter();
-        try
-        {
-            // First, set to dc1 and make sure CDC picks it up. Have to drop and recreated cdc log, since the has local check
-            // occurs at time of keyspace alter and we need our DC to match at that time. Only relevant for tests as we won't
-            // be changing DC names on the fly in production.
-            execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE));
-            DatabaseDescriptor.setLocalDataCenter("dc1");
-            execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
-            populateData(samples);
-            CommitLogSegmentPosition cdcEnd = cdcMgr.getCurrentSegmentPosition();
-
-            // Can't really check standard mgr for position change since other things (system tables) can be written to it during test
-            // We can reliably check the CDC segment position, however, since no system tables have CDC enabled.
-            Assert.assertTrue(cdcEnd.position > cdcStart.position);
-
-            // Change and confirm future mutations don't go CDC
-            execute(String.format("ALTER KEYSPACE %s DROP CDCLOG;", KEYSPACE));
-            DatabaseDescriptor.setLocalDataCenter("dc2");
-            execute(String.format("ALTER KEYSPACE %s WITH cdc_datacenters = {'dc1'};", KEYSPACE));
-            cdcStart = cdcMgr.getCurrentSegmentPosition();
-            populateData(samples);
-            cdcEnd = cdcMgr.getCurrentSegmentPosition();
-            Assert.assertTrue(cdcEnd.position == cdcStart.position);
-        }
-        finally
-        {
-            DatabaseDescriptor.setLocalDataCenter(originalDC);
-        }
-    }
-
     private int getCDCOverflowCount()
     {
-        return new File(DatabaseDescriptor.getCDCOverflowLocation()).listFiles().length;
+        return new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length;
     }
 }
