@@ -987,6 +987,8 @@ public class StorageProxy implements StorageProxyMBean
         // local write that time out should be handled by LocalMutationRunnable
         assert !target.equals(FBUtilities.getBroadcastAddress()) : target;
 
+        Tracing.trace("Submit hint for {}", target);
+
         HintRunnable runnable = new HintRunnable(target)
         {
             public void runMayThrow()
@@ -994,7 +996,9 @@ public class StorageProxy implements StorageProxyMBean
                 int ttl = HintedHandOffManager.calculateHintTTL(mutation);
                 if (ttl > 0)
                 {
-                    logger.debug("Adding hint for {}", target);
+                    if (logger.isDebugEnabled())
+                        logger.debug("Adding hint for {} tracing session {}", target, Tracing.isTracing() ? Tracing.instance.getSessionId():"None");
+                    Tracing.trace("Adding hint for {}", target);
                     writeHintForMutation(mutation, System.currentTimeMillis(), ttl, target);
                     // Notify the handler only for CL == ANY
                     if (responseHandler != null && responseHandler.consistencyLevel == ConsistencyLevel.ANY)

@@ -25,6 +25,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class WriteCallbackInfo extends CallbackInfo
@@ -38,9 +39,10 @@ public class WriteCallbackInfo extends CallbackInfo
                              MessageOut message,
                              IVersionedSerializer<?> serializer,
                              ConsistencyLevel consistencyLevel,
-                             boolean allowHints)
+                             boolean allowHints,
+                             TraceState ts)
     {
-        super(target, callback, serializer);
+        super(target, callback, serializer, false, ts);
         assert message != null;
         this.sentMessage = message;
         this.consistencyLevel = consistencyLevel;

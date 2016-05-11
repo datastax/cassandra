@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
@@ -378,8 +379,17 @@ public final class MessagingService implements MessagingServiceMBean
 
                 if (expiredCallbackInfo.shouldHint())
                 {
-                    Mutation mutation = ((WriteCallbackInfo) expiredCallbackInfo).mutation();
-                    return StorageProxy.submitHint(mutation, expiredCallbackInfo.target, null);
+                    TraceState oldState = Tracing.instance.get();
+                    Tracing.instance.set(pair.right.value.traceState);
+                    try
+                    {
+                        Mutation mutation = ((WriteCallbackInfo) expiredCallbackInfo).mutation();
+                        return StorageProxy.submitHint(mutation, expiredCallbackInfo.target, null);
+                    }
+                    finally
+                    {
+                        Tracing.instance.set(oldState);
+                    }
                 }
 
                 return null;
@@ -586,6 +596,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         assert message.verb != Verb.MUTATION; // mutations need to call the overload with a ConsistencyLevel
         int messageId = nextId();
+
         CallbackInfo previous = callbacks.put(messageId, new CallbackInfo(to, cb, callbackDeserializers.get(message.verb), failureCallback), timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;
@@ -601,13 +612,17 @@ public final class MessagingService implements MessagingServiceMBean
         assert message.verb == Verb.MUTATION || message.verb == Verb.COUNTER_MUTATION || message.verb == Verb.PAXOS_COMMIT;
         int messageId = nextId();
 
+        final byte[] sessionBytes = (byte[]) message.parameters.get(Tracing.TRACE_HEADER);
+        TraceState ts = sessionBytes == null ? null : new TraceState(FBUtilities.getLocalAddress(), UUIDGen.getUUID(ByteBuffer.wrap(sessionBytes)));
+
         CallbackInfo previous = callbacks.put(messageId,
                                               new WriteCallbackInfo(to,
                                                                     cb,
                                                                     message,
                                                                     callbackDeserializers.get(message.verb),
                                                                     consistencyLevel,
-                                                                    allowHints),
+                                                                    allowHints,
+                                                                    ts),
                                                                     timeout);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;

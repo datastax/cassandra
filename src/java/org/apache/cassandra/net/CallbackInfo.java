@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.net.InetAddress;
 
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.tracing.TraceState;
 
 /**
  * Encapsulates the callback information.
@@ -31,6 +32,7 @@ public class CallbackInfo
     protected final InetAddress target;
     protected final IAsyncCallback callback;
     protected final IVersionedSerializer<?> serializer;
+    public final TraceState traceState;
     private final boolean failureCallback;
 
     public CallbackInfo(InetAddress target, IAsyncCallback callback, IVersionedSerializer<?> serializer)
@@ -47,10 +49,23 @@ public class CallbackInfo
      */
     public CallbackInfo(InetAddress target, IAsyncCallback callback, IVersionedSerializer<?> serializer, boolean failureCallback)
     {
+        this(target, callback, serializer, failureCallback, null);
+    }
+
+    /**
+     * Create CallbackInfo without sent message
+     *
+     * @param target target to send message
+     * @param callback
+     * @param serializer serializer to deserialize response message
+     */
+    public CallbackInfo(InetAddress target, IAsyncCallback callback, IVersionedSerializer<?> serializer, boolean failureCallback, TraceState traceState)
+    {
         this.target = target;
         this.callback = callback;
         this.serializer = serializer;
         this.failureCallback = failureCallback;
+        this.traceState = traceState;
     }
 
     public boolean shouldHint()
