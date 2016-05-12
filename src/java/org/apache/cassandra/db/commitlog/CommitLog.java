@@ -497,16 +497,4 @@ public class CommitLog implements CommitLogMBean
                 throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());
         }
     }
-
-    /**
-     * Hook for CDC-specific tests to swap in CDC CLSM.
-     * TODO: Remove this in favor of having a test .yaml that runs commitlog tests on CDC-enabled CLSM
-     */
-    @VisibleForTesting
-    public void switchToCDCSegmentManager()
-    {
-        segmentManager.stopUnsafe(true);
-        segmentManager = new CommitLogSegmentManagerCDC(this, DatabaseDescriptor.getCommitLogLocation());
-        segmentManager.start();
-    }
 }
