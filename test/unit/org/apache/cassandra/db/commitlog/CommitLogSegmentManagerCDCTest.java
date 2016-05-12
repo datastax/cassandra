@@ -42,9 +42,9 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     private static Random random = new Random();
 
     @BeforeClass
-    public static void beforeClass()
+    public static void checkConfig()
     {
-        CommitLog.instance.switchToCDCSegmentManager();
+        Assume.assumeTrue(DatabaseDescriptor.isCDCEnabled());
     }
 
     /**

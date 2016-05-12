@@ -54,8 +54,6 @@ public class CommitLogStressTest
     public static int rateLimit = 0;
     public static int runTimeMs = 10000;
 
-    public static String location;
-
     public static int hash(int hash, ByteBuffer bytes)
     {
         int shift = 0;
@@ -69,8 +67,6 @@ public class CommitLogStressTest
 
     public static void main(String[] args) throws Exception
     {
-        DatabaseDescriptor.setCommitLogLocation(DatabaseDescriptor.getCommitLogLocation() + File.separator + "stress");
-        location = DatabaseDescriptor.getCommitLogLocation();
         try
         {
             if (args.length >= 1)
@@ -135,21 +131,9 @@ public class CommitLogStressTest
     }
 
     @Before
-    public void cleanDir()
+    public void cleanDir() throws IOException
     {
-        File dir = new File(location);
-        if (dir.isDirectory())
-        {
-            File[] files = dir.listFiles();
-
-            for (File f : files)
-                if (!f.delete())
-                    Assert.fail("Failed to delete " + f);
-        }
-        else
-        {
-            dir.mkdir();
-        }
+        CommitLog.instance.resetUnsafe(true);
     }
 
     @Test
@@ -269,7 +253,7 @@ public class CommitLogStressTest
         System.out.println("Stopped. Replaying... ");
         System.out.flush();
         Reader reader = new Reader();
-        File[] files = new File(location).listFiles();
+        File[] files = new File(DatabaseDescriptor.getCommitLogLocation()).listFiles();
 
         DummyHandler handler = new DummyHandler();
         reader.readAllFiles(handler, files);
@@ -306,7 +290,7 @@ public class CommitLogStressTest
         CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
 
         long combinedSize = 0;
-        for (File f : new File(location).listFiles())
+        for (File f : new File(DatabaseDescriptor.getCommitLogLocation()).listFiles())
             combinedSize += f.length();
         Assert.assertEquals(combinedSize, commitLog.getActiveOnDiskSize());
 
