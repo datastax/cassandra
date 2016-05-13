@@ -21,6 +21,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -33,6 +36,8 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
  */
 public class ThriftConversion
 {
+    public static final Logger logger = LoggerFactory.getLogger(ThriftConversion.class);
+
     public static org.apache.cassandra.db.ConsistencyLevel fromThrift(ConsistencyLevel cl)
     {
         switch (cl)
@@ -75,6 +80,7 @@ public class ThriftConversion
     // for methods that have a return value.
     public static RuntimeException rethrow(RequestExecutionException e) throws UnavailableException, TimedOutException
     {
+        log(e);
         if (e instanceof RequestTimeoutException)
             throw toThrift((RequestTimeoutException)e);
         else
@@ -83,21 +89,25 @@ public class ThriftConversion
 
     public static InvalidRequestException toThrift(RequestValidationException e)
     {
+        log(e);
         return new InvalidRequestException(e.getMessage());
     }
 
     public static UnavailableException toThrift(org.apache.cassandra.exceptions.UnavailableException e)
     {
+        log(e);
         return new UnavailableException();
     }
 
     public static AuthenticationException toThrift(org.apache.cassandra.exceptions.AuthenticationException e)
     {
+        log(e);
         return new AuthenticationException(e.getMessage());
     }
 
     public static TimedOutException toThrift(RequestTimeoutException e)
     {
+        log(e);
         TimedOutException toe = new TimedOutException();
         if (e instanceof WriteTimeoutException)
         {
@@ -129,5 +139,10 @@ public class ThriftConversion
                                                                       expr.value));
         }
         return converted;
+    }
+
+    private static void log(Exception e)
+    {
+        logger.warn("converting to thrift exception", e);
     }
 }
