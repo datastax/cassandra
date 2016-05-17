@@ -435,7 +435,7 @@ public class CommitLogStressTest
         protected void readMutation(CommitLogReadHandler handler,
                                     byte[] inputBuffer,
                                     int size,
-                                    final long entryLocation,
+                                    final int entryLocation,
                                     final CommitLogDescriptor desc) throws IOException
         {
             if (desc.id < discardedPos.segmentId)
@@ -492,6 +492,6 @@ public class CommitLogStressTest
 
         public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }
 
-        public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc) { }
+        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc) { }
     }
 }

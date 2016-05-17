@@ -69,10 +69,10 @@ public class Memtable implements Comparable<Memtable>
 
     // the write barrier for directing writes to this memtable during a switch
     private volatile OpOrder.Barrier writeBarrier;
-    // the precise upper bound of ReplayPosition owned by this memtable
-    private volatile AtomicReference<ReplayPosition> commitLogUpperBound;
-    // the precise lower bound of ReplayPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
-    private AtomicReference<ReplayPosition> commitLogLowerBound;
+    // the precise upper bound of CommitLogSegmentPosition owned by this memtable
+    private volatile AtomicReference<CommitLogSegmentPosition> commitLogUpperBound;
+    // the precise lower bound of CommitLogSegmentPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
+    private AtomicReference<CommitLogSegmentPosition> commitLogLowerBound;
     // the approximate lower bound by this memtable; must be <= commitLogLowerBound once our predecessor
     // the last CommitLogSegmentPosition owned by this Memtable; all CommitLogSegmentPosition lower are owned by this or an earlier Memtable
     private volatile AtomicReference<CommitLogSegmentPosition> lastCommitLogSegmentPosition;
@@ -80,7 +80,7 @@ public class Memtable implements Comparable<Memtable>
     // the "first" CommitLogSegmentPosition owned by this Memtable; this is inaccurate, and only used as a convenience to prevent CLSM flushing wantonly
     private final CommitLogSegmentPosition minCommitLogSegmentPosition;
     // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
-    private final ReplayPosition approximateCommitLogLowerBound = CommitLog.instance.getContext();
+    private final CommitLogSegmentPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentSegmentPosition();
 
     public int compareTo(Memtable that)
     {
@@ -113,7 +113,7 @@ public class Memtable implements Comparable<Memtable>
     private final StatsCollector statsCollector = new StatsCollector();
 
     // only to be used by init(), to setup the very first memtable for the cfs
-    public Memtable(AtomicReference<ReplayPosition> commitLogLowerBound, ColumnFamilyStore cfs)
+    public Memtable(AtomicReference<CommitLogSegmentPosition> commitLogLowerBound, ColumnFamilyStore cfs)
     {
         this.cfs = cfs;
         this.commitLogLowerBound = commitLogLowerBound;
@@ -154,7 +154,7 @@ public class Memtable implements Comparable<Memtable>
     public void setDiscarding(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogSegmentPosition> lastCommitLogSegmentPosition)
     {
         assert this.writeBarrier == null;
-        this.commitLogUpperBound = lastReplayPosition;
+        this.commitLogUpperBound = lastCommitLogSegmentPosition;
         this.writeBarrier = writeBarrier;
         allocator.setDiscarding();
     }
@@ -184,17 +184,17 @@ public class Memtable implements Comparable<Memtable>
             // its current value and ours; if it HAS been finalised, we simply accept its judgement
             // this permits us to coordinate a safe boundary, as the boundary choice is made
             // atomically wrt our max() maintenance, so an operation cannot sneak into the past
-            ReplayPosition currentLast = commitLogUpperBound.get();
+            CommitLogSegmentPosition currentLast = commitLogUpperBound.get();
             if (currentLast instanceof LastCommitLogSegmentPosition)
                 return currentLast.compareTo(commitLogSegmentPosition) >= 0;
             if (currentLast != null && currentLast.compareTo(commitLogSegmentPosition) >= 0)
                 return true;
-            if (commitLogUpperBound.compareAndSet(currentLast, replayPosition))
+            if (commitLogUpperBound.compareAndSet(currentLast, commitLogSegmentPosition))
                 return true;
         }
     }
 
-    public ReplayPosition getCommitLogLowerBound()
+    public CommitLogSegmentPosition getCommitLogLowerBound()
     {
         return commitLogLowerBound.get();
     }
@@ -209,7 +209,7 @@ public class Memtable implements Comparable<Memtable>
         return partitions.isEmpty();
     }
 
-    public boolean mayContainDataBefore(ReplayPosition position)
+    public boolean mayContainDataBefore(CommitLogSegmentPosition position)
     {
         return approximateCommitLogLowerBound.compareTo(position) < 0;
     }

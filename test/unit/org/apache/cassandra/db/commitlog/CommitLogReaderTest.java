@@ -131,7 +131,7 @@ public class CommitLogReaderTest extends CQLTester
             sawStopOnErrorCheck = true;
         }
 
-        public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc)
+        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
         {
             if ((cfm == null) || (cfm != null && m.get(cfm) != null)) {
                 seenMutations.add(m);

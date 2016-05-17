@@ -40,7 +40,9 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
 
@@ -58,7 +60,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     private final Queue<Future<Integer>> futures;
 
     private final AtomicInteger replayedCount;
-    private final Map<UUID, ReplayPosition.ReplayFilter> cfPersisted;
+    private final Map<UUID, ReplayPositionFilter> cfPersisted;
     private final CommitLogSegmentPosition globalPosition;
 
     // Used to throttle speed of replay of mutations if we pass the max outstanding count
@@ -69,12 +71,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     @VisibleForTesting
     protected CommitLogReader commitLogReader;
-                                                   final int entryLocation,
-                        if (clr.shouldReplay(update.metadata().cfId, new ReplayPosition(segmentId, entryLocation)))
 
     CommitLogReplayer(CommitLog commitLog,
                       CommitLogSegmentPosition globalPosition,
-                      Map<UUID, CommitLogSegmentPosition> cfPositions,
+                      Map<UUID, ReplayPositionFilter> cfPersisted,
                       ReplayFilter replayFilter)
     {
         this.keyspacesReplayed = new NonBlockingHashSet<Keyspace>();
@@ -91,14 +91,13 @@ public class CommitLogReplayer implements CommitLogReadHandler
     public static CommitLogReplayer construct(CommitLog commitLog)
     {
         // compute per-CF and global commit log segment positions
-        Map<UUID, ReplayPosition.ReplayFilter> cfPersisted = new HashMap<>();
+        Map<UUID, ReplayPositionFilter> cfPersisted = new HashMap<>();
         Map<UUID, CommitLogSegmentPosition> cfPositions = new HashMap<UUID, CommitLogSegmentPosition>();
         Ordering<CommitLogSegmentPosition> commitLogSegmentPositionOrdering = Ordering.from(CommitLogSegmentPosition.comparator);
         ReplayFilter replayFilter = ReplayFilter.create();
-        ReplayPosition globalPosition = null;
+        CommitLogSegmentPosition globalPosition = null;
         for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
         {
-            CommitLogSegmentPosition clsp = CommitLogSegmentPosition.getCommitLogSegmentPosition(cfs.getSSTables(SSTableSet.CANONICAL));
             // but, if we've truncated the cf in question, then we need to need to start replay after the truncation
             CommitLogSegmentPosition truncatedAt = SystemKeyspace.getTruncatedPosition(cfs.metadata.cfId);
             if (truncatedAt != null)
@@ -119,23 +118,17 @@ public class CommitLogReplayer implements CommitLogReadHandler
                         truncatedAt = null;
                     }
                 }
-                    clsp = commitLogSegmentPositionOrdering.max(Arrays.asList(clsp, truncatedAt));
             }
 
-            ReplayPosition.ReplayFilter filter = new ReplayPosition.ReplayFilter(cfs.getSSTables(), truncatedAt);
+            ReplayPositionFilter filter = new ReplayPositionFilter(cfs.getSSTables(), truncatedAt);
             if (!filter.isEmpty())
                 cfPersisted.put(cfs.metadata.cfId, filter);
             else
-                globalPosition = ReplayPosition.NONE; // if we have no ranges for this CF, we must replay everything and filter
+                globalPosition = CommitLogSegmentPosition.NONE; // if we have no ranges for this CF, we must replay everything and filter
         }
-// B
-            if (globalPosition == null)
-            globalPosition = ReplayPosition.firstNotCovered(cfPersisted.values());
-// C
-        CommitLogSegmentPosition globalPosition = commitLogSegmentPositionOrdering.min(cfPositions.values());
+        if (globalPosition == null)
+            globalPosition = firstNotCovered(cfPersisted.values());
         logger.trace("Global commit log segment position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPositions));
-
-        logger.debug("Global replay position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPersisted));
         return new CommitLogReplayer(commitLog, globalPosition, cfPersisted, replayFilter);
     }
 
@@ -194,7 +187,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         protected Future<Integer> initiateMutation(final Mutation mutation,
                                                    final long segmentId,
                                                    final int serializedSize,
-                                                   final long entryLocation,
+                                                   final int entryLocation,
                                                    final CommitLogReplayer commitLogReplayer)
         {
             Runnable runnable = new WrappedRunnable()
@@ -219,11 +212,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
                         if (Schema.instance.getCF(update.metadata().cfId) == null)
                             continue; // dropped
 
-                        CommitLogSegmentPosition clsp = commitLogReplayer.cfPositions.get(update.metadata().cfId);
-
                         // replay if current segment is newer than last flushed one or,
                         // if it is the last known segment, if we are after the commit log segment position
-                        if (segmentId > clsp.segmentId || (segmentId == clsp.segmentId && entryLocation > clsp.position))
+                        if (commitLogReplayer.shouldReplay(update.metadata().cfId, new CommitLogSegmentPosition(segmentId, entryLocation)))
                         {
                             if (newMutation == null)
                                 newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
@@ -250,6 +241,71 @@ public class CommitLogReplayer implements CommitLogReadHandler
             };
             return StageManager.getStage(Stage.MUTATION).submit(runnable, serializedSize);
         }
+    }
+
+    /**
+     * A filter of known safe-to-discard commit log replay positions, based on
+     * the range covered by on disk sstables and those prior to the most recent truncation record
+     */
+    public static class ReplayPositionFilter
+    {
+        final NavigableMap<CommitLogSegmentPosition, CommitLogSegmentPosition> persisted = new TreeMap<>();
+        public ReplayPositionFilter(Iterable<SSTableReader> onDisk, CommitLogSegmentPosition truncatedAt)
+        {
+            for (SSTableReader reader : onDisk)
+            {
+                CommitLogSegmentPosition start = reader.getSSTableMetadata().commitLogLowerBound;
+                CommitLogSegmentPosition end = reader.getSSTableMetadata().commitLogUpperBound;
+                add(persisted, start, end);
+            }
+            if (truncatedAt != null)
+                add(persisted, CommitLogSegmentPosition.NONE, truncatedAt);
+        }
+
+        private static void add(NavigableMap<CommitLogSegmentPosition, CommitLogSegmentPosition> ranges, CommitLogSegmentPosition start, CommitLogSegmentPosition end)
+        {
+            // extend ourselves to cover any ranges we overlap
+            // record directly preceding our end may extend past us, so take the max of our end and its
+            Map.Entry<CommitLogSegmentPosition, CommitLogSegmentPosition> extend = ranges.floorEntry(end);
+            if (extend != null && extend.getValue().compareTo(end) > 0)
+                end = extend.getValue();
+
+            // record directly preceding our start may extend into us; if it does, we take it as our start
+            extend = ranges.lowerEntry(start);
+            if (extend != null && extend.getValue().compareTo(start) >= 0)
+                start = extend.getKey();
+
+            ranges.subMap(start, end).clear();
+            ranges.put(start, end);
+        }
+
+        public boolean shouldReplay(CommitLogSegmentPosition position)
+        {
+            // replay ranges are start exclusive, end inclusive
+            Map.Entry<CommitLogSegmentPosition, CommitLogSegmentPosition> range = persisted.lowerEntry(position);
+            return range == null || position.compareTo(range.getValue()) > 0;
+        }
+
+        public boolean isEmpty()
+        {
+            return persisted.isEmpty();
+        }
+    }
+
+    public static CommitLogSegmentPosition firstNotCovered(Iterable<ReplayPositionFilter> ranges)
+    {
+        CommitLogSegmentPosition min = null;
+        for (ReplayPositionFilter map : ranges)
+        {
+            CommitLogSegmentPosition first = map.persisted.firstEntry().getValue();
+            if (min == null)
+                min = first;
+            else
+                min = Ordering.natural().min(min, first);
+        }
+        if (min == null)
+            return CommitLogSegmentPosition.NONE;
+        return min;
     }
 
     abstract static class ReplayFilter
@@ -333,9 +389,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
      *
      * @return true iff replay is necessary
      */
-    private boolean shouldReplay(UUID cfId, ReplayPosition position)
+    private boolean shouldReplay(UUID cfId, CommitLogSegmentPosition position)
     {
-        ReplayPosition.ReplayFilter filter = cfPersisted.get(cfId);
+        ReplayPositionFilter filter = cfPersisted.get(cfId);
         return filter == null || filter.shouldReplay(position);
     }
 
@@ -347,14 +403,12 @@ public class CommitLogReplayer implements CommitLogReadHandler
         for (PartitionUpdate upd : fm.getPartitionUpdates())
         {
             if (archiver.precision.toMillis(upd.maxTimestamp()) > restoreTarget)
-            replayMutation(buffer, serializedSize, (int) reader.getFilePointer(), desc);
                 return true;
         }
         return false;
-            final int entryLocation, final CommitLogDescriptor desc) throws IOException
     }
 
-    public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc)
+    public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
     {
         pendingMutationBytes += size;
         futures.offer(mutationInitiator.initiateMutation(m,
