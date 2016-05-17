@@ -137,11 +137,7 @@ public class Mutation implements IMutation
         assert update != null;
         assert update.partitionKey().getPartitioner() == key.getPartitioner();
 
-        if (DatabaseDescriptor.isCDCEnabled() &&
-            Keyspace.open(update.metadata().ksName).getColumnFamilyStore(update.metadata().cfName).hasCDCEnabled())
-        {
-            cdcEnabled = true;
-        }
+        cdcEnabled |= update.metadata().params.cdc;
 
         PartitionUpdate prev = modifications.put(update.metadata().cfId, update);
         if (prev != null)
