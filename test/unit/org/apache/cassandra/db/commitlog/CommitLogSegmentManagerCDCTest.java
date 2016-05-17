@@ -227,6 +227,57 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         Assert.assertTrue(new File(DatabaseDescriptor.getCDCLogLocation()).listFiles().length > 0);
     }
 
+    @Test
+    public void testMixedAllocateOnBoundary() throws Throwable
+    {
+        CommitLog.instance.resetUnsafe(true);
+        String nct = createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=false;");
+        String ct = createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
+
+        DatabaseDescriptor.setCommitLogSpaceInMBCDC(16);
+        CFMetaData ncfm = Keyspace.open(keyspace()).getColumnFamilyStore(nct).metadata;
+        CFMetaData ccfm = Keyspace.open(keyspace()).getColumnFamilyStore(ct).metadata;
+        // Spin until we hit CDC capacity and make sure we get a WriteTimeout
+        try
+        {
+            // Should trigger on anything < 20:1 compression ratio during compressed test
+            for (int i = 0; i < 1000; i++)
+            {
+                new RowUpdateBuilder(ccfm, 0, i)
+                    .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+                    .build().apply();
+            }
+            Assert.fail("Expected WriteTimeoutException from full CDC but did not receive it.");
+        }
+        catch (WriteTimeoutException e)
+        {
+            // expected, do nothing
+        }
+
+        execute(String.format("USE %s;", keyspace()));
+        execute(String.format("INSERT INTO %s (idx, data) VALUES (14392, '14392');", nct));
+
+        // A small cdc allocation should still work since it's < the remaining size in the current segment.
+        execute(String.format("INSERT INTO %s (idx, data) VALUES (14393, '14393');", ct));
+
+        // We need to fill that segment and force movement to another so we can test what happens when we're at cdc limit
+        // and in a segment that does not yet have a cdc mutation in it.
+        for (int i = 0; i < 4; i++) {
+            new RowUpdateBuilder(ncfm, 0, i + 10000)
+            .add("data", randomizeBuffer(DatabaseDescriptor.getCommitLogSegmentSize() / 3))
+            .build().apply();
+        }
+
+        // We expect this allocation to fail, since we're a) at cdc limit between unflushed and cdc_raw, and b) we're in
+        // a segment with no CDC mutations in it.
+        try
+        {
+            execute(String.format("INSERT INTO %s (idx, data) VALUES (14393, '14393');", ct));
+            Assert.fail("Expected WriteTimeoutException from full CDC after non-cdc allocation.");
+        }
+        catch (WriteTimeoutException wte) { }
+    }
+
     private ByteBuffer randomizeBuffer(int size)
     {
         byte[] toWrap = new byte[size];

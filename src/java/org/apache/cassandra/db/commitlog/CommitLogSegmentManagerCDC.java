@@ -90,10 +90,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * create a new segment. For CDC mutations, allocation is expected to throw WTE if we're at CDC capacity.
      *
      * We allow advancement of non-CDC enabled segments as all CDC mutations should be rejected until space is cleared
-     * in cdc_raw. Subsequent non-cdc mutations won't flag cdc on the CommitLogSegment and thus the segment will be deleted
+     * in cdc_raw. Subsequent non-CDC mutations won't flag cdc on the CommitLogSegment and thus the segment will be deleted
      * on discard() rather than further pushing the total CDC on disk footprint.
      *
-     * @return the provided Allocation object, or null if we are at allowable allocated CDC capacity on disk
+     * @return the provided Allocation object
      * @throws WriteTimeoutException If CDC directory is at configured limit, we throw an exception rather than allocate.
      */
     @Override
@@ -101,17 +101,32 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     {
         CommitLogSegment segment = allocatingFrom();
         CommitLogSegment.Allocation alloc;
-        while ( null == (alloc = segment.allocate(mutation, size)) )
+
+        // If we're at our capacity of unflushed + flushed cdc data but the current segment a) contains cdc data and b)
+        // still has room left to allow this allocation, we allow it.
+        if (mutation.trackedByCDC() && atCapacity())
         {
-            if (mutation.trackedByCDC() && atCapacity())
+            if (!segment.containsCDCMutations.get() || (null == (alloc = segment.allocate(mutation, size))))
             {
                 cdcSizeCalculator.submitOverflowSizeRecalculation();
                 throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
             }
+            return alloc;
+        }
+        else
+        {
+            while ( null == (alloc = segment.allocate(mutation, size)) )
+            {
+                if (mutation.trackedByCDC() && atCapacity())
+                {
+                    cdcSizeCalculator.submitOverflowSizeRecalculation();
+                    throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
+                }
 
-            // Failed to allocate, so move to a new segment with enough room if possible.
-            advanceAllocatingFrom(segment);
-            segment = allocatingFrom;
+                // Failed to allocate, so move to a new segment with enough room if possible.
+                advanceAllocatingFrom(segment);
+                segment = allocatingFrom;
+            }
         }
 
         // Operate with a worst-case estimate of full DBD.getCommitLogSegmentSize as being our final size of CDC CLS
