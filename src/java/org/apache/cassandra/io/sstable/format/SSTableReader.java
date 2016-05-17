@@ -1908,8 +1908,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata.compressionRatio;
     }
 
-    public CommitLogSegmentPosition getCommitLogSegmentPosition()
-        return sstableMetadata.commitLogSegmentPosition;
     public long getMinTimestamp()
     {
         return sstableMetadata.minTimestamp;

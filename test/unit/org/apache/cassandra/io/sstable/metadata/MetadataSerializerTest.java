@@ -81,8 +81,8 @@ public class MetadataSerializerTest
 
     public Map<MetadataType, MetadataComponent> constructMetadata()
     {
-        ReplayPosition club = new ReplayPosition(11L, 12);
-        ReplayPosition cllb = new ReplayPosition(9L, 12);
+        CommitLogSegmentPosition club = new CommitLogSegmentPosition(11L, 12);
+        CommitLogSegmentPosition cllb = new CommitLogSegmentPosition(9L, 12);
 
         CFMetaData cfm = SchemaLoader.standardCFMD("ks1", "cf1");
         MetadataCollector collector = new MetadataCollector(cfm.comparator)

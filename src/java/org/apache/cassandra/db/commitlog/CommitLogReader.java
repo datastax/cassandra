@@ -326,7 +326,7 @@ public class CommitLogReader
                 }
                 continue;
             }
-            readMutation(handler, buffer, serializedSize, reader.getFilePointer(), desc);
+            readMutation(handler, buffer, serializedSize, (int) reader.getFilePointer(), desc);
             statusTracker.addProcessedMutation();
         }
     }
@@ -344,7 +344,7 @@ public class CommitLogReader
     protected void readMutation(CommitLogReadHandler handler,
                               byte[] inputBuffer,
                               int size,
-                              final long entryLocation,
+                              final int entryLocation,
                               final CommitLogDescriptor desc) throws IOException
     {
         final Mutation mutation;

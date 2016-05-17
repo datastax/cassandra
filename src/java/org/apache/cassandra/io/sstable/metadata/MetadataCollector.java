@@ -67,7 +67,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
         return new StatsMetadata(defaultPartitionSizeHistogram(),
                                  defaultCellPerPartitionCountHistogram(),
                                  CommitLogSegmentPosition.NONE,
-                                 ReplayPosition.NONE,
+                                 CommitLogSegmentPosition.NONE,
                                  Long.MIN_VALUE,
                                  Long.MAX_VALUE,
                                  Integer.MAX_VALUE,
@@ -88,8 +88,8 @@ public class MetadataCollector implements PartitionStatisticsCollector
     protected EstimatedHistogram estimatedPartitionSize = defaultPartitionSizeHistogram();
     // TODO: cound the number of row per partition (either with the number of cells, or instead)
     protected EstimatedHistogram estimatedCellPerPartitionCount = defaultCellPerPartitionCountHistogram();
-    protected CommitLogSegmentPosition commitLogSegmentPosition = CommitLogSegmentPosition.NONE;
-    protected ReplayPosition commitLogUpperBound = ReplayPosition.NONE;
+    protected CommitLogSegmentPosition commitLogLowerBound = CommitLogSegmentPosition.NONE;
+    protected CommitLogSegmentPosition commitLogUpperBound = CommitLogSegmentPosition.NONE;
     protected final MinMaxLongTracker timestampTracker = new MinMaxLongTracker();
     protected final MinMaxIntTracker localDeletionTimeTracker = new MinMaxIntTracker(Cell.NO_DELETION_TIME, Cell.NO_DELETION_TIME);
     protected final MinMaxIntTracker ttlTracker = new MinMaxIntTracker(Cell.NO_TTL, Cell.NO_TTL);
@@ -123,7 +123,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
     {
         this(comparator);
 
-        ReplayPosition min = null, max = null;
+        CommitLogSegmentPosition min = null, max = null;
         for (SSTableReader sstable : sstables)
         {
             if (min == null)
@@ -226,15 +226,13 @@ public class MetadataCollector implements PartitionStatisticsCollector
         ttlTracker.update(newTTL);
     }
 
-    public MetadataCollector commitLogLowerBound(ReplayPosition commitLogLowerBound)
-    public MetadataCollector commitLogSegmentPosition(CommitLogSegmentPosition commitLogSegmentPosition)
+    public MetadataCollector commitLogLowerBound(CommitLogSegmentPosition commitLogLowerBound)
     {
         this.commitLogLowerBound = commitLogLowerBound;
-        this.commitLogSegmentPosition = commitLogSegmentPosition;
         return this;
     }
 
-    public MetadataCollector commitLogUpperBound(ReplayPosition commitLogUpperBound)
+    public MetadataCollector commitLogUpperBound(CommitLogSegmentPosition commitLogUpperBound)
     {
         this.commitLogUpperBound = commitLogUpperBound;
         return this;
@@ -301,7 +299,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
         components.put(MetadataType.VALIDATION, new ValidationMetadata(partitioner, bloomFilterFPChance));
         components.put(MetadataType.STATS, new StatsMetadata(estimatedPartitionSize,
                                                              estimatedCellPerPartitionCount,
-                                                             commitLogSegmentPosition,
+                                                             commitLogLowerBound,
                                                              commitLogUpperBound,
                                                              timestampTracker.min(),
                                                              timestampTracker.max(),

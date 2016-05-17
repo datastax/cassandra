@@ -734,7 +734,7 @@ public class CommitLogTest
 
         @SuppressWarnings("resource")
         @Override
-        public void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc)
+        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
         {
             if (entryLocation <= filterPosition.position)
             {

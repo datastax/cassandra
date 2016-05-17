@@ -94,7 +94,7 @@ public class TableViews extends AbstractCollection<View>
             viewCfs.dumpMemtable();
     }
 
-    public void truncateBlocking(ReplayPosition replayAfter, long truncatedAt)
+    public void truncateBlocking(CommitLogSegmentPosition replayAfter, long truncatedAt)
     {
         for (ColumnFamilyStore viewCfs : allViewsCfs())
         {

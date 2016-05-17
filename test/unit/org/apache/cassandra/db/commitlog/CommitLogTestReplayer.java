@@ -59,7 +59,7 @@ public class CommitLogTestReplayer extends CommitLogReplayer
         protected void readMutation(CommitLogReadHandler handler,
                                     byte[] inputBuffer,
                                     int size,
-                                    final long entryLocation,
+                                    final int entryLocation,
                                     final CommitLogDescriptor desc) throws IOException
         {
             RebufferingInputStream bufIn = new DataInputBuffer(inputBuffer, 0, size);

@@ -71,5 +71,5 @@ public interface CommitLogReadHandler
      * @param entryLocation filePointer offset inside the CommitLogSegment for the record
      * @param desc CommitLogDescriptor for mutation being processed
      */
-    void handleMutation(Mutation m, int size, long entryLocation, CommitLogDescriptor desc);
+    void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc);
 }

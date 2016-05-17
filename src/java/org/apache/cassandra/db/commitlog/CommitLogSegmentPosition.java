@@ -44,28 +44,6 @@ public class CommitLogSegmentPosition implements Comparable<CommitLogSegmentPosi
     //  - it will sort before any real CommitLogSegmentPosition, so it will be effectively ignored by getCommitLogSegmentPosition
     public static final CommitLogSegmentPosition NONE = new CommitLogSegmentPosition(-1, 0);
 
-    /**
-     * Convenience method to compute the segment position for a group of SSTables.
-     * @param sstables
-     * @return the most recent (highest) segment position
-     */
-    public static CommitLogSegmentPosition getCommitLogSegmentPosition(Iterable<? extends SSTableReader> sstables)
-    {
-        if (Iterables.isEmpty(sstables))
-            return NONE;
-
-        Function<SSTableReader, CommitLogSegmentPosition> f = new Function<SSTableReader, CommitLogSegmentPosition>()
-        {
-            public CommitLogSegmentPosition apply(SSTableReader sstable)
-            {
-                return sstable.getCommitLogSegmentPosition();
-            }
-        };
-        Ordering<CommitLogSegmentPosition> ordering = Ordering.from(CommitLogSegmentPosition.comparator);
-        return ordering.max(Iterables.transform(sstables, f));
-    }
-
-
     public final long segmentId;
     public final int position;
 
@@ -125,6 +103,7 @@ public class CommitLogSegmentPosition implements Comparable<CommitLogSegmentPosi
     {
         return new CommitLogSegmentPosition(segmentId, position);
     }
+
 
     public static class CommitLogSegmentPositionSerializer implements ISerializer<CommitLogSegmentPosition>
     {
