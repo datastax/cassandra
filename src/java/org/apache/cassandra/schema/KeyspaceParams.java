@@ -44,15 +44,10 @@ public final class KeyspaceParams
     public final boolean durableWrites;
     public final ReplicationParams replication;
 
-    private KeyspaceParams(boolean durableWrites, ReplicationParams replication)
+    public KeyspaceParams(boolean durableWrites, ReplicationParams replication)
     {
         this.durableWrites = durableWrites;
         this.replication = replication;
-    }
-
-    public static KeyspaceParams create(boolean durableWrites, ReplicationParams replication)
-    {
-        return new KeyspaceParams(durableWrites, replication);
     }
 
     public static KeyspaceParams create(boolean durableWrites, Map<String, String> replication)
@@ -62,25 +57,22 @@ public final class KeyspaceParams
 
     public static KeyspaceParams local()
     {
-        return KeyspaceParams.create(true, ReplicationParams.local());
+        return new KeyspaceParams(true, ReplicationParams.local());
     }
 
     public static KeyspaceParams simple(int replicationFactor)
     {
-        return KeyspaceParams.create(true, ReplicationParams.simple(replicationFactor));
+        return new KeyspaceParams(true, ReplicationParams.simple(replicationFactor));
     }
 
     public static KeyspaceParams simpleTransient(int replicationFactor)
     {
-        return KeyspaceParams.create(false, ReplicationParams.simple(replicationFactor));
+        return new KeyspaceParams(false, ReplicationParams.simple(replicationFactor));
     }
 
-    /**
-     * NetworkTopology keyspace - used for testing. No CDC support.
-     */
     public static KeyspaceParams nts(Object... args)
     {
-        return KeyspaceParams.create(true, ReplicationParams.nts(args));
+        return new KeyspaceParams(true, ReplicationParams.nts(args));
     }
 
     public void validate(String name)

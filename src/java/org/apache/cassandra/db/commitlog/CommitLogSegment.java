@@ -57,29 +57,17 @@ public abstract class CommitLogSegment
 
     public final AtomicBoolean containsCDCMutations = new AtomicBoolean(false);
 
-    // With multiple CommitLogSegmentManagers and interleaved id assignment, we need to make sure we use a static atomic
-    // assignment method in order to ensure that a single "global position" used to mark a point in time in the collective
-    // commitlog is valid across multiple CLSM.
     private final static AtomicInteger nextId = new AtomicInteger(1);
     private static long replayLimitId;
     static
     {
         long maxId = Long.MIN_VALUE;
-        // Any future additional CommitLogSegmentManagers will need to have their location checked here on startup
-        maxId = Math.max(getMaxId(DatabaseDescriptor.getCommitLogLocation()), maxId);
-        maxId = Math.max(getMaxId(DatabaseDescriptor.getCDCLogLocation()), maxId);
-        idBase = Math.max(System.currentTimeMillis(), maxId + 1);
-    }
-
-    private static long getMaxId(String location)
-    {
-        long result = 0;
-        for (File file : new File(location).listFiles())
+        for (File file : new File(DatabaseDescriptor.getCommitLogLocation()).listFiles())
         {
             if (CommitLogDescriptor.isValid(file.getName()))
-                result = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, result);
+                maxId = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, maxId);
         }
-        return result;
+        idBase = Math.max(System.currentTimeMillis(), maxId + 1);
     }
 
     // The commit log entry overhead in bytes (int: length + int: head checksum + int: tail checksum)
@@ -128,11 +116,11 @@ public abstract class CommitLogSegment
 
     static CommitLogSegment createSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager, Runnable onClose)
     {
-        CommitLogSegment segment = commitLog.encryptionContext.isEnabled() ?
-            new EncryptedSegment(commitLog, commitLog.encryptionContext, manager, onClose) :
-               commitLog.compressor != null ?
-               new CompressedSegment(commitLog, manager, onClose) :
-               new MemoryMappedSegment(commitLog, manager);
+        CommitLogSegment segment = commitLog.encryptionContext.isEnabled()
+                                   ? new EncryptedSegment(commitLog, commitLog.encryptionContext, manager, onClose)
+                                   : commitLog.compressor != null
+                                     ? new CompressedSegment(commitLog, manager, onClose)
+                                     : new MemoryMappedSegment(commitLog, manager);
         segment.writeLogHeader();
         return segment;
     }

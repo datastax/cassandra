@@ -68,8 +68,7 @@ public class CommitLog implements CommitLogMBean
     // empty segments when writing large records
     final long MAX_MUTATION_SIZE = DatabaseDescriptor.getMaxMutationSize();
 
-    // TODO: Change back to final, remove switchToCDCSegmentManager
-    public AbstractCommitLogSegmentManager segmentManager;
+    final public AbstractCommitLogSegmentManager segmentManager;
 
     public final CommitLogArchiver archiver;
     final CommitLogMetrics metrics;
@@ -126,24 +125,15 @@ public class CommitLog implements CommitLogMBean
     }
 
     /**
-     * Perform recovery on commit log segments located on-disk
-     *
-     * @return the total number of mutatiosn replayed
-     */
-    public int recoverSegmentsOnDisk() throws IOException
-    {
-        return recoverSegmentManager(segmentManager);
-    }
-
-    /**
      * Perform recovery on commit logs located in the directory specified by the config file.
      *
      * @return the number of mutations replayed
+     * @throws IOException
      */
-    private int recoverSegmentManager(AbstractCommitLogSegmentManager manager) throws IOException
+    public int recoverSegmentsOnDisk() throws IOException
     {
         // If createReserveSegments is already flipped, the CLSM is running and recovery has already taken place.
-        if (manager.createReserveSegments)
+        if (segmentManager.createReserveSegments)
             return 0;
 
         FilenameFilter unmanagedFilesFilter = new FilenameFilter()
@@ -158,7 +148,7 @@ public class CommitLog implements CommitLogMBean
         };
 
         // submit all files for this segment manager for archiving prior to recovery - CASSANDRA-6904
-        for (File file : new File(manager.storageDirectory).listFiles(unmanagedFilesFilter))
+        for (File file : new File(segmentManager.storageDirectory).listFiles(unmanagedFilesFilter))
         {
             archiver.maybeArchive(file.getPath(), file.getName());
             archiver.maybeWaitForArchiving(file.getName());
@@ -167,7 +157,7 @@ public class CommitLog implements CommitLogMBean
         assert archiver.archivePending.isEmpty() : "Not all commit log archive tasks were completed before restore";
         archiver.maybeRestoreArchive();
 
-        File[] files = new File(manager.storageDirectory).listFiles(unmanagedFilesFilter);
+        File[] files = new File(segmentManager.storageDirectory).listFiles(unmanagedFilesFilter);
         int replayed = 0;
         if (files.length == 0)
         {
@@ -181,10 +171,10 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayed);
 
             for (File f : files)
-                manager.handleReplayedSegment(f);
+                segmentManager.handleReplayedSegment(f);
         }
 
-        manager.enableReserveSegmentCreation();
+        segmentManager.enableReserveSegmentCreation();
         return replayed;
     }
 
@@ -258,12 +248,12 @@ public class CommitLog implements CommitLogMBean
     }
 
     /**
-     * Add a Mutation to the commit log. Depending on which type of CommitLogSegmentManager is servicing this request,
-     * it's possible for this to fail via a thrown WriteTimeoutException.
+     * Add a Mutation to the commit log. If CDC is enabled, this can fail.
      *
      * @param mutation the Mutation to add to the log
+     * @throws WriteTimeoutException
      */
-    public CommitLogSegmentPosition add(Keyspace keyspace, Mutation mutation) throws WriteTimeoutException
+    public CommitLogSegmentPosition add(Mutation mutation) throws WriteTimeoutException
     {
         assert mutation != null;
 
@@ -389,7 +379,7 @@ public class CommitLog implements CommitLogMBean
     @Override
     public long getActiveContentSize()
     {
-        int size = 0;
+        long size = 0;
         for (CommitLogSegment seg : segmentManager.getActiveSegments())
             size += seg.contentSize();
         return size;

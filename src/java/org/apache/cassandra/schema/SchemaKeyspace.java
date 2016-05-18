@@ -180,7 +180,7 @@ public final class SchemaKeyspace
                 + "min_index_interval int,"
                 + "read_repair_chance double,"
                 + "speculative_retry text,"
-                + "cdc boolean," // Not used, but needed for parity on addTableParamsToSchemaMutation
+                + "cdc boolean,"
                 + "PRIMARY KEY ((keyspace_name), view_name))");
 
     private static final CFMetaData Indexes =

@@ -23,65 +23,24 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.*;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
-import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.io.util.RandomAccessReader;
 
 import static org.junit.Assert.assertEquals;
 
 public class CommitLogReaderTest extends CQLTester
 {
-    private static String KEYSPACE = "clr_test";
-    private static String TABLE = "clr_test_table";
-    private static boolean _initialized = false;
-
-    /**
-     * Intentionally not using static @BeforeClass since we need access to CQLTester internal methods here and we want
-     * the convenience of access to its guts for the following tests.
-     */
-    @Before
-    public void before() throws Throwable
-    {
-        if (!_initialized)
-        {
-            execute(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};", KEYSPACE));
-            execute(String.format("USE %s;", KEYSPACE));
-            execute(String.format("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));", TABLE));
-            _initialized = true;
-        }
-        else
-        {
-            execute(String.format("TRUNCATE TABLE %s;", TABLE));
-        }
-    }
-
-    /**
-     * Returns offset of active written data at halfway point of data
-     */
-    private CommitLogSegmentPosition populateData(int entryCount) throws Throwable
-    {
-        Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
-        int midpoint = entryCount / 2;
-
-        for (int i = 0; i < midpoint; i++)
-            execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
-
-        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
-
-        for (int i = midpoint; i < entryCount; i++)
-            execute(String.format("INSERT INTO %s (idx, data) VALUES (?, ?)", TABLE), i, Integer.toString(i));
-
-        Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).forceBlockingFlush();
-        return result;
-    }
-
     static ArrayList<File> getCommitLogs()
     {
         File dir = new File(DatabaseDescriptor.getCommitLogLocation());
@@ -95,11 +54,6 @@ public class CommitLogReaderTest extends CQLTester
         }
         Assert.assertTrue("Didn't find any commit log files.", 0 != results.size());
         return results;
-    }
-
-    private CFMetaData testCFM()
-    {
-        return Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata;
     }
 
     static class TestCLRHandler implements CommitLogReadHandler
@@ -141,6 +95,29 @@ public class CommitLogReaderTest extends CQLTester
         public int seenMutationCount() { return seenMutations.size(); }
     }
 
+    /**
+     * Returns offset of active written data at halfway point of data
+     */
+    CommitLogSegmentPosition populateData(int entryCount) throws Throwable
+    {
+        Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
+
+        createTable("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));");
+        int midpoint = entryCount / 2;
+
+        for (int i = 0; i < midpoint; i++) {
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
+        }
+
+        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
+
+        for (int i = midpoint; i < entryCount; i++)
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
+
+        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
+        return result;
+    }
+
     @Test
     public void testReadAll() throws Throwable
     {
@@ -150,15 +127,14 @@ public class CommitLogReaderTest extends CQLTester
 
         CommitLogReader reader = new CommitLogReader();
 
-        CFMetaData cfm = testCFM();
-        TestCLRHandler testHandler = new TestCLRHandler(cfm);
+        TestCLRHandler testHandler = new TestCLRHandler(currentTableMetadata());
         for (File f : toCheck)
             reader.readCommitLogSegment(testHandler, f, CommitLogReader.ALL_MUTATIONS, false);
 
         Assert.assertEquals("Expected 1000 seen mutations, got: " + testHandler.seenMutationCount(),
                             1000, testHandler.seenMutationCount());
 
-        confirmReadOrder(testHandler, testCFM(), 0);
+        confirmReadOrder(testHandler, 0);
     }
 
     @Test
@@ -198,7 +174,7 @@ public class CommitLogReaderTest extends CQLTester
         Assert.assertEquals("Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size(),
                             readCount, testHandler.seenMutationCount());
 
-        confirmReadOrder(testHandler, testCFM(), samples / 2);
+        confirmReadOrder(testHandler, samples / 2);
     }
 
     @Test
@@ -210,8 +186,7 @@ public class CommitLogReaderTest extends CQLTester
         ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
-        CFMetaData cfm = testCFM();
-        TestCLRHandler testHandler = new TestCLRHandler(cfm);
+        TestCLRHandler testHandler = new TestCLRHandler(currentTableMetadata());
 
         // Reading from mid to overflow by 4.5k
         // Will skip on incorrect segments due to id mismatch on midpoint
@@ -221,7 +196,7 @@ public class CommitLogReaderTest extends CQLTester
         Assert.assertEquals("Expected " + samples / 2 + " seen mutations, got: " + testHandler.seenMutations.size(),
                             samples / 2, testHandler.seenMutationCount());
 
-        confirmReadOrder(testHandler, testCFM(), samples / 2);
+        confirmReadOrder(testHandler, samples / 2);
     }
 
     @Test
@@ -233,8 +208,7 @@ public class CommitLogReaderTest extends CQLTester
         ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
-        CFMetaData cfm = testCFM();
-        TestCLRHandler testHandler = new TestCLRHandler(cfm);
+        TestCLRHandler testHandler = new TestCLRHandler(currentTableMetadata());
 
         for (File f: toCheck)
             reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
@@ -243,7 +217,7 @@ public class CommitLogReaderTest extends CQLTester
         Assert.assertEquals("Expected " + readCount + " seen mutations, got: " + testHandler.seenMutations.size(),
             readCount, testHandler.seenMutationCount());
 
-        confirmReadOrder(testHandler, testCFM(), samples / 2);
+        confirmReadOrder(testHandler, samples / 2);
     }
 
     /**
@@ -252,14 +226,14 @@ public class CommitLogReaderTest extends CQLTester
      * @param handler
      * @param offset integer offset of count we expect to see in record
      */
-    private void confirmReadOrder(TestCLRHandler handler, CFMetaData toMatch, int offset)
+    private void confirmReadOrder(TestCLRHandler handler, int offset)
     {
-        ColumnDefinition cd = testCFM().getColumnDefinition(new ColumnIdentifier("data", false));
+        ColumnDefinition cd = currentTableMetadata().getColumnDefinition(new ColumnIdentifier("data", false));
         int i = 0;
         int j = 0;
         while (i + j < handler.seenMutationCount())
         {
-            PartitionUpdate pu = handler.seenMutations.get(i + j).get(toMatch);
+            PartitionUpdate pu = handler.seenMutations.get(i + j).get(currentTableMetadata());
             if (pu == null)
             {
                 j++;

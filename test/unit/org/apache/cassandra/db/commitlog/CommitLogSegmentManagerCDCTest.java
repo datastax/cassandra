@@ -47,12 +47,20 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         Assume.assumeTrue(DatabaseDescriptor.isCDCEnabled());
     }
 
+    @Before
+    public void before()
+    {
+        if (currentTable() != null)
+            dropTable("DROP TABLE %s;");
+    }
+
     /**
      * Returns offset of active written data at halfway point of data
      */
-    private CommitLogSegmentPosition populateData(int entryCount) throws Throwable
+    CommitLogSegmentPosition populateData(int entryCount) throws Throwable
     {
         Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
+
         int midpoint = entryCount / 2;
 
         for (int i = 0; i < midpoint; i++) {
@@ -129,7 +137,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         CFMetaData cfm = currentTableMetadata();
 
         // Confirm that logic to check for whether or not we can allocate new CDC segments works
-        Integer originalCDCSize = DatabaseDescriptor.getCommitLogSpaceInMBCDC();
+        Integer originalCDCSize = DatabaseDescriptor.getCDCSpaceInMB();
         Integer originalCheckInterval = DatabaseDescriptor.getCDCDiskCheckInterval();
         try
         {
@@ -145,11 +153,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
 
             // Confirm atCapacity is performing as expected
             Assert.assertTrue("Expected to be able to allocate new CDC segments but apparently can't.", !cdcMgr.atCapacity());
-            DatabaseDescriptor.setCommitLogSpaceInMBCDC(0);
+            DatabaseDescriptor.setCDCSpaceInMB(0);
             Assert.assertTrue("Expected inability to allocate new CLSegments within CDC after changing apace max value to 1",
                               cdcMgr.atCapacity());
 
-            DatabaseDescriptor.setCommitLogSpaceInMBCDC(16);
+            DatabaseDescriptor.setCDCSpaceInMB(16);
             // Spin until we hit CDC capacity and make sure we get a WriteTimeout
             try
             {
@@ -196,7 +204,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.setCommitLogSpaceInMBCDC(originalCDCSize);
+            DatabaseDescriptor.setCDCSpaceInMB(originalCDCSize);
             DatabaseDescriptor.setCDCDiskCheckInterval(originalCheckInterval);
         }
     }
@@ -234,7 +242,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         String nct = createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=false;");
         String ct = createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
 
-        DatabaseDescriptor.setCommitLogSpaceInMBCDC(16);
+        DatabaseDescriptor.setCDCSpaceInMB(16);
         CFMetaData ncfm = Keyspace.open(keyspace()).getColumnFamilyStore(nct).metadata;
         CFMetaData ccfm = Keyspace.open(keyspace()).getColumnFamilyStore(ct).metadata;
         // Spin until we hit CDC capacity and make sure we get a WriteTimeout

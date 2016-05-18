@@ -1055,12 +1055,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 memtables.add(oldMemtable);
             }
 
-            // we now attempt to define the lastCommitLogSegmentPosition; we do this by grabbing the current limit from the CL
+            // we then ensure an atomic decision is made about the upper bound of the continuous range of commit log
             // records owned by this memtable
             setCommitLogUpperBound(commitLogUpperBound);
 
             // we then issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
-            // since this happens after wiring up the lastCommitLogSegmentPosition, we also know all operations with earlier
+            // since this happens after wiring up the commitLogUpperBound, we also know all operations with earlier
             // commit log segment position have also completed, i.e. the memtables are done and ready to flush
             writeBarrier.issue();
             postFlush = new PostFlush(!truncate, writeBarrier, commitLogUpperBound.get(), memtables, readers);
@@ -1623,11 +1623,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public int gcBefore(int nowInSec)
     {
         return nowInSec - metadata.params.gcGraceSeconds;
-    }
-
-    public boolean hasCDCEnabled()
-    {
-        return metadata.params.cdc;
     }
 
     @SuppressWarnings("resource")

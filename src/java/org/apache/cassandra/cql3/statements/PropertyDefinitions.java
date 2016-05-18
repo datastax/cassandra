@@ -79,20 +79,6 @@ public class PropertyDefinitions
         return (Map<String, String>)val;
     }
 
-    /**
-     * To keep processing simple in our grammar, we treat sets as Maps w/single-char entry values, only caring about
-     * the keySet of the Map as our Set. Conversion between the parser and the logical C* space occurs here.
-     */
-    protected Set<String> getSet(String name) throws SyntaxException
-    {
-        Object val = properties.get(name);
-        if (val == null)
-            return null;
-        if (!(val instanceof Map))
-            throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a map.", name));
-        return ((Map)val).keySet();
-    }
-
     public Boolean hasProperty(String name)
     {
         return properties.containsKey(name);

@@ -74,7 +74,7 @@ public class CommitLogReader
     }
 
     /**
-     * Reads all passed in files with minPosition, no hard start, and no mutation limit.
+     * Reads all passed in files with minPosition, no start, and no mutation limit.
      */
     public void readAllFiles(CommitLogReadHandler handler, File[] files, CommitLogSegmentPosition minPosition) throws IOException
     {
@@ -102,7 +102,7 @@ public class CommitLogReader
     /**
      * Reads mutations from file, handing them off to handler
      * @param handler Handler that will take action based on deserialized Mutations
-     * @param file Commit Log Segment file to read
+     * @param file CommitLogSegment file to read
      * @param minPosition Optional minimum CommitLogSegmentPosition - all segments with id > or matching w/greater position will be read
      * @param mutationLimit Optional limit on # of mutations to replay. Local ALL_MUTATIONS serves as marker to play all.
      * @param tolerateTruncation Whether or not we should allow truncation of this file or throw if EOF found
@@ -199,8 +199,8 @@ public class CommitLogReader
                         break;
                 }
             }
-            // unfortunately AbstractIterator cannot throw a checked exception, so we check to see if a RuntimeException
-            // is wrapping an IOException
+            // Unfortunately AbstractIterator cannot throw a checked exception, so we check to see if a RuntimeException
+            // is wrapping an IOException.
             catch (RuntimeException re)
             {
                 if (re.getCause() instanceof IOException)
@@ -251,8 +251,8 @@ public class CommitLogReader
             if (logger.isTraceEnabled())
                 logger.trace("Reading mutation at {}", mutationStart);
 
-            long claimedCRC32 = 0;
-            int serializedSize = 0;
+            long claimedCRC32;
+            int serializedSize;
             try
             {
                 // any of the reads may hit EOF
@@ -265,8 +265,9 @@ public class CommitLogReader
                 }
 
                 // Mutation must be at LEAST 10 bytes:
-                // 3 each for a non-empty Keyspace and Key (including the
-                // 2-byte length from writeUTF/writeWithShortLength) and 4 bytes for column count.
+                //    3 for a non-empty Keyspace
+                //    3 for a Key (including the 2-byte length from writeUTF/writeWithShortLength)
+                //    4 bytes for column count.
                 // This prevents CRC by being fooled by special-case garbage in the file; see CASSANDRA-2128
                 if (serializedSize < 10)
                 {
@@ -342,10 +343,10 @@ public class CommitLogReader
      */
     @VisibleForTesting
     protected void readMutation(CommitLogReadHandler handler,
-                              byte[] inputBuffer,
-                              int size,
-                              final int entryLocation,
-                              final CommitLogDescriptor desc) throws IOException
+                                byte[] inputBuffer,
+                                int size,
+                                final int entryLocation,
+                                final CommitLogDescriptor desc) throws IOException
     {
         final Mutation mutation;
         try (RebufferingInputStream bufIn = new DataInputBuffer(inputBuffer, 0, size))
@@ -353,7 +354,7 @@ public class CommitLogReader
             mutation = Mutation.serializer.deserialize(bufIn,
                                                        desc.getMessagingVersion(),
                                                        SerializationHelper.Flag.LOCAL);
-            // doublecheck that what we read is [still] valid for the current schema
+            // doublecheck that what we read is still] valid for the current schema
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
                 upd.validate();
         }
@@ -417,19 +418,6 @@ public class CommitLogReader
             }
         }
 
-        public static int claimedChecksumSerializedSize(int commitLogVersion) throws IOException
-        {
-            switch (commitLogVersion)
-            {
-                case CommitLogDescriptor.VERSION_12:
-                case CommitLogDescriptor.VERSION_20:
-                    return TypeSizes.LONG_SIZE;
-                // Changed format in 2.1
-                default:
-                    return TypeSizes.INT_SIZE;
-            }
-        }
-
         public static void updateChecksum(CRC32 checksum, int serializedSize, int commitLogVersion)
         {
             switch (commitLogVersion)
@@ -454,19 +442,6 @@ public class CommitLogReader
                 // Changed format in 2.1
                 default:
                     return input.readInt() & 0xffffffffL;
-            }
-        }
-
-        public static int claimedCRC32SerializedSize(int commitLogVersion) throws IOException
-        {
-            switch (commitLogVersion)
-            {
-                case CommitLogDescriptor.VERSION_12:
-                case CommitLogDescriptor.VERSION_20:
-                    return TypeSizes.LONG_SIZE;
-                // Changed format in 2.1
-                default:
-                    return TypeSizes.INT_SIZE;
             }
         }
     }

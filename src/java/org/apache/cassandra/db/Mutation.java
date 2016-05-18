@@ -130,6 +130,7 @@ public class Mutation implements IMutation
      * Assumes no updates for the Table this PartitionUpdate impacts.
      *
      * @param update PartitionUpdate to append to Modifications list
+     * @return Mutation this mutation
      * @throws IllegalArgumentException If PartitionUpdate for duplicate table is passed as argument
      */
     public Mutation add(PartitionUpdate update)

@@ -71,15 +71,11 @@ New features
    - Change-Data-Capture is now available. See cassandra.yaml and for cdc-specific flags and
      a brief explanation of on-disk locations for archived data in CommitLog form. This can
      be enabled via ALTER TABLE ... WITH cdc=true.
-     Upon flush, CommitLogSegments remain in the data/cdc_raw directory until removed by the
-     user and writes to CDC-enabled tables will be rejected with a WriteTimeoutException once
-     cdc_total_space_in_mb is reached between unflushed CommitLogSegments and cdc_raw.
+     Upon flush, CommitLogSegments containing data for CDC-enabled tables are moved to
+     the data/cdc_raw directory until removed by the user and writes to CDC-enabled tables
+     will be rejected with a WriteTimeoutException once cdc_total_space_in_mb is reached
+     between unflushed CommitLogSegments and cdc_raw.
 
-Upgrading
----------
-    - The undocumented .yaml parameter commitlog_max_compression_buffers_in_pool has been
-      renamed to commitlog_max_compression_buffers_per_pool to better reflect the new
-      multiple CommitLogSegmentManager support added for Change-Data-Capture functionality
 
 3.4
 =====

@@ -71,11 +71,10 @@ public class CommitLogSegmentManagerTest
                      .add("val", ByteBuffer.wrap(entropy))
                      .build();
 
-        Keyspace ks1 = Keyspace.open(KEYSPACE1);
         Thread dummyThread = new Thread( () ->
         {
-            for (int i = 0; i < 30; i++)
-                CommitLog.instance.add(ks1, m);
+            for (int i = 0; i < 20; i++)
+                CommitLog.instance.add(m);
         });
         dummyThread.start();
 
@@ -90,6 +89,7 @@ public class CommitLogSegmentManagerTest
         }
         Thread.sleep(1000);
 
+        // Should only be able to create 3 segments (not 7) because it blocks waiting for truncation that never comes.
         Assert.assertEquals(3, clsm.getActiveSegments().size());
 
         clsm.getActiveSegments().forEach(segment -> clsm.recycleSegment(segment));

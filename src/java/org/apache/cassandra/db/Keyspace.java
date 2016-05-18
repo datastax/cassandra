@@ -490,7 +490,7 @@ public class Keyspace
             if (writeCommitLog)
             {
                 Tracing.trace("Appending to commitlog");
-                commitLogSegmentPosition = CommitLog.instance.add(this, mutation);
+                commitLogSegmentPosition = CommitLog.instance.add(mutation);
             }
 
             for (PartitionUpdate upd : mutation.getPartitionUpdates())

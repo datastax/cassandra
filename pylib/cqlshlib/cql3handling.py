@@ -390,7 +390,7 @@ def ks_prop_name_completer(ctxt, cass):
     optsseen = ctxt.get_binding('propname', ())
     if 'replication' not in optsseen:
         return ['replication']
-    return ['durable_writes']
+    return ["durable_writes"]
 
 
 def ks_prop_val_completer(ctxt, cass):
@@ -1370,8 +1370,7 @@ explain_completion('alterTypeInstructions', 'newcol', '<new_field_name>')
 
 syntax_rules += r'''
 <alterKeyspaceStatement> ::= "ALTER" wat=( "KEYSPACE" | "SCHEMA" ) ks=<alterableKeyspaceName>
-                                 ( "DROP" "CDCLOG")?
-                                 ( "WITH" <property> ( "AND" <property> )* )?
+                                 "WITH" <property> ( "AND" <property> )*
                            ;
 '''
 

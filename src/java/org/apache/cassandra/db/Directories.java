@@ -807,16 +807,6 @@ public class Directories
         return snapshotSpaceMap;
     }
 
-    /**
-     * Calculates and returns the on-disk size of the path
-     * @param path Path to calculate
-     */
-    public long getDirectorySize(File path)
-    {
-        assert path.isDirectory() : "getDirectorySize used with file: " + path;
-        return getTrueAllocatedSizeIn(path);
-    }
-
     public List<String> listEphemeralSnapshots()
     {
         final List<String> ephemeralSnapshots = new LinkedList<>();
