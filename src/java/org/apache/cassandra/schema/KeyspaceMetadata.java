@@ -31,8 +31,6 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.SimpleStrategy;
 
 /**
  * An immutable representation of keyspace metadata (name, params, tables, types, and functions).

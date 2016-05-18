@@ -20,7 +20,6 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -52,6 +51,8 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      * Reserve space in the current segment for the provided mutation or, if there isn't space available,
      * create a new segment. allocate() is blocking until allocation succeeds as it waits on a signal in advanceAllocatingFrom
      *
+     * @param mutation mutation to allocate space for
+     * @param size total size of mutation (overhead + serialized size)
      * @return the provided Allocation object
      */
     public CommitLogSegment.Allocation allocate(Mutation mutation, int size)

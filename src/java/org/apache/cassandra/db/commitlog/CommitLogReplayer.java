@@ -92,8 +92,6 @@ public class CommitLogReplayer implements CommitLogReadHandler
     {
         // compute per-CF and global commit log segment positions
         Map<UUID, ReplayPositionFilter> cfPersisted = new HashMap<>();
-        Map<UUID, CommitLogSegmentPosition> cfPositions = new HashMap<UUID, CommitLogSegmentPosition>();
-        Ordering<CommitLogSegmentPosition> commitLogSegmentPositionOrdering = Ordering.from(CommitLogSegmentPosition.comparator);
         ReplayFilter replayFilter = ReplayFilter.create();
         CommitLogSegmentPosition globalPosition = null;
         for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
@@ -128,7 +126,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         }
         if (globalPosition == null)
             globalPosition = firstNotCovered(cfPersisted.values());
-        logger.trace("Global commit log segment position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPositions));
+        logger.trace("Global commit log segment position is {} from columnfamilies {}", globalPosition, FBUtilities.toString(cfPersisted));
         return new CommitLogReplayer(commitLog, globalPosition, cfPersisted, replayFilter);
     }
 

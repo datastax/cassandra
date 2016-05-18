@@ -146,23 +146,24 @@ public class StreamReceiveTask extends StreamTask
                     task.session.taskCompleted(task);
                     return;
                 }
-                Keyspace ks = Keyspace.open(kscf.left);
-                cfs = ks.getColumnFamilyStore(kscf.right);
+                cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
                 hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
+                hasCDC = cfs.metadata.params.cdc;
 
                 Collection<SSTableReader> readers = task.sstables;
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    // We have a special path for views and for CDC.
-                    //
-                    // For views, Since the view requires cleaning up any pre-existing state, we must put all partitions
-                    // through the same write path as normal mutations. This also ensures any 2is are also updated.
-                    //
-                    // For CDC-enabled keyspaces, we want to ensure that the mutations are routed to the appropriate
-                    // CommitLogSegmentManager on disk, so rather than just bulk loading the SSTables into the CFS' view
-                    // we need to replay the mutations through the CommitLog.
-                    if (hasViews || cfs.metadata.params.cdc)
+                    /*
+                     * We have a special path for views and for CDC.
+                     *
+                     * For views, since the view requires cleaning up any pre-existing state, we must put all partitions
+                     * through the same write path as normal mutations. This also ensures any 2is are also updated.
+                     *
+                     * For CDC-enabled tables, we want to ensure that the mutations are run through the CommitLog so they
+                     * can be archived by the CDC process on discard.
+                     */
+                    if (hasViews || hasCDC)
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -179,7 +180,7 @@ public class StreamReceiveTask extends StreamTask
                                         //
                                         // If the CFS has CDC, however, these updates need to be written to the CommitLog
                                         // so they get archived into the cdc_raw folder
-                                        if (cfs.metadata.params.cdc)
+                                        if (hasCDC)
                                             m.apply();
                                         else
                                             m.applyUnsafe();

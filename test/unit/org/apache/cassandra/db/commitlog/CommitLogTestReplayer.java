@@ -35,7 +35,6 @@ import org.apache.cassandra.io.util.RebufferingInputStream;
  */
 public class CommitLogTestReplayer extends CommitLogReplayer
 {
-    private final File commitLogDir;
     private final Predicate<Mutation> processor;
 
     public CommitLogTestReplayer(Predicate<Mutation> processor) throws IOException
@@ -43,14 +42,13 @@ public class CommitLogTestReplayer extends CommitLogReplayer
         super(CommitLog.instance, CommitLogSegmentPosition.NONE, null, ReplayFilter.create());
         CommitLog.instance.sync(true);
 
-        commitLogDir = new File(DatabaseDescriptor.getCommitLogLocation());
         this.processor = processor;
         commitLogReader = new CommitLogTestReader();
     }
 
     public void examineCommitLog() throws IOException
     {
-        replayFiles(commitLogDir.listFiles());
+        replayFiles(new File(DatabaseDescriptor.getCommitLogLocation()).listFiles());
     }
 
     private class CommitLogTestReader extends CommitLogReader

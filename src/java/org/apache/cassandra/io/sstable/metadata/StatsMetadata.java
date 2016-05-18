@@ -304,7 +304,6 @@ public class StatsMetadata extends MetadataComponent
             EstimatedHistogram partitionSizes = EstimatedHistogram.serializer.deserialize(in);
             EstimatedHistogram columnCounts = EstimatedHistogram.serializer.deserialize(in);
             CommitLogSegmentPosition commitLogLowerBound = CommitLogSegmentPosition.NONE, commitLogUpperBound;
-            CommitLogSegmentPosition commitLogSegmentPosition = CommitLogSegmentPosition.serializer.deserialize(in);
             commitLogUpperBound = CommitLogSegmentPosition.serializer.deserialize(in);
             long minTimestamp = in.readLong();
             long maxTimestamp = in.readLong();

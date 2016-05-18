@@ -47,10 +47,10 @@ public interface CommitLogReadHandler
     }
 
     /**
-     * Handle an error during segment read, signaling whether or not you want the reader to continue based on the error.
+     * Handle an error during segment read, signaling whether or not you want the reader to stop based on the error.
      *
-     * @param exception
-     * @return boolean indicating whether to continue reading or not
+     * @param exception CommitLogReadException w/details on exception state
+     * @return boolean indicating whether to stop reading
      * @throws IOException
      */
     boolean shouldStopOnError(CommitLogReadException exception) throws IOException;
@@ -58,7 +58,7 @@ public interface CommitLogReadHandler
     /**
      * In instances where we cannot recover from a specific error and don't care what the reader thinks
      *
-     * @param exception
+     * @param exception CommitLogReadException w/details on exception state
      * @throws IOException
      */
     void handleUnrecoverableError(CommitLogReadException exception) throws IOException;

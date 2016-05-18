@@ -31,7 +31,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BlacklistedDirectories;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories.DataDirectory;
-import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.db.Keyspace;

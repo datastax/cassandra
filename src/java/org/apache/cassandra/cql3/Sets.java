@@ -48,7 +48,7 @@ public abstract class Sets
 
     public static class Literal extends Term.Raw
     {
-        public final List<Term.Raw> elements;
+        private final List<Term.Raw> elements;
 
         public Literal(List<Term.Raw> elements)
         {

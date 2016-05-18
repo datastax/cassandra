@@ -76,6 +76,6 @@ public final class KeyspaceAttributes extends PropertyDefinitions
         ReplicationParams replication = getReplicationStrategyClass() == null
                                       ? previous.replication
                                       : ReplicationParams.fromMap(getAllReplicationOptions());
-        return KeyspaceParams.create(durableWrites, replication);
+        return new KeyspaceParams(durableWrites, replication);
     }
 }

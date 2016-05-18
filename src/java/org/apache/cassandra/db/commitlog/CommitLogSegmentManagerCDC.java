@@ -53,7 +53,6 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         cdcSizeCalculator.start();
     }
 
-    @Override
     public void discard(CommitLogSegment segment, boolean delete)
     {
         segment.close();
@@ -77,7 +76,6 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     /**
      * Initiates the shutdown process for the management thread. Also stops the cdc on-disk size calculator executor.
      */
-    @Override
     public void shutdown()
     {
         run = false;
@@ -89,10 +87,12 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * Reserve space in the current segment for the provided mutation or, if there isn't space available,
      * create a new segment. For CDC mutations, allocation is expected to throw WTE if we're at CDC capacity.
      *
-     * We allow advancement of non-CDC enabled segments as all CDC mutations should be rejected until space is cleared
-     * in cdc_raw. Subsequent non-CDC mutations won't flag cdc on the CommitLogSegment and thus the segment will be deleted
-     * on discard() rather than further pushing the total CDC on disk footprint.
+     * We allow advancement of non-CDC enabled segments if at CDC limit since we'll reject CDC-enabled mutations until space
+     * is freed in cdc_raw. Subsequent non-CDC mutations won't flag cdc on the CommitLogSegment and thus the segment
+     * will be deleted on discard() rather than further pushing the total CDC on disk footprint.
      *
+     * @param mutation Mutation to allocate in segment manager
+     * @param size total size (overhead + serialized) of mutation
      * @return the provided Allocation object
      * @throws WriteTimeoutException If CDC directory is at configured limit, we throw an exception rather than allocate.
      */
@@ -129,7 +129,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
             }
         }
 
-        // Operate with a worst-case estimate of full DBD.getCommitLogSegmentSize as being our final size of CDC CLS
+        // Operate with a worst-case estimate of full DBD.getCommitLogSegmentSize as being the size of this segment
         if (mutation.trackedByCDC() && segment.containsCDCMutations.compareAndSet(false, true))
             cdcSizeCalculator.addUnflushedSize(DatabaseDescriptor.getCommitLogSegmentSize());
 
@@ -148,28 +148,27 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     }
 
     /*
-     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_raw. While we deterministically
+     * We operate with a somewhat "lazy" tracked view of how much space is in the cdc_raw directory. While we deterministically
      * increment the size of the cdc_raw directory on each segment discard, we cannot afford to synchronously process the full
      * directory size to decrement based on file consumption. Similarly, adding piping for a consumer to notify the C*
      * process is a large complexity burden and would introduce a longer delay between deletion and C*'s view of the dir
      * size rather than just recalculating it ourselves.
      *
      * Synchronous size recalculation on each allocation call could lead to very long delays in new segment allocation,
-     * thus long delays in thread signaling to wake waiting allocation / writer threads. Similarly, kicking off an async
-     * recalc of the directory on each allocation would lead to unnecessary garbage generation in the form of canceled futures.
+     * thus long delays in thread signaling to wake waiting allocation / writer threads.
      *
      * While we can race and have our discard logic incorrectly add a discarded segment's size to this value, it will
      * be corrected on the next pass at allocation when a new re-calculation task is submitted. Essentially, if you're
      * flirting with the edge of your possible allocation space for CDC, it's likely that some mutations will be
-     * rejected if we happen to race right at this boundary until next recalc succeeds. With the default 4G CDC space
-     * and 32MB segment, most trivial local benchmarks place that at < 500 usec.
+     * rejected if we happen to race right at this boundary until next recalc succeeds. This process on default settings
+     * should take < 500 usec.
      *
      * Reference DirectorySizerBench for more information about performance of the directory size recalc.
      */
     @VisibleForTesting
     public boolean atCapacity()
     {
-        return cdcSizeCalculator.getTotalCDCSizeOnDisk() >= (long)DatabaseDescriptor.getCommitLogSpaceInMBCDC() * 1024 * 1024;
+        return cdcSizeCalculator.getTotalCDCSizeOnDisk() >= (long)DatabaseDescriptor.getCDCSpaceInMB() * 1024 * 1024;
     }
 
     /**

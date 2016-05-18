@@ -418,7 +418,7 @@ public class CommitLogStressTest
                 }
 
                 Keyspace ks = Keyspace.open("Keyspace1");
-                clsp = commitLog.add(ks, new Mutation(builder.build()));
+                clsp = commitLog.add(new Mutation(builder.build()));
                 counter.incrementAndGet();
             }
         }

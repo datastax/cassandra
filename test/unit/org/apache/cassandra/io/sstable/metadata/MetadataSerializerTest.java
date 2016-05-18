@@ -53,7 +53,6 @@ public class MetadataSerializerTest
 
         MetadataSerializer serializer = new MetadataSerializer();
         File statsFile = serialize(originalMetadata, serializer, BigFormat.latestVersion);
-        CommitLogSegmentPosition clsp = new CommitLogSegmentPosition(11L, 12);
 
         Descriptor desc = new Descriptor( statsFile.getParentFile(), "", "", 0);
         try (RandomAccessReader in = RandomAccessReader.open(statsFile))

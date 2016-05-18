@@ -67,7 +67,7 @@ public abstract class AbstractCommitLogSegmentManager
      * can see the effect of recycling segments immediately (even though they're really happening asynchronously
      * on the manager thread, which will take a ms or two).
      */
-    protected final AtomicLong size = new AtomicLong();
+    private final AtomicLong size = new AtomicLong();
 
     /**
      * New segment creation is initially disabled because we'll typically get some "free" segments
@@ -115,7 +115,7 @@ public abstract class AbstractCommitLogSegmentManager
                                 hasAvailableSegments.signalAll();
                             }
 
-                            // flush old Cfs if we're full or can't allocate
+                            // flush old Cfs if we're full
                             long unused = unusedCapacity();
                             if (unused < 0)
                             {
@@ -195,7 +195,7 @@ public abstract class AbstractCommitLogSegmentManager
 
     /**
      * Grab the current CommitLogSegment we're allocating from. Also serves as a utility method to block while the allocator
-     * is working on initial allocation of a CLS.
+     * is working on initial allocation of a CommitLogSegment.
      */
     CommitLogSegment allocatingFrom()
     {
@@ -212,8 +212,7 @@ public abstract class AbstractCommitLogSegmentManager
      * Fetches a new segment from the queue, signaling the management thread to create a new one if necessary, and "activates" it.
      * Blocks until a new segment is allocated and the thread requesting an advanceAllocatingFrom is signalled.
      *
-     * INVARIANT: Segment management thread always succeeds in allocating a new segment or kills the JVM.
-     *
+     * WARNING: Assumes segment management thread always succeeds in allocating a new segment or kills the JVM.
      */
     protected void advanceAllocatingFrom(CommitLogSegment old)
     {
@@ -382,9 +381,9 @@ public abstract class AbstractCommitLogSegmentManager
 
     private long unusedCapacity()
     {
-        long total = DatabaseDescriptor.getCommitLogSpaceInMBStandard() * 1024 * 1024;
+        long total = DatabaseDescriptor.getTotalCommitlogSpaceInMB() * 1024 * 1024;
         long currentSize = size.get();
-        logger.trace("Total standard commitlog segment space used is {} out of {}", currentSize, total);
+        logger.trace("Total active commitlog segment space used is {} out of {}", currentSize, total);
         return total - currentSize;
     }
 

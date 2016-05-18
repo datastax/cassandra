@@ -73,12 +73,7 @@ public class Memtable implements Comparable<Memtable>
     private volatile AtomicReference<CommitLogSegmentPosition> commitLogUpperBound;
     // the precise lower bound of CommitLogSegmentPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
     private AtomicReference<CommitLogSegmentPosition> commitLogLowerBound;
-    // the approximate lower bound by this memtable; must be <= commitLogLowerBound once our predecessor
-    // the last CommitLogSegmentPosition owned by this Memtable; all CommitLogSegmentPosition lower are owned by this or an earlier Memtable
-    private volatile AtomicReference<CommitLogSegmentPosition> lastCommitLogSegmentPosition;
 
-    // the "first" CommitLogSegmentPosition owned by this Memtable; this is inaccurate, and only used as a convenience to prevent CLSM flushing wantonly
-    private final CommitLogSegmentPosition minCommitLogSegmentPosition;
     // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
     private final CommitLogSegmentPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentSegmentPosition();
 
@@ -121,7 +116,6 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = cfs.metadata.comparator;
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata.partitionColumns());
-        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition();
     }
 
     // ONLY to be used for testing, to create a mock Memtable
@@ -132,7 +126,6 @@ public class Memtable implements Comparable<Memtable>
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.partitionColumns());
-        this.minCommitLogSegmentPosition = CommitLog.instance.getCurrentSegmentPosition();
     }
 
     public MemtableAllocator getAllocator()

@@ -18,9 +18,7 @@
 package org.apache.cassandra.schema;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
@@ -35,7 +33,6 @@ public final class ReplicationParams
     public static final String CLASS = "class";
 
     public final Class<? extends AbstractReplicationStrategy> klass;
-
     public final ImmutableMap<String, String> options;
 
     private ReplicationParams(Class<? extends AbstractReplicationStrategy> klass, Map<String, String> options)
