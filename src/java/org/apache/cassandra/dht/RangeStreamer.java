@@ -130,13 +130,17 @@ public class RangeStreamer
 
     public void addRanges(String keyspaceName, Collection<Range<Token>> ranges)
     {
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("getting {} sources for {} ranges on keyspace {}", useStrictSourcesForRanges(keyspaceName) ? "strict":"all", ranges.size(), keyspaceName);
+        }
         Multimap<Range<Token>, InetAddress> rangesForKeyspace = useStrictSourcesForRanges(keyspaceName)
                 ? getAllRangesWithStrictSourcesFor(keyspaceName, ranges) : getAllRangesWithSourcesFor(keyspaceName, ranges);
 
         if (logger.isDebugEnabled())
         {
             for (Map.Entry<Range<Token>, InetAddress> entry : rangesForKeyspace.entries())
-                logger.debug(String.format("%s: range %s exists on %s", description, entry.getKey(), entry.getValue()));
+                logger.debug(String.format("%s: range %s exists on %s for keyspace %s", description, entry.getKey(), entry.getValue(), keyspaceName));
         }
 
         for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : getRangeFetchMap(rangesForKeyspace, sourceFilters, keyspaceName).asMap().entrySet())
