@@ -61,7 +61,7 @@ public class BootStrapper
     public void bootstrap()
     {
         if (logger.isDebugEnabled())
-            logger.debug("Beginning bootstrap process");
+            logger.debug("Beginning bootstrap process: Endpoint states {}", ((FailureDetector)FailureDetector.instance).getAllEndpointStates());
 
         RangeStreamer streamer = new RangeStreamer(tokenMetadata, tokens, address, "Bootstrap");
         streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
