@@ -13,6 +13,20 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+
+3.8
+=====
+New features
+------------
+   - Change-Data-Capture is now available. See cassandra.yaml and for cdc-specific flags and
+     a brief explanation of on-disk locations for archived data in CommitLog form. This can
+     be enabled via ALTER TABLE ... WITH cdc=true.
+     Upon flush, CommitLogSegments containing data for CDC-enabled tables are moved to
+     the data/cdc_raw directory until removed by the user and writes to CDC-enabled tables
+     will be rejected with a WriteTimeoutException once cdc_total_space_in_mb is reached
+     between unflushed CommitLogSegments and cdc_raw.
+
+
 3.6
 =====
 
@@ -42,13 +56,6 @@ New features
      to resolve the situation.
    - Filtering expressions are made more pluggable and can be added programatically via
      a QueryHandler implementation. See CASSANDRA-11295 for more details.
-   - Change-Data-Capture is now available. See cassandra.yaml and for cdc-specific flags and
-     a brief explanation of on-disk locations for archived data in CommitLog form. This can
-     be enabled via ALTER TABLE ... WITH cdc=true.
-     Upon flush, CommitLogSegments containing data for CDC-enabled tables are moved to
-     the data/cdc_raw directory until removed by the user and writes to CDC-enabled tables
-     will be rejected with a WriteTimeoutException once cdc_total_space_in_mb is reached
-     between unflushed CommitLogSegments and cdc_raw.
 
 
 3.4
