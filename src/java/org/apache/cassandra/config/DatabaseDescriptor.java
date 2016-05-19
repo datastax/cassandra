@@ -1388,6 +1388,12 @@ public class DatabaseDescriptor
         return conf.commitlog_directory;
     }
 
+    @VisibleForTesting
+    public static void setCommitLogLocation(String value)
+    {
+        conf.commitlog_directory = value;
+    }
+
     public static ParameterizedClass getCommitLogCompression()
     {
         return conf.commitlog_compression;

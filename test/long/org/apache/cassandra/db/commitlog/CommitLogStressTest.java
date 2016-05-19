@@ -54,6 +54,8 @@ public class CommitLogStressTest
     public static int rateLimit = 0;
     public static int runTimeMs = 10000;
 
+    public static String location = DatabaseDescriptor.getCommitLogLocation() + "/stress";
+
     public static int hash(int hash, ByteBuffer bytes)
     {
         int shift = 0;
@@ -133,7 +135,19 @@ public class CommitLogStressTest
     @Before
     public void cleanDir() throws IOException
     {
-        CommitLog.instance.resetUnsafe(true);
+        File dir = new File(location);
+        if (dir.isDirectory())
+        {
+            File[] files = dir.listFiles();
+
+            for (File f : files)
+                if (!f.delete())
+                    Assert.fail("Failed to delete " + f);
+        }
+        else
+        {
+            dir.mkdir();
+        }
     }
 
     @Test
@@ -185,12 +199,22 @@ public class CommitLogStressTest
     {
         DatabaseDescriptor.setCommitLogCompression(compression);
         DatabaseDescriptor.setEncryptionContext(encryptionContext);
-        for (CommitLogSync sync : CommitLogSync.values())
+
+        String originalDir = DatabaseDescriptor.getCommitLogLocation();
+        try
         {
-            DatabaseDescriptor.setCommitLogSync(sync);
-            CommitLog commitLog = new CommitLog(CommitLogArchiver.disabled()).start();
-            testLog(commitLog);
-            assert !failed;
+            DatabaseDescriptor.setCommitLogLocation(location);
+            for (CommitLogSync sync : CommitLogSync.values())
+            {
+                DatabaseDescriptor.setCommitLogSync(sync);
+                CommitLog commitLog = new CommitLog(CommitLogArchiver.disabled()).start();
+                testLog(commitLog);
+                assert !failed;
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setCommitLogLocation(originalDir);
         }
     }
 
@@ -253,7 +277,7 @@ public class CommitLogStressTest
         System.out.println("Stopped. Replaying... ");
         System.out.flush();
         Reader reader = new Reader();
-        File[] files = new File(DatabaseDescriptor.getCommitLogLocation()).listFiles();
+        File[] files = new File(location).listFiles();
 
         DummyHandler handler = new DummyHandler();
         reader.readAllFiles(handler, files);
