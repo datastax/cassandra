@@ -70,6 +70,9 @@ public class CompactionController implements AutoCloseable
 
     void maybeRefreshOverlaps()
     {
+        if (NEVER_PURGE_TOMBSTONES)
+            return;
+
         for (SSTableReader reader : overlappingSSTables)
         {
             if (reader.isMarkedCompacted())
