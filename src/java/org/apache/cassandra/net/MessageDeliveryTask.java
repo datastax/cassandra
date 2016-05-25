@@ -50,6 +50,14 @@ public class MessageDeliveryTask implements Runnable
                 && timeTaken > message.getTimeout())
         {
             MessagingService.instance().incrementDroppedMessages(verb, timeTaken, isCrossNodeTimestamp);
+            if (logger.isTraceEnabled() && verb.toString() == "MUTATION")
+            {
+                logger.trace("MUTATION being DROPPED. time taken: {} from: {} payload: \"{}\" parameters: \"{}\".",
+                             timeTaken,
+                             message.from.toString(),
+                             message.payload.toString(),
+                             message.parameters.toString());
+            }
             return;
         }
 
