@@ -36,7 +36,6 @@ New features
      between unflushed CommitLogSegments and cdc_raw.
 
 
-
 3.7
 ===
 
@@ -47,6 +46,7 @@ Upgrading
      max_value_size_in_mb in cassandra.yaml. The default is 256MB, which matches the default
      value of native_transport_max_frame_size_in_mb. SSTables will be considered corrupt if
      they contain values whose size exceeds this limit. See CASSANDRA-9530 for more details.
+
 
 3.6
 =====
