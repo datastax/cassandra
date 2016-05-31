@@ -202,7 +202,7 @@ cdc_enabled: false
 # segment contains mutations for a CDC-enabled table. This should be placed on a
 # separate spindle than the data directories. If not set, the default directory is
 # $CASSANDRA_HOME/data/cdc_raw.
-cdc_raw_directory: /var/lib/cassandra/cdc_raw
+# cdc_raw_directory: /var/lib/cassandra/cdc_raw
 
 # policy for data disk failures:
 # die: shut down gossip and client transports and kill the JVM for any fs errors or
@@ -590,7 +590,8 @@ native_transport_port: 9042
 # native_transport_max_threads: 128
 #
 # The maximum size of allowed frame. Frame (requests) larger than this will
-# be rejected as invalid. The default is 256MB.
+# be rejected as invalid. The default is 256MB. If you're changing this parameter,
+# you may want to adjust max_value_size_in_mb accordingly.
 # native_transport_max_frame_size_in_mb: 256
 
 # The maximum number of concurrent client connections.
@@ -800,10 +801,12 @@ request_timeout_in_ms: 10000
 cross_node_timeout: false
 
 # Set socket timeout for streaming operation.
-# The stream session is failed if no data is received by any of the
-# participants within that period.
-# Default value is 3600000, which means streams timeout after an hour.
-# streaming_socket_timeout_in_ms: 3600000
+# The stream session is failed if no data/ack is received by any of the participants
+# within that period, which means this should also be sufficient to stream a large
+# sstable or rebuild table indexes.
+# Default value is 86400000ms, which means stale streams timeout after 24 hours.
+# A value of zero means stream sockets should never time out.
+# streaming_socket_timeout_in_ms: 86400000
 
 # phi value that must be reached for a host to be marked down.
 # most users should never need to adjust this.
@@ -1065,3 +1068,8 @@ compaction_large_partition_warning_threshold_mb: 100
 # Adjust the threshold based on your application throughput requirement
 # By default, Cassandra logs GC Pauses greater than 200 ms at INFO level
 gc_warn_threshold_in_ms: 1000
+
+# Maximum size of any value in SSTables. Safety measure to detect SSTable corruption
+# early. Any value size larger than this threshold will result into marking an SSTable
+# as corrupted.
+# max_value_size_in_mb: 256

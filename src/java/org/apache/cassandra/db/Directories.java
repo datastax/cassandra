@@ -289,7 +289,7 @@ public class Directories
     {
         if (directory != null)
         {
-            for (DataDirectory dataDirectory : dataDirectories)
+            for (DataDirectory dataDirectory : paths)
             {
                 if (directory.getAbsolutePath().startsWith(dataDirectory.location.getAbsolutePath()))
                     return dataDirectory;
@@ -457,7 +457,7 @@ public class Directories
     public DataDirectory[] getWriteableLocations()
     {
         List<DataDirectory> nonBlacklistedDirs = new ArrayList<>();
-        for (DataDirectory dir : dataDirectories)
+        for (DataDirectory dir : paths)
         {
             if (!BlacklistedDirectories.isUnwritable(dir.location))
                 nonBlacklistedDirs.add(dir);
@@ -933,11 +933,17 @@ public class Directories
         return visitor.getAllocatedSize();
     }
 
-    // Recursively finds all the sub directories in the KS directory.
     public static List<File> getKSChildDirectories(String ksName)
     {
+        return getKSChildDirectories(ksName, dataDirectories);
+
+    }
+
+    // Recursively finds all the sub directories in the KS directory.
+    public static List<File> getKSChildDirectories(String ksName, DataDirectory[] directories)
+    {
         List<File> result = new ArrayList<>();
-        for (DataDirectory dataDirectory : dataDirectories)
+        for (DataDirectory dataDirectory : directories)
         {
             File ksDir = new File(dataDirectory.location, ksName);
             File[] cfDirs = ksDir.listFiles();

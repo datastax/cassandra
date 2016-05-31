@@ -1,25 +1,45 @@
 3.8
+ * Introduce HdrHistogram and response/service/wait separation to stress tool (CASSANDRA-11853)
+ * entry-weighers in QueryProcessor should respect partitionKeyBindIndexes field (CASSANDRA-11718)
  * Support older ant versions (CASSANDRA-11807)
  * Estimate compressed on disk size when deciding if sstable size limit reached (CASSANDRA-11623)
  * cassandra-stress profiles should support case sensitive schemas (CASSANDRA-11546)
  * Remove DatabaseDescriptor dependency from FileUtils (CASSANDRA-11578)
  * Faster streaming (CASSANDRA-9766)
  * Add prepared query parameter to trace for "Execute CQL3 prepared query" session (CASSANDRA-11425)
+ * Add repaired percentage metric (CASSANDRA-11503)
  * Add Change-Data-Capture (CASSANDRA-8844)
 
 
 3.7
+ * Don't use static dataDirectories field in Directories instances (CASSANDRA-11647)
 Merged from 3.0:
+ * Avoid WriteTimeoutExceptions during commit log replay due to materialized
+   view lock contention (CASSANDRA-11891)
+ * Prevent OOM failures on SSTable corruption, improve tests for corruption detection (CASSANDRA-9530)
+ * Use CFS.initialDirectories when clearing snapshots (CASSANDRA-11705)
  * Allow compaction strategies to disable early open (CASSANDRA-11754)
  * Refactor Materialized View code (CASSANDRA-11475)
  * Update Java Driver (CASSANDRA-11615)
 Merged from 2.2:
+ * Fix possible race condition in CommitLog.recover (CASSANDRA-11743)
+ * Enable client encryption in sstableloader with cli options (CASSANDRA-11708)
+ * Possible memory leak in NIODataInputStream (CASSANDRA-11867)
+ * Add seconds to cqlsh tracing session duration (CASSANDRA-11753)
  * Fix commit log replay after out-of-order flush completion (CASSANDRA-9669)
  * Prohibit Reversed Counter type as part of the PK (CASSANDRA-9395)
  * cqlsh: correctly handle non-ascii chars in error messages (CASSANDRA-11626)
+Merged from 2.1:
+ * Clear out parent repair session if repair coordinator dies (CASSANDRA-11824)
+ * Set default streaming_socket_timeout_in_ms to 24 hours (CASSANDRA-11840)
+ * Do not consider local node a valid source during replace (CASSANDRA-11848)
+ * Add message dropped tasks to nodetool netstats (CASSANDRA-11855)
+ * Avoid holding SSTableReaders for duration of incremental repair (CASSANDRA-11739)
 
 
 3.6
+ * Correctly migrate schema for frozen UDTs during 2.x -> 3.x upgrades
+   (does not affect any released versions) (CASSANDRA-11613)
  * Allow server startup if JMX is configured directly (CASSANDRA-11725)
  * Prevent direct memory OOM on buffer pool allocations (CASSANDRA-11710)
  * Enhanced Compaction Logging (CASSANDRA-10805)

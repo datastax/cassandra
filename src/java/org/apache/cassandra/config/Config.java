@@ -99,7 +99,7 @@ public class Config
 
     public volatile Long truncate_request_timeout_in_ms = 60000L;
 
-    public Integer streaming_socket_timeout_in_ms = 3600000;
+    public Integer streaming_socket_timeout_in_ms = 86400000; //24 hours
 
     public boolean cross_node_timeout = false;
 
@@ -155,6 +155,12 @@ public class Config
 
     @Deprecated
     public Integer thrift_max_message_length_in_mb = 16;
+    /**
+     * Max size of values in SSTables, in MegaBytes.
+     * Default is the same as the native protocol frame limit: 256Mb.
+     * See AbstractType for how it is used.
+     */
+    public Integer max_value_size_in_mb = 256;
 
     public Integer thrift_framed_transport_size_in_mb = 15;
     public Boolean snapshot_before_compaction = false;

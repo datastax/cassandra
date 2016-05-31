@@ -15,9 +15,18 @@ using the provided 'sstableupgrade' tool.
 
 
 3.8
-=====
+===
+
 New features
 ------------
+   - A new option has been added to cassandra-stress "-rate fixed={number}/s"
+     that forces a scheduled rate of operations/sec over time. Using this, stress can
+     accurately account for coordinated ommission from the stress process.
+   - The cassandra-stress "-rate limit=" option has been renamed to "-rate throttle="
+   - hdr histograms have been added to stress runs, it's output can be saved to disk using:
+     "-log hdrfile=" option. This histogram includes response/service/wait times when used with the
+     fixed or throttle rate options.  The histogram file can be plotted on
+     http://hdrhistogram.github.io/HdrHistogram/plotFiles.html
    - Change-Data-Capture is now available. See cassandra.yaml and for cdc-specific flags and
      a brief explanation of on-disk locations for archived data in CommitLog form. This can
      be enabled via ALTER TABLE ... WITH cdc=true.
@@ -25,6 +34,18 @@ New features
      the data/cdc_raw directory until removed by the user and writes to CDC-enabled tables
      will be rejected with a WriteTimeoutException once cdc_total_space_in_mb is reached
      between unflushed CommitLogSegments and cdc_raw.
+
+
+3.7
+===
+
+Upgrading
+---------
+   - A maximum size for SSTables values has been introduced, to prevent out of memory
+     exceptions when reading corrupt SSTables. This maximum size can be set via
+     max_value_size_in_mb in cassandra.yaml. The default is 256MB, which matches the default
+     value of native_transport_max_frame_size_in_mb. SSTables will be considered corrupt if
+     they contain values whose size exceeds this limit. See CASSANDRA-9530 for more details.
 
 
 3.6

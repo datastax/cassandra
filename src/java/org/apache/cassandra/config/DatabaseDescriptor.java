@@ -804,6 +804,9 @@ public class DatabaseDescriptor
         {
             throw new ConfigurationException("Encryption must be enabled in client_encryption_options for native_transport_port_ssl", false);
         }
+
+        if (conf.max_value_size_in_mb == null || conf.max_value_size_in_mb <= 0)
+            throw new ConfigurationException("max_value_size_in_mb must be positive", false);
     }
 
     private static FileStore guessFileStore(String dir) throws IOException
@@ -947,6 +950,11 @@ public class DatabaseDescriptor
     public static int getThriftFramedTransportSize()
     {
         return conf.thrift_framed_transport_size_in_mb * 1024 * 1024;
+    }
+
+    public static int getMaxValueSize()
+    {
+        return conf.max_value_size_in_mb * 1024 * 1024;
     }
 
     /**
@@ -1378,6 +1386,12 @@ public class DatabaseDescriptor
     public static String getCommitLogLocation()
     {
         return conf.commitlog_directory;
+    }
+
+    @VisibleForTesting
+    public static void setCommitLogLocation(String value)
+    {
+        conf.commitlog_directory = value;
     }
 
     public static ParameterizedClass getCommitLogCompression()

@@ -25,10 +25,12 @@ import java.util.List;
 
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -36,86 +38,24 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.KillerForTests;
 
 import static org.junit.Assert.assertEquals;
 
 public class CommitLogReaderTest extends CQLTester
 {
-    static ArrayList<File> getCommitLogs()
+    @BeforeClass
+    public static void beforeClass()
     {
-        File dir = new File(DatabaseDescriptor.getCommitLogLocation());
-        File[] files = dir.listFiles();
-        ArrayList<File> results = new ArrayList<>();
-        for (File f : files)
-        {
-            if (f.isDirectory())
-                continue;
-            results.add(f);
-        }
-        Assert.assertTrue("Didn't find any commit log files.", 0 != results.size());
-        return results;
+        DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.ignore);
+        JVMStabilityInspector.replaceKiller(new KillerForTests(false));
     }
 
-    static class TestCLRHandler implements CommitLogReadHandler
+    @Before
+    public void before() throws IOException
     {
-        public List<Mutation> seenMutations = new ArrayList<Mutation>();
-        public boolean sawStopOnErrorCheck = false;
-
-        private final CFMetaData cfm;
-
-        // Accept all
-        public TestCLRHandler()
-        {
-            this.cfm = null;
-        }
-
-        public TestCLRHandler(CFMetaData cfm)
-        {
-            this.cfm = cfm;
-        }
-
-        public boolean shouldStopOnError(CommitLogReadException exception) throws IOException
-        {
-            sawStopOnErrorCheck = true;
-            return false;
-        }
-
-        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
-        {
-            sawStopOnErrorCheck = true;
-        }
-
-        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
-        {
-            if ((cfm == null) || (cfm != null && m.get(cfm) != null)) {
-                seenMutations.add(m);
-            }
-        }
-
-        public int seenMutationCount() { return seenMutations.size(); }
-    }
-
-    /**
-     * Returns offset of active written data at halfway point of data
-     */
-    CommitLogSegmentPosition populateData(int entryCount) throws Throwable
-    {
-        Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
-
-        createTable("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));");
-        int midpoint = entryCount / 2;
-
-        for (int i = 0; i < midpoint; i++) {
-            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
-        }
-
-        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
-
-        for (int i = midpoint; i < entryCount; i++)
-            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
-
-        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
-        return result;
+        CommitLog.instance.resetUnsafe(true);
     }
 
     @Test
@@ -208,7 +148,7 @@ public class CommitLogReaderTest extends CQLTester
         ArrayList<File> toCheck = getCommitLogs();
 
         CommitLogReader reader = new CommitLogReader();
-        TestCLRHandler testHandler = new TestCLRHandler(currentTableMetadata());
+        TestCLRHandler testHandler = new TestCLRHandler();
 
         for (File f: toCheck)
             reader.readCommitLogSegment(testHandler, f, midpoint, readCount, false);
@@ -244,5 +184,82 @@ public class CommitLogReaderTest extends CQLTester
                 assertEquals(ByteBuffer.wrap(Integer.toString(i + offset).getBytes()), r.getCell(cd).value());
             i++;
         }
+    }
+
+    static ArrayList<File> getCommitLogs()
+    {
+        File dir = new File(DatabaseDescriptor.getCommitLogLocation());
+        File[] files = dir.listFiles();
+        ArrayList<File> results = new ArrayList<>();
+        for (File f : files)
+        {
+            if (f.isDirectory())
+                continue;
+            results.add(f);
+        }
+        Assert.assertTrue("Didn't find any commit log files.", 0 != results.size());
+        return results;
+    }
+
+    static class TestCLRHandler implements CommitLogReadHandler
+    {
+        public List<Mutation> seenMutations = new ArrayList<Mutation>();
+        public boolean sawStopOnErrorCheck = false;
+
+        private final CFMetaData cfm;
+
+        // Accept all
+        public TestCLRHandler()
+        {
+            this.cfm = null;
+        }
+
+        public TestCLRHandler(CFMetaData cfm)
+        {
+            this.cfm = cfm;
+        }
+
+        public boolean shouldStopOnError(CommitLogReadException exception) throws IOException
+        {
+            sawStopOnErrorCheck = true;
+            return false;
+        }
+
+        public void handleUnrecoverableError(CommitLogReadException exception) throws IOException
+        {
+            sawStopOnErrorCheck = true;
+        }
+
+        public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
+        {
+            if ((cfm == null) || (cfm != null && m.get(cfm) != null)) {
+                seenMutations.add(m);
+            }
+        }
+
+        public int seenMutationCount() { return seenMutations.size(); }
+    }
+
+    /**
+     * Returns offset of active written data at halfway point of data
+     */
+    CommitLogSegmentPosition populateData(int entryCount) throws Throwable
+    {
+        Assert.assertEquals("entryCount must be an even number.", 0, entryCount % 2);
+
+        createTable("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));");
+        int midpoint = entryCount / 2;
+
+        for (int i = 0; i < midpoint; i++) {
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
+        }
+
+        CommitLogSegmentPosition result = CommitLog.instance.getCurrentSegmentPosition();
+
+        for (int i = midpoint; i < entryCount; i++)
+            execute("INSERT INTO %s (idx, data) VALUES (?, ?)", i, Integer.toString(i));
+
+        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush();
+        return result;
     }
 }

@@ -394,7 +394,7 @@ public class CommitLogReader
         }
 
         if (logger.isTraceEnabled())
-            logger.trace("replaying mutation for {}.{}: {}", mutation.getKeyspaceName(), mutation.key(),
+            logger.trace("Read mutation for {}.{}: {}", mutation.getKeyspaceName(), mutation.key(),
                          "{" + StringUtils.join(mutation.getPartitionUpdates().iterator(), ", ") + "}");
 
         handler.handleMutation(mutation, size, entryLocation, desc);
