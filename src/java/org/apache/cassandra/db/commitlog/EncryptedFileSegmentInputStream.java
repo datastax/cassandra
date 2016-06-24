@@ -56,8 +56,24 @@ public class EncryptedFileSegmentInputStream extends FileSegmentInputStream impl
 
     public void seek(long position)
     {
-        // implement this when we actually need it
-        throw new UnsupportedOperationException();
+        long bufferPos = position - totalChunkOffset - segmentOffset;
+        while (buffer != null && bufferPos > buffer.capacity())
+        {
+            // rebuffer repeatedly until we have reached desired position
+            buffer.position(buffer.limit());
+
+            // increases totalChunkOffset
+            reBuffer();
+            bufferPos = position - totalChunkOffset - segmentOffset;
+        }
+        if (buffer == null || bufferPos < 0 || bufferPos > buffer.capacity())
+            throw new IllegalArgumentException(
+                    String.format("Unable to seek to position %d in %s (%d bytes) in partial mode",
+                            position,
+                            getPath(),
+                            segmentOffset + expectedLength));
+        buffer.position((int) bufferPos);
+
     }
 
     public long bytesPastMark(DataPosition mark)

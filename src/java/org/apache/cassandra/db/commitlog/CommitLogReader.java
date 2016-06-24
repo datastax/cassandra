@@ -192,6 +192,11 @@ public class CommitLogReader
 
                     if (desc.id == minPosition.segmentId && syncSegment.endPosition < minPosition.position)
                         continue;
+                   
+                    // seek rather than deserializing mutation-by-mutation to reach the desired minPosition in this
+                    // SyncSegment
+                    if (desc.id == minPosition.segmentId && syncSegment.input.getFilePointer() < minPosition.position)
+                        syncSegment.input.seek(minPosition.position);
 
                     statusTracker.errorContext = String.format("Next section at %d in %s", syncSegment.fileStartPosition, desc.fileName());
                     readSection(handler, syncSegment.input, syncSegment.endPosition, statusTracker, desc);
