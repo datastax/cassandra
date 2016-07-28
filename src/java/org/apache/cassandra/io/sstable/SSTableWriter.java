@@ -322,7 +322,16 @@ public class SSTableWriter extends SSTable
             }
             columnIndexer.finishAddingAtoms();
 
-            columnIndexer.maybeWriteEmptyRowHeader();
+            // even if there aren't any columns or tombstones written, we need to write header
+            if (columnIndexer.writtenAtomCount() == 0 && !cf.isMarkedForDelete())
+            {
+                ByteBufferUtil.writeWithShortLength(key.getKey(), dataFile.stream);
+                DeletionTime.serializer.serialize(cf.deletionInfo().getTopLevelDeletion(), dataFile.stream);
+            }
+            else
+            {
+                columnIndexer.maybeWriteEmptyRowHeader();
+            }
             dataFile.stream.writeShort(END_OF_ROW);
         }
         catch (IOException e)
