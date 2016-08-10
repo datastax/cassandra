@@ -136,6 +136,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Thread drainOnShutdown = null;
     private volatile boolean inShutdownHook = false;
+    private List<Runnable> runOnShutdown = new ArrayList<>();
 
     public static final StorageService instance = new StorageService();
 
@@ -572,7 +573,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             @Override
             public void runMayThrow() throws InterruptedException, ExecutionException
             {
-                inShutdownHook = true;
+                synchronized (StorageService.this)
+                {
+                    inShutdownHook = true;
+                    runOnShutdown.forEach(hook -> hook.run());
+                }
+
                 ExecutorService viewMutationStage = StageManager.getStage(Stage.VIEW_MUTATION);
                 ExecutorService counterMutationStage = StageManager.getStage(Stage.COUNTER_MUTATION);
                 ExecutorService mutationStage = StageManager.getStage(Stage.MUTATION);
@@ -713,6 +719,34 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (FBUtilities.isWindows)
             WindowsTimer.endTimerPeriod(DatabaseDescriptor.getWindowsTimerInterval());
+    }
+
+    /**
+     * Add a runnable which will be called before C* enters its primary shutdown code.  This is useful for other
+     * applications running in the same JVM which may want to shut down first rather than time out attempting to use
+     * C* calls which will no longer work.
+     * @param hook: the code to run
+     * @return true on success, false if C* is already shutting down, in which case the runnable has NOT been called
+     * and it is the caller's responsibility to decide what to do.
+     */
+    public synchronized boolean runBeforeShutdown(Runnable hook)
+    {
+        if (!inShutdownHook)
+        {
+            runOnShutdown.add(hook);
+        }
+
+        return !inShutdownHook;
+    }
+
+    /**
+     * Cleanup a shutdown runnable that was added with {@link runBeforeShutdown(Runnable) runBeforeShutdown}
+     * @param hook: the code that is no longer needed
+     * @return whether the hook was successfully removed.
+     */
+    public synchronized boolean removeShutdownRunnable(Runnable hook)
+    {
+        return runOnShutdown.remove(hook);
     }
 
     private boolean shouldBootstrap()
@@ -4192,6 +4226,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public synchronized void drain() throws IOException, InterruptedException, ExecutionException
     {
         inShutdownHook = true;
+
+        runOnShutdown.forEach(hook -> hook.run());
 
         BatchlogManager.instance.shutdown();
 
