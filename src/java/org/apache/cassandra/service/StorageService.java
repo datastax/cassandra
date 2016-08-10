@@ -135,6 +135,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Thread drainOnShutdown = null;
     private volatile boolean inShutdownHook = false;
+    private List<Runnable> runBeforeShutdown = new ArrayList<>();
+    private List<Runnable> runAfterShutdown = new ArrayList<>();
 
     public static final StorageService instance = new StorageService();
 
@@ -573,7 +575,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             @Override
             public void runMayThrow() throws InterruptedException
             {
-                inShutdownHook = true;
+                synchronized (StorageService.this)
+                {
+                    inShutdownHook = true;
+                    runBeforeShutdown.forEach(hook -> hook.run());
+                }
+
                 ExecutorService viewMutationStage = StageManager.getStage(Stage.VIEW_MUTATION);
                 ExecutorService counterMutationStage = StageManager.getStage(Stage.COUNTER_MUTATION);
                 ExecutorService mutationStage = StageManager.getStage(Stage.MUTATION);
@@ -630,6 +637,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 ScheduledExecutors.nonPeriodicTasks.shutdown();
                 if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
                     logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
+
+                synchronized (StorageService.this)
+                {
+                    runAfterShutdown.forEach(hook -> hook.run());
+                }
             }
         }, "StorageServiceShutdownHook");
         Runtime.getRuntime().addShutdownHook(drainOnShutdown);
@@ -714,6 +726,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (FBUtilities.isWindows())
             WindowsTimer.endTimerPeriod(DatabaseDescriptor.getWindowsTimerInterval());
+    }
+
+    /**
+     * Add a runnable which will be called before C* enters its primary shutdown code.  This is useful for other
+     * applications running in the same JVM which may want to shut down first rather than time out attempting to use
+     * C* calls which will no longer work.
+     * @param hook: the code to run
+     * @return true on success, false if C* is already shutting down, in which case the runnable has NOT been called
+     * and it is the caller's responsibility to decide what to do.
+     */
+    public synchronized boolean runBeforeShutdown(Runnable hook)
+    {
+        if (!inShutdownHook)
+        {
+            runBeforeShutdown.add(FBUtilities.warnOnException(hook, exception -> logger.warn("Caught exception in shutdown hook, continuing . . .", exception)));
+        }
+
+        return !inShutdownHook;
+    }
+
+    /**
+     * Add a runnable which will be called after C* enters its primary shutdown code.  This is useful for other
+     * applications running in the same JVM that C* needs to work (e.g. the logger code) and should shut down later.
+     * @param hook: the code to run
+     * @return true on success, false if C* is already shutting down, in which case the runnable has NOT been called
+     * and it is the caller's responsibility to decide what to do.
+     */
+    public synchronized boolean runAfterShutdown(Runnable hook)
+    {
+        if (!inShutdownHook)
+        {
+            runAfterShutdown.add(FBUtilities.warnOnException(hook, exception -> logger.warn("Caught exception in shutdown hook, continuing . . .", exception)));
+        }
+
+        return !inShutdownHook;
     }
 
     private boolean shouldBootstrap()
@@ -4187,6 +4234,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public synchronized void drain() throws IOException, InterruptedException, ExecutionException
     {
         inShutdownHook = true;
+        runBeforeShutdown.forEach(hook -> hook.run());
 
         BatchlogManager.instance.shutdown();
 
@@ -4277,6 +4325,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
             logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
 
+        runAfterShutdown.forEach(hook -> hook.run());
         setMode(Mode.DRAINED, true);
     }
 

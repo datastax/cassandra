@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
@@ -891,6 +892,20 @@ public class FBUtilities
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public static Runnable warnOnException(Runnable base, Consumer<Throwable> onException)
+    {
+        return () -> {
+            try
+            {
+                base.run();
+            }
+            catch (Throwable exception)
+            {
+                onException.accept(exception);
+            }
+        };
     }
 	
 	public static void sleepQuietly(long millis)
