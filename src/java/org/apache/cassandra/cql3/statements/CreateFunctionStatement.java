@@ -120,11 +120,11 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(Permission.ALTER, FunctionResource.function(functionName.keyspace,
-                                                                                  functionName.name,
-                                                                                  argTypes));
+            state.ensureHasPermission(CassandraPermission.ALTER, FunctionResource.function(functionName.keyspace,
+                                                                                           functionName.name,
+                                                                                           argTypes));
         else
-            state.ensureHasPermission(Permission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.ensureHasPermission(CassandraPermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
     }
 
     public void validate(ClientState state) throws InvalidRequestException

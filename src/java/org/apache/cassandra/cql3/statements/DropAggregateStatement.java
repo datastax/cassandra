@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.CassandraPermission;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.*;
@@ -70,7 +70,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
     {
         // TODO CASSANDRA-7557 (function DDL permission)
 
-        state.hasKeyspaceAccess(functionName.keyspace, Permission.DROP);
+        state.hasKeyspaceAccess(functionName.keyspace, CassandraPermission.DROP);
     }
 
     public void validate(ClientState state) throws RequestValidationException

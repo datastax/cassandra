@@ -25,7 +25,7 @@ import java.util.Set;
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
-import com.google.common.collect.Sets;
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.config.Schema;
@@ -52,21 +52,21 @@ public class FunctionResource implements IResource
 
     // permissions which may be granted on either a resource representing some collection of functions
     // i.e. the root resource (all functions) or a keyspace level resource (all functions in a given keyspace)
-    private static final Set<Permission> COLLECTION_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                              Permission.ALTER,
-                                                                                              Permission.DROP,
-                                                                                              Permission.AUTHORIZE,
-                                                                                              Permission.EXECUTE);
+    private static final Set<Permission> COLLECTION_LEVEL_PERMISSIONS = ImmutableSet.of(CassandraPermission.CREATE,
+                                                                                        CassandraPermission.ALTER,
+                                                                                        CassandraPermission.DROP,
+                                                                                        CassandraPermission.AUTHORIZE,
+                                                                                        CassandraPermission.EXECUTE);
     // permissions which may be granted on resources representing a specific function
-    private static final Set<Permission> SCALAR_FUNCTION_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                             Permission.DROP,
-                                                                                             Permission.AUTHORIZE,
-                                                                                             Permission.EXECUTE);
+    private static final Set<Permission> SCALAR_FUNCTION_PERMISSIONS = ImmutableSet.of(CassandraPermission.ALTER,
+                                                                                       CassandraPermission.DROP,
+                                                                                       CassandraPermission.AUTHORIZE,
+                                                                                       CassandraPermission.EXECUTE);
 
-    private static final Set<Permission> AGGREGATE_FUNCTION_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                                Permission.DROP,
-                                                                                                Permission.AUTHORIZE,
-                                                                                                Permission.EXECUTE);
+    private static final Set<Permission> AGGREGATE_FUNCTION_PERMISSIONS = ImmutableSet.of(CassandraPermission.ALTER,
+                                                                                          CassandraPermission.DROP,
+                                                                                          CassandraPermission.AUTHORIZE,
+                                                                                          CassandraPermission.EXECUTE);
 
     private static final String ROOT_NAME = "functions";
     private static final FunctionResource ROOT_RESOURCE = new FunctionResource();

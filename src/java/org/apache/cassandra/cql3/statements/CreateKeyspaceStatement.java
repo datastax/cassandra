@@ -62,7 +62,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        state.hasAllKeyspacesAccess(Permission.CREATE);
+        state.hasAllKeyspacesAccess(CassandraPermission.CREATE);
     }
 
     /**

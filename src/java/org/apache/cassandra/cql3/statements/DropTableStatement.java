@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.CassandraPermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.config.Schema;
@@ -44,7 +44,7 @@ public class DropTableStatement extends SchemaAlteringStatement
     {
         try
         {
-            state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.DROP);
+            state.hasColumnFamilyAccess(keyspace(), columnFamily(), CassandraPermission.DROP);
         }
         catch (InvalidRequestException e)
         {

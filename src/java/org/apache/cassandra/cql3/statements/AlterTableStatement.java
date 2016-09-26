@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.CassandraPermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -71,7 +71,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.ALTER);
+        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CassandraPermission.ALTER);
     }
 
     public void validate(ClientState state)

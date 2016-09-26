@@ -21,7 +21,6 @@ import java.util.Set;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -42,29 +41,29 @@ public class RoleResource implements IResource, Comparable<RoleResource>
     }
 
     // permissions which may be granted on the root level resource
-    private static final Set<Permission> ROOT_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                        Permission.ALTER,
-                                                                                        Permission.DROP,
-                                                                                        Permission.AUTHORIZE,
-                                                                                        Permission.DESCRIBE);
+    public static final Set<Permission> ROOT_LEVEL_PERMISSIONS = ImmutableSet.of(CassandraPermission.CREATE,
+                                                                                 CassandraPermission.ALTER,
+                                                                                 CassandraPermission.DROP,
+                                                                                 CassandraPermission.AUTHORIZE,
+                                                                                 CassandraPermission.DESCRIBE);
     // permissions which may be granted on role level resources
-    private static final Set<Permission> ROLE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                        Permission.DROP,
-                                                                                        Permission.AUTHORIZE);
+    public static final Set<Permission> ROLE_LEVEL_PERMISSIONS = ImmutableSet.of(CassandraPermission.ALTER,
+                                                                                 CassandraPermission.DROP,
+                                                                                 CassandraPermission.AUTHORIZE);
 
-    private static final String ROOT_NAME = "roles";
-    private static final RoleResource ROOT_RESOURCE = new RoleResource();
+    public static final String ROOT_NAME = "roles";
+    public static final RoleResource ROOT_RESOURCE = new RoleResource();
 
-    private final Level level;
-    private final String name;
+    public final Level level;
+    public final String name;
 
-    private RoleResource()
+    RoleResource()
     {
         level = Level.ROOT;
         name = null;
     }
 
-    private RoleResource(String name)
+    RoleResource(String name)
     {
         level = Level.ROLE;
         this.name = name;

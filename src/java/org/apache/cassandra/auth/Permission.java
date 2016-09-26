@@ -17,53 +17,21 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.EnumSet;
-import java.util.Set;
-
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-
 /**
- * An enum encapsulating the set of possible permissions that an authenticated user can have on a resource.
+ * Permissions which a role can have over a resource.  This is an interface implemented by multiple enums for
+ * extensibility.  This works pretty well: the == test inside the enum class will work fine with multiple inheriting
+ * enums, serializing is just calling getName, and deserializing (in PermissionFactory) is just calculating the class
+ * name from the qualified name and calling valueOf().It would be even a bit cleaner to extend enum directly,
+ * but Java does not allow that.
  *
- * IAuthorizer implementations may encode permissions using ordinals, so the Enum order must never change order.
- * Adding new values is ok.
+ * The primary difficulty is CassandraPermission.ALL.  With multiple enumerated types that could be dynamically registered by
+ * extending classes, it's not so easy to figure out the set of all permissions.  The current solution is to have
+ * everything that extends Permission register its values on load.  This is a bit clunky but it *should* work, because
+ * if a resource contains a permission in its applicable set, then that class will be loaded first and all permissions
+ * updated.  The Parser should also contain most if not all resource/permission classes and will be loaded pretty quickly.
  */
-public enum Permission
+public interface Permission
 {
-    @Deprecated
-    READ,
-    @Deprecated
-    WRITE,
-
-    // schema and role management
-    // CREATE, ALTER and DROP permissions granted on an appropriate DataResource are required for
-    // CREATE KEYSPACE and CREATE TABLE.
-    // ALTER KEYSPACE, ALTER TABLE, CREATE INDEX and DROP INDEX require ALTER permission on the
-    // relevant DataResource.
-    // DROP KEYSPACE and DROP TABLE require DROP permission.
-    //
-    // In the context of Role management, these permissions may also be granted on a RoleResource.
-    // CREATE is only granted on the root-level role resource, and is required to create new roles.
-    // ALTER & DROP may be granted on either the root-level role resource, giving permissions on
-    // all roles, or on specific role-level resources.
-    CREATE,
-    ALTER,
-    DROP,
-
-    // data access
-    SELECT, // required for SELECT on a table
-    MODIFY, // required for INSERT, UPDATE, DELETE, TRUNCATE on a DataResource.
-
-    // permission management
-    AUTHORIZE, // required for GRANT and REVOKE of permissions or roles.
-
-    DESCRIBE, // required on the root-level RoleResource to list all Roles
-
-    // UDF permissions
-    EXECUTE;  // required to invoke any user defined function or aggregate
-
-    public static final Set<Permission> ALL =
-            Sets.immutableEnumSet(EnumSet.range(Permission.CREATE, Permission.EXECUTE));
-    public static final Set<Permission> NONE = ImmutableSet.of();
+    String name();         // Simple enum name, e.g. CREATE
+    String getName();      // Qualified name.  For Cassandra these are the same, for extensions the class name will be merged (see PermissionFactory), for example XX.CanDoSomething.
 }

@@ -74,7 +74,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace(), Permission.CREATE);
+        state.hasKeyspaceAccess(keyspace(), CassandraPermission.CREATE);
     }
 
     public void validate(ClientState state)

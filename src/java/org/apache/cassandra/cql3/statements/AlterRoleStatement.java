@@ -77,7 +77,7 @@ public class AlterRoleStatement extends AuthenticationStatement
         else
         {
             // if not attempting to alter another role, ensure we have ALTER permissions on it
-            super.checkPermission(state, Permission.ALTER, role);
+            super.checkPermission(state, CassandraPermission.ALTER, role);
         }
     }
 

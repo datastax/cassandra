@@ -39,6 +39,8 @@ import Parser,Lexer;
     import java.util.Map;
     import java.util.Set;
 
+    import com.google.common.collect.ImmutableSet;
+
     import org.apache.cassandra.auth.*;
     import org.apache.cassandra.config.ColumnDefinition;
     import org.apache.cassandra.cql3.*;

@@ -187,16 +187,16 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(Permission.ALTER, FunctionResource.function(functionName.keyspace,
-                                                                                  functionName.name,
-                                                                                  argTypes));
+            state.ensureHasPermission(CassandraPermission.ALTER, FunctionResource.function(functionName.keyspace,
+                                                                                           functionName.name,
+                                                                                           argTypes));
         else
-            state.ensureHasPermission(Permission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.ensureHasPermission(CassandraPermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
 
-        state.ensureHasPermission(Permission.EXECUTE, stateFunction);
+        state.ensureHasPermission(CassandraPermission.EXECUTE, stateFunction);
 
         if (finalFunction != null)
-            state.ensureHasPermission(Permission.EXECUTE, finalFunction);
+            state.ensureHasPermission(CassandraPermission.EXECUTE, finalFunction);
     }
 
     public void validate(ClientState state) throws InvalidRequestException
