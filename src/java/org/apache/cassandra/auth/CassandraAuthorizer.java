@@ -19,6 +19,7 @@ package org.apache.cassandra.auth;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
@@ -70,6 +71,8 @@ public class CassandraAuthorizer implements IAuthorizer
     private SelectStatement authorizeRoleStatement;
     private SelectStatement legacyAuthorizeRoleStatement;
 
+    protected final PermissionFactory factory = new PermissionFactory();
+
     public CassandraAuthorizer()
     {
     }
@@ -81,7 +84,8 @@ public class CassandraAuthorizer implements IAuthorizer
         if (user.isSuper())
             return resource.applicablePermissions();
 
-        Set<Permission> permissions = EnumSet.noneOf(Permission.class);
+        Set<Permission> permissions = new HashSet<>();
+
         try
         {
             for (RoleResource role: user.getRoles())
@@ -227,7 +231,7 @@ public class CassandraAuthorizer implements IAuthorizer
         {
             for (String perm : result.one().getSet(PERMISSIONS, UTF8Type.instance))
             {
-                permissions.add(Permission.valueOf(perm));
+                permissions.add(factory.valueOf(perm));
             }
         }
     }
@@ -240,7 +244,7 @@ public class CassandraAuthorizer implements IAuthorizer
                               SchemaConstants.AUTH_KEYSPACE_NAME,
                               AuthKeyspace.ROLE_PERMISSIONS,
                               op,
-                              "'" + StringUtils.join(permissions, "','") + "'",
+                              "'" + permissions.stream().map(perm -> perm.getName()).collect(Collectors.joining("','")) + "'",
                               escape(role.getRoleName()),
                               escape(resource.getName())));
     }
@@ -306,7 +310,7 @@ public class CassandraAuthorizer implements IAuthorizer
             {
                 for (String p : row.getSet(PERMISSIONS, UTF8Type.instance))
                 {
-                    Permission permission = Permission.valueOf(p);
+                    Permission permission = factory.valueOf(p);
                     if (permissions.contains(permission))
                         details.add(new PermissionDetails(row.getString(entityColumnName),
                                                           Resources.fromName(row.getString(RESOURCE)),
@@ -420,7 +424,7 @@ public class CassandraAuthorizer implements IAuthorizer
                     {
                         public boolean apply(String s)
                         {
-                            return resource.applicablePermissions().contains(Permission.valueOf(s));
+                            return resource.applicablePermissions().contains(factory.valueOf(s));
                         }
                     };
                     SetSerializer<String> serializer = SetSerializer.getInstance(UTF8Serializer.instance, UTF8Type.instance);

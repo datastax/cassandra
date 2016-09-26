@@ -39,7 +39,7 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.CREATE, RoleResource.root());
+        super.checkPermission(state, CassandraPermission.CREATE, RoleResource.root());
         if (opts.getSuperuser().isPresent())
         {
             if (opts.getSuperuser().get() && !state.getUser().isSuper())

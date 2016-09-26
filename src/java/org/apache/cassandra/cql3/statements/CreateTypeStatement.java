@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.CassandraPermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -61,7 +61,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace(), Permission.CREATE);
+        state.hasKeyspaceAccess(keyspace(), CassandraPermission.CREATE);
     }
 
     public void validate(ClientState state) throws RequestValidationException

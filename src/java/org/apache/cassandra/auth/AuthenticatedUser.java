@@ -63,7 +63,7 @@ public class AuthenticatedUser
     /**
      * Checks the user's superuser status.
      * Only a superuser is allowed to perform CREATE USER and DROP USER queries.
-     * Im most cased, though not necessarily, a superuser will have Permission.ALL on every resource
+     * Im most cased, though not necessarily, a superuser will have CassandraPermission.ALL on every resource
      * (depends on IAuthorizer implementation).
      */
     public boolean isSuper()

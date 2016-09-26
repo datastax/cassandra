@@ -24,7 +24,7 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.Sets;
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
 
 public class JMXResource implements IResource
@@ -40,11 +40,11 @@ public class JMXResource implements IResource
     private final String name;
 
     // permissions which may be granted on Mbeans
-    private static final Set<Permission> JMX_PERMISSIONS = Sets.immutableEnumSet(Permission.AUTHORIZE,
-                                                                                 Permission.DESCRIBE,
-                                                                                 Permission.EXECUTE,
-                                                                                 Permission.MODIFY,
-                                                                                 Permission.SELECT);
+    private static final Set<Permission> JMX_PERMISSIONS = ImmutableSet.of(CassandraPermission.AUTHORIZE,
+                                                                           CassandraPermission.DESCRIBE,
+                                                                           CassandraPermission.EXECUTE,
+                                                                           CassandraPermission.MODIFY,
+                                                                           CassandraPermission.SELECT);
 
     private JMXResource()
     {

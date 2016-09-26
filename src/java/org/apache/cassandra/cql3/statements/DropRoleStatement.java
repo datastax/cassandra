@@ -37,7 +37,7 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.DROP, role);
+        super.checkPermission(state, CassandraPermission.DROP, role);
 
         // We only check superuser status for existing roles to avoid
         // caching info about roles which don't exist (CASSANDRA-9189)

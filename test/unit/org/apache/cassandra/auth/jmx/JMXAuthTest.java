@@ -118,22 +118,22 @@ public class JMXAuthTest extends CQLTester
                                                          ColumnFamilyStoreMBean.class);
 
         // grant SELECT on a single specific Table mbean
-        assertPermissionOnResource(Permission.SELECT, tableMBean, proxy::getTableName);
+        assertPermissionOnResource(CassandraPermission.SELECT, tableMBean, proxy::getTableName);
 
         // grant SELECT on all Table mbeans in named keyspace
         clearAllPermissions();
         JMXResource allTablesInKeyspace = JMXResource.mbean(String.format("org.apache.cassandra.db:type=Tables,keyspace=%s,*",
                                                                           KEYSPACE));
-        assertPermissionOnResource(Permission.SELECT, allTablesInKeyspace, proxy::getTableName);
+        assertPermissionOnResource(CassandraPermission.SELECT, allTablesInKeyspace, proxy::getTableName);
 
         // grant SELECT on all Table mbeans
         clearAllPermissions();
         JMXResource allTables = JMXResource.mbean("org.apache.cassandra.db:type=Tables,*");
-        assertPermissionOnResource(Permission.SELECT, allTables, proxy::getTableName);
+        assertPermissionOnResource(CassandraPermission.SELECT, allTables, proxy::getTableName);
 
         // grant SELECT ON ALL MBEANS
         clearAllPermissions();
-        assertPermissionOnResource(Permission.SELECT, JMXResource.root(), proxy::getTableName);
+        assertPermissionOnResource(CassandraPermission.SELECT, JMXResource.root(), proxy::getTableName);
     }
 
     @Test
@@ -145,22 +145,22 @@ public class JMXAuthTest extends CQLTester
         MBeanAction action = () -> proxy.setMinimumCompactionThreshold(4);
 
         // grant MODIFY on a single specific Table mbean
-        assertPermissionOnResource(Permission.MODIFY, tableMBean, action);
+        assertPermissionOnResource(CassandraPermission.MODIFY, tableMBean, action);
 
         // grant MODIFY on all Table mbeans in named keyspace
         clearAllPermissions();
         JMXResource allTablesInKeyspace = JMXResource.mbean(String.format("org.apache.cassandra.db:type=Tables,keyspace=%s,*",
                                                                           KEYSPACE));
-        assertPermissionOnResource(Permission.MODIFY, allTablesInKeyspace, action);
+        assertPermissionOnResource(CassandraPermission.MODIFY, allTablesInKeyspace, action);
 
         // grant MODIFY on all Table mbeans
         clearAllPermissions();
         JMXResource allTables = JMXResource.mbean("org.apache.cassandra.db:type=Tables,*");
-        assertPermissionOnResource(Permission.MODIFY, allTables, action);
+        assertPermissionOnResource(CassandraPermission.MODIFY, allTables, action);
 
         // grant MODIFY ON ALL MBEANS
         clearAllPermissions();
-        assertPermissionOnResource(Permission.MODIFY, JMXResource.root(), action);
+        assertPermissionOnResource(CassandraPermission.MODIFY, JMXResource.root(), action);
     }
 
     @Test
@@ -171,22 +171,22 @@ public class JMXAuthTest extends CQLTester
                                                          ColumnFamilyStoreMBean.class);
 
         // grant EXECUTE on a single specific Table mbean
-        assertPermissionOnResource(Permission.EXECUTE, tableMBean, proxy::estimateKeys);
+        assertPermissionOnResource(CassandraPermission.EXECUTE, tableMBean, proxy::estimateKeys);
 
         // grant EXECUTE on all Table mbeans in named keyspace
         clearAllPermissions();
         JMXResource allTablesInKeyspace = JMXResource.mbean(String.format("org.apache.cassandra.db:type=Tables,keyspace=%s,*",
                                                                           KEYSPACE));
-        assertPermissionOnResource(Permission.EXECUTE, allTablesInKeyspace, proxy::estimateKeys);
+        assertPermissionOnResource(CassandraPermission.EXECUTE, allTablesInKeyspace, proxy::estimateKeys);
 
         // grant EXECUTE on all Table mbeans
         clearAllPermissions();
         JMXResource allTables = JMXResource.mbean("org.apache.cassandra.db:type=Tables,*");
-        assertPermissionOnResource(Permission.EXECUTE, allTables, proxy::estimateKeys);
+        assertPermissionOnResource(CassandraPermission.EXECUTE, allTables, proxy::estimateKeys);
 
         // grant EXECUTE ON ALL MBEANS
         clearAllPermissions();
-        assertPermissionOnResource(Permission.EXECUTE, JMXResource.root(), proxy::estimateKeys);
+        assertPermissionOnResource(CassandraPermission.EXECUTE, JMXResource.root(), proxy::estimateKeys);
     }
 
     private void assertPermissionOnResource(Permission permission,

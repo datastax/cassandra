@@ -308,10 +308,10 @@ public class ClientState
             return;
         validateLogin();
         preventSystemKSSchemaModification(keyspace, resource, perm);
-        if ((perm == Permission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
+        if ((perm == CassandraPermission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
             return;
         if (PROTECTED_AUTH_RESOURCES.contains(resource))
-            if ((perm == Permission.CREATE) || (perm == Permission.ALTER) || (perm == Permission.DROP))
+            if ((perm == CassandraPermission.CREATE) || (perm == CassandraPermission.ALTER) || (perm == CassandraPermission.DROP))
                 throw new UnauthorizedException(String.format("%s schema is protected", resource));
         ensureHasPermission(perm, resource);
     }
@@ -361,7 +361,7 @@ public class ClientState
     private void preventSystemKSSchemaModification(String keyspace, DataResource resource, Permission perm) throws UnauthorizedException
     {
         // we only care about schema modification.
-        if (!((perm == Permission.ALTER) || (perm == Permission.DROP) || (perm == Permission.CREATE)))
+        if (!((perm == CassandraPermission.ALTER) || (perm == CassandraPermission.DROP) || (perm == CassandraPermission.CREATE)))
             return;
 
         // prevent system keyspace modification
@@ -372,8 +372,8 @@ public class ClientState
         // TRACING_KS, and also to drop legacy tables (users, credentials, permissions) from
         // AUTH_KS
         if (ALTERABLE_SYSTEM_KEYSPACES.contains(resource.getKeyspace().toLowerCase())
-           && ((perm == Permission.ALTER && !resource.isKeyspaceLevel())
-               || (perm == Permission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
+           && ((perm == CassandraPermission.ALTER && !resource.isKeyspaceLevel())
+               || (perm == CassandraPermission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
         {
             throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
         }

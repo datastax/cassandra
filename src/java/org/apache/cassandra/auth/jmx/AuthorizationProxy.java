@@ -246,9 +246,9 @@ public class AuthorizationProxy implements InvocationHandler
      */
     private boolean authorizeMBeanServerMethod(RoleResource subject, String methodName)
     {
-        logger.trace("JMX invocation of {} on MBeanServer requires permission {}", methodName, Permission.DESCRIBE);
+        logger.trace("JMX invocation of {} on MBeanServer requires permission {}", methodName, CassandraPermission.DESCRIBE);
         return (MBEAN_SERVER_METHOD_WHITELIST.contains(methodName) &&
-            hasPermission(subject, Permission.DESCRIBE, JMXResource.root()));
+            hasPermission(subject, CassandraPermission.DESCRIBE, JMXResource.root()));
     }
 
     /**
@@ -414,12 +414,12 @@ public class AuthorizationProxy implements InvocationHandler
         {
             case "getAttribute":
             case "getAttributes":
-                return Permission.SELECT;
+                return CassandraPermission.SELECT;
             case "setAttribute":
             case "setAttributes":
-                return Permission.MODIFY;
+                return CassandraPermission.MODIFY;
             case "invoke":
-                return Permission.EXECUTE;
+                return CassandraPermission.EXECUTE;
             case "getInstanceOf":
             case "getMBeanInfo":
             case "hashCode":
@@ -427,7 +427,7 @@ public class AuthorizationProxy implements InvocationHandler
             case "isRegistered":
             case "queryMBeans":
             case "queryNames":
-                return Permission.DESCRIBE;
+                return CassandraPermission.DESCRIBE;
             default:
                 logger.debug("Access denied, method name {} does not map to any defined permission", methodName);
                 return null;
@@ -470,7 +470,7 @@ public class AuthorizationProxy implements InvocationHandler
         // get all permissions for the specified subject. We'll cache them as it's likely
         // we'll receive multiple lookups for the same subject (but for different resources
         // and permissions) in quick succession
-        return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER, Permission.ALL, null, subject)
+        return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER, PermissionFactory.ALL, null, subject)
                                                  .stream()
                                                  .filter(details -> details.resource instanceof JMXResource)
                                                  .collect(Collectors.toSet());

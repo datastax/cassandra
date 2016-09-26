@@ -66,7 +66,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
         // check that the user has AUTHORIZE permission on the resource or its parents, otherwise reject GRANT/REVOKE.
-        state.ensureHasPermission(Permission.AUTHORIZE, resource);
+        state.ensureHasPermission(CassandraPermission.AUTHORIZE, resource);
         // check that the user has [a single permission or all in case of ALL] on the resource or its parents.
         for (Permission p : permissions)
             state.ensureHasPermission(p, resource);

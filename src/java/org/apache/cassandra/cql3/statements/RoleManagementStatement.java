@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.CassandraPermission;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
@@ -39,7 +39,7 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.AUTHORIZE, role);
+        super.checkPermission(state, CassandraPermission.AUTHORIZE, role);
     }
 
     public void validate(ClientState state) throws RequestValidationException

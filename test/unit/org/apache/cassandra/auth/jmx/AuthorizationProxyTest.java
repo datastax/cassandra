@@ -64,7 +64,7 @@ public class AuthorizationProxyTest
     public void roleHasRequiredPermission() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, Permission.SELECT)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, CassandraPermission.SELECT)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isSuperuser((role) -> false)
                                                      .getPermissions(permissions::get)
@@ -80,7 +80,7 @@ public class AuthorizationProxyTest
     public void roleDoesNotHaveRequiredPermission() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, Permission.AUTHORIZE)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, CassandraPermission.AUTHORIZE)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isSuperuser((role) -> false)
                                                      .getPermissions(permissions::get)
@@ -95,7 +95,7 @@ public class AuthorizationProxyTest
     public void roleHasRequiredPermissionOnRootResource() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), Permission.SELECT)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), CassandraPermission.SELECT)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isSuperuser((role) -> false)
                                                      .getPermissions(permissions::get)
@@ -111,7 +111,7 @@ public class AuthorizationProxyTest
     public void roleHasOtherPermissionOnRootResource() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), Permission.AUTHORIZE)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), CassandraPermission.AUTHORIZE)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isSuperuser((role) -> false)
                                                      .getPermissions(permissions::get)
@@ -211,7 +211,7 @@ public class AuthorizationProxyTest
     public void authorizeWhenWildcardGrantCoversExactTarget() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, Permission.SELECT)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, CassandraPermission.SELECT)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -227,7 +227,7 @@ public class AuthorizationProxyTest
     public void rejectWhenWildcardGrantDoesNotCoverExactTarget() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, Permission.SELECT)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, CassandraPermission.SELECT)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -243,7 +243,7 @@ public class AuthorizationProxyTest
     public void authorizeWhenWildcardGrantCoversWildcardTarget() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, Permission.DESCRIBE)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, javaLangWildcard, CassandraPermission.DESCRIBE)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -261,7 +261,7 @@ public class AuthorizationProxyTest
     {
         JMXResource customWildcard = JMXResource.mbean("org.apache.cassandra:*");
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, customWildcard, Permission.DESCRIBE)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, customWildcard, CassandraPermission.DESCRIBE)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -291,8 +291,8 @@ public class AuthorizationProxyTest
         ObjectName allCassandraBeans = ObjectName.getInstance("org.apache.cassandra*:*");
 
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, ImmutableSet.of(permission(role1, allCustomBeans, Permission.DESCRIBE),
-                                                   permission(role1, allHintsBeans, Permission.DESCRIBE)));
+            ImmutableMap.of(role1, ImmutableSet.of(permission(role1, allCustomBeans, CassandraPermission.DESCRIBE),
+                                                   permission(role1, allHintsBeans, CassandraPermission.DESCRIBE)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -310,7 +310,7 @@ public class AuthorizationProxyTest
     public void authorizeOnTargetWildcardWithPermissionOnRoot() throws Throwable
     {
         Map<RoleResource, Set<PermissionDetails>> permissions =
-            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), Permission.SELECT)));
+            ImmutableMap.of(role1, Collections.singleton(permission(role1, JMXResource.root(), CassandraPermission.SELECT)));
 
         AuthorizationProxy proxy = new ProxyBuilder().isAuthzRequired(() -> true)
                                                      .isSuperuser((role) -> false)
@@ -328,7 +328,7 @@ public class AuthorizationProxyTest
         // Grant ALL permissions on the root resource, so we know that it's
         // the unknown method that causes the authz rejection. Of course, this
         // isn't foolproof but it's something.
-        Set<PermissionDetails> allPerms = Permission.ALL.stream()
+        Set<PermissionDetails> allPerms = Arrays.stream(CassandraPermission.values())
                                                         .map(perm -> permission(role1, JMXResource.root(), perm))
                                                         .collect(Collectors.toSet());
         Map<RoleResource, Set<PermissionDetails>> permissions = ImmutableMap.of(role1, allPerms);
@@ -389,7 +389,7 @@ public class AuthorizationProxyTest
         // hasn't finished.
 
         Map<RoleResource, Set<PermissionDetails>> permissions =
-        ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, Permission.SELECT)));
+        ImmutableMap.of(role1, Collections.singleton(permission(role1, osBean, CassandraPermission.SELECT)));
 
         // verify that access is granted when setup is complete
         AuthorizationProxy proxy = new ProxyBuilder().isSuperuser((role) -> false)
@@ -429,7 +429,7 @@ public class AuthorizationProxyTest
         if (withPermission)
         {
             Map<RoleResource, Set<PermissionDetails>> permissions =
-                ImmutableMap.of(role1, ImmutableSet.of(permission(role1, JMXResource.root(), Permission.DESCRIBE)));
+                ImmutableMap.of(role1, ImmutableSet.of(permission(role1, JMXResource.root(), CassandraPermission.DESCRIBE)));
             builder.getPermissions(permissions::get);
         }
         else
