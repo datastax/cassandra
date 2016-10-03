@@ -65,6 +65,6 @@ public enum CassandraPermission implements Permission
 
     static
     {
-        PermissionFactory.register(values());
+        PermissionFactory.register(CassandraPermission.class, values());
     }
 }

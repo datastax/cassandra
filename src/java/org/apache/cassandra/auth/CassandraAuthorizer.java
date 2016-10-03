@@ -76,8 +76,6 @@ public class CassandraAuthorizer implements IAuthorizer
     private SelectStatement authorizeRoleStatement;
     private SelectStatement legacyAuthorizeRoleStatement;
 
-    protected final PermissionFactory factory = new PermissionFactory();
-
     public CassandraAuthorizer()
     {
     }
@@ -235,7 +233,7 @@ public class CassandraAuthorizer implements IAuthorizer
         {
             for (String perm : result.one().getSet(PERMISSIONS, UTF8Type.instance))
             {
-                permissions.add(factory.valueOf(perm));
+                permissions.add(PermissionFactory.valueOf(perm));
             }
         }
     }
@@ -314,7 +312,7 @@ public class CassandraAuthorizer implements IAuthorizer
             {
                 for (String p : row.getSet(PERMISSIONS, UTF8Type.instance))
                 {
-                    Permission permission = factory.valueOf(p);
+                    Permission permission = PermissionFactory.valueOf(p);
                     if (permissions.contains(permission))
                         details.add(new PermissionDetails(row.getString(entityColumnName),
                                                           Resources.fromName(row.getString(RESOURCE)),
@@ -428,7 +426,7 @@ public class CassandraAuthorizer implements IAuthorizer
                     {
                         public boolean apply(String s)
                         {
-                            return resource.applicablePermissions().contains(factory.valueOf(s));
+                            return resource.applicablePermissions().contains(PermissionFactory.valueOf(s));
                         }
                     };
                     SetSerializer<String> serializer = SetSerializer.getInstance(UTF8Serializer.instance, UTF8Type.instance);

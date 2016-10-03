@@ -19,26 +19,39 @@
 package org.apache.cassandra.auth;
 
 import java.util.Arrays;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
 public class PermissionFactory
 {
     // ALL permissions.  See note in Permission.  This would ideally be in the Permission interface, but
-    // all interface static variables (only since Java 8!) are implicitly final.
+    // all interface static variables (only since Java 8!) are implicitly final.  Register should generally happen
+    // early enough in the initialization that these variables are effectively final.
     public static ImmutableSet<Permission> ALL = ImmutableSet.of();
     public static final ImmutableSet<Permission> NONE = ImmutableSet.of();
 
-    static synchronized void register(Permission... values)
-    {
-        ALL = ImmutableSet.copyOf(Stream.concat(Arrays.stream(values), ALL.stream()).collect(Collectors.toSet()));
-    }
+    // Registered permissions: serialize XXPermission.Y as XX.Y (to make things look pretty in LIST PERMISSIONS more
+    // than anything).  Unfortunately it does not seem possible to have multiple type bounds on a wildcard.
+    private static ImmutableMap<String, Class<? extends Enum>> EXTENDED = ImmutableMap.of();
 
-    // unfortunately it does not seem possible to have multiple type bounds with a wildcard
-    private static ConcurrentHashMap<String, Class<? extends Enum>> extendedPermissions = new ConcurrentHashMap<>();
+    static synchronized void register(Class<? extends Enum> clazz, Permission... values)
+    {
+        assert Permission.class.isAssignableFrom(clazz) : "Permission classes must implement Permission";
+        String className = clazz.getSimpleName();
+        assert clazz.getSimpleName().endsWith("Permission") : "Convention is that Permission class names end with Permission";
+        String shortName = className.substring(0, className.length() - "Permission".length());
+        assert !EXTENDED.containsKey(shortName) : "Map already contains this permission!";
+
+        EXTENDED = ImmutableMap.<String, Class<? extends Enum>>builder()
+                   .putAll(EXTENDED)
+                   .put(shortName, clazz)
+                   .build();
+
+        ALL = ImmutableSet.<Permission>builder()
+              .addAll(ALL)
+              .addAll(Arrays.asList(values))
+              .build();
+    }
 
     public static Permission valueOf(String name)
     {
@@ -51,25 +64,15 @@ public class PermissionFactory
         }
         else
         {
-            String className = "org.apache.cassandra.auth." + name.substring(0, split) + "Permission";
-            String permissionName = name.substring(split+1);
-            Class<? extends Enum> permissionClass = extendedPermissions.computeIfAbsent(className, classname -> {
-                try
-                {
-                    Class loading = Class.forName(className);
-                    assert Enum.class.isAssignableFrom(loading) : "Permission classes must extend enum";
-                    assert Permission.class.isAssignableFrom(loading) : "Permission classes must implement Permission";
-                    return loading;
-                }
-                catch (ClassNotFoundException e)
-                {
-                    throw new RuntimeException("Couldn't load permission class " + classname, e);
-                }
-            });
+            Class<? extends Enum> permissionClass = EXTENDED.get(name.substring(0, split));
 
+            if (permissionClass == null)
+            {
+                throw new RuntimeException("Class not registered for " + name);
+            }
 
-            // Cast should be safe based on the assertions above
-            return (Permission)Enum.valueOf(permissionClass, permissionName);
+            // Cast should be safe based on the assertions in register()
+            return (Permission)Enum.valueOf(permissionClass, name.substring(split+1));
         }
     }
 }
