@@ -19,6 +19,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 

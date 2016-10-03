@@ -38,9 +38,9 @@ public class PermissionFactory
     }
 
     // unfortunately it does not seem possible to have multiple type bounds with a wildcard
-    private ConcurrentHashMap<String, Class<? extends Enum>> extendedPermissions = new ConcurrentHashMap<>();
+    private static ConcurrentHashMap<String, Class<? extends Enum>> extendedPermissions = new ConcurrentHashMap<>();
 
-    public Permission valueOf(String name)
+    public static Permission valueOf(String name)
     {
         int split = name.indexOf('.');
 

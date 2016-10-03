@@ -122,3 +122,11 @@ import Parser,Lexer;
 query returns [ParsedStatement stmnt]
     : st=cqlStatement (';')* EOF { $stmnt = st; }
     ;
+
+permission returns [Permission perm]
+    : p=cassandraPermission { $perm = p; }
+    ;
+
+resource returns [IResource res]
+    : r=cassandraResource { $res = r; }
+    ;

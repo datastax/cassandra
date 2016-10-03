@@ -944,7 +944,7 @@ listPermissionsStatement returns [ListPermissionsStatement stmt]
       { $stmt = new ListPermissionsStatement($permissionOrAll.perms, resource, grantee, recursive); }
     ;
 
-permission returns [Permission perm]
+cassandraPermission returns [Permission perm]
     : p=(K_CREATE | K_ALTER | K_DROP | K_SELECT | K_MODIFY | K_AUTHORIZE | K_DESCRIBE | K_EXECUTE)
     { $perm = CassandraPermission.valueOf($p.text.toUpperCase()); }
     ;
@@ -954,7 +954,7 @@ permissionOrAll returns [Set<Permission> perms]
     | p=permission ( K_PERMISSION )? { $perms = ImmutableSet.of($p.perm); }
     ;
 
-resource returns [IResource res]
+cassandraResource returns [IResource res]
     : d=dataResource { $res = $d.res; }
     | r=roleResource { $res = $r.res; }
     | f=functionResource { $res = $f.res; }
