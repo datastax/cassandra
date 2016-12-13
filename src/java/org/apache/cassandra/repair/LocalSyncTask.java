@@ -19,6 +19,8 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,9 +49,10 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
 
     private final long repairedAt;
 
-    public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt)
+    public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt,
+                         Executor taskExecutor, SyncTask next)
     {
-        super(desc, r1, r2);
+        super(desc, r1, r2, taskExecutor, next);
         this.repairedAt = repairedAt;
     }
 

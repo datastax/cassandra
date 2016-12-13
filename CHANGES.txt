@@ -1,3 +1,7 @@
+DSE 5.0.6
+ * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
+
+
 DSE 5.0.5
  * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
  * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)

@@ -19,6 +19,8 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +32,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * RemoteSyncTask sends {@link SyncRequest} to remote(non-coordinator) node
@@ -40,14 +43,20 @@ import org.apache.cassandra.utils.FBUtilities;
 public class RemoteSyncTask extends SyncTask
 {
     private static final Logger logger = LoggerFactory.getLogger(RemoteSyncTask.class);
+    private final RepairSession session;
 
-    public RemoteSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2)
+    public RemoteSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, RepairSession session,
+                          Executor taskExecutor, SyncTask next)
     {
-        super(desc, r1, r2);
+        super(desc, r1, r2, taskExecutor, next);
+        this.session = session;
     }
 
     protected void startSync(List<Range<Token>> differences)
     {
+        // RemoteSyncTask expects SyncComplete message sent back.
+        // Register task to RepairSession to receive response.
+        session.waitForSync(Pair.create(desc, new NodePair(r1.endpoint, r2.endpoint)), this);
         InetAddress local = FBUtilities.getBroadcastAddress();
         SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, differences);
         String message = String.format("Forwarding streaming repair of %d ranges to %s (to be streamed with %s)", request.ranges.size(), request.src, request.dst);
