@@ -46,12 +46,6 @@ import static org.junit.Assert.assertNull;
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class DatabaseDescriptorTest
 {
-    @BeforeClass
-    public static void setupDatabaseDescriptor()
-    {
-        DatabaseDescriptor.setDaemonInitialized();
-    }
-
     @Test
     public void testCFMetaDataSerialization() throws ConfigurationException, InvalidRequestException
     {

@@ -388,13 +388,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         logger.info("Initializing {}.{}", keyspace.getName(), name);
 
-        // Create Memtable only on online
-        Memtable initialMemtable = null;
-        if (DatabaseDescriptor.isDaemonInitialized())
-            initialMemtable = new Memtable(new AtomicReference<>(CommitLog.instance.getContext()), this);
-        data = new Tracker(initialMemtable, loadSSTables);
-
         // scan for sstables corresponding to this cf and load them
+        data = new Tracker(this, loadSSTables);
+
         if (data.loadsstables)
         {
             Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
@@ -1957,7 +1953,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 public Void call()
                 {
-                    cfs.data.reset(new Memtable(new AtomicReference<>(ReplayPosition.NONE), cfs));
+                    cfs.data.reset();
                     return null;
                 }
             }, true, false);

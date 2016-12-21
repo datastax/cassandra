@@ -199,8 +199,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                 if (!sstable.isRepaired())
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
             }
-            return iterators.isEmpty() ? EmptyIterators.unfilteredPartition(metadata(), isForThrift())
-                                       : checkCacheFilter(UnfilteredPartitionIterators.mergeLazily(iterators, nowInSec()), cfs);
+            return checkCacheFilter(UnfilteredPartitionIterators.mergeLazily(iterators, nowInSec()), cfs);
         }
         catch (RuntimeException | Error e)
         {

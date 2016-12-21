@@ -33,7 +33,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -45,10 +44,6 @@ import static org.junit.Assert.assertEquals;
 
 public class GossiperTest
 {
-    static
-    {
-        DatabaseDescriptor.setDaemonInitialized();
-    }
     static final IPartitioner partitioner = new RandomPartitioner();
     StorageService ss = StorageService.instance;
     TokenMetadata tmd = StorageService.instance.getTokenMetadata();

@@ -20,10 +20,8 @@ package org.apache.cassandra.dht;
 import java.net.InetAddress;
 import java.util.Collections;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
 import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamSession;
@@ -34,11 +32,6 @@ import static org.junit.Assert.assertTrue;
 
 public class StreamStateStoreTest
 {
-    @BeforeClass
-    public static void initDD()
-    {
-        DatabaseDescriptor.setDaemonInitialized();
-    }
 
     @Test
     public void testUpdateAndQueryAvailableRanges()

@@ -74,7 +74,6 @@ public class TrackerTest
     @BeforeClass
     public static void setUp()
     {
-        DatabaseDescriptor.setDaemonInitialized();
         MockSchema.cleanup();
     }
 
@@ -82,7 +81,7 @@ public class TrackerTest
     public void testTryModify()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = new Tracker(null, false);
+        Tracker tracker = new Tracker(cfs, false);
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, true, cfs), MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         tracker.addInitialSSTables(copyOf(readers));
         Assert.assertNull(tracker.tryModify(ImmutableList.of(MockSchema.sstable(0, cfs)), OperationType.COMPACTION));
@@ -146,7 +145,7 @@ public class TrackerTest
     public void testAddInitialSSTables()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = cfs.getTracker();
+        Tracker tracker = new Tracker(cfs, false);
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs),
                                                        MockSchema.sstable(1, 121, cfs),
                                                        MockSchema.sstable(2, 9, cfs));
@@ -166,7 +165,7 @@ public class TrackerTest
         boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
         DatabaseDescriptor.setIncrementalBackupsEnabled(false);
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = cfs.getTracker();
+        Tracker tracker = new Tracker(cfs, false);
         MockListener listener = new MockListener(false);
         tracker.subscribe(listener);
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs),

@@ -22,11 +22,9 @@ package org.apache.cassandra.db.context;
 
 import java.nio.ByteBuffer;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClockAndCount;
 import org.apache.cassandra.db.context.CounterContext.Relationship;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -49,12 +47,6 @@ public class CounterContextTest
     private static final int clockLength = 8;
     private static final int countLength = 8;
     private static final int stepLength = idLength + clockLength + countLength;
-
-    @BeforeClass
-    public static void setupDD()
-    {
-        DatabaseDescriptor.setDaemonInitialized();
-    }
 
     @Test
     public void testAllocate()

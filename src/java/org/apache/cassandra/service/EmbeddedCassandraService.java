@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.io.IOException;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.CassandraDaemon;
 
 /**
@@ -50,7 +49,6 @@ public class EmbeddedCassandraService
     public void start() throws IOException
     {
         cassandraDaemon = new CassandraDaemon();
-        DatabaseDescriptor.setDaemonInitialized();
         cassandraDaemon.init(null);
         cassandraDaemon.start();
     }
