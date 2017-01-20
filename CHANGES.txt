@@ -1,4 +1,5 @@
 DSE 5.0.6
+ * Duplicate rows after upgrading from 2.1.16 to 3.0.10/3.9 (CASSANDRA-13125)
  * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
    and warn about high GC pressure for values below 4 (APOLLO-386)
  * Filter out duplicate sstables when performing snapshots to avoid
