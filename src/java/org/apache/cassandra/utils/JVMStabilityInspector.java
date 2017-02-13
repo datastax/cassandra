@@ -67,8 +67,6 @@ public final class JVMStabilityInspector
         if (t instanceof FileNotFoundException || t instanceof SocketException)
             if (t.getMessage().contains("Too many open files"))
                 isUnstable = true;
-        if (t instanceof AssertionError)
-            isUnstable = true;
 
         if (isUnstable)
             killer.killCurrentJVM(t);

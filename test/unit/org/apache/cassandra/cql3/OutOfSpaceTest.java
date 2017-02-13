@@ -31,10 +31,7 @@ import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -56,33 +53,7 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.die);
-            flushAndExpectError(FSWriteError.class);
-            Assert.assertTrue(killerForTests.wasKilled());
-            Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
-        }
-        finally
-        {
-            DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
-            JVMStabilityInspector.replaceKiller(originalKiller);
-        }
-    }
-
-    @Test
-    public void testFlushAssertionErrorDie() throws Throwable
-    {
-        makeTable();
-
-        KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
-        DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
-        try
-        {
-            DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);  // we should always die on assertion errors
-            Mutation m = new Mutation(PartitionUpdate.singleRowUpdate(currentTableMetadata(),
-                                                                      Util.dk("broken"),
-                                                                      BTreeRow.emptyRow(Util.clustering(currentTableMetadata().comparator, "col"))));
-            m.applyUnsafe();
-            flushAndExpectError(AssertionError.class);
+            flushAndExpectError();
             Assert.assertTrue(killerForTests.wasKilled());
             Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
         }
@@ -102,7 +73,7 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.stop);
-            flushAndExpectError(FSWriteError.class);
+            flushAndExpectError();
             Assert.assertFalse(Gossiper.instance.isEnabled());
         }
         finally
@@ -120,7 +91,7 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);
-            flushAndExpectError(FSWriteError.class);
+            flushAndExpectError();
         }
         finally
         {
@@ -140,17 +111,17 @@ public class OutOfSpaceTest extends CQLTester
             execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
     }
 
-    public void flushAndExpectError(Class<? extends Throwable> errorClass) throws InterruptedException, ExecutionException
+    public void flushAndExpectError() throws InterruptedException, ExecutionException
     {
         try
         {
             Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().get();
-            fail(errorClass.getSimpleName() + " expected.");
+            fail("FSWriteError expected.");
         }
         catch (ExecutionException e)
         {
             // Correct path.
-            Assert.assertTrue(errorClass.isInstance(e.getCause()));
+            Assert.assertTrue(e.getCause() instanceof FSWriteError);
         }
 
         // Make sure commit log wasn't discarded.

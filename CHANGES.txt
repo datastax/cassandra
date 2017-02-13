@@ -4,7 +4,7 @@ DSE 5.0.6
  * Filter out duplicate sstables when performing snapshots to avoid
    duplicate hardlink errors (APOLLO-290)
  * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
- * Always die on AssertionError and log flush failure errors. (APOLLO-227)
+ * Always log flush errors. (APOLLO-227)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
  * Add repaired percentage metric (Backport CASSANDRA-11503)
 Merged from 3.0.X
