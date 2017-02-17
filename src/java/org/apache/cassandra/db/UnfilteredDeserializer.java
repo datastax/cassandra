@@ -625,7 +625,7 @@ public abstract class UnfilteredDeserializer
                 /**
                  * Update the tracker given the provided newly open tombstone. This return the Unfiltered corresponding to the opening
                  * of said tombstone: this can be a simple open mark, a boundary (if there was an open tombstone superseded by this new one)
-                 * or even null (if the new tombston start is supersedes by the currently open tombstone).
+                 * or even null (if the new tombstone start is supersedes by the currently open tombstone).
                  *
                  * Note that this method assume the added tombstone is not fully shadowed, i.e. that !isShadowed(tombstone). It also
                  * assumes no opened tombstone closes before that tombstone (so !hasClosingMarkerBefore(tombstone)).
@@ -638,28 +638,44 @@ public abstract class UnfilteredDeserializer
                         return new RangeTombstoneBoundMarker(tombstone.start.bound, tombstone.deletionTime);
                     }
 
+                    // Add the new tombstone, and then check if it changes the currently open deletion or not.
+                    // Note: we grab the first tombstone (which represents the currently open deletion time) before adding
+                    // because add() can remove that first.
                     Iterator<LegacyLayout.LegacyRangeTombstone> iter = openTombstones.iterator();
                     LegacyLayout.LegacyRangeTombstone first = iter.next();
-                    if (tombstone.deletionTime.supersedes(first.deletionTime))
-                    {
-                        // We're supperseding the currently open tombstone, so we should produce a boundary that close the currently open
-                        // one and open the new one. We should also add the tombstone, but if it stop after the first one, we should
-                        // also remove that first tombstone as it won't be useful anymore.
-                        if (metadata.comparator.compare(tombstone.stop.bound, first.stop.bound) >= 0)
-                            iter.remove();
 
-                        openTombstones.add(tombstone);
-                        return RangeTombstoneBoundaryMarker.makeBoundary(false, tombstone.start.bound.invert(), tombstone.start.bound, first.deletionTime, tombstone.deletionTime);
-                    }
-                    else
+                    add(tombstone);
+
+                    // If the newly opened tombstone superseds the currently open one, we have to produce a boundary to change
+                    // the currently open deletion time, otherwise we have nothing to do.
+                    return tombstone.deletionTime.supersedes(first.deletionTime)
+                           ? RangeTombstoneBoundaryMarker.makeBoundary(false, tombstone.start.bound.invert(), tombstone.start.bound, first.deletionTime, tombstone.deletionTime)
+                           : null;
+                }
+
+                /**
+                 * Adds a new tombstone to openTombstones, removing anything that would be shadowed by this new tombstone.
+                 */
+                private void add(LegacyLayout.LegacyRangeTombstone tombstone)
+                {
+                    // First, remove existing tombstone that is shadowed by this tombstone.
+                    Iterator<LegacyLayout.LegacyRangeTombstone> iter = openTombstones.iterator();
+                    while (iter.hasNext())
                     {
-                        // If the new tombstone don't supersedes the currently open tombstone, we don't have anything to return, we
-                        // just add the new tombstone (because we know tombstone is not fully shadowed, this imply the new tombstone
-                        // simply extend after the first one and we'll deal with it later)
-                        assert metadata.comparator.compare(tombstone.start.bound, first.stop.bound) <= 0;
-                        openTombstones.add(tombstone);
-                        return null;
+
+                        LegacyLayout.LegacyRangeTombstone existing = iter.next();
+                        // openTombstones is ordered by stop bound and the new tombstone can't be shadowing anything that
+                        // stop after it.
+                        if (metadata.comparator.compare(tombstone.stop.bound, existing.stop.bound) < 0)
+                            break;
+
+                        // Note that we remove an existing tombstone even if it is equal to the new one because in that case,
+                        // either the existing strictly stops before the new one and we don't want it, or it stops exactly
+                        // like the new one but we're going to inconditionally add the new one anyway.
+                        if (!existing.deletionTime.supersedes(tombstone.deletionTime))
+                            iter.remove();
                     }
+                    openTombstones.add(tombstone);
                 }
 
                 public boolean hasOpenTombstones()
