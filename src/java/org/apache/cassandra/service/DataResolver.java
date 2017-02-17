@@ -314,8 +314,10 @@ public class DataResolver extends ResponseResolver
                             // Since there is an ongoing merged deletion, the only way we don't have an open repair for
                             // this source is that it had a range open with the same deletion as current and it's
                             // closing it. This imply we need to open a deletion for the source from that point.
-                            assert marker.isClose(isReversed) && currentDeletion.equals(marker.closeDeletionTime(isReversed));
-                            assert !marker.isOpen(isReversed) || currentDeletion.supersedes(marker.openDeletionTime(isReversed));
+                            assert marker.isClose(isReversed) && currentDeletion.equals(marker.closeDeletionTime(isReversed))
+                                : String.format("Current deletion=%s, marker=%s", currentDeletion, marker.toString(command.metadata()));
+                            assert !marker.isOpen(isReversed) || currentDeletion.supersedes(marker.openDeletionTime(isReversed))
+                                : String.format("Current deletion=%s, marker=%s", currentDeletion, marker.toString(command.metadata()));
                             markerToRepair[i] = marker.closeBound(isReversed).invert();
                         }
                         // In case 2) above, we only have something to do if the source is up-to-date after that point
