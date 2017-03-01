@@ -21,7 +21,6 @@ package org.apache.cassandra.db.compaction;
 import java.util.*;
 import java.util.concurrent.Callable;
 
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,12 +82,22 @@ public class CompactionStrategyManager implements INotificationConsumer
      * Returns a task for the compaction strategy that needs it the most (most estimated remaining tasks)
      *
      */
-    public synchronized AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+    public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+    {
+        return getNextBackgroundTask(gcBefore, CompactionManager.CompactionBucket.ANY);
+    }
+
+    public synchronized AbstractCompactionTask getNextBackgroundTask(int gcBefore, CompactionManager.CompactionBucket bucket)
     {
         if (!isEnabled())
             return null;
 
         maybeReload(cfs.metadata);
+
+        if (bucket == CompactionManager.CompactionBucket.REPAIRED)
+            return repaired.getNextBackgroundTask(gcBefore);
+        else if (bucket == CompactionManager.CompactionBucket.UNREPAIRED)
+            return unrepaired.getNextBackgroundTask(gcBefore);
 
         if (repaired.getEstimatedRemainingTasks() > unrepaired.getEstimatedRemainingTasks())
         {

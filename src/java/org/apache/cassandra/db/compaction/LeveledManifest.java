@@ -25,7 +25,6 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 
@@ -298,14 +297,14 @@ public class LeveledManifest
      */
     public synchronized CompactionCandidate getCompactionCandidates()
     {
-        // during bootstrap we only do size tiering in L0 to make sure
+        // during bootstrap or incremental repair we only do size tiering in L0 to make sure
         // the streamed files can be placed in their original levels
-        if (StorageService.instance.isBootstrapMode())
+        if (StorageService.instance.isBootstrapMode() || isUnderRepair())
         {
             List<SSTableReader> mostInteresting = getSSTablesForSTCS(getLevel(0));
             if (!mostInteresting.isEmpty())
             {
-                logger.info("Bootstrapping - doing STCS in L0");
+                logger.debug("Bootstrapping or repairing - doing STCS in L0");
                 return new CompactionCandidate(mostInteresting, 0, Long.MAX_VALUE);
             }
             return null;
@@ -363,12 +362,35 @@ public class LeveledManifest
                     candidates = getOverlappingStarvedSSTables(nextLevel, candidates);
                     if (logger.isTraceEnabled())
                         logger.trace("Compaction candidates for L{} are {}", i, toString(candidates));
+
+                    //If there are no overlapping candidates, it's fine to just mutate the SSTable level
+                    //instead of re-compacting it
+                    while(!candidates.isEmpty() && candidates.size() == 1)
+                    {
+                        SSTableReader candidate = candidates.iterator().next();
+                        logger.debug("No overlap for candidate {} on L{}, mutating level.", candidate, nextLevel);
+                        try
+                        {
+                            mutateLevel(candidate, nextLevel);
+                            //refresh candidates
+                            candidates = getCandidatesFor(i);
+                            nextLevel = getNextLevel(candidates);
+                            candidates = getOverlappingStarvedSSTables(nextLevel, candidates);
+                            if (logger.isTraceEnabled())
+                                logger.trace("Compaction candidates for L{} are {}", i, toString(candidates));
+
+                        }
+                        catch (IOException e)
+                        {
+                            logger.warn("Could not mutate level of non-overlapping candidate, performing compaction anyway.", e);
+                            return new CompactionCandidate(candidates, nextLevel, cfs.getCompactionStrategyManager().getMaxSSTableBytes());
+                        }
+                    }
+
                     return new CompactionCandidate(candidates, nextLevel, cfs.getCompactionStrategyManager().getMaxSSTableBytes());
                 }
-                else
-                {
-                    logger.trace("No compaction candidates for L{}", i);
-                }
+
+                logger.trace("No compaction candidates for L{}", i);
             }
         }
 
@@ -384,6 +406,38 @@ public class LeveledManifest
             return getSTCSInL0CompactionCandidate();
         }
         return new CompactionCandidate(candidates, getNextLevel(candidates), cfs.getCompactionStrategyManager().getMaxSSTableBytes());
+    }
+
+    private void mutateLevel(SSTableReader reader, int nextLevel) throws IOException
+    {
+        try
+        {
+            remove(reader);
+            reader.descriptor.getMetadataSerializer().mutateLevel(reader.descriptor, nextLevel);
+            reader.reloadSSTableMetadata();
+        }
+        finally
+        {
+            add(reader);
+        }
+    }
+
+    private boolean isUnderRepair()
+    {
+        return !isRepaired() && cfs.hasLockedSSTablesForRepair();
+    }
+
+    /**
+     * Whether this manifest is holding repaired sstables
+     */
+    private boolean isRepaired()
+    {
+        for (int i = generations.length - 1; i >= 0; i--)
+        {
+            for (SSTableReader reader : generations[i])
+                return reader.isRepaired();
+        }
+        return false;
     }
 
     private CompactionCandidate getSTCSInL0CompactionCandidate()

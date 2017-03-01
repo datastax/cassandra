@@ -37,7 +37,8 @@ public enum OperationType
     STREAM("Stream"),
     WRITE("Write"),
     VIEW_BUILD("View build"),
-    INDEX_SUMMARY("Index summary redistribution");
+    INDEX_SUMMARY("Index summary redistribution"),
+    INCREMENTAL_REPAIR("Repair");
 
     public final String type;
     public final String fileName;

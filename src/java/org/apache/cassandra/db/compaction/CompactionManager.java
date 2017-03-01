@@ -45,7 +45,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionInfo.Holder;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewBuilder;
 import org.apache.cassandra.dht.Bounds;
@@ -157,6 +156,16 @@ public class CompactionManager implements CompactionManagerMBean
      */
     public List<Future<?>> submitBackground(final ColumnFamilyStore cfs)
     {
+        return submitBackground(cfs, CompactionBucket.ANY);
+    }
+
+    public List<Future<?>> submitBackgroundUnrepaired(final ColumnFamilyStore cfs)
+    {
+        return submitBackground(cfs, CompactionBucket.UNREPAIRED);
+    }
+
+    private List<Future<?>> submitBackground(final ColumnFamilyStore cfs, CompactionBucket bucket)
+    {
         if (cfs.isAutoCompactionDisabled())
         {
             logger.trace("Autocompaction is disabled");
@@ -177,7 +186,7 @@ public class CompactionManager implements CompactionManagerMBean
                      cfs.getCompactionStrategyManager().getName());
 
         List<Future<?>> futures = new ArrayList<>(1);
-        Future<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
+        Future<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs, bucket), "background task");
         if (!fut.isCancelled())
         {
             compactingCF.add(cfs);
@@ -234,15 +243,27 @@ public class CompactionManager implements CompactionManagerMBean
         executor.awaitTermination(timeout, unit);
     }
 
+    enum CompactionBucket
+    {
+        ANY, REPAIRED, UNREPAIRED
+    }
+
     // the actual sstables to compact are not determined until we run the BCT; that way, if new sstables
     // are created between task submission and execution, we execute against the most up-to-date information
     class BackgroundCompactionCandidate implements Runnable
     {
         private final ColumnFamilyStore cfs;
+        private final CompactionBucket compactionBucket;
+
+        BackgroundCompactionCandidate(ColumnFamilyStore cfs, CompactionBucket compactionBucket)
+        {
+            this.cfs = cfs;
+            this.compactionBucket = compactionBucket;
+        }
 
         BackgroundCompactionCandidate(ColumnFamilyStore cfs)
         {
-            this.cfs = cfs;
+            this(cfs, CompactionBucket.ANY);
         }
 
         public void run()
@@ -257,7 +278,7 @@ public class CompactionManager implements CompactionManagerMBean
                 }
 
                 CompactionStrategyManager strategy = cfs.getCompactionStrategyManager();
-                AbstractCompactionTask task = strategy.getNextBackgroundTask(getDefaultGcBefore(cfs, FBUtilities.nowInSeconds()));
+                AbstractCompactionTask task = strategy.getNextBackgroundTask(getDefaultGcBefore(cfs, FBUtilities.nowInSeconds()), compactionBucket);
                 if (task == null)
                 {
                     logger.trace("No tasks available");
@@ -496,6 +517,35 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
+    public ListenableFuture<?> submitAntiCompaction(final ColumnFamilyStore cfs,
+                                                    final Collection<Range<Token>> ranges,
+                                                    final Refs<SSTableReader> sstables,
+                                                    final long repairedAt,
+                                                    final UUID parentRepairSession,
+                                                    final LifecycleTransaction modifier)
+    {
+        Runnable runnable = new WrappedRunnable() {
+            @Override
+            @SuppressWarnings("resource")
+            public void runMayThrow() throws Exception
+            {
+                performAnticompaction(cfs, ranges, sstables, modifier, repairedAt, parentRepairSession);
+            }
+        };
+
+        ListenableFuture<?> ret = null;
+        try
+        {
+            ret = antiCompactionExecutor.submitIfRunning(runnable, "anticompaction");
+            return ret;
+        }
+        finally
+        {
+            if (ret == null || ret.isCancelled())
+                sstables.release();
+        }
+    }
+
     /**
      * Make sure the {validatedForRepair} are marked for compaction before calling this.
      *
@@ -515,7 +565,7 @@ public class CompactionManager implements CompactionManagerMBean
                                       long repairedAt,
                                       UUID parentRepairSession) throws InterruptedException, IOException
     {
-        logger.info("[repair #{}] Starting anticompaction for {}.{} on {}/{} sstables", parentRepairSession, cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables());
+        logger.info("[repair #{}] Starting anticompaction for {}.{} on {}/{} sstables", parentRepairSession, cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables().size());
         logger.trace("[repair #{}] Starting anticompaction for ranges {}", parentRepairSession, ranges);
         Set<SSTableReader> sstables = new HashSet<>(validatedForRepair);
         Set<SSTableReader> mutatedRepairStatuses = new HashSet<>();
@@ -1088,9 +1138,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
             else
             {
-                // flush first so everyone is validating data that is as similar as possible
-                StorageService.instance.forceKeyspaceFlush(cfs.keyspace.getName(), cfs.name);
-                sstables = getSSTablesToValidate(cfs, validator);
+                sstables = ActiveRepairService.instance.getSSTablesToValidate(cfs, validator.desc.parentSessionId);
                 if (sstables == null)
                     return; // this means the parent repair session was removed - the repair session failed on another node and we removed i
                 if (validator.gcBefore > 0)
@@ -1138,9 +1186,13 @@ public class CompactionManager implements CompactionManagerMBean
                              validator.desc);
             }
         }
+        catch (Throwable t)
+        {
+            logger.debug("[repair #{}] Error during validation compaction", validator.desc.sessionId, t);
+        }
         finally
         {
-            if (sstables != null)
+            if (sstables != null && !ActiveRepairService.instance.shouldReferenceSSTables(validator.desc.parentSessionId))
                 sstables.release();
         }
     }
@@ -1179,39 +1231,6 @@ public class CompactionManager implements CompactionManagerMBean
         return tree;
     }
 
-    private synchronized Refs<SSTableReader> getSSTablesToValidate(ColumnFamilyStore cfs, Validator validator)
-    {
-        Refs<SSTableReader> sstables;
-
-        ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(validator.desc.parentSessionId);
-        if (prs == null)
-            return null;
-        Set<SSTableReader> sstablesToValidate = new HashSet<>();
-        if (prs.isGlobal)
-            prs.markSSTablesRepairing(cfs.metadata.cfId, validator.desc.parentSessionId);
-        // note that we always grab all existing sstables for this - if we were to just grab the ones that
-        // were marked as repairing, we would miss any ranges that were compacted away and this would cause us to overstream
-        try (ColumnFamilyStore.RefViewFragment sstableCandidates = cfs.selectAndReference(View.select(SSTableSet.CANONICAL, (s) -> !prs.isIncremental || !s.isRepaired())))
-        {
-            for (SSTableReader sstable : sstableCandidates.sstables)
-            {
-                if (new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(validator.desc.ranges))
-                {
-                    sstablesToValidate.add(sstable);
-                }
-            }
-
-            sstables = Refs.tryRef(sstablesToValidate);
-            if (sstables == null)
-            {
-                logger.error("Could not reference sstables");
-                throw new RuntimeException("Could not reference sstables");
-            }
-        }
-
-        return sstables;
-    }
-
     /**
      * Splits up an sstable into two new sstables. The first of the new tables will store repaired ranges, the second
      * will store the non-repaired ranges. Once anticompation is completed, the original sstable is marked as compacted
@@ -1223,7 +1242,8 @@ public class CompactionManager implements CompactionManagerMBean
      */
     private void doAntiCompaction(ColumnFamilyStore cfs, Collection<Range<Token>> ranges, LifecycleTransaction repaired, long repairedAt)
     {
-        logger.info("Performing anticompaction on {} sstables", repaired.originals().size());
+        int originalSSTables = repaired.originals().size();
+        logger.info("Performing anticompaction on {} sstables", originalSSTables);
 
         //Group SSTables
         Collection<Collection<SSTableReader>> groupedSSTables = cfs.getCompactionStrategyManager().groupSSTablesForAntiCompaction(repaired.originals());
@@ -1239,7 +1259,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
 
         String format = "Anticompaction completed successfully, anticompacted from {} to {} sstable(s).";
-        logger.info(format, repaired.originals().size(), antiCompactedSSTableCount);
+        logger.info(format, originalSSTables, antiCompactedSSTableCount);
     }
 
     private int antiCompactGroup(ColumnFamilyStore cfs, Collection<Range<Token>> ranges,

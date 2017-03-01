@@ -70,6 +70,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.schema.*;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
@@ -162,6 +163,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     private static final String SAMPLING_RESULTS_NAME = "SAMPLING_RESULTS";
     private static final CompositeType SAMPLING_RESULT;
+
+    public boolean hasLockedSSTablesForRepair()
+    {
+        return ActiveRepairService.instance.hasLockedSSTablesForRepair(this.metadata.cfId);
+    }
 
     static
     {

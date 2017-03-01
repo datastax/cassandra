@@ -119,6 +119,11 @@ public interface Transactional extends AutoCloseable
             return accumulate;
         }
 
+        public boolean isFinished()
+        {
+            return state == State.COMMITTED || state == State.ABORTED;
+        }
+
         /**
          * rollback any effects of this transaction object graph; delegates first to doCleanup, then to doAbort
          */
