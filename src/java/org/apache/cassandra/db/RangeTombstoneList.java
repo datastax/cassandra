@@ -147,6 +147,8 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
      */
     public void add(Slice.Bound start, Slice.Bound end, long markedAt, int delTime)
     {
+        assert comparator.compare(start, end) < 0 : String.format("%s and %s form an empty range, this shouldn't happen", start.toString(comparator), end.toString(comparator));
+
         if (isEmpty())
         {
             addInternal(0, start, end, markedAt, delTime);
@@ -740,6 +742,8 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
 
     private void setInternal(int i, Slice.Bound start, Slice.Bound end, long markedAt, int delTime)
     {
+        assert comparator.compare(start, end) < 0 : String.format("%s and %s form an empty range, this shouldn't happen", start.toString(comparator), end.toString(comparator));
+
         if (starts[i] != null)
             boundaryHeapSize -= starts[i].unsharedHeapSize() + ends[i].unsharedHeapSize();
         starts[i] = start;
