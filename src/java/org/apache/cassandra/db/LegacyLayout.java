@@ -1080,11 +1080,14 @@ public abstract class LegacyLayout
         }
     }
 
-    public static LegacyRangeTombstone readLegacyRangeTombstoneBody(CFMetaData metadata, DataInputPlus in, ByteBuffer boundname) throws IOException
+    public static LegacyRangeTombstone readLegacyRangeTombstoneBody(CFMetaData metadata, DataInputPlus in, ByteBuffer minBoundName) throws IOException
     {
-        LegacyBound min = decodeBound(metadata, boundname, true);
-        LegacyBound max = decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), false);
+        LegacyBound min = decodeBound(metadata, minBoundName, true);
+        ByteBuffer maxBoundName = ByteBufferUtil.readWithShortLength(in);
+        LegacyBound max = decodeBound(metadata, maxBoundName, false);
         DeletionTime dt = DeletionTime.serializer.deserialize(in);
+        assert new LegacyBoundComparator(metadata.comparator).compare(min, max) < 0
+            : String.format("[%s.%s] %s >= %s, this shouldn't happen (min=%s, max=%s)", metadata.ksName, metadata.cfName, min, max, ByteBufferUtil.bytesToHex(minBoundName), ByteBufferUtil.bytesToHex(maxBoundName));
         return new LegacyRangeTombstone(min, max, dt);
     }
 
