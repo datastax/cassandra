@@ -20,6 +20,9 @@ package org.apache.cassandra.db.columniterator;
 import java.io.IOException;
 import java.util.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -35,6 +38,8 @@ import org.apache.cassandra.utils.btree.BTree;
  */
 public class SSTableReversedIterator extends AbstractSSTableIterator
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableReversedIterator.class);
+
     public SSTableReversedIterator(SSTableReader sstable, DecoratedKey key, ColumnFilter columns, boolean isForThrift)
     {
         this(sstable, null, key, sstable.getPosition(key, SSTableReader.Operator.EQ), columns, isForThrift);
@@ -180,9 +185,15 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 {
                     isFirst = false;
                     if (deserializer.nextIsRow())
+                    {
                         deserializer.skipNext();
+                    }
                     else
-                        updateOpenMarker((RangeTombstoneMarker)deserializer.readNext());
+                    {
+                        RangeTombstoneMarker marker = (RangeTombstoneMarker) deserializer.readNext();
+                        logger.info("[{}.{}] Before block start, skipping {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
+                        updateOpenMarker(marker);
+                    }
                 }
             }
 
@@ -199,7 +210,9 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 // want to "return" it just yet, we'll wait until we reach it in the previous blocks. That's why we trigger
                 // skipLast in that case.
                 RangeTombstone.Bound markerStart = start == null ? RangeTombstone.Bound.BOTTOM : RangeTombstone.Bound.fromSliceBound(start);
-                buffer.add(new RangeTombstoneBoundMarker(markerStart, openMarker));
+                RangeTombstoneBoundMarker marker = new RangeTombstoneBoundMarker(markerStart, openMarker);
+                logger.info("[{}.{}] On block start, adding {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
+                buffer.add(marker);
                 if (hasNextBlock)
                     skipLast = true;
             }
@@ -213,7 +226,11 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             {
                 Unfiltered unfiltered = deserializer.readNext();
                 if (!isFirst || includeFirst)
+                {
+                    if (unfiltered.isRangeTombstoneMarker())
+                        logger.info("[{}.{}] adding {}", metadata().ksName, metadata().cfName, unfiltered.toString(metadata()));
                     buffer.add(unfiltered);
+                }
 
                 isFirst = false;
 
@@ -232,7 +249,9 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 // not breaking ImmutableBTreePartition, we should skip it when returning from the iterator, hence the
                 // skipFirst.
                 RangeTombstone.Bound markerEnd = end == null ? RangeTombstone.Bound.TOP : RangeTombstone.Bound.fromSliceBound(end);
-                buffer.add(new RangeTombstoneBoundMarker(markerEnd, getAndClearOpenMarker()));
+                RangeTombstoneBoundMarker marker = new RangeTombstoneBoundMarker(markerEnd, getAndClearOpenMarker());
+                logger.info("[{}.{}] On block end, adding {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
+                buffer.add(marker);
                 if (hasPreviousBlock)
                     skipFirst = true;
             }
@@ -398,7 +417,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         {
             built = null;
             rowBuilder.reuse();
-            deletionBuilder = MutableDeletionInfo.builder(partitionLevelDeletion, metadata().comparator, false);
+            deletionBuilder = MutableDeletionInfo.builder(partitionLevelDeletion, metadata(), false);
         }
 
         public void build()

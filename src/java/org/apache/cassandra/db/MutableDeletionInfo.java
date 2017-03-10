@@ -22,6 +22,7 @@ import java.util.Iterator;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -257,9 +258,9 @@ public class MutableDeletionInfo implements DeletionInfo
             ranges.collectStats(collector);
     }
 
-    public static Builder builder(DeletionTime partitionLevelDeletion, ClusteringComparator comparator, boolean reversed)
+    public static Builder builder(DeletionTime partitionLevelDeletion, CFMetaData metadata, boolean reversed)
     {
-        return new Builder(partitionLevelDeletion, comparator, reversed);
+        return new Builder(partitionLevelDeletion, metadata, reversed);
     }
 
     /**
@@ -269,20 +270,39 @@ public class MutableDeletionInfo implements DeletionInfo
     {
         private final MutableDeletionInfo deletion;
         private final ClusteringComparator comparator;
+        private final CFMetaData metadata;
 
         private final boolean reversed;
 
         private RangeTombstoneMarker openMarker;
 
-        private Builder(DeletionTime partitionLevelDeletion, ClusteringComparator comparator, boolean reversed)
+        private Builder(DeletionTime partitionLevelDeletion, CFMetaData metadata, boolean reversed)
         {
             this.deletion = new MutableDeletionInfo(partitionLevelDeletion);
-            this.comparator = comparator;
+            this.comparator = metadata.comparator;
+            this.metadata = metadata;
             this.reversed = reversed;
         }
 
         public void add(RangeTombstoneMarker marker)
         {
+            assert openMarker == null || (marker.isClose(reversed) && comparator.compare(openMarker.openBound(reversed), marker.closeBound(reversed)) < 0)
+                : (marker.isClose(reversed)
+                   ? String.format("[%s.%s] cmp(%s, %s) == %d [reversed=%b, openMarker=%s, marker=%s]",
+                                   metadata.ksName,
+                                   metadata.cfName,
+                                   openMarker.openBound(reversed).toString(metadata),
+                                   marker.closeBound(reversed).toString(metadata),
+                                   comparator.compare(openMarker.openBound(reversed), marker.closeBound(reversed)),
+                                   reversed,
+                                   openMarker.toString(metadata),
+                                   marker.toString((metadata)))
+                   : String.format("[%s.%s] New marker isn't closing open one: openMarker=%s, marker=%s",
+                                   metadata.ksName,
+                                   metadata.cfName,
+                                   openMarker.toString(metadata),
+                                   marker.toString((metadata))));
+
             // We need to start by the close case in case that's a boundary
 
             if (marker.isClose(reversed))

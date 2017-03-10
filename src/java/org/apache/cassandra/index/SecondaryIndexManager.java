@@ -571,7 +571,7 @@ public class SecondaryIndexManager implements IndexRegistry
                             readStatic = true;
                         }
 
-                        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(partition.partitionLevelDeletion(), baseCfs.getComparator(), false);
+                        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(partition.partitionLevelDeletion(), baseCfs.metadata, false);
 
                         while (partition.hasNext())
                         {

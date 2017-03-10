@@ -665,7 +665,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             assert !header.isReversed;
             assert header.rowEstimate >= 0;
 
-            MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionDeletion, metadata.comparator, false);
+            MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionDeletion, metadata, false);
             BTree.Builder<Row> rows = BTree.builder(metadata.comparator, header.rowEstimate);
             rows.auto(false);
 

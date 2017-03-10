@@ -329,7 +329,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
         BTree.Builder<Row> builder = BTree.builder(metadata.comparator, initialRowCapacity);
         builder.auto(!ordered);
-        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(iterator.partitionLevelDeletion(), metadata.comparator, reversed);
+        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(iterator.partitionLevelDeletion(), metadata, reversed);
 
         while (iterator.hasNext())
         {

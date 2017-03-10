@@ -616,10 +616,16 @@ public abstract class UnfilteredDeserializer
                     // If that was the last open tombstone, we just want to close it. Otherwise, we have a boundary with the
                     // next tombstone
                     if (!iter.hasNext())
-                        return new RangeTombstoneBoundMarker(first.stop.bound, first.deletionTime);
+                    {
+                        Unfiltered marker = new RangeTombstoneBoundMarker(first.stop.bound, first.deletionTime);
+                        logger.info("[Legacy on {}.{}] Poping last tombstone: {}", metadata.ksName, metadata.cfName, marker.toString(metadata));
+                        return marker;
+                    }
 
                     LegacyLayout.LegacyRangeTombstone next = iter.next();
-                    return RangeTombstoneBoundaryMarker.makeBoundary(false, first.stop.bound, first.stop.bound.invert(), first.deletionTime, next.deletionTime);
+                    Unfiltered boundary = RangeTombstoneBoundaryMarker.makeBoundary(false, first.stop.bound, first.stop.bound.invert(), first.deletionTime, next.deletionTime);
+                    logger.info("[Legacy on {}.{}] Poping tombstone: {}", metadata.ksName, metadata.cfName, boundary.toString(metadata));
+                    return boundary;
                 }
 
                 /**
@@ -635,7 +641,9 @@ public abstract class UnfilteredDeserializer
                     if (openTombstones.isEmpty())
                     {
                         openTombstones.add(tombstone);
-                        return new RangeTombstoneBoundMarker(tombstone.start.bound, tombstone.deletionTime);
+                        Unfiltered marker = new RangeTombstoneBoundMarker(tombstone.start.bound, tombstone.deletionTime);
+                        logger.info("[Legacy on {}.{}] Adding {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, marker.toString(metadata));
+                        return marker;
                     }
 
                     // Add the new tombstone, and then check if it changes the currently open deletion or not.
@@ -648,9 +656,12 @@ public abstract class UnfilteredDeserializer
 
                     // If the newly opened tombstone superseds the currently open one, we have to produce a boundary to change
                     // the currently open deletion time, otherwise we have nothing to do.
-                    return tombstone.deletionTime.supersedes(first.deletionTime)
-                           ? RangeTombstoneBoundaryMarker.makeBoundary(false, tombstone.start.bound.invert(), tombstone.start.bound, first.deletionTime, tombstone.deletionTime)
-                           : null;
+                    Unfiltered toReturn = tombstone.deletionTime.supersedes(first.deletionTime)
+                                          ? RangeTombstoneBoundaryMarker.makeBoundary(false, tombstone.start.bound.invert(), tombstone.start.bound, first.deletionTime, tombstone.deletionTime)
+                                          : null;
+
+                    logger.info("[Legacy on {}.{}] Added {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, toReturn == null ? "null" : toReturn.toString(metadata));
+                    return toReturn;
                 }
 
                 /**
