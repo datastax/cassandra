@@ -171,6 +171,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         {
             // start != null means it's the block covering the beginning of the slice, so it has to be the last block for this slice.
             assert start == null || !hasNextBlock;
+            logger.info("[{}.{}] Loading new block: hasPrevious: %b, hadNext: %b", metadata().ksName, metadata().cfName, hasPreviousBlock, hasNextBlock);
 
             buffer.reset();
             skipFirst = false;

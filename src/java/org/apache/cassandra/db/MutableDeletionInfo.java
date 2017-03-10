@@ -315,6 +315,8 @@ public class MutableDeletionInfo implements DeletionInfo
 
                 Slice slice = reversed ? Slice.make(close, open) : Slice.make(open, close);
                 deletion.add(new RangeTombstone(slice, openDeletion), comparator);
+                
+                openMarker = null;
             }
 
             if (marker.isOpen(reversed))
