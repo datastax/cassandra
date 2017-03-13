@@ -284,9 +284,14 @@ public class MutableDeletionInfo implements DeletionInfo
             this.reversed = reversed;
         }
 
+        private static boolean isNotEmpty(int cmp, boolean reversed)
+        {
+            return reversed ? cmp > 0 : cmp < 0;
+        }
+
         public void add(RangeTombstoneMarker marker)
         {
-            assert openMarker == null || (marker.isClose(reversed) && comparator.compare(openMarker.openBound(reversed), marker.closeBound(reversed)) < 0)
+            assert openMarker == null || (marker.isClose(reversed) && isNotEmpty(comparator.compare(openMarker.openBound(reversed), marker.closeBound(reversed)), reversed))
                 : (marker.isClose(reversed)
                    ? String.format("[%s.%s] cmp(%s, %s) == %d [reversed=%b, openMarker=%s, marker=%s]",
                                    metadata.ksName,

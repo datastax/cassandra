@@ -618,13 +618,15 @@ public abstract class UnfilteredDeserializer
                     if (!iter.hasNext())
                     {
                         Unfiltered marker = new RangeTombstoneBoundMarker(first.stop.bound, first.deletionTime);
-                        logger.info("[Legacy on {}.{}] Poping last tombstone: {}", metadata.ksName, metadata.cfName, marker.toString(metadata));
+                        if (!Thread.currentThread().getName().contains("CompactionExecutor"))
+                            logger.info("[Legacy on {}.{}] Poping last tombstone: {}", metadata.ksName, metadata.cfName, marker.toString(metadata));
                         return marker;
                     }
 
                     LegacyLayout.LegacyRangeTombstone next = iter.next();
                     Unfiltered boundary = RangeTombstoneBoundaryMarker.makeBoundary(false, first.stop.bound, first.stop.bound.invert(), first.deletionTime, next.deletionTime);
-                    logger.info("[Legacy on {}.{}] Poping tombstone: {}", metadata.ksName, metadata.cfName, boundary.toString(metadata));
+                    if (!Thread.currentThread().getName().contains("CompactionExecutor"))
+                        logger.info("[Legacy on {}.{}] Poping tombstone: {}", metadata.ksName, metadata.cfName, boundary.toString(metadata));
                     return boundary;
                 }
 
@@ -642,7 +644,8 @@ public abstract class UnfilteredDeserializer
                     {
                         openTombstones.add(tombstone);
                         Unfiltered marker = new RangeTombstoneBoundMarker(tombstone.start.bound, tombstone.deletionTime);
-                        logger.info("[Legacy on {}.{}] Adding {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, marker.toString(metadata));
+                        if (!Thread.currentThread().getName().contains("CompactionExecutor"))
+                            logger.info("[Legacy on {}.{}] Adding {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, marker.toString(metadata));
                         return marker;
                     }
 
@@ -660,7 +663,8 @@ public abstract class UnfilteredDeserializer
                                           ? RangeTombstoneBoundaryMarker.makeBoundary(false, tombstone.start.bound.invert(), tombstone.start.bound, first.deletionTime, tombstone.deletionTime)
                                           : null;
 
-                    logger.info("[Legacy on {}.{}] Added {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, toReturn == null ? "null" : toReturn.toString(metadata));
+                    if (!Thread.currentThread().getName().contains("CompactionExecutor"))
+                        logger.info("[Legacy on {}.{}] Added {} to openTombstones; returning {}", metadata.ksName, metadata.cfName, tombstone, toReturn == null ? "null" : toReturn.toString(metadata));
                     return toReturn;
                 }
 
