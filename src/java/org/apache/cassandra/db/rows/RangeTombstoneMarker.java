@@ -49,6 +49,8 @@ public interface RangeTombstoneMarker extends Unfiltered
 
     public RangeTombstoneMarker copy(AbstractAllocator allocator);
 
+    public RangeTombstoneMarker withNewOpeningDeletionTime(boolean reversed, DeletionTime newDeletionTime);
+
     /**
      * Utility class to help merging range tombstone markers coming from multiple inputs (UnfilteredRowIterators).
      * <p>
