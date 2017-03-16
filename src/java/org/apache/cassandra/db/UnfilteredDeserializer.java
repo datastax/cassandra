@@ -636,8 +636,6 @@ public abstract class UnfilteredDeserializer
                 {
                     assert openMarkerToReturn != null;
                     Unfiltered toReturn = openMarkerToReturn;
-                    if (!Thread.currentThread().getName().contains("CompactionExecutor"))
-                        logger.info("[Legacy on {}.{}] Poping open tombstone: {}", metadata.ksName, metadata.cfName, toReturn.toString(metadata));
                     openMarkerToReturn = null;
                     return toReturn;
                 }
@@ -665,18 +663,10 @@ public abstract class UnfilteredDeserializer
                     // If that was the last open tombstone, we just want to close it. Otherwise, we have a boundary with the
                     // next tombstone
                     if (!iter.hasNext())
-                    {
-                        Unfiltered marker = new RangeTombstoneBoundMarker(first.stop.bound, first.deletionTime);
-                        if (!Thread.currentThread().getName().contains("CompactionExecutor"))
-                            logger.info("[Legacy on {}.{}] Poping last closing tombstone: {}", metadata.ksName, metadata.cfName, marker.toString(metadata));
-                        return marker;
-                    }
+                        return new RangeTombstoneBoundMarker(first.stop.bound, first.deletionTime);
 
                     LegacyLayout.LegacyRangeTombstone next = iter.next();
-                    Unfiltered boundary = RangeTombstoneBoundaryMarker.makeBoundary(false, first.stop.bound, first.stop.bound.invert(), first.deletionTime, next.deletionTime);
-                    if (!Thread.currentThread().getName().contains("CompactionExecutor"))
-                        logger.info("[Legacy on {}.{}] Poping closing tombstone: {}", metadata.ksName, metadata.cfName, boundary.toString(metadata));
-                    return boundary;
+                    return RangeTombstoneBoundaryMarker.makeBoundary(false, first.stop.bound, first.stop.bound.invert(), first.deletionTime, next.deletionTime);
                 }
 
                 /**
@@ -712,8 +702,6 @@ public abstract class UnfilteredDeserializer
                         assert openMarkerToReturn == null;
                         openTombstones.add(tombstone);
                         openMarkerToReturn = new RangeTombstoneBoundMarker(tombstone.start.bound, tombstone.deletionTime);
-                        if (!Thread.currentThread().getName().contains("CompactionExecutor"))
-                            logger.info("[Legacy on {}.{}] Adding {} to openTombstones; to open set to {}", metadata.ksName, metadata.cfName, tombstone, openMarkerToReturn.toString(metadata));
                         return;
                     }
 
@@ -742,9 +730,6 @@ public abstract class UnfilteredDeserializer
                     // In all cases, we know !isShadowed(tombstone) so we need to add the tombstone (note however that we may not have set openMarkerToReturn if the
                     // new tombstone doesn't supersedes the current deletion _but_ extend past the marker currently open)
                     add(tombstone);
-
-                    if (!Thread.currentThread().getName().contains("CompactionExecutor"))
-                        logger.info("[Legacy on {}.{}] Added {} to openTombstones; to open set to {}", metadata.ksName, metadata.cfName, tombstone, openMarkerToReturn == null ? "null" : openMarkerToReturn.toString(metadata));
                 }
 
                 /**

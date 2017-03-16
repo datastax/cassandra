@@ -171,7 +171,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         {
             // start != null means it's the block covering the beginning of the slice, so it has to be the last block for this slice.
             assert start == null || !hasNextBlock;
-            logger.info("[{}.{}] Loading new block: hasPrevious: {}, hadNext: {}", metadata().ksName, metadata().cfName, hasPreviousBlock, hasNextBlock);
 
             buffer.reset();
             skipFirst = false;
@@ -186,15 +185,9 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 {
                     isFirst = false;
                     if (deserializer.nextIsRow())
-                    {
                         deserializer.skipNext();
-                    }
                     else
-                    {
-                        RangeTombstoneMarker marker = (RangeTombstoneMarker) deserializer.readNext();
-                        logger.info("[{}.{}] Before block start, skipping {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
-                        updateOpenMarker(marker);
-                    }
+                        updateOpenMarker((RangeTombstoneMarker) deserializer.readNext());
                 }
             }
 
@@ -212,7 +205,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 // skipLast in that case.
                 RangeTombstone.Bound markerStart = start == null ? RangeTombstone.Bound.BOTTOM : RangeTombstone.Bound.fromSliceBound(start);
                 RangeTombstoneBoundMarker marker = new RangeTombstoneBoundMarker(markerStart, openMarker);
-                logger.info("[{}.{}] On block start, adding {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
                 buffer.add(marker);
                 if (hasNextBlock)
                     skipLast = true;
@@ -228,8 +220,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 Unfiltered unfiltered = deserializer.readNext();
                 if (!isFirst || includeFirst)
                 {
-                    if (unfiltered.isRangeTombstoneMarker())
-                        logger.info("[{}.{}] adding {}", metadata().ksName, metadata().cfName, unfiltered.toString(metadata()));
                     buffer.add(unfiltered);
                 }
 
@@ -251,7 +241,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                 // skipFirst.
                 RangeTombstone.Bound markerEnd = end == null ? RangeTombstone.Bound.TOP : RangeTombstone.Bound.fromSliceBound(end);
                 RangeTombstoneBoundMarker marker = new RangeTombstoneBoundMarker(markerEnd, getAndClearOpenMarker());
-                logger.info("[{}.{}] On block end, adding {}", metadata().ksName, metadata().cfName, marker.toString(metadata()));
                 buffer.add(marker);
                 if (hasPreviousBlock)
                     skipFirst = true;
