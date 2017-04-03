@@ -1,3 +1,30 @@
+3.0.13
+ * Fix view builder bug that can filter out data on restart (CASSANDRA-13405)
+ * Fix 2i page size calculation when there are no regular columns (CASSANDRA-13400)
+ * Fix the conversion of 2.X expired rows without regular column data (CASSANDRA-13395)
+ * Fix hint delivery when using ext+internal IPs with prefer_local enabled (CASSANDRA-13020)
+ * Fix possible NPE on upgrade to 3.0/3.X in case of IO errors (CASSANDRA-13389)
+ * Legacy deserializer can create empty range tombstones (CASSANDRA-13341)
+ * Use the Kernel32 library to retrieve the PID on Windows and fix startup checks (CASSANDRA-13333)
+ * Fix code to not exchange schema across major versions (CASSANDRA-13274)
+ * Dropping column results in "corrupt" SSTable (CASSANDRA-13337)
+ * Bugs handling range tombstones in the sstable iterators (CASSANDRA-13340)
+ * Fix CONTAINS filtering for null collections (CASSANDRA-13246)
+ * Applying: Use a unique metric reservoir per test run when using Cassandra-wide metrics residing in MBeans (CASSANDRA-13216)
+ * Propagate row deletions in 2i tables on upgrade (CASSANDRA-13320)
+ * Slice.isEmpty() returns false for some empty slices (CASSANDRA-13305)
+ * Add formatted row output to assertEmpty in CQL Tester (CASSANDRA-13238)
+ * Legacy caching options can prevent 3.0 upgrade (CASSANDRA-13384)
+Merged from 2.2:
+ * Honor truststore-password parameter in cassandra-stress (CASSANDRA-12773)
+ * Discard in-flight shadow round responses (CASSANDRA-12653)
+ * Don't anti-compact repaired data to avoid inconsistencies (CASSANDRA-13153)
+ * Wrong logger name in AnticompactionTask (CASSANDRA-13343)
+ * Commitlog replay may fail if last mutation is within 4 bytes of end of segment (CASSANDRA-13282)
+ * Fix queries updating multiple time the same list (CASSANDRA-13130)
+ * Fix GRANT/REVOKE when keyspace isn't specified (CASSANDRA-13053)
+
+
 3.0.12
  * Legacy deserializer can create unexpected boundary range tombstones (CASSANDRA-13237)
  * Remove unnecessary assertion from AntiCompactionTest (CASSANDRA-13070)
