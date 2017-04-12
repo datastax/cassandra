@@ -283,10 +283,14 @@ public abstract class AbstractReadExecutor
             {
                 // Could be waiting on the data, or on enough digests.
                 ReadCommand retryCommand = command;
-                if (handler.resolver.isDataPresent())
+                logger.trace("TESTING AND DEBUGGING: COULD NOT WAIT ANY LONGER FOR COMMAND: `{}`", retryCommand);
+                if (handler.resolver.isDataPresent()) {
                     retryCommand = command.copy().setIsDigestQuery(true);
+                    logger.trace("TESTING AND DEBUGGING: DATA IS ALREADY PRESENT FOR THE CURRENT HANDLER, CHANGING RETRY COMMAND TO: `{}`", retryCommand);
+                }
 
                 InetAddress extraReplica = Iterables.getLast(targetReplicas);
+                logger.trace("TESTING AND DEBUGGING: ALL THE REPLICAS: `{}`, THE NEW REPLICA WE'RE ABOUT TO HIT: `{}`", targetReplicas, extraReplica);
                 if (traceState != null)
                     traceState.trace("speculating read retry on {}", extraReplica);
                 logger.trace("speculating read retry on {}", extraReplica);
@@ -295,6 +299,7 @@ public abstract class AbstractReadExecutor
                 speculated = true;
 
                 cfs.metric.speculativeRetries.inc();
+                logger.trace("TESTING AND DEBUGGING: NUMBER OF SPEC RETRIES: `{}`", cfs.metric.speculativeRetries);
             }
         }
 
