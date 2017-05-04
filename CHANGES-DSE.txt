@@ -1,3 +1,7 @@
+DSE 5.0.12
+ * Add metrics on coordination of read commands (APOLLO-637)
+
+
 DSE 5.0.10
  * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
  * Add nodetool mark_unrepaired command (APOLLO-692)
