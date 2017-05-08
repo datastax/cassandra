@@ -65,7 +65,7 @@ public class QueryProcessor implements QueryHandler
     public static final QueryProcessor instance = new QueryProcessor();
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
-    private static final MemoryMeter meter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_BEST).ignoreKnownSingletons();
+    private static final MemoryMeter meter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_BEST).omitSharedBufferOverhead().ignoreKnownSingletons();
     private static final String PREPARED_STATEMENTS_CACHE_SIZE_IN_BYTES_PROPERTY = "cassandra.prepared_statements_cache_size_in_bytes";
     private static final long MAX_CACHE_PREPARED_MEMORY = Long.getLong(PREPARED_STATEMENTS_CACHE_SIZE_IN_BYTES_PROPERTY, Runtime.getRuntime().maxMemory() / 256);
 
