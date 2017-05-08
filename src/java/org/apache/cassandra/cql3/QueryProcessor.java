@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
+import com.google.common.base.Stopwatch;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
@@ -64,7 +65,7 @@ public class QueryProcessor implements QueryHandler
     public static final QueryProcessor instance = new QueryProcessor();
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
-    private static final MemoryMeter meter = new MemoryMeter().omitSharedBufferOverhead().withGuessing(MemoryMeter.Guess.FALLBACK_BEST).ignoreKnownSingletons();
+    private static final MemoryMeter meter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_BEST).ignoreKnownSingletons();
     private static final String PREPARED_STATEMENTS_CACHE_SIZE_IN_BYTES_PROPERTY = "cassandra.prepared_statements_cache_size_in_bytes";
     private static final long MAX_CACHE_PREPARED_MEMORY = Long.getLong(PREPARED_STATEMENTS_CACHE_SIZE_IN_BYTES_PROPERTY, Runtime.getRuntime().maxMemory() / 256);
 
@@ -73,7 +74,12 @@ public class QueryProcessor implements QueryHandler
         @Override
         public int weightOf(MD5Digest key, ParsedStatement.Prepared value)
         {
-            return Ints.checkedCast(measure(key) + measure(value.statement) + measure(value.boundNames));
+            long keyWeight = measure(key);
+            long stmtWeight = measure(value.statement);
+            long boundNamesWeight = measure(value.boundNames);
+            int weight = Ints.checkedCast(keyWeight + stmtWeight + boundNamesWeight);
+            logger.info(String.format("CAPACITY: %s / CQL WEIGHT: %s / key: %s / stmt: %s / boundNames: %s", MAX_CACHE_PREPARED_MEMORY, weight, keyWeight, stmtWeight, boundNamesWeight));
+            return weight;
         }
     };
 
@@ -82,7 +88,12 @@ public class QueryProcessor implements QueryHandler
         @Override
         public int weightOf(Integer key, ParsedStatement.Prepared value)
         {
-            return Ints.checkedCast(measure(key) + measure(value.statement) + measure(value.boundNames));
+            long keyWeight = measure(key);
+            long stmtWeight = measure(value.statement);
+            long boundNamesWeight = measure(value.boundNames);
+            int weight = Ints.checkedCast(keyWeight + stmtWeight + boundNamesWeight);
+            logger.info(String.format("CAPACITY: %s / THRIFT WEIGHT: %s / key: %s / stmt: %s / boundNames: %s", MAX_CACHE_PREPARED_MEMORY, weight, keyWeight, stmtWeight, boundNamesWeight));
+            return weight;
         }
     };
 
@@ -116,6 +127,7 @@ public class QueryProcessor implements QueryHandler
                                  {
                                      metrics.preparedStatementsEvicted.inc();
                                      lastMinuteEvictionsCount.incrementAndGet();
+                                     logger.info(String.format("CQL - MAX CAPACITY IS %s - EVICTED %s PREP STATEMENT - LAST MINUTE EVICT COUNT IS %s", MAX_CACHE_PREPARED_MEMORY, metrics.preparedStatementsEvicted.getCount(), lastMinuteEvictionsCount.get()));
                                  }
                              }).build();
 
@@ -128,6 +140,7 @@ public class QueryProcessor implements QueryHandler
                                        {
                                            metrics.preparedStatementsEvicted.inc();
                                            lastMinuteEvictionsCount.incrementAndGet();
+                                           logger.info(String.format("THRIFT - MAX CAPACITY IS %s - EVICTED %s PREP STATEMENT - LAST MINUTE EVICT COUNT IS %s", MAX_CACHE_PREPARED_MEMORY, metrics.preparedStatementsEvicted.getCount(), lastMinuteEvictionsCount.get()));
                                        }
                                    })
                                    .build();
@@ -457,7 +470,10 @@ public class QueryProcessor implements QueryHandler
         else
         {
             MD5Digest statementId = computeId(queryString, keyspace);
+            Stopwatch start = Stopwatch.createStarted();
             preparedStatements.put(statementId, prepared);
+            Stopwatch stop = start.stop();
+            logger.debug(String.format("DURATION: %s ms -> preparedStatements.put(%s, %s)", stop.elapsed(TimeUnit.MILLISECONDS), statementId.toString(), prepared.toString()));
             return new ResultMessage.Prepared(statementId, prepared);
         }
     }
@@ -578,8 +594,12 @@ public class QueryProcessor implements QueryHandler
         {
             while (iterator.hasNext())
             {
-                if (shouldInvalidate(ksName, cfName, iterator.next().statement))
+                CQLStatement stmt = iterator.next().statement;
+                if (shouldInvalidate(ksName, cfName, stmt))
+                {
+                    logger.info(String.format("INVALIDATING STMT for %s.%s: %s", ksName, cfName, stmt));
                     iterator.remove();
+                }
             }
         }
 
