@@ -42,6 +42,8 @@ public class RoleOptions
         if (options.containsKey(option))
             throw new SyntaxException(String.format("Multiple definition for property '%s'", option.name()));
         options.put(option, value);
+
+        validate();
     }
 
     /**
@@ -59,6 +61,8 @@ public class RoleOptions
      */
     public Map<IRoleManager.Option, Object> getOptions()
     {
+        validate();
+
         return options;
     }
 
@@ -68,7 +72,7 @@ public class RoleOptions
      */
     public Optional<Boolean> getSuperuser()
     {
-        return Optional.fromNullable((Boolean)options.get(IRoleManager.Option.SUPERUSER));
+        return Optional.fromNullable((Boolean)getOptions().get(IRoleManager.Option.SUPERUSER));
     }
 
     /**
@@ -77,7 +81,7 @@ public class RoleOptions
      */
     public Optional<Boolean> getLogin()
     {
-        return Optional.fromNullable((Boolean)options.get(IRoleManager.Option.LOGIN));
+        return Optional.fromNullable((Boolean)getOptions().get(IRoleManager.Option.LOGIN));
     }
 
     /**
@@ -86,7 +90,7 @@ public class RoleOptions
      */
     public Optional<String> getPassword()
     {
-        return Optional.fromNullable((String)options.get(IRoleManager.Option.PASSWORD));
+        return Optional.fromNullable((String)getOptions().get(IRoleManager.Option.PASSWORD));
     }
 
     /**
@@ -99,7 +103,7 @@ public class RoleOptions
     @SuppressWarnings("unchecked")
     public Optional<Map<String, String>> getCustomOptions()
     {
-        return Optional.fromNullable((Map<String, String>)options.get(IRoleManager.Option.OPTIONS));
+        return Optional.fromNullable((Map<String, String>)getOptions().get(IRoleManager.Option.OPTIONS));
     }
 
     /**
@@ -148,6 +152,6 @@ public class RoleOptions
 
     public String toString()
     {
-        return FBUtilities.toString(options);
+        return FBUtilities.toString(getOptions());
     }
 }
