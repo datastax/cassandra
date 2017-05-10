@@ -373,7 +373,7 @@ public class CassandraDaemon
             }
         }
 
-        Gossiper.waitToSettle("accepting client requests");
+        Gossiper.waitToSettle("accepting client requests", true);
 
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
         // due to scheduling errors or race conditions

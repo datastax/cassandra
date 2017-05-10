@@ -31,6 +31,7 @@ import javax.management.ObjectName;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.utils.Pair;
@@ -1625,7 +1626,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     }
 
 
-    public static void waitToSettle(String waitingFor)
+    public static void waitToSettle(String waitingFor, boolean includeStatus)
     {
         if (FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
             return;
@@ -1637,26 +1638,50 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
         final int GOSSIP_SETTLE_MIN_WAIT_MS = 5000;
         final int GOSSIP_SETTLE_POLL_INTERVAL_MS = 1000;
-        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = 3;
+        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 10);
+        final Set<InetAddress> unstableEndpoints = new HashSet<>();
+        final Set<InetAddress> stableEndpoints = new HashSet<>();
 
         logger.info("Waiting for gossip to settle before {}...", waitingFor);
         Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_MIN_WAIT_MS, TimeUnit.MILLISECONDS);
         int totalPolls = 0;
         int numOkay = 0;
-        int epSize = Gossiper.instance.getEndpointStates().size();
+
+        //Only include endpoints that have recieved a heartbeat
+        //Otherwise we would just be looking at data from peers table
+        long epSize = Gossiper.instance.getLiveMembers().size();
+
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-            int currentSize = Gossiper.instance.getEndpointStates().size();
+
+            int currentSize = 0;
+            if (includeStatus)
+            {
+                // We need to avoid counting any nodes that go from UP to DOWN status
+                // Since they could stop this check from ever finishing.
+                // So once a node goes from UP to DOWN we remove it from our check.
+                Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+                unstableEndpoints.addAll(noLongerStable);
+
+                stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+                stableEndpoints.removeAll(unstableEndpoints);
+                currentSize = stableEndpoints.size();
+            }
+            else
+            {
+                currentSize = Gossiper.instance.getEndpointStates().size();
+            }
+
             totalPolls++;
             if (currentSize == epSize)
             {
-                logger.debug("Gossip looks settled.");
+                logger.debug("Gossip looks settled. {}", currentSize);
                 numOkay++;
             }
             else
             {
-                logger.info("Gossip not settled after {} polls.", totalPolls);
+                logger.info("Gossip not settled after {} polls. previously {}, now {}", totalPolls, epSize, currentSize);
                 numOkay = 0;
             }
             epSize = currentSize;
