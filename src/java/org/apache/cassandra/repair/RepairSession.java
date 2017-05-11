@@ -284,7 +284,14 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public void terminate()
     {
         terminated = true;
+
+        //Unblock RepairJob
+        for (ValidationTask v : validating.values())
+            v.treesReceived(null);
         validating.clear();
+
+        for (RemoteSyncTask s : syncingTasks.values())
+            s.syncComplete(false);
         syncingTasks.clear();
     }
 
