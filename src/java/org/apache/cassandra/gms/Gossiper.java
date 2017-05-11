@@ -1637,8 +1637,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             return;
         }
         final int GOSSIP_SETTLE_MIN_WAIT_MS = 5000;
-        final int GOSSIP_SETTLE_POLL_INTERVAL_MS = 1000;
-        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 10);
+        final int GOSSIP_SETTLE_POLL_INTERVAL_MS = 800;
+        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 5);
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
 
@@ -1647,48 +1647,46 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         int totalPolls = 0;
         int numOkay = 0;
 
-        //Only include endpoints that have recieved a heartbeat
-        //Otherwise we would just be looking at data from peers table
+        JMXEnabledThreadPoolExecutor gossipStage = (JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP);
         long epSize = Gossiper.instance.getLiveMembers().size();
+
+        Random random = new Random();
+
+        logger.debug("Starting endpoint size in gossip polls is {}", epSize);
 
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
-            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-
-            int currentSize = 0;
-            if (includeStatus)
-            {
-                // We need to avoid counting any nodes that go from UP to DOWN status
-                // Since they could stop this check from ever finishing.
-                // So once a node goes from UP to DOWN we remove it from our check.
-                Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
-                unstableEndpoints.addAll(noLongerStable);
-
-                stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
-                stableEndpoints.removeAll(unstableEndpoints);
-                currentSize = stableEndpoints.size();
-            }
-            else
-            {
-                currentSize = Gossiper.instance.getEndpointStates().size();
-            }
-
+            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS + random.nextInt(401), TimeUnit.MILLISECONDS);
+            long completed = gossipStage.metrics.completedTasks.getValue();
+            long active = gossipStage.metrics.activeTasks.getValue();
+            long pending = gossipStage.metrics.pendingTasks.getValue();
             totalPolls++;
-            if (currentSize == epSize)
+
+
+            Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+            unstableEndpoints.addAll(noLongerStable);
+
+            stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+            stableEndpoints.removeAll(unstableEndpoints);
+
+            logger.debug("Current unstable endpoint size in gossip is {}", unstableEndpoints.size());
+            logger.debug("Current stable endpoint size in gossip is {}", stableEndpoints.size());
+
+            if (active == 0 && pending == 0)
             {
-                logger.debug("Gossip looks settled. {}", currentSize);
+                logger.info("Gossip looks settled. CompletedTasks: {}", completed);
                 numOkay++;
             }
             else
             {
-                logger.info("Gossip not settled after {} polls. previously {}, now {}", totalPolls, epSize, currentSize);
+                logger.info("Gossip not settled after {} polls. Gossip Stage active/pending/completed: {}/{}/{}", totalPolls, active, pending, completed);
                 numOkay = 0;
             }
-            epSize = currentSize;
+
             if (forceAfter > 0 && totalPolls > forceAfter)
             {
-                logger.warn("Gossip not settled but startup forced by cassandra.skip_wait_for_gossip_to_settle. Gossip total polls: {}",
-                            totalPolls);
+                logger.warn("Gossip not settled but startup forced by cassandra.skip_wait_for_gossip_to_settle. Gossip total polls: {}. Gossip Stage active/pending/completed: {}/{}/{}.",
+                            totalPolls, active, pending, completed);
                 break;
             }
         }
@@ -1696,6 +1694,20 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.info("Gossip settled after {} extra polls; proceeding", totalPolls - GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED);
         else
             logger.info("No gossip backlog; proceeding");
+
+        // Verify above theory that stage monitoring is sufficient
+
+        for (int polls = 0; polls < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED; polls++)
+        {
+            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS + 200, TimeUnit.MILLISECONDS);
+            Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+            unstableEndpoints.addAll(noLongerStable);
+
+            stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+            stableEndpoints.removeAll(unstableEndpoints);
+            logger.debug("Unstable endpoint size after exiting stage polls is {}", unstableEndpoints.size());
+            logger.debug("Stable endpoint size after exiting stage polls is {}", stableEndpoints.size());
+        }
     }
 
 }
