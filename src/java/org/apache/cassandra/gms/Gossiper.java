@@ -44,6 +44,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.metrics.GossipMetrics;
 import org.apache.cassandra.net.IAsyncCallback;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
@@ -136,6 +137,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private volatile long lastProcessedMessageAt = System.currentTimeMillis();
 
+    public final GossipMetrics metrics;
+
     private class GossipTask implements Runnable
     {
         public void run()
@@ -208,6 +211,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         fatClientTimeout = (QUARANTINE_DELAY / 2);
         /* register with the Failure Detector for receiving Failure detector events */
         FailureDetector.instance.registerFailureDetectionEventListener(this);
+
+        metrics = new GossipMetrics();
 
         // Register this instance with JMX
         try
@@ -1637,8 +1642,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             return;
         }
         final int GOSSIP_SETTLE_MIN_WAIT_MS = 5000;
-        final int GOSSIP_SETTLE_POLL_INTERVAL_MS = 1000;
-        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 10);
+        final long GOSSIP_SETTLE_POLL_INTERVAL_MS = FailureDetector.getMaxLocalPause();
+        final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 3);
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
 
@@ -1690,6 +1695,44 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 logger.warn("Gossip not settled but startup forced by cassandra.skip_wait_for_gossip_to_settle. Gossip total polls: {}",
                             totalPolls);
                 break;
+            }
+
+            if (numOkay == GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED && Gossiper.instance.getLiveMembers().size() > 1)
+            {
+                // By setting the minimums to proceed at 2 higher than the current ack/ack2 count,
+                // we guarantee at least one ack/ack2 has been processed (since we could check this
+                // at any point in processing).
+                long currentAcksReceived = Gossiper.instance.metrics.gossipAcksReceived.getCount();
+                long currentAck2sReceived = Gossiper.instance.metrics.gossipAck2sReceived.getCount();
+
+                // We can only sensibly do this check if we're receiving acks/ack2s.
+                if (currentAcksReceived != 0 || currentAck2sReceived != 0)
+                {
+                    while (Gossiper.instance.metrics.gossipAcksReceived.getCount() < currentAcksReceived + 2
+                           || Gossiper.instance.metrics.gossipAck2sReceived.getCount() < currentAck2sReceived + 2)
+                    {
+                        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+                    }
+
+                    // We need to avoid counting any nodes that go from UP to DOWN status
+                    // Since they could stop this check from ever finishing.
+                    // So once a node goes from UP to DOWN we remove it from our check.
+                    Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+                    unstableEndpoints.addAll(noLongerStable);
+
+                    stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+                    stableEndpoints.removeAll(unstableEndpoints);
+                    currentSize = stableEndpoints.size();
+
+                    if (currentSize != epSize)
+                    {
+                        // We saw a change after waiting for ack/ack2 processing, reset loop since
+                        // endpoint states are still changing.
+                        logger.info("Gossip not settled after ensuring ack/ack2 processing. previously {}, now {}", epSize, currentSize);
+                        numOkay = 0;
+                        epSize = currentSize;
+                    }
+                }
             }
         }
         if (totalPolls > GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)

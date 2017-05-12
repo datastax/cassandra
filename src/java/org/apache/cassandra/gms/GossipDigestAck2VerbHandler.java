@@ -43,6 +43,9 @@ public class GossipDigestAck2VerbHandler implements IVerbHandler<GossipDigestAck
                 logger.trace("Ignoring GossipDigestAck2Message because gossip is disabled");
             return;
         }
+
+        Gossiper.instance.metrics.gossipAck2sReceived.inc();
+
         Map<InetAddress, EndpointState> remoteEpStateMap = message.payload.getEndpointStateMap();
         /* Notify the Failure Detector */
         Gossiper.instance.notifyFailureDetector(remoteEpStateMap);
