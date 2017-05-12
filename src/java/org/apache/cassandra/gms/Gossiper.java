@@ -1642,7 +1642,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             return;
         }
         final int GOSSIP_SETTLE_MIN_WAIT_MS = 5000;
-        final long GOSSIP_SETTLE_POLL_INTERVAL_MS = FailureDetector.getMaxLocalPause();
+        final long GOSSIP_SETTLE_POLL_INTERVAL_NS = FailureDetector.getMaxLocalPause();
         final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 3);
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
@@ -1658,7 +1658,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
-            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
 
             int currentSize = 0;
             if (includeStatus)
