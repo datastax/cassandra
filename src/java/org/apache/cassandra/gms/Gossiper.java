@@ -1697,41 +1697,38 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 break;
             }
 
-            if (numOkay == GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED && Gossiper.instance.getLiveMembers().size() > 1)
+            long currentAcksReceived = Gossiper.instance.metrics.gossipAcksReceived.getCount();
+            long currentAck2sReceived = Gossiper.instance.metrics.gossipAck2sReceived.getCount();
+
+            if (numOkay == GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED && (currentAcksReceived != 0 || currentAck2sReceived != 0))
             {
                 // By setting the minimums to proceed at 2 higher than the current ack/ack2 count,
                 // we guarantee at least one ack/ack2 has been processed (since we could check this
                 // at any point in processing).
-                long currentAcksReceived = Gossiper.instance.metrics.gossipAcksReceived.getCount();
-                long currentAck2sReceived = Gossiper.instance.metrics.gossipAck2sReceived.getCount();
 
-                // We can only sensibly do this check if we're receiving acks/ack2s.
-                if (currentAcksReceived != 0 || currentAck2sReceived != 0)
+                while (Gossiper.instance.metrics.gossipAcksReceived.getCount() < currentAcksReceived + 2
+                       || Gossiper.instance.metrics.gossipAck2sReceived.getCount() < currentAck2sReceived + 2)
                 {
-                    while (Gossiper.instance.metrics.gossipAcksReceived.getCount() < currentAcksReceived + 2
-                           || Gossiper.instance.metrics.gossipAck2sReceived.getCount() < currentAck2sReceived + 2)
-                    {
-                        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-                    }
+                    Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+                }
 
-                    // We need to avoid counting any nodes that go from UP to DOWN status
-                    // Since they could stop this check from ever finishing.
-                    // So once a node goes from UP to DOWN we remove it from our check.
-                    Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
-                    unstableEndpoints.addAll(noLongerStable);
+                // We need to avoid counting any nodes that go from UP to DOWN status
+                // Since they could stop this check from ever finishing.
+                // So once a node goes from UP to DOWN we remove it from our check.
+                Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+                unstableEndpoints.addAll(noLongerStable);
 
-                    stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
-                    stableEndpoints.removeAll(unstableEndpoints);
-                    currentSize = stableEndpoints.size();
+                stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+                stableEndpoints.removeAll(unstableEndpoints);
+                currentSize = stableEndpoints.size();
 
-                    if (currentSize != epSize)
-                    {
-                        // We saw a change after waiting for ack/ack2 processing, reset loop since
-                        // endpoint states are still changing.
-                        logger.info("Gossip not settled after ensuring ack/ack2 processing. previously {}, now {}", epSize, currentSize);
-                        numOkay = 0;
-                        epSize = currentSize;
-                    }
+                if (currentSize != epSize)
+                {
+                    // We saw a change after waiting for ack/ack2 processing, reset loop since
+                    // endpoint states are still changing.
+                    logger.info("Gossip not settled after ensuring ack/ack2 processing. previously {}, now {}", epSize, currentSize);
+                    numOkay = 0;
+                    epSize = currentSize;
                 }
             }
         }
