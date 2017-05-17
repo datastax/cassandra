@@ -1103,7 +1103,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         String status = getGossipStatus(epState);
         if (status.isEmpty())
-            return false;
+            return true;
 
         return DEAD_STATES.contains(status);
     }
