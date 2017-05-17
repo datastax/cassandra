@@ -44,7 +44,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.metrics.GossipMetrics;
 import org.apache.cassandra.net.IAsyncCallback;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
@@ -137,8 +136,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private volatile long lastProcessedMessageAt = System.currentTimeMillis();
 
-    public final GossipMetrics metrics;
-
     private class GossipTask implements Runnable
     {
         public void run()
@@ -211,8 +208,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         fatClientTimeout = (QUARANTINE_DELAY / 2);
         /* register with the Failure Detector for receiving Failure detector events */
         FailureDetector.instance.registerFailureDetectionEventListener(this);
-
-        metrics = new GossipMetrics();
 
         // Register this instance with JMX
         try
@@ -1696,6 +1691,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                             totalPolls);
                 break;
             }
+<<<<<<< HEAD
 
             long currentAcksReceived = Gossiper.instance.metrics.gossipAcksReceived.getCount();
             long currentAck2sReceived = Gossiper.instance.metrics.gossipAck2sReceived.getCount();
@@ -1731,6 +1727,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     epSize = currentSize;
                 }
             }
+=======
+>>>>>>> parent of 938591a... When waiting for gossip to settle, ensure we process at least one ack/ack2 before final stability checking, allowing us to detect a slow gossip stage.
         }
         if (totalPolls > GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
             logger.info("Gossip settled after {} extra polls; proceeding", totalPolls - GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED);

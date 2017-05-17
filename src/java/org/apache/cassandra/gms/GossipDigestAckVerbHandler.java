@@ -60,8 +60,6 @@ public class GossipDigestAckVerbHandler implements IVerbHandler<GossipDigestAck>
             return; // don't bother doing anything else, we have what we came for
         }
 
-        Gossiper.instance.metrics.gossipAcksReceived.inc();
-
         if (epStateMap.size() > 0)
         {
             // Ignore any GossipDigestAck messages that we handle before a regular GossipDigestSyn has been send.

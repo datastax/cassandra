@@ -45,8 +45,6 @@ public class GossipDigestSynVerbHandler implements IVerbHandler<GossipDigestSyn>
             return;
         }
 
-        Gossiper.instance.metrics.gossipSynsReceived.inc();
-
         GossipDigestSyn gDigestMessage = message.payload;
         /* If the message is from a different cluster throw it away. */
         if (!gDigestMessage.clusterId.equals(DatabaseDescriptor.getClusterName()))
