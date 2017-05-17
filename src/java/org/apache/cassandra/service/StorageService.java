@@ -792,6 +792,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getBroadcastRpcAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
+            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
 
             // load the persisted ring state. This used to be done earlier in the init process,
             // but now we always perform a shadow round when preparing to join and we have to
