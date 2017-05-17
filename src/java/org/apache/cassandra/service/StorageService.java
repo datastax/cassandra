@@ -808,6 +808,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
+            Gossiper.waitToSettle("accepting client requests", true);
             BatchlogManager.instance.start();
         }
     }
