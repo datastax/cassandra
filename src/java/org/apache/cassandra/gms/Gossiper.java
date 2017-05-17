@@ -1639,6 +1639,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         final int GOSSIP_SETTLE_MIN_WAIT_MS = 5000;
         final long GOSSIP_SETTLE_POLL_INTERVAL_NS = FailureDetector.getMaxLocalPause();
         final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 3);
+        final int MAX_BACKLOG_CHECKS = 10;
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
 
@@ -1646,13 +1647,21 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_MIN_WAIT_MS, TimeUnit.MILLISECONDS);
         int totalPolls = 0;
         int numOkay = 0;
+        int backlogChecks = 0;
 
         //Only include endpoints that have recieved a heartbeat
         //Otherwise we would just be looking at data from peers table
         long epSize = Gossiper.instance.getLiveMembers().size();
 
+        JMXEnabledThreadPoolExecutor gossipStage = (JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP);
+        long startingCompletedTasks = 0;
+
+
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
+            if (numOkay == 0)
+                startingCompletedTasks = ((JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP)).metrics.completedTasks.getValue();
+
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
 
             int currentSize = 0;
@@ -1676,7 +1685,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             totalPolls++;
             if (currentSize == epSize)
             {
-                logger.debug("Gossip looks settled. {}", currentSize);
+                logger.debug("Gossip looks settled. Live endpoints: {}", currentSize);
                 numOkay++;
             }
             else
@@ -1691,49 +1700,65 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                             totalPolls);
                 break;
             }
-<<<<<<< HEAD
 
-            long currentAcksReceived = Gossiper.instance.metrics.gossipAcksReceived.getCount();
-            long currentAck2sReceived = Gossiper.instance.metrics.gossipAck2sReceived.getCount();
-
-            if (numOkay == GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED && (currentAcksReceived != 0 || currentAck2sReceived != 0))
+            if (numOkay == GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
             {
-                // By setting the minimums to proceed at 2 higher than the current ack/ack2 count,
-                // we guarantee at least one ack/ack2 has been processed (since we could check this
-                // at any point in processing).
+                long pendingTasks = 0;
+                long activeTasks = 0;
 
-                while (Gossiper.instance.metrics.gossipAcksReceived.getCount() < currentAcksReceived + 2
-                       || Gossiper.instance.metrics.gossipAck2sReceived.getCount() < currentAck2sReceived + 2)
+                boolean backlogClear = false;
+
+                for (int i = 0; i < 50; i++)
                 {
                     Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+                    pendingTasks = gossipStage.metrics.pendingTasks.getValue();
+                    activeTasks = gossipStage.metrics.activeTasks.getValue();
+
+                    if (pendingTasks == 0 && activeTasks == 0)
+                    {
+                        logger.info("No gossip backlog");
+                        backlogClear = true;
+                        break;
+                    }
+                    else
+                        logger.debug("Gossip backlog not clear. Pending {}, active {}", pendingTasks, activeTasks);
                 }
 
-                // We need to avoid counting any nodes that go from UP to DOWN status
-                // Since they could stop this check from ever finishing.
-                // So once a node goes from UP to DOWN we remove it from our check.
-                Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
-                unstableEndpoints.addAll(noLongerStable);
+                long completedTasks = gossipStage.metrics.completedTasks.getValue();
 
-                stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
-                stableEndpoints.removeAll(unstableEndpoints);
-                currentSize = stableEndpoints.size();
-
-                if (currentSize != epSize)
+                if (backlogClear || (backlogChecks == MAX_BACKLOG_CHECKS && completedTasks > startingCompletedTasks + 2))
                 {
-                    // We saw a change after waiting for ack/ack2 processing, reset loop since
-                    // endpoint states are still changing.
-                    logger.info("Gossip not settled after ensuring ack/ack2 processing. previously {}, now {}", epSize, currentSize);
-                    numOkay = 0;
-                    epSize = currentSize;
+                    Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+                    unstableEndpoints.addAll(noLongerStable);
+
+                    stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+                    stableEndpoints.removeAll(unstableEndpoints);
+                    currentSize = stableEndpoints.size();
+
+                    if (backlogChecks == MAX_BACKLOG_CHECKS)
+                        logger.warn("Skipping backlog check after {} checks, completed tasks {}", MAX_BACKLOG_CHECKS, completedTasks);
+
+                    if (currentSize != epSize)
+                    {
+                        logger.info("After waiting for gossip backlog to clear, endpoint size no longer stable. Previously {}, now {}",
+                                    epSize, currentSize);
+                        epSize = currentSize;
+                        numOkay = 0;
+                    }
                 }
+                else
+                {
+                    logger.info("Gossip backlog did not stabilize. Pending {}, active {}, completed {}",
+                                pendingTasks, activeTasks, completedTasks);
+                }
+
+                backlogChecks++;
             }
-=======
->>>>>>> parent of 938591a... When waiting for gossip to settle, ensure we process at least one ack/ack2 before final stability checking, allowing us to detect a slow gossip stage.
         }
         if (totalPolls > GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
             logger.info("Gossip settled after {} extra polls; proceeding", totalPolls - GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED);
         else
-            logger.info("No gossip backlog; proceeding");
+            logger.info("Gossip settled; proceeding");
     }
 
 }
