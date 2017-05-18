@@ -1016,7 +1016,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
         };
 
-        MessagingService.instance().sendRR(echoMessage, addr, echoHandler);
+        MessagingService.instance().sendRRWithFailure(echoMessage, addr, echoHandler);
     }
 
     @VisibleForTesting
