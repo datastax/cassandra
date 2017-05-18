@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.gms;
 
+import java.lang.Boolean;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.management.MBeanServer;
@@ -79,7 +79,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         SILENT_SHUTDOWN_STATES.add(VersionedValue.STATUS_BOOTSTRAPPING_REPLACE);
     }
 
-    protected AtomicInteger pendingEcho = new AtomicInteger();
+    protected Map<InetAddress,Boolean> pendingEcho = new ConcurrentHashMap<InetAddress, Boolean>();
     private volatile ScheduledFuture<?> scheduledGossipTask;
     private static final ReentrantLock taskLock = new ReentrantLock();
     public final static int intervalInMillis = 1000;
@@ -993,10 +993,15 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
 
         localState.markDead();
+        if (pendingEcho.containsKey(addr))
+        {
+            logger.debug("Already waiting on echo reply from {}, skipping", addr);
+            return;
+        }
 
         logger.debug("Sending an EchoMessage to {}", addr);
         MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
-        pendingEcho.incrementAndGet();
+        pendingEcho.put(addr, true);
         IAsyncCallbackWithFailure echoHandler = new IAsyncCallbackWithFailure()
         {
             public boolean isLatencyForSnitch()
@@ -1007,11 +1012,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             public void response(MessageIn msg)
             {
                 realMarkAlive(addr, localState);
-                pendingEcho.decrementAndGet();
+                pendingEcho.remove(addr);
             }
             public void onFailure(InetAddress from)
             {
-                pendingEcho.decrementAndGet();
+                pendingEcho.remove(addr);
                 logger.debug("Failed to receive echo reply from {}", from);
             }
         };
@@ -1761,9 +1766,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 backlogChecks++;
             }
         }
-        while (Gossiper.instance.pendingEcho.get() > 0)
+        while (Gossiper.instance.pendingEcho.size() > 0)
         {
-            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho.get());
+            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho.size());
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
         }
 
