@@ -998,7 +998,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.debug("Already waiting on echo reply from {}, skipping", addr);
             return;
         }
+        else
+        {
+            sendEcho(addr, localState);
+        }
+    }
 
+    private void sendEcho(final InetAddress addr, final EndpointState localState)
+    {
         logger.debug("Sending an EchoMessage to {}", addr);
         MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
         pendingEcho.put(addr, true);
@@ -1018,8 +1025,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             {
                 pendingEcho.remove(from);
                 logger.debug("Failed to receive echo reply from {}", from);
-                logger.debug("Sending an EchoMessage to {}", addr);
-                MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
+                sendEcho(addr, localState);
             }
         };
 
