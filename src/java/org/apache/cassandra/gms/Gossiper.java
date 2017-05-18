@@ -1016,7 +1016,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
             public void onFailure(InetAddress from)
             {
-                pendingEcho.remove(addr);
+                pendingEcho.remove(from);
                 logger.debug("Failed to receive echo reply from {}", from);
             }
         };
