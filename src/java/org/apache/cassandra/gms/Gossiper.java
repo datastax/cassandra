@@ -44,13 +44,10 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.net.*;
 
 /**
  * This module is responsible for Gossiping information for the local endpoint. This abstraction
@@ -81,6 +78,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         SILENT_SHUTDOWN_STATES.add(VersionedValue.STATUS_BOOTSTRAPPING_REPLACE);
     }
 
+    protected volatile int pendingEcho;
     private volatile ScheduledFuture<?> scheduledGossipTask;
     private static final ReentrantLock taskLock = new ReentrantLock();
     public final static int intervalInMillis = 1000;
@@ -997,7 +995,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
         logger.trace("Sending a EchoMessage to {}", addr);
-        IAsyncCallback echoHandler = new IAsyncCallback()
+        pendingEcho++;
+        IAsyncCallbackWithFailure echoHandler = new IAsyncCallbackWithFailure()
         {
             public boolean isLatencyForSnitch()
             {
@@ -1007,6 +1006,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             public void response(MessageIn msg)
             {
                 realMarkAlive(addr, localState);
+                pendingEcho--;
+            }
+            public void onFailure(InetAddress from)
+            {
+                pendingEcho--;
+                logger.debug("Failed to receive echo reply from {}", from);
             }
         };
 
@@ -1755,6 +1760,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 backlogChecks++;
             }
         }
+        while (Gossiper.instance.pendingEcho > 0)
+        {
+            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho);
+            Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
+        }
+
         if (totalPolls > GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
             logger.info("Gossip settled after {} extra polls; proceeding", totalPolls - GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED);
         else
