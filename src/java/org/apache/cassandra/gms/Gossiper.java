@@ -1653,14 +1653,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         //Otherwise we would just be looking at data from peers table
         long epSize = Gossiper.instance.getLiveMembers().size();
 
-        JMXEnabledThreadPoolExecutor requestResponseStage = (JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.REQUEST_RESPONSE);
+        JMXEnabledThreadPoolExecutor gossipStage = (JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP);
         long startingCompletedTasks = 0;
 
 
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
             if (numOkay == 0)
-                startingCompletedTasks = requestResponseStage.metrics.completedTasks.getValue();
+                startingCompletedTasks = ((JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP)).metrics.completedTasks.getValue();
 
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
 
@@ -1711,20 +1711,20 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 for (int i = 0; i < 50; i++)
                 {
                     Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-                    pendingTasks = requestResponseStage.metrics.pendingTasks.getValue();
-                    activeTasks = requestResponseStage.metrics.activeTasks.getValue();
+                    pendingTasks = gossipStage.metrics.pendingTasks.getValue();
+                    activeTasks = gossipStage.metrics.activeTasks.getValue();
 
                     if (pendingTasks == 0 && activeTasks == 0)
                     {
-                        logger.info("No request response backlog");
+                        logger.info("No gossip backlog");
                         backlogClear = true;
                         break;
                     }
                     else
-                        logger.debug("Request response backlog not clear. Pending {}, active {}", pendingTasks, activeTasks);
+                        logger.debug("Gossip backlog not clear. Pending {}, active {}", pendingTasks, activeTasks);
                 }
 
-                long completedTasks = requestResponseStage.metrics.completedTasks.getValue();
+                long completedTasks = gossipStage.metrics.completedTasks.getValue();
 
                 if (backlogClear || (backlogChecks == MAX_BACKLOG_CHECKS && completedTasks > startingCompletedTasks + 2))
                 {
@@ -1740,7 +1740,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                     if (currentSize != epSize)
                     {
-                        logger.info("After waiting for request response backlog to clear, endpoint size no longer stable. Previously {}, now {}",
+                        logger.info("After waiting for gossip backlog to clear, endpoint size no longer stable. Previously {}, now {}",
                                     epSize, currentSize);
                         epSize = currentSize;
                         numOkay = 0;
@@ -1748,7 +1748,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 }
                 else
                 {
-                    logger.info("Request response backlog did not stabilize. Pending {}, active {}, completed {}",
+                    logger.info("Gossip backlog did not stabilize. Pending {}, active {}, completed {}",
                                 pendingTasks, activeTasks, completedTasks);
                 }
 
