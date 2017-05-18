@@ -23,6 +23,7 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.management.MBeanServer;
@@ -78,7 +79,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         SILENT_SHUTDOWN_STATES.add(VersionedValue.STATUS_BOOTSTRAPPING_REPLACE);
     }
 
-    protected volatile int pendingEcho;
+    protected AtomicInteger pendingEcho = new AtomicInteger();
     private volatile ScheduledFuture<?> scheduledGossipTask;
     private static final ReentrantLock taskLock = new ReentrantLock();
     public final static int intervalInMillis = 1000;
@@ -995,7 +996,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
         logger.debug("Sending a EchoMessage to {}", addr);
-        pendingEcho++;
+        pendingEcho.incrementAndGet();
         IAsyncCallbackWithFailure echoHandler = new IAsyncCallbackWithFailure()
         {
             public boolean isLatencyForSnitch()
@@ -1006,11 +1007,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             public void response(MessageIn msg)
             {
                 realMarkAlive(addr, localState);
-                pendingEcho--;
+                pendingEcho.decrementAndGet();
             }
             public void onFailure(InetAddress from)
             {
-                pendingEcho--;
+                pendingEcho.decrementAndGet();
                 logger.debug("Failed to receive echo reply from {}", from);
             }
         };
@@ -1760,9 +1761,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 backlogChecks++;
             }
         }
-        while (Gossiper.instance.pendingEcho > 0)
+        while (Gossiper.instance.pendingEcho.get() > 0)
         {
-            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho);
+            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho.get());
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
         }
 
