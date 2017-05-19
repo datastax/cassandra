@@ -1770,6 +1770,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             if (Gossiper.instance.pendingEcho.get() <= 0)
             {
                 logger.info("No pending echos; proceeding");
+                break;
             }
             else if (i == forceAfter)
             {
