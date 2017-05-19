@@ -1732,7 +1732,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                 long completedTasks = gossipStage.metrics.completedTasks.getValue();
 
-                if (backlogClear || (backlogChecks == MAX_BACKLOG_CHECKS && completedTasks > startingCompletedTasks + 2))
+                if (backlogClear || (backlogChecks >= MAX_BACKLOG_CHECKS && completedTasks > startingCompletedTasks + 2))
                 {
                     Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
                     unstableEndpoints.addAll(noLongerStable);
@@ -1761,10 +1761,20 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 backlogChecks++;
             }
         }
-        while (Gossiper.instance.pendingEcho.get() > 0)
+
+        for (int i = 0; i <= forceAfter; i++)
         {
-            logger.debug("Waiting for echo replies from {} nodes", Gossiper.instance.pendingEcho.get());
+            logger.debug("Waiting for echo replies");
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
+
+            if (Gossiper.instance.pendingEcho.get() <= 0)
+            {
+                logger.info("No pending echos; proceeding");
+            }
+            else if (i == forceAfter)
+            {
+                logger.warn("Pending echos did not reach 0 after {} tries, forcing. {} outstanding echos", forceAfter, Gossiper.instance.pendingEcho.get());
+            }
         }
 
         if (totalPolls > GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
