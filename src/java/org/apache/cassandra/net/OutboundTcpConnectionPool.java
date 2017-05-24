@@ -76,12 +76,14 @@ public class OutboundTcpConnectionPool
 
     void reset()
     {
+        logger.trace("Reset called for {}", id);
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
             conn.closeSocket(false);
     }
 
     public void resetToNewerVersion(int version)
     {
+        logger.trace("Reset called for newer version on {}", id);
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
         {
             if (version > conn.getTargetVersion())
@@ -96,6 +98,7 @@ public class OutboundTcpConnectionPool
      */
     public void reset(InetAddress remoteEP)
     {
+        logger.trace("Reset called for {} remoteEP {}", id, remoteEP);
         SystemKeyspace.updatePreferredIP(id, remoteEP);
         resetEndpoint = remoteEP;
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
@@ -207,6 +210,7 @@ public class OutboundTcpConnectionPool
 
     public void close()
     {
+        logger.trace("close called for {}", id);
         // these null guards are simply for tests
         if (largeMessages != null)
             largeMessages.closeSocket(true);
