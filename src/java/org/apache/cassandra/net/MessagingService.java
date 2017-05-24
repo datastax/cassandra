@@ -605,6 +605,7 @@ public final class MessagingService implements MessagingServiceMBean
 
     public void destroyConnectionPool(InetAddress to)
     {
+        logger.trace("Destroy pool {}", to);
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
         if (cp == null)
             return;
