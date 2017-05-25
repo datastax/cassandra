@@ -29,6 +29,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import java.lang.StackTraceElement;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.net.ssl.SSLHandshakeException;
@@ -488,6 +490,9 @@ public final class MessagingService implements MessagingServiceMBean
     public void convict(InetAddress ep)
     {
         logger.trace("Resetting pool for {}", ep);
+        for (StackTraceElement ste : Thread.currentThread().getStackTrace()) {
+            logger.trace(ste.toString());
+        }
         getConnectionPool(ep).reset();
     }
 
