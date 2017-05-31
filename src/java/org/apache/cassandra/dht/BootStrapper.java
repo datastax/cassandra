@@ -204,7 +204,6 @@ public class BootStrapper extends ProgressEventNotifierSupport
                                             int schemaWaitDelay)
     {
         StorageService.instance.waitForSchema(schemaWaitDelay);
-        Gossiper.waitToSettle("allocating tokens", false);
 
         if (allocationKeyspace != null)
         {
