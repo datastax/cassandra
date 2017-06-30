@@ -484,7 +484,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         cfs.truncateBlocking();
 
         ByteBuffer rowKey = ByteBufferUtil.bytes("k1");
-        CellName colName = cellname("birthdate"); 
+        CellName colName = cellname("birthdate");
         ByteBuffer val1 = ByteBufferUtil.bytes(1L);
         ByteBuffer val2 = ByteBufferUtil.bytes(2L);
 
@@ -548,7 +548,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
 
         ByteBuffer rowKey = ByteBufferUtil.bytes("k1");
         ByteBuffer clusterKey = ByteBufferUtil.bytes("ck1");
-        ByteBuffer colName = ByteBufferUtil.bytes("col1"); 
+        ByteBuffer colName = ByteBufferUtil.bytes("col1");
 
         CellNameType baseComparator = cfs.getComparator();
         CellName compositeName = baseComparator.makeCellName(clusterKey, colName);
@@ -855,6 +855,97 @@ public class ColumnFamilyStoreTest extends SchemaLoader
                 new BufferCell(cellname(8L), ByteBufferUtil.bytes("val8"), 3),
                 new BufferCell(cellname(9L), ByteBufferUtil.bytes("val9"), 3));
         assertRowAndColCount(1, 3, false, cfs.getRangeSlice(Util.range("f", "g"), null, ThriftValidation.asIFilter(sp, cfs.metadata, scfName), 100));
+    }
+
+    @Test
+    public void testMultiRangeDelete() throws Throwable
+    {
+        String keyspaceName = "Keyspace1";
+        String cfName= "Standard1";
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfName);
+        DecoratedKey key = Util.dk("mykey");
+
+        cfs.disableAutoCompaction();
+
+        Cell[] cells = new Cell[100];
+        for (int i=0; i < 100; i++)
+        {
+            cells[i] = new BufferCell(cellname(i), ByteBufferUtil.bytes("val" + i), 1);
+        }
+
+        // create an SSTable with 100 columns
+        putColsStandard(cfs, key, cells);
+        cfs.forceBlockingFlush();
+
+        // verify insert.
+        final SlicePredicate sp = new SlicePredicate();
+        sp.setSlice_range(new SliceRange());
+        sp.getSlice_range().setCount(100);
+        sp.getSlice_range().setStart(ArrayUtils.EMPTY_BYTE_ARRAY);
+        sp.getSlice_range().setFinish(ArrayUtils.EMPTY_BYTE_ARRAY);
+
+        assertRowAndColCount(1, 100, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+
+        // Make 10 interleaved range deletions
+        for (int i = 0; i < 9; i++)
+        {
+            Mutation rm = new Mutation(keyspace.getName(), key.getKey());
+            rm.deleteRange(cfName, cellname(i).start(), cellname(i+1).end(), 2);
+            rm.apply();
+        }
+
+        //check before flush
+        assertRowAndColCount(1, 90, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+        cfs.forceBlockingFlush();
+        //check after flush
+        assertRowAndColCount(1, 90, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+
+        // Make 9 interleaved range deletions
+        for (int i = 10; i < 18; i++)
+        {
+            Mutation rm = new Mutation(keyspace.getName(), key.getKey());
+            rm.deleteRange(cfName, cellname(i).start(), cellname(i+1).end(), 2);
+            rm.apply();
+        }
+        // Make 1 non-interleaved range deletion
+        Mutation rm = new Mutation(keyspace.getName(), key.getKey());
+        rm.deleteRange(cfName, cellname(19).start(), cellname(19).end(), 2);
+        rm.apply();
+
+        //check before flush
+        assertRowAndColCount(1, 80, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+        cfs.forceBlockingFlush();
+        //check after flush
+        assertRowAndColCount(1, 80, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+
+        // Make 10 interleaved range deletions
+        for (int i = 20; i < 29; i++)
+        {
+            rm = new Mutation(keyspace.getName(), key.getKey());
+            rm.deleteRange(cfName, cellname(i).start(), cellname(i+1).end(), 2);
+            rm.apply();
+        }
+        // Add new row
+        putColsStandard(cfs, key, new BufferCell(cellname(101), ByteBufferUtil.bytes("val101"), 1));
+
+        //check before flush
+        assertRowAndColCount(1, 71, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+        cfs.forceBlockingFlush();
+        //check after flush
+        assertRowAndColCount(1, 71, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
+
+        //check after major compaction
+        cfs.forceMajorCompaction();
+        assertRowAndColCount(1, 71, false, cfs.getRangeSlice(Util.range("m", "n"), null,
+                                                             ThriftValidation.asIFilter(sp, cfs.metadata, null), 100));
     }
 
     private static void assertRowAndColCount(int rowCount, int colCount, boolean isDeleted, Collection<Row> rows) throws CharacterCodingException
@@ -2206,7 +2297,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         });
         System.err.println("Row key: " + rowKey + " Cols: " + transformed);
     }
-    
+
     @Test
     public void testRebuildSecondaryIndex() throws IOException
     {
@@ -2218,19 +2309,19 @@ public class ColumnFamilyStoreTest extends SchemaLoader
 
         rm.apply();
         assertTrue(Arrays.equals("k1".getBytes(), PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY.array()));
-        
+
         Keyspace.open("PerRowSecondaryIndex").getColumnFamilyStore("Indexed1").forceBlockingFlush();
-        
+
         PerRowSecondaryIndexTest.TestIndex.reset();
-        
+
         ColumnFamilyStore.rebuildSecondaryIndex("PerRowSecondaryIndex", "Indexed1", PerRowSecondaryIndexTest.TestIndex.class.getSimpleName());
         assertTrue(Arrays.equals("k1".getBytes(), PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY.array()));
-        
+
         PerRowSecondaryIndexTest.TestIndex.reset();
         PerRowSecondaryIndexTest.TestIndex.ACTIVE = false;
         ColumnFamilyStore.rebuildSecondaryIndex("PerRowSecondaryIndex", "Indexed1", PerRowSecondaryIndexTest.TestIndex.class.getSimpleName());
         assertNull(PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY);
-        
+
         PerRowSecondaryIndexTest.TestIndex.reset();
     }
 }

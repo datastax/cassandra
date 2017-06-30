@@ -18,22 +18,41 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicLong;
 
-import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNames;
 import org.apache.cassandra.db.composites.SimpleDenseCellNameType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.io.sstable.IndexHelper;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+
+import org.junit.Assert;
 import org.junit.Test;
 
 public class RowIndexEntryTest extends SchemaLoader
 {
     @Test
     public void testSerializedSize() throws IOException
+    {
+        testSerializedSize(false);
+    }
+
+    /**
+     * Check that column index is properly generated when there are
+     * multiple range tombstones
+     */
+    @Test
+    public void testSerializedSizeWithRangeTombstones() throws IOException
+    {
+        testSerializedSize(true);
+    }
+
+    public void testSerializedSize(final boolean rangeTombstones) throws IOException
     {
         final RowIndexEntry simple = new RowIndexEntry(123);
 
@@ -44,27 +63,55 @@ public class RowIndexEntryTest extends SchemaLoader
 
         Assert.assertEquals(buffer.getLength(), serializer.serializedSize(simple));
 
+        final int INDEX_ENTRIES = 3;
+
         buffer = new DataOutputBuffer();
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        final ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        final AtomicLong totalWrittenBytes = new AtomicLong();
         ColumnIndex columnIndex = new ColumnIndex.Builder(cf, ByteBufferUtil.bytes("a"), new DataOutputBuffer())
         {{
-            int idx = 0, size = 0;
-            Cell column;
+            int col = 0;
+            long size = 0;
             do
             {
-                column = new BufferCell(CellNames.simpleDense(ByteBufferUtil.bytes("c" + idx++)), ByteBufferUtil.bytes("v"), FBUtilities.timestampMicros());
-                size += column.serializedSize(new SimpleDenseCellNameType(UTF8Type.instance), TypeSizes.NATIVE);
-
-                add(column);
+                CellName cellName = CellNames.simpleDense(ByteBufferUtil.bytes(String.format("%05d", col++)));
+                OnDiskAtom atom = new BufferCell(cellName, ByteBufferUtil.bytes("v"), FBUtilities.timestampMicros());
+                size += addAtom(atom);
+                if (rangeTombstones)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        cellName = CellNames.simpleDense(ByteBufferUtil.bytes(String.format("%05d", col++)));
+                        atom = new RangeTombstone(cellName.start(), cellName.end(), new DeletionTime(System.currentTimeMillis(), col));
+                        size += addAtom(atom);
+                    }
+                }
             }
-            while (size < DatabaseDescriptor.getColumnIndexSize() * 3);
+            while (size < DatabaseDescriptor.getColumnIndexSize() * INDEX_ENTRIES);
             finishAddingAtoms();
+            totalWrittenBytes.set(size);
+        }
 
-        }}.build();
+            private long addAtom(OnDiskAtom atom) throws IOException
+            {
+                add(atom);
+                return cf.getComparator().onDiskAtomSerializer().serializedSizeForSSTable(atom);
+            }
+        }.build();
 
         RowIndexEntry withIndex = RowIndexEntry.create(0xdeadbeef, DeletionTime.LIVE, columnIndex);
 
         serializer.serialize(withIndex, buffer);
         Assert.assertEquals(buffer.getLength(), serializer.serializedSize(withIndex));
+
+        Assert.assertEquals(INDEX_ENTRIES, columnIndex.columnsIndex.size());
+        long totalWidth = 0;
+        for (int i = 0; i < INDEX_ENTRIES; i++)
+        {
+            IndexHelper.IndexInfo info = columnIndex.columnsIndex.get(i);
+            Assert.assertTrue((info.offset >= DatabaseDescriptor.getColumnIndexSize() * i) && (info.offset <= DatabaseDescriptor.getColumnIndexSize() * (i+1)));
+            totalWidth += info.width;
+        }
+        Assert.assertEquals(totalWrittenBytes.get(), totalWidth);
     }
 }

@@ -1,4 +1,5 @@
 DSE backports
+ * Avoid holding unnecessary range tombstones in memory during SSTable writing (APOLLO-824)
  * Close window between create table keyspace validation and read of serialized keyspace (APOLLO-273)
  * Fix DynamicEndpointSnitch noop in multi-datacenter situations (CASSANDRA-13074)
  * Backport TimeWindowCompactionStrategy (APOLLO-15)

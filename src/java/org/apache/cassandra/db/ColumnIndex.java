@@ -78,9 +78,9 @@ public class ColumnIndex
         }
 
         public Builder(ColumnFamily cf,
-                ByteBuffer key,
-                DataOutputPlus output,
-                OnDiskAtom.SerializerForWriting serializer)
+                       ByteBuffer key,
+                       DataOutputPlus output,
+                       OnDiskAtom.SerializerForWriting serializer)
         {
             assert cf != null;
             assert key != null;
@@ -105,7 +105,7 @@ public class ColumnIndex
             // TODO fix constantSize when changing the nativeconststs.
             int keysize = key.remaining();
             return typeSizes.sizeof((short) keysize) + keysize          // Row key
-                 + DeletionTime.serializer.serializedSize(delInfo.getTopLevelDeletion(), typeSizes);
+                   + DeletionTime.serializer.serializedSize(delInfo.getTopLevelDeletion(), typeSizes);
         }
 
         public RangeTombstone.Tracker tombstoneTracker()
@@ -115,7 +115,7 @@ public class ColumnIndex
 
         public int writtenAtomCount()
         {
-            return atomCount + tombstoneTracker.writtenAtom();
+            return atomCount;
         }
 
         /**
@@ -123,7 +123,6 @@ public class ColumnIndex
          * such as Bloom Filter, index block size, IndexInfo list
          *
          * @param cf Column family to create index for
-         *
          * @return information about index - it's Bloom Filter, block size and IndexInfo list
          */
         public ColumnIndex build(ColumnFamily cf) throws IOException
@@ -173,7 +172,7 @@ public class ColumnIndex
         {
             while (columns.hasNext())
             {
-                OnDiskAtom c =  columns.next();
+                OnDiskAtom c = columns.next();
                 add(c);
             }
             finishAddingAtoms();
@@ -190,33 +189,57 @@ public class ColumnIndex
                 firstColumn = column;
                 startPosition = endPosition;
                 // TODO: have that use the firstColumn as min + make sure we optimize that on read
-                endPosition += tombstoneTracker.writeOpenedMarkers(firstColumn.name(), output, atomSerializer);
+                for (RangeTombstone rt : tombstoneTracker.getOpenedMarkers(firstColumn.name()))
+                {
+                    endPosition += writeRangeTombstone(rt);
+                }
                 blockSize = 0; // We don't count repeated tombstone marker in the block size, to avoid a situation
                                // where we wouldn't make any progress because a block is filled by said marker
 
                 maybeWriteRowHeader();
             }
 
-            if (tombstoneTracker.update(column, false))
+            long size = 0;
+            for (RangeTombstone tombstoneToWrite : tombstoneTracker.update(column, false))
             {
-                long size = tombstoneTracker.writeUnwrittenTombstones(output, atomSerializer);
-                size += atomSerializer.serializedSizeForSSTable(column);
-                endPosition += size;
-                blockSize += size;
+                size += writeRangeTombstone(tombstoneToWrite);
+            }
 
+            // Range tombstones to write are handled by the tombstone tracker above
+            if (isNotRangeTombstone(column))
+            {
                 atomSerializer.serializeForSSTable(column, output);
+                size += atomSerializer.serializedSizeForSSTable(column);
             }
 
             lastColumn = column;
+            blockSize += size;
+            endPosition += size;
 
             // if we hit the column index size that we have to index after, go ahead and index it.
             if (blockSize >= DatabaseDescriptor.getColumnIndexSize())
             {
+                finishAddingAtoms(); //write any unwritten range tombstone so they don't slip to next index section
                 IndexHelper.IndexInfo cIndexInfo = new IndexHelper.IndexInfo(firstColumn.name(), column.name(), indexOffset + startPosition, endPosition - startPosition);
                 result.columnsIndex.add(cIndexInfo);
                 firstColumn = null;
                 lastBlockClosing = column;
             }
+        }
+
+        private boolean isNotRangeTombstone(OnDiskAtom column)
+        {
+            return !(column instanceof RangeTombstone);
+        }
+
+        public long writeRangeTombstone(RangeTombstone rt) throws IOException
+        {
+            long size = atomSerializer.serializedSizeForSSTable(rt);
+            atomCount++;
+            if (output != null)
+                atomSerializer.serializeForSSTable(rt, output);
+            tombstoneTracker.clearRangeTombstone(rt);
+            return size;
         }
 
         private void maybeWriteRowHeader() throws IOException
@@ -230,7 +253,11 @@ public class ColumnIndex
 
         public void finishAddingAtoms() throws IOException
         {
-            long size = tombstoneTracker.writeUnwrittenTombstones(output, atomSerializer);
+            long size = 0;
+            for (RangeTombstone rt : tombstoneTracker.getUnwrittenTombstones())
+            {
+                size += writeRangeTombstone(rt);
+            }
             endPosition += size;
             blockSize += size;
         }

@@ -83,6 +83,42 @@ public class RangeTombstoneMergeTest extends CQLTester
         assertOneTombstone();
     }
 
+    @Test
+    public void testMultiRowDelete() throws Throwable
+    {
+        execute("DELETE FROM %s WHERE key=? AND column=?", "1", "2");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "1", "3");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "3", "4");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "3", "5");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "5", "6");
+
+        flush();
+
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        assertEquals(1, Iterables.size(cfs.getSSTables()));
+        SSTableReader reader = Iterables.get(cfs.getSSTables(), 0);
+        assertEquals(5, countRangeTombstones(reader));
+
+        execute("INSERT INTO %s (key, column, data, extra) VALUES (?, ?, ?, ?)", "1", "2", "2", "2");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "1", "2");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "1", "3");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "3", "4");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "3", "5");
+        execute("DELETE FROM %s WHERE key=? AND column=?", "5", "6");
+
+        flush();
+
+        assertEquals(2, Iterables.size(cfs.getSSTables()));
+        reader = Iterables.get(cfs.getSSTables(), 1);
+        assertEquals(5, countRangeTombstones(reader));
+
+        compact();
+
+        assertEquals(1, Iterables.size(cfs.getSSTables()));
+        reader = Iterables.get(cfs.getSSTables(), 0);
+        assertEquals(5, countRangeTombstones(reader));
+    }
+
     void assertOneTombstone() throws Throwable
     {
         assertRows(execute("SELECT column FROM %s"),
@@ -96,7 +132,7 @@ public class RangeTombstoneMergeTest extends CQLTester
 
         assertEquals(1, cfs.getSSTables().size());
         SSTableReader reader = Iterables.get(cfs.getSSTables(), 0);
-        assertEquals(1, countTombstones(reader));           // See CASSANDRA-7953.
+        assertEquals(1, countRangeTombstones(reader));           // See CASSANDRA-7953.
     }
 
     void addRemoveAndFlush() throws Throwable
@@ -106,7 +142,7 @@ public class RangeTombstoneMergeTest extends CQLTester
         flush();
     }
 
-    int countTombstones(SSTableReader reader)
+    int countRangeTombstones(SSTableReader reader)
     {
         int tombstones = 0;
         ISSTableScanner partitions = reader.getScanner();
