@@ -667,6 +667,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (joinRing)
         {
             joinTokenRing(delay);
+            //We always go from HIBERNATE in prepareToJoin() to NORMAL
+            //This should be considered a major state change.
+            //Since uptil now all state has been ignored
+            Gossiper.instance.forceNewerGeneration();
         }
         else
         {
