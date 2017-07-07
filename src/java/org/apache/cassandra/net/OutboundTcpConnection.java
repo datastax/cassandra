@@ -148,7 +148,7 @@ public class OutboundTcpConnection extends Thread
 
     private final CoalescingStrategy cs;
     private DataOutputStreamPlus out;
-    private Socket socket;
+    private volatile Socket socket;
     private volatile long completed;
     private final AtomicLong dropped = new AtomicLong();
     private volatile int currentMsgBufferCount = 0;
@@ -421,6 +421,12 @@ public class OutboundTcpConnection extends Thread
             out = null;
             socket = null;
         }
+    }
+
+    public boolean isConnected()
+    {
+        Socket sock = socket;
+        return sock != null && sock.isConnected() && !sock.isClosed();
     }
 
     @SuppressWarnings("resource")

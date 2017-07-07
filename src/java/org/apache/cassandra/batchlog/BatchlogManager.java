@@ -508,12 +508,48 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             // strip out dead endpoints and localhost
             ListMultimap<String, InetAddress> validated = ArrayListMultimap.create();
+            int numValidated = 0;
             for (Map.Entry<String, InetAddress> entry : endpoints.entries())
+            {
                 if (isValid(entry.getValue()))
+                {
                     validated.put(entry.getKey(), entry.getValue());
+                    ++numValidated;
+                }
+            }
 
             if (validated.size() <= 2)
                 return validated.values();
+
+            // strip out endpoints without an active connection
+            // since the nodes may have just died and phi may have tripped yet
+            ListMultimap<String, InetAddress> validatedConnected = ArrayListMultimap.create();
+            int numValidatedConnected = 0;
+            for (Map.Entry<String, InetAddress> entry : endpoints.entries())
+            {
+                if (isValidAndConnected(entry.getValue()))
+                {
+                    validatedConnected.put(entry.getKey(), entry.getValue());
+                    ++numValidatedConnected;
+                }
+            }
+
+            //If we have a selection of nodes to pick from
+            //we can go forward with the more restricted list
+            if (numValidatedConnected < numValidated)
+            {
+                if (logger.isTraceEnabled())
+                {
+                    Collection<InetAddress> nodes = validated.values();
+                    nodes.removeAll(validatedConnected.values());
+                    logger.trace("Detected node(s) down before gossip. Removed {}", nodes);
+                }
+
+                validated = validatedConnected;
+
+                if (validated.size() <= 2)
+                    return validated.values();
+            }
 
             if (validated.size() - validated.get(localRack).size() >= 2)
             {
@@ -554,8 +590,19 @@ public class BatchlogManager implements BatchlogManagerMBean
         @VisibleForTesting
         protected boolean isValid(InetAddress input)
         {
-            return !input.equals(FBUtilities.getBroadcastAddress()) && FailureDetector.instance.isAlive(input);
+            return !input.equals(FBUtilities.getBroadcastAddress()) &&
+                   FailureDetector.instance.isAlive(input);
         }
+
+        @VisibleForTesting
+        protected boolean isValidAndConnected(InetAddress input)
+        {
+            // When a node dies our incoming connection should die very quickly since we are using
+            // blocking threads to read.
+            return isValid(input) &&
+                   MessagingService.instance().getConnectionPool(input).gossipMessages.isConnected();
+        }
+
 
         @VisibleForTesting
         protected int getRandomInt(int bound)
