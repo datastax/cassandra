@@ -515,6 +515,18 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (validated.size() <= 2)
                 return validated.values();
 
+            // strip out endpoints without an active connection
+            // since the nodes may have just died and phi may have tripped yet
+            ListMultimap<String, InetAddress> validatedConnected = ArrayListMultimap.create();
+            for (Map.Entry<String, InetAddress> entry : endpoints.entries())
+                if (isValidAndConnected(entry.getValue()))
+                    validatedConnected.put(entry.getKey(), entry.getValue());
+
+            //If we have a selection of nodes to pick from
+            //we can go forward with the more restricted list
+            if (validatedConnected.size() >= 2)
+                validated = validatedConnected;
+
             if (validated.size() - validated.get(localRack).size() >= 2)
             {
                 // we have enough endpoints in other racks
@@ -554,8 +566,19 @@ public class BatchlogManager implements BatchlogManagerMBean
         @VisibleForTesting
         protected boolean isValid(InetAddress input)
         {
-            return !input.equals(FBUtilities.getBroadcastAddress()) && FailureDetector.instance.isAlive(input);
+            return !input.equals(FBUtilities.getBroadcastAddress()) &&
+                   FailureDetector.instance.isAlive(input);
         }
+
+        @VisibleForTesting
+        protected boolean isValidAndConnected(InetAddress input)
+        {
+            // When a node dies our incoming connection should die very quickly since we are using
+            // blocking threads to read.
+            return isValid(input) &&
+                   MessagingService.instance().getConnectionPool(input).largeMessages.isAlive();
+        }
+
 
         @VisibleForTesting
         protected int getRandomInt(int bound)
