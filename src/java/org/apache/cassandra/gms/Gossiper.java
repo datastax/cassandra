@@ -1456,7 +1456,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         epstate.getHeartBeatState().forceNewerGenerationUnsafe();
     }
 
-
     /**
      * Add an endpoint we knew about previously, but whose state is unknown
      */
