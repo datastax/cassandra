@@ -1,7 +1,7 @@
 DSE 5.0.10
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
-
+ * LCS levels are not respected for `nodetool refresh` and replacing a node (APOLLO-639)
 
 DSE 5.0.9
  * Skip complex column range tombstones on simple columns (APOLLO-480)

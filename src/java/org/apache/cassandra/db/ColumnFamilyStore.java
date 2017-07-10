@@ -651,17 +651,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param ksName The keyspace name
      * @param cfName The columnFamily name
      */
-    public static synchronized void loadNewSSTables(String ksName, String cfName)
+    public static synchronized void loadNewSSTables(String ksName, String cfName, boolean resetLevels)
     {
         /** ks/cf existence checks will be done by open and getCFS methods for us */
         Keyspace keyspace = Keyspace.open(ksName);
-        keyspace.getColumnFamilyStore(cfName).loadNewSSTables();
+        keyspace.getColumnFamilyStore(cfName).loadNewSSTables(resetLevels);
+    }
+
+    public synchronized void loadNewSSTables()
+    {
+        loadNewSSTables(false);
     }
 
     /**
      * #{@inheritDoc}
      */
-    public synchronized void loadNewSSTables()
+    public synchronized void loadNewSSTables(boolean resetLevels)
     {
         logger.info("Loading new SSTables for {}/{}...", keyspace.getName(), name);
 
@@ -684,15 +689,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                         descriptor));
 
             // force foreign sstables to level 0
-            try
+            if (resetLevels)
             {
-                if (new File(descriptor.filenameFor(Component.STATS)).exists())
-                    descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
-            }
-            catch (IOException e)
-            {
-                SSTableReader.logOpenException(entry.getKey(), e);
-                continue;
+                try
+                {
+                    if (new File(descriptor.filenameFor(Component.STATS)).exists())
+                        descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
+                }
+                catch (IOException e)
+                {
+                    SSTableReader.logOpenException(entry.getKey(), e);
+                    continue;
+                }
             }
 
             // Increment the generation until we find a filename that doesn't exist. This is needed because the new
