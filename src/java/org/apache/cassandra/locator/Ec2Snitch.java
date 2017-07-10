@@ -126,4 +126,11 @@ public class Ec2Snitch extends AbstractNetworkTopologySnitch
             return savedEndpoints.get(endpoint).get("data_center");
         return DEFAULT_DC;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
+    }
 }

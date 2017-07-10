@@ -32,14 +32,18 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.OutboundTcpConnectionPool;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.BiMultiValMap;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortedBiMultiValMap;
 
@@ -1380,6 +1384,15 @@ public class TokenMetadata
 
             doRemoveEndpoint(ep, current);
             doAddEndpoint(ep, dc, rack);
+
+            String localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
+
+            if (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc &&
+                !dc.equals(current.left) && !localDC.equals(current.left))
+            {
+                logger.debug("Resetting connection to {} due to dc compression");
+                MessagingService.instance().getConnectionPool(ep).softReset();
+            }
         }
 
         /**

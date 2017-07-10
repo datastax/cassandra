@@ -80,6 +80,13 @@ public class OutboundTcpConnectionPool
             conn.closeSocket(false);
     }
 
+    public void softReset()
+    {
+        logger.trace("Soft reset called for {}", id);
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
+            conn.softCloseSocket();
+    }
+
     public void resetToNewerVersion(int version)
     {
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
