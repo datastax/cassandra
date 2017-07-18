@@ -880,11 +880,15 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     EndpointState getStateForVersionBiggerThan(InetAddress forEndpoint, int version)
     {
-        EndpointState epState = endpointStateMap.get(forEndpoint);
-        EndpointState reqdEndpointState = null;
-
-        if (epState != null)
+        //Ensure state isn't changing under us
+        taskLock.lock();
+        try
         {
+            EndpointState epState = endpointStateMap.get(forEndpoint);
+            EndpointState reqdEndpointState = null;
+
+            if (epState != null)
+            {
             /*
              * Here we try to include the Heart Beat state only if it is
              * greater than the version passed in. It might happen that
@@ -893,35 +897,40 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
              * than the version passed in. In this case we also send the old
              * heart beat and throw it away on the receiver if it is redundant.
             */
-            int localHbVersion = epState.getHeartBeatState().getHeartBeatVersion();
-            if (localHbVersion > version)
-            {
-                reqdEndpointState = new EndpointState(epState.getHeartBeatState());
-                if (logger.isTraceEnabled())
-                    logger.trace("local heartbeat version {} greater than {} for {}", localHbVersion, version, forEndpoint);
-            }
-            /* Accumulate all application states whose versions are greater than "version" variable */
-            Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
-            for (Entry<ApplicationState, VersionedValue> entry : epState.states())
-            {
-                VersionedValue value = entry.getValue();
-                if (value.version > version)
+                int localHbVersion = epState.getHeartBeatState().getHeartBeatVersion();
+                if (localHbVersion > version)
                 {
-                    if (reqdEndpointState == null)
-                    {
-                        reqdEndpointState = new EndpointState(epState.getHeartBeatState());
-                    }
-                    final ApplicationState key = entry.getKey();
+                    reqdEndpointState = new EndpointState(epState.getHeartBeatState());
                     if (logger.isTraceEnabled())
-                        logger.trace("Adding state {}: {}" , key, value.value);
-
-                    states.put(key, value);
+                        logger.trace("local heartbeat version {} greater than {} for {}", localHbVersion, version, forEndpoint);
                 }
+            /* Accumulate all application states whose versions are greater than "version" variable */
+                Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+                for (Entry<ApplicationState, VersionedValue> entry : epState.states())
+                {
+                    VersionedValue value = entry.getValue();
+                    if (value.version > version)
+                    {
+                        if (reqdEndpointState == null)
+                        {
+                            reqdEndpointState = new EndpointState(epState.getHeartBeatState());
+                        }
+                        final ApplicationState key = entry.getKey();
+                        if (logger.isTraceEnabled())
+                            logger.trace("Adding state {}: {}", key, value.value);
+
+                        states.put(key, value);
+                    }
+                }
+                if (reqdEndpointState != null)
+                    reqdEndpointState.addApplicationStates(states);
             }
-            if (reqdEndpointState != null)
-                reqdEndpointState.addApplicationStates(states);
+            return reqdEndpointState;
         }
-        return reqdEndpointState;
+        finally
+        {
+            taskLock.unlock();
+        }
     }
 
     /**

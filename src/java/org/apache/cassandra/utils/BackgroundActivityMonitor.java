@@ -161,7 +161,7 @@ public class BackgroundActivityMonitor
             if (report == -1d)
                 report = compaction_severity.get();
 
-            if (!Gossiper.instance.isEnabled())
+            if (!Gossiper.instance.isEnabled() || !Gossiper.instance.isAlive(FBUtilities.getBroadcastAddress()))
                 return;
             report += manual_severity.get(); // add manual severity setting.
             VersionedValue updated = StorageService.instance.valueFactory.severity(report);
