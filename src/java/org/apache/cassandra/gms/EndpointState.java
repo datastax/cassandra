@@ -101,10 +101,14 @@ public class EndpointState
             Map<ApplicationState, VersionedValue> copy = new EnumMap<>(orig);
 
             for (Map.Entry<ApplicationState, VersionedValue> value : values)
+            {
+                logger.trace("Adding app state: {} {}", value.getKey(), value.getValue());
                 copy.put(value.getKey(), value.getValue());
-
+            }
             if (applicationState.compareAndSet(orig, copy))
                 return;
+
+            logger.trace("Concurrent app state changes... retrying");
         }
     }
 

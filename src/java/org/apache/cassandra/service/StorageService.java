@@ -1745,7 +1745,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
             if (epState == null || Gossiper.instance.isDeadState(epState))
             {
-                logger.debug("Ignoring state change for dead or unknown endpoint: {}", endpoint);
+                logger.debug("Ignoring state change({}) for dead or unknown endpoint: {}", state, endpoint);
                 return;
             }
 
