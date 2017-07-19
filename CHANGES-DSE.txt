@@ -1,6 +1,7 @@
 DSE 5.0.10
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
+ * Keep sstable level for decommision, remove and move operations (APOLLO-908)
 
 
 DSE 5.0.9
