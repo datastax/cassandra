@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.concurrent.TimeoutException;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
+import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -272,6 +274,37 @@ public class DataResolver extends ResponseResolver
             }
 
             public void onMergedRangeTombstoneMarkers(RangeTombstoneMarker merged, RangeTombstoneMarker[] versions)
+            {
+                try
+                {
+                    // The code for merging range tombstones is a tad complex and has a few assertions that have
+                    // historically been triggered unexpectedly (not because the assertions are wrong per-se, but rather
+                    // due to other part of the code generating bad RTs, especially backward compatibility code).
+                    // It's hard to get insights into those problems however without more context that what the assertion
+                    // errors themselves hold, hence the catch here that basically gather as much as context as reasonable.
+                    internalOnMergedRangeTombstoneMarkers(merged, versions);
+                }
+                catch (AssertionError e)
+                {
+                    // Note that the following can be pretty noisy.
+                    CFMetaData table = command.metadata();
+                    String details = String.format("Error merging RTs on %s.%s: merged=%s, versions=%s, sources={%s}, responses:%n %s",
+                                                   table.ksName, table.cfName,
+                                                   merged == null ? "null" : merged.toString(table),
+                                                   '[' + Joiner.on(", ").join(Iterables.transform(Arrays.asList(versions), rt -> rt == null ? "null" : rt.toString(table))) + ']',
+                                                   Arrays.toString(sources),
+                                                   makeResponsesDebugString());
+                    throw new AssertionError(details, e);
+                }
+            }
+
+            private String makeResponsesDebugString()
+            {
+                return Joiner.on(",\n")
+                             .join(Iterables.transform(getMessages(), m -> m.from + " => " + m.payload.toDebugString(command, partitionKey)));
+            }
+
+            private void internalOnMergedRangeTombstoneMarkers(RangeTombstoneMarker merged, RangeTombstoneMarker[] versions)
             {
                 // The current deletion as of dealing with this marker.
                 DeletionTime currentDeletion = currentDeletion();
