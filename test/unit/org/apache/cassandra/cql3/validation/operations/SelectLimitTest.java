@@ -94,6 +94,22 @@ public class SelectLimitTest extends CQLTester
 
     }
 
+    @Test
+    public void testLimitInStaticTable() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY (k) ) WITH COMPACT STORAGE ");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s(k, v) VALUES (?, ?)", i, i);
+
+        assertRows(execute("SELECT * FROM %s LIMIT 5"),
+                   row(0, 0),
+                   row(1, 1),
+                   row(2, 2),
+                   row(3, 3),
+                   row(4, 4));
+    }
+
     /**
      * Check for #7052 bug,
      * migrated from cql_tests.py:TestCQL.limit_compact_table()

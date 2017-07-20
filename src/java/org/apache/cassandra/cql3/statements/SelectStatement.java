@@ -716,7 +716,7 @@ public class SelectStatement implements CQLStatement
 
         orderResults(cqlRows);
 
-        cqlRows.trim(userLimit);
+       // cqlRows.trim(userLimit);
 
         return cqlRows;
     }

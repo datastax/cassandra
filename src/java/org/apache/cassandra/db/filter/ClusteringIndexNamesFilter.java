@@ -72,7 +72,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
     public boolean selectsAllPartition()
     {
-        return false;
+        return clusterings.isEmpty();
     }
 
     public boolean selects(Clustering clustering)
