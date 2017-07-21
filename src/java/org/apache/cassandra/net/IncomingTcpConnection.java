@@ -24,8 +24,8 @@ import java.net.SocketException;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.zip.Checksum;
-import java.util.Set;
 
+import com.google.common.collect.Multimap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,15 +51,18 @@ public class IncomingTcpConnection extends Thread implements Closeable
     private final int version;
     private final boolean compressed;
     private final Socket socket;
-    private final Set<Closeable> group;
-    public InetAddress from;
+    private final Multimap<InetAddress, Closeable> group;
+    public final InetAddress socketFrom;
 
-    public IncomingTcpConnection(int version, boolean compressed, Socket socket, Set<Closeable> group)
+    public InetAddress snitchFrom;
+
+    public IncomingTcpConnection(int version, boolean compressed, Socket socket, Multimap<InetAddress, Closeable> group)
     {
         super("MessagingService-Incoming-" + socket.getInetAddress());
         this.version = version;
         this.compressed = compressed;
         this.socket = socket;
+        this.socketFrom = socket.getInetAddress();
         this.group = group;
         if (DatabaseDescriptor.getInternodeRecvBufferSize() != null)
         {
@@ -128,7 +131,9 @@ public class IncomingTcpConnection extends Thread implements Closeable
         }
         finally
         {
-            group.remove(this);
+            group.remove(socketFrom, this);
+            if (snitchFrom != null)
+                group.remove(snitchFrom, this);
         }
     }
 
@@ -145,10 +150,13 @@ public class IncomingTcpConnection extends Thread implements Closeable
         int maxVersion = in.readInt();
         // outbound side will reconnect if necessary to upgrade version
         assert version <= MessagingService.current_version;
-        from = CompactEndpointSerializationHelper.deserialize(in);
+        snitchFrom = CompactEndpointSerializationHelper.deserialize(in);
         // record the (true) version of the endpoint
-        MessagingService.instance().setVersion(from, maxVersion);
-        logger.trace("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
+        MessagingService.instance().setVersion(snitchFrom, maxVersion);
+        logger.trace("Set version for {} to {} (will use {})", snitchFrom, maxVersion, MessagingService.instance().getVersion(snitchFrom));
+
+        //Save the connection under snitch address
+        group.put(snitchFrom, this);
 
         if (compressed)
         {

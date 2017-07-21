@@ -43,6 +43,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -50,6 +51,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.OutboundTcpConnectionPool;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.FBUtilities;
@@ -599,8 +601,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             // When a node dies our incoming connection should die very quickly since we are using
             // blocking threads to read.
-            return isValid(input) &&
-                   MessagingService.instance().getConnectionPool(input).gossipMessages.isConnected();
+            return isValid(input) && (!Gossiper.instance.isEnabled() || MessagingService.instance().hasValidIncomingConnections(input));
         }
 
 
