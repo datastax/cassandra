@@ -99,7 +99,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     public DeletionTime partitionLevelDeletion()
     {
-        return holder().deletionInfo.getPartitionDeletion();
+        return deletionInfo().getPartitionDeletion();
     }
 
     public PartitionColumns columns()

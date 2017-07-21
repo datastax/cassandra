@@ -231,6 +231,15 @@ public class DataResolver extends ResponseResolver
                 return repairs[i];
             }
 
+            /**
+             * Returns whether source {@code i} is being repaired on it's partition level deletion. The output
+             * of this method is only valid after the call to {@link #onMergedPartitionLevelDeletion}.
+             */
+            private boolean hasPartitionLevelDeletionRepair(int i)
+            {
+                return repairs[i] != null && !repairs[i].partitionLevelDeletion().isLive();
+            }
+
             private Row.Builder currentRow(int i, Clustering clustering)
             {
                 if (currentRows[i] == null)
@@ -330,21 +339,23 @@ public class DataResolver extends ResponseResolver
                         // active after that point. Further whatever deletion was open or is open by this marker on the
                         // source, that deletion cannot supersedes the current one.
                         //
-                        // But while the marker deletion (before and/or after this point) cannot supersed the current
+                        // But while the marker deletion (before and/or after this point) cannot supersede the current
                         // deletion, we want to know if it's equal to it (both before and after), because in that case
                         // the source is up to date and we don't want to include repair.
                         //
                         // So in practice we have 2 possible case:
-                        //  1) the source was up-to-date on deletion up to that point (markerToRepair[i] == null). Then
-                        //     it won't be from that point on unless it's a boundary and the new opened deletion time
-                        //     is also equal to the current deletion (note that this implies the boundary has the same
-                        //     closing and opening deletion time, which should generally not happen, but can due to legacy
-                        //     reading code not avoiding this for a while, see CASSANDRA-13237).
-                        //   2) the source wasn't up-to-date on deletion up to that point (markerToRepair[i] != null), and
-                        //      it may now be (if it isn't we just have nothing to do for that marker).
+                        //  1) the source was up-to-date on deletion up to that point: then it won't be from that point
+                        //     on unless it's a boundary and the new opened deletion time is also equal to the current
+                        //     deletion (note that this implies the boundary has the same closing and opening deletion
+                        //     time, which should generally not happen, but can due to legacy reading code not avoiding
+                        //     this for a while, see CASSANDRA-13237).
+                        //  2) the source wasn't up-to-date on deletion up to that point and it may now be (if it isn't
+                        //     we just have nothing to do for that marker).
                         assert !currentDeletion.isLive() : currentDeletion.toString();
 
-                        if (markerToRepair[i] == null)
+                        // Is the source repaired on deletion info at this point (range tombstones or partition level deletion)?
+                        if (markerToRepair[i] == null && !hasPartitionLevelDeletionRepair(i))
+                        //if (markerToRepair[i] == null)
                         {
                             // Since there is an ongoing merged deletion, the only way we don't have an open repair for
                             // this source is that it had a range open with the same deletion as current and it's
@@ -359,6 +370,8 @@ public class DataResolver extends ResponseResolver
                                 markerToRepair[i] = marker.closeBound(isReversed).invert();
                         }
                         // In case 2) above, we only have something to do if the source is up-to-date after that point
+                        // (which, since the source isn't up-to-date before that point, means we're opening a new deletion
+                        // that is equal to the current one).
                         else if (marker.isOpen(isReversed) && currentDeletion.equals(marker.openDeletionTime(isReversed)))
                         {
                             closeOpenMarker(i, marker.openBound(isReversed).invert());
