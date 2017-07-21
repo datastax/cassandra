@@ -108,6 +108,27 @@ public class SelectLimitTest extends CQLTester
                    row(2, 2),
                    row(3, 3),
                    row(4, 4));
+
+        assertRows(execute("SELECT v FROM %s LIMIT 5"),
+                   row(0),
+                   row(1),
+                   row(2),
+                   row(3),
+                   row(4));
+
+        assertRows(execute("SELECT k FROM %s LIMIT 5"),
+                   row(0),
+                   row(1),
+                   row(2),
+                   row(3),
+                   row(4));
+
+        assertRows(execute("SELECT DISTINCT k FROM %s LIMIT 5"),
+                   row(0),
+                   row(1),
+                   row(2),
+                   row(3),
+                   row(4));
     }
 
     /**

@@ -72,6 +72,8 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
     public boolean selectsAllPartition()
     {
+        // if the clusterings set is empty we are selecting a static row and in this case we want to count
+        // static rows so we return true
         return clusterings.isEmpty();
     }
 
