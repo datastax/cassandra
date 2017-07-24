@@ -1387,10 +1387,11 @@ public class TokenMetadata
 
             String localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
 
+            // We reset the connection is the Dc has changed or if the DC is no longer default
             if (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc &&
-                !dc.equals(current.left) && !localDC.equals(current.left))
+                (!dc.equals(current.left) || snitch.isDefaultDC(current.left)) && !snitch.isDefaultDC(localDC))
             {
-                logger.debug("Resetting connection to {} due to dc compression");
+                logger.debug("Resetting connection to {} due to dc compression", ep);
                 MessagingService.instance().getConnectionPool(ep).softReset();
             }
         }
