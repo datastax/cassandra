@@ -25,6 +25,9 @@ import java.nio.channels.SocketChannel;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -38,6 +41,7 @@ public class OutboundTcpConnectionPool
 {
     public static final long LARGE_MESSAGE_THRESHOLD =
             Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
+    private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
 
     // pointer for the real Address.
     private final InetAddress id;
@@ -76,12 +80,14 @@ public class OutboundTcpConnectionPool
 
     void reset()
     {
+        logger.trace("Reset called for {}", id);
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
             conn.closeSocket(false);
     }
 
     public void resetToNewerVersion(int version)
     {
+        logger.trace("Reset called for newer version on {}", id);
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
         {
             if (version > conn.getTargetVersion())
@@ -96,6 +102,7 @@ public class OutboundTcpConnectionPool
      */
     public void reset(InetAddress remoteEP)
     {
+        logger.trace("Reset called for {} remoteEP {}", id, remoteEP);
         SystemKeyspace.updatePreferredIP(id, remoteEP);
         resetEndpoint = remoteEP;
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
@@ -207,6 +214,7 @@ public class OutboundTcpConnectionPool
 
     public void close()
     {
+        logger.trace("close called for {}", id);
         // these null guards are simply for tests
         if (largeMessages != null)
             largeMessages.closeSocket(true);

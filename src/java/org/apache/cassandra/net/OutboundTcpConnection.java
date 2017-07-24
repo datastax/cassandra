@@ -253,6 +253,7 @@ public class OutboundTcpConnection extends Thread
                     MessageOut<?> m = qm.message;
                     if (m == CLOSE_SENTINEL)
                     {
+                        logger.trace("Disconnecting because CLOSE_SENTINEL detected");
                         disconnect();
                         if (isStopped)
                             break outer;

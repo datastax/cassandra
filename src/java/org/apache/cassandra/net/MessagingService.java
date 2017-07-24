@@ -29,6 +29,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import java.lang.StackTraceElement;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.net.ssl.SSLHandshakeException;
@@ -486,16 +488,7 @@ public final class MessagingService implements MessagingServiceMBean
         for (ILatencySubscriber subscriber : subscribers)
             subscriber.receiveTiming(address, latency);
     }
-
-    /**
-     * called from gossiper when it notices a node is not responding.
-     */
-    public void convict(InetAddress ep)
-    {
-        logger.trace("Resetting pool for {}", ep);
-        getConnectionPool(ep).reset();
-    }
-
+    
     public void listen()
     {
         callbacks.reset(); // hack to allow tests to stop/restart MS
@@ -610,6 +603,7 @@ public final class MessagingService implements MessagingServiceMBean
 
     public void destroyConnectionPool(InetAddress to)
     {
+        logger.trace("Destroy pool {}", to);
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
         if (cp == null)
             return;
