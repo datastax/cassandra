@@ -20,7 +20,6 @@
  */
 package org.apache.cassandra.db.transform;
 
-import org.apache.cassandra.db.PartitionColumns;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -46,11 +45,6 @@ public interface MoreRows<I extends BaseRowIterator<?>> extends MoreContents<I>
     public static UnfilteredRowIterator extend(UnfilteredRowIterator iterator, MoreRows<? super UnfilteredRowIterator> more)
     {
         return add(mutable(iterator), more);
-    }
-
-    public static UnfilteredRowIterator extend(UnfilteredRowIterator iterator, MoreRows<? super UnfilteredRowIterator> more, PartitionColumns columns)
-    {
-        return add(Transformation.wrapIterator(iterator, columns), more);
     }
 
     public static RowIterator extend(RowIterator iterator, MoreRows<? super RowIterator> more)
