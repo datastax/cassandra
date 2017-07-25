@@ -23,9 +23,9 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.util.concurrent.ListenableFuture;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Keyspace;
@@ -67,9 +67,7 @@ public class BootStrapper extends ProgressEventNotifierSupport
 
     public ListenableFuture<StreamState> bootstrap(StreamStateStore stateStore, boolean useStrictConsistency)
     {
-        StreamingOptions options = StreamingOptions.forBootStrap(tokenMetadata.cloneOnlyTokenMap());
-
-        logger.info("Bootstrapping with streaming options:{}", options);
+        logger.trace("Beginning bootstrap process");
 
         RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                    tokens,
@@ -77,18 +75,12 @@ public class BootStrapper extends ProgressEventNotifierSupport
                                                    "Bootstrap",
                                                    useStrictConsistency,
                                                    DatabaseDescriptor.getEndpointSnitch(),
-                                                   stateStore,
-                                                   true,
-                                                   options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
-                                                                          FailureDetector.instance));
+                                                   stateStore);
+        streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
+        streamer.addSourceFilter(new RangeStreamer.ExcludeLocalNodeFilter());
 
         for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
         {
-            if (!options.acceptKeyspace(keyspaceName))
-            {
-                logger.warn("Keyspace '{}' is explicitly excluded from bootstrap on user request. Make sure to rebuild the keyspace!");
-                continue;
-            }
             AbstractReplicationStrategy strategy = Keyspace.open(keyspaceName).getReplicationStrategy();
             streamer.addRanges(keyspaceName, strategy.getPendingAddressRanges(tokenMetadata, tokens, address));
         }

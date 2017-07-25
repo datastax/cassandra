@@ -1,8 +1,11 @@
+<<<<<<< HEAD
 DSE 5.0.10
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
 
 
+=======
+>>>>>>> parent of 955b1e9... nodetool rebuild & bootstrap improvements
 DSE 5.0.9
  * Skip complex column range tombstones on simple columns (APOLLO-480)
  * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)

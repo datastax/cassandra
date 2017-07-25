@@ -309,7 +309,7 @@ public interface StorageServiceMBean extends NotificationEmitter
      * @deprecated use {@link #repairAsync(String keyspace, Map options)} instead.
      */
     @Deprecated
-    public int forceRepairAsync(String keyspace, boolean isSequential, Collection<String> dataCenters, Collection<String> hosts, boolean primaryRange, boolean fullRepair, String... tableNames) throws IOException;
+    public int forceRepairAsync(String keyspace, boolean isSequential, Collection<String> dataCenters, Collection<String> hosts,  boolean primaryRange, boolean fullRepair, String... tableNames) throws IOException;
 
     /**
      * Invoke repair asynchronously.
@@ -512,51 +512,6 @@ public interface StorageServiceMBean extends NotificationEmitter
      * @param sourceDc Name of DC from which to select sources for streaming or null to pick any node
      */
     public void rebuild(String sourceDc);
-
-    /**
-     * Initiate a process of streaming data for which we are responsible from other nodes. It is similar to bootstrap
-     * except meant to be used on a node which is already in the cluster (typically containing no data) as an
-     * alternative to running repair.
-     *
-     * Same as {@link #rebuild(String)}, but only for specified keyspace and ranges.
-     *
-     * @param sourceDc Name of DC from which to select sources for streaming or null to pick any node
-     * @param keyspace Name of the keyspace which to rebuild or null to rebuild all keyspaces.
-     * @param tokens Range of tokens to rebuild or null to rebuild all token ranges. In the format of:
-     *               "(start_token_1,end_token_1],(start_token_2,end_token_2],...(start_token_n,end_token_n]"
-     * @param specificSources Comma separated list of source hosts to stream from
-     */
-    public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources);
-
-    /**
-     * Initiate a process of streaming data for which we are responsible from other nodes. It is similar to bootstrap
-     * except meant to be used on a node which is already in the cluster (typically containing no data) as an
-     * alternative to running repair.
-     *
-     * The sources used for streaming are controlled by {@code srcDcNames}/{@code excludeDcNames} and
-     * {@code specifiedSources}/{@code excludeSources}.
-     *
-     * @param keyspaces Name of the keyspace(s) to rebuild or null or empty to rebuild all keyspaces.
-     * @param tokens Range of tokens to rebuild or null to rebuild all token ranges. In the format of:
-     *               "(start_token_1,end_token_1],(start_token_2,end_token_2],...(start_token_n,end_token_n]"
-     * @param mode one out of three modes:
-     *             <ul>
-     *                 <li>{@code normal} conventional behaviour, only streams ranges that are not already locally available</li>
-     *                 <li>{@code refetch} resets the locally available ranges, streams all ranges but leaves current data untouched</li>
-     *                 <li>{@code reset} resets the locally available ranges, removes all locally present data (like a {@code TRUNCATE}), streams all ranges</li>
-     *             </ul>
-     * @param srcDcNames list of DCs to include for streaming
-     * @param excludeDcNames list of DCs to exclude for streaming
-     * @param specifiedSources list of hosts to include for streaming
-     * @param excludeSources list of hosts to exclude for streaming
-     */
-    public String rebuild(List<String> keyspaces,
-                          String tokens,
-                          String mode,
-                          List<String> srcDcNames,
-                          List<String> excludeDcNames,
-                          List<String> specifiedSources,
-                          List<String> excludeSources);
 
     /** Starts a bulk load and blocks until it completes. */
     public void bulkLoad(String directory);

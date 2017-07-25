@@ -1349,15 +1349,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                                                               TimeUnit.MILLISECONDS);
     }
 
-    @VisibleForTesting
-    public void startForTest()
-    {
-        scheduledGossipTask = executor.scheduleWithFixedDelay(() -> {},
-                                                              Gossiper.intervalInMillis,
-                                                              Gossiper.intervalInMillis,
-                                                              TimeUnit.MILLISECONDS);
-    }
-
     /**
      * Do a single 'shadow' round of gossip by retrieving endpoint states that will be stored exclusively in the
      * map return value, instead of endpointStateMap.

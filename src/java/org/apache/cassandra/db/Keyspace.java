@@ -23,10 +23,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,12 +121,6 @@ public class Keyspace
     public static void setInitialized()
     {
         initialized = true;
-    }
-
-    @VisibleForTesting
-    public static boolean isInitialized()
-    {
-        return initialized;
     }
 
     public static Keyspace open(String keyspaceName)
