@@ -1312,6 +1312,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         CompactionManager.instance.submitBackground(this);
     }
 
+    public void addSSTablesFromStreaming(Collection<SSTableReader> sstables)
+    {
+        data.addSSTablesFromStreaming(sstables);
+        CompactionManager.instance.submitBackground(this);
+    }
+
     /**
      * Calculate expected file size of SSTable after compaction.
      *

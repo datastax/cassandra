@@ -197,7 +197,7 @@ public class StreamReceiveTask extends StreamTask
                         task.finishTransaction();
 
                         // add sstables and build secondary indexes
-                        cfs.addSSTables(readers);
+                        cfs.addSSTablesFromStreaming(readers);
                         cfs.indexManager.buildAllIndexesBlocking(readers);
 
                         //invalidate row and counter cache
