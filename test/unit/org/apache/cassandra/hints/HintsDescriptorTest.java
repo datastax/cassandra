@@ -115,6 +115,26 @@ public class HintsDescriptorTest
         }
     }
 
+    @Test
+    public void testStatistics() throws IOException
+    {
+        UUID hostId = UUID.randomUUID();
+        int version = HintsDescriptor.CURRENT_VERSION;
+        long timestamp = System.currentTimeMillis();
+        ImmutableMap<String, Object> parameters = ImmutableMap.of();
+        HintsDescriptor expected = new HintsDescriptor(hostId, version, timestamp, parameters);
+
+        File directory = Files.createTempDir();
+        directory.deleteOnExit();
+        try (HintsWriter ignored = HintsWriter.create(directory, expected))
+        {
+            ignored.totalHintsWritten.set(1234567L);
+        }
+        HintsDescriptor actual = HintsDescriptor.readFromFile(new File(directory, expected.fileName()).toPath());
+        actual.loadStatsComponent(directory.toString());
+        assertEquals(1234567L, actual.statistics().totalCount());
+    }
+
     private static void testSerializeDeserializeLoop(HintsDescriptor descriptor) throws IOException
     {
         // serialize to a byte array

@@ -79,6 +79,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
         try
         {
             HintsDescriptor descriptor = HintsDescriptor.deserialize(reader);
+            descriptor.loadStatsComponent(file.getParent());
             if (descriptor.isCompressed())
             {
                 // since the hints descriptor is always uncompressed, it needs to be read with the normal ChecksummedDataInput.

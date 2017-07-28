@@ -55,11 +55,10 @@ final class HintsDispatcher implements AutoCloseable
     private final InetAddress address;
     private final int messagingVersion;
     private final AtomicBoolean isPaused;
-    private final long oldestLoadedTimestamp;
 
     private long currentPageOffset;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused, long oldestLoadedTimestamp)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused)
     {
         currentPageOffset = 0L;
 
@@ -68,13 +67,12 @@ final class HintsDispatcher implements AutoCloseable
         this.address = address;
         this.messagingVersion = messagingVersion;
         this.isPaused = isPaused;
-        this.oldestLoadedTimestamp = oldestLoadedTimestamp;
     }
 
-    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, AtomicBoolean isPaused, long oldestLoadedTimestamp)
+    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, AtomicBoolean isPaused)
     {
         int messagingVersion = MessagingService.instance().getVersion(address);
-        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, isPaused, oldestLoadedTimestamp);
+        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, isPaused);
     }
 
     public void close()
@@ -155,16 +153,7 @@ final class HintsDispatcher implements AutoCloseable
                 hadFailures = true;
         }
 
-        if (hadFailures)
-        {
-            return Action.ABORT;
-        }
-        else
-        {
-            if (reader.descriptor().timestamp > oldestLoadedTimestamp)
-                HintedHandoffMetrics.hintsSinceStartupDispatchedAndDiscarded.inc(callbacks.size());
-            return Action.CONTINUE;
-        }
+        return hadFailures ? Action.ABORT : Action.CONTINUE;
     }
 
     private void updateMetrics(Callback.Outcome outcome)

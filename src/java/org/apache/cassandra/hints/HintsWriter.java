@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.hints;
 
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,6 +26,7 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,7 +35,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
@@ -53,6 +55,8 @@ class HintsWriter implements AutoCloseable
     private final int fd;
     private final CRC32 globalCRC;
 
+    @VisibleForTesting
+    AtomicLong totalHintsWritten = new AtomicLong();
     private volatile long lastSyncPosition = 0L;
 
     protected HintsWriter(File directory, HintsDescriptor descriptor, File file, FileChannel channel, int fd, CRC32 globalCRC)
@@ -104,6 +108,24 @@ class HintsWriter implements AutoCloseable
         return descriptor;
     }
 
+    private void writeStatistics()
+    {
+        long hintsWritten = totalHintsWritten.get();
+        HintsDescriptor.Statistics statistics = new HintsDescriptor.Statistics(hintsWritten);
+        descriptor.setStatistics(statistics);
+        StorageMetrics.hintsOnDisk.inc(hintsWritten);
+
+        File file = new File(directory, descriptor.statisticsFileName());
+        try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(file.toPath())))
+        {
+            statistics.serialize(out);
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, file);
+        }
+    }
+
     private void writeChecksum()
     {
         File checksumFile = new File(directory, descriptor.checksumFileName());
@@ -121,6 +143,7 @@ class HintsWriter implements AutoCloseable
     {
         perform(file, Throwables.FileOpType.WRITE, this::doFsync, channel::close);
 
+        writeStatistics();
         writeChecksum();
     }
 
@@ -165,6 +188,7 @@ class HintsWriter implements AutoCloseable
         private final ByteBuffer buffer;
 
         private final long initialSize;
+        private long hintsWritten;
         private long bytesWritten;
 
         Session(ByteBuffer buffer, long initialSize)
@@ -196,6 +220,7 @@ class HintsWriter implements AutoCloseable
          */
         void append(ByteBuffer hint) throws IOException
         {
+            hintsWritten += 1;
             bytesWritten += hint.remaining();
 
             // if the hint to write won't fit in the aggregation buffer, flush it
@@ -266,6 +291,7 @@ class HintsWriter implements AutoCloseable
             flushBuffer();
             maybeFsync();
             maybeSkipCache();
+            totalHintsWritten.addAndGet(hintsWritten);
         }
 
         private void flushBuffer() throws IOException

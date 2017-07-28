@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SyncUtil;
 
@@ -140,12 +141,19 @@ final class HintsStore
     {
         File hintsFile = new File(hintsDirectory, descriptor.fileName());
         if (hintsFile.delete())
+        {
+            StorageMetrics.hintsOnDisk.dec(descriptor.statistics().totalCount());
             logger.info("Deleted hint file {}", descriptor.fileName());
+        }
         else
+        {
             logger.error("Failed to delete hint file {}", descriptor.fileName());
+        }
 
         //noinspection ResultOfMethodCallIgnored
         new File(hintsDirectory, descriptor.checksumFileName()).delete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(hintsDirectory, descriptor.statisticsFileName()).delete();
     }
 
     boolean hasFiles()

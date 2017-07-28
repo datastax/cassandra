@@ -18,6 +18,9 @@
 package org.apache.cassandra.hints;
 
 import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -27,15 +30,20 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.json.simple.JSONValue;
@@ -50,6 +58,8 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  */
 final class HintsDescriptor
 {
+    private static final Logger logger = LoggerFactory.getLogger(HintsDescriptor.class);
+
     static final int VERSION_30 = 1;
     static final int CURRENT_VERSION = VERSION_30;
 
@@ -65,6 +75,7 @@ final class HintsDescriptor
     // implemented for future compression support - see CASSANDRA-9428
     final ImmutableMap<String, Object> parameters;
     final ParameterizedClass compressionConfig;
+    private volatile Statistics statistics;
 
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
     {
@@ -72,6 +83,7 @@ final class HintsDescriptor
         this.version = version;
         this.timestamp = timestamp;
         this.parameters = parameters;
+        this.statistics = EMPTY_STATS;
         compressionConfig = createCompressionConfig(parameters);
     }
 
@@ -100,9 +112,29 @@ final class HintsDescriptor
         }
     }
 
+    public void setStatistics(Statistics statistics)
+    {
+        this.statistics = statistics;
+    }
+
+    public Statistics statistics()
+    {
+        return statistics;
+    }
+
     String fileName()
     {
         return String.format("%s-%s-%s.hints", hostId, timestamp, version);
+    }
+
+    String statisticsFileName()
+    {
+        return statisticsFileName(hostId, timestamp, version);
+    }
+
+    static String statisticsFileName(UUID hostId, long timestamp, int version)
+    {
+        return String.format("%s-%s-%s-Statistics.hints", hostId, timestamp, version);
     }
 
     String checksumFileName()
@@ -135,11 +167,36 @@ final class HintsDescriptor
     {
         try (RandomAccessFile raf = new RandomAccessFile(path.toFile(), "r"))
         {
-            return deserialize(raf);
+            HintsDescriptor descriptor = deserialize(raf);
+            descriptor.loadStatsComponent(path.getParent().toString());
+            StorageMetrics.hintsOnDisk.inc(descriptor.statistics().totalCount());
+            return descriptor;
         }
         catch (IOException e)
         {
             throw new FSReadError(e, path.toFile());
+        }
+    }
+
+    @VisibleForTesting
+    void loadStatsComponent(String hintsDirectory)
+    {
+        File file = new File(hintsDirectory, statisticsFileName());
+        try (RandomAccessFile statsFile = new RandomAccessFile(file, "r"))
+        {
+            this.statistics = Statistics.deserialize(statsFile);
+        }
+        catch (FileNotFoundException e)
+        {
+            // Statistics are only used for metrics; it's ok to ignore an absent component during upgrades
+            logger.warn("Cannot find stats component `{}` for hints descriptor, initialising with empty statistics.", file.toString());
+            this.statistics = EMPTY_STATS;
+        }
+        catch (IOException e)
+        {
+            // Ignore error in case of corruption
+            logger.error("Cannot read stats component `{}` for hints descriptor, initialising with empty statistics.", file.toString(), e);
+            this.statistics = EMPTY_STATS;
         }
     }
 
@@ -275,5 +332,38 @@ final class HintsDescriptor
     {
         if (expected != actual)
             throw new IOException("Hints Descriptor CRC Mismatch");
+    }
+
+    public static Statistics EMPTY_STATS = new Statistics(0);
+
+    public static class Statistics
+    {
+        private final long totalCount;
+
+        public Statistics(long totalCount)
+        {
+            this.totalCount = totalCount;
+        }
+
+        public long totalCount()
+        {
+            return totalCount;
+        }
+
+        public void serialize(DataOutput out) throws IOException
+        {
+            out.writeLong(totalCount);
+        }
+
+        public static Statistics deserialize(DataInput in) throws IOException
+        {
+            long totalCount = in.readLong();
+            return new Statistics(totalCount);
+        }
+
+        public static int serializedSize()
+        {
+            return Long.BYTES;
+        }
     }
 }
