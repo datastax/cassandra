@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
@@ -92,7 +93,10 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
         else
         {
             // the common path - the node is both the destination and a valid replica for the hint.
-            hint.applyFuture().thenAccept(o -> reply(id, message.from)).exceptionally(e -> {logger.debug("Failed to apply hint", e); return null;});
+            hint.applyFuture()
+                .thenAccept(o -> reply(id, message.from))
+                .thenAccept(o -> StorageMetrics.totalHintsReplayed.inc())
+                .exceptionally(e -> {logger.debug("Failed to apply hint", e); return null;});
         }
     }
 

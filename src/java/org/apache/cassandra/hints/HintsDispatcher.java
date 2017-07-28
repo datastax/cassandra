@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.metrics.HintedHandoffMetrics;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
@@ -53,10 +55,11 @@ final class HintsDispatcher implements AutoCloseable
     private final InetAddress address;
     private final int messagingVersion;
     private final AtomicBoolean isPaused;
+    private final long oldestLoadedTimestamp;
 
     private long currentPageOffset;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused, long oldestLoadedTimestamp)
     {
         currentPageOffset = 0L;
 
@@ -65,12 +68,13 @@ final class HintsDispatcher implements AutoCloseable
         this.address = address;
         this.messagingVersion = messagingVersion;
         this.isPaused = isPaused;
+        this.oldestLoadedTimestamp = oldestLoadedTimestamp;
     }
 
-    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, AtomicBoolean isPaused)
+    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, AtomicBoolean isPaused, long oldestLoadedTimestamp)
     {
         int messagingVersion = MessagingService.instance().getVersion(address);
-        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, isPaused);
+        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, isPaused, oldestLoadedTimestamp);
     }
 
     public void close()
@@ -141,11 +145,42 @@ final class HintsDispatcher implements AutoCloseable
         if (action == Action.ABORT)
             return action;
 
+        boolean hadFailures = false;
         for (Callback cb : callbacks)
-            if (cb.await() != Callback.Outcome.SUCCESS)
-                return Action.ABORT;
+        {
+            Callback.Outcome outcome = cb.await();
+            updateMetrics(outcome);
 
-        return Action.CONTINUE;
+            if (outcome != Callback.Outcome.SUCCESS)
+                hadFailures = true;
+        }
+
+        if (hadFailures)
+        {
+            return Action.ABORT;
+        }
+        else
+        {
+            if (reader.descriptor().timestamp > oldestLoadedTimestamp)
+                HintedHandoffMetrics.hintsDispatchedSinceStartup.inc(callbacks.size());
+            return Action.CONTINUE;
+        }
+    }
+
+    private void updateMetrics(Callback.Outcome outcome)
+    {
+        switch (outcome)
+        {
+            case SUCCESS:
+                HintsServiceMetrics.hintsSucceeded.mark();
+                break;
+            case FAILURE:
+                HintsServiceMetrics.hintsFailed.mark();
+                break;
+            case TIMEOUT:
+                HintsServiceMetrics.hintsTimedOut.mark();
+                break;
+        }
     }
 
     /*

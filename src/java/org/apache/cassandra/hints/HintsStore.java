@@ -61,6 +61,9 @@ final class HintsStore
     private volatile long dispatchBackoffDuration = MIN_DISPATCH_BACKOFF_DURATION;
     private volatile long lastDispatchFailureTimestamp;
 
+    // last timestamp loaded on the startup
+    public final long oldestLoadedTimestamp;
+
     // last timestamp used in a descriptor; make sure to not reuse the same timestamp for new descriptors.
     private volatile long lastUsedTimestamp;
 
@@ -78,6 +81,7 @@ final class HintsStore
 
         //noinspection resource
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
+        oldestLoadedTimestamp = lastUsedTimestamp;
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)

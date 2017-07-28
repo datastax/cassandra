@@ -41,6 +41,8 @@ public class HintedHandoffMetrics
 
     private static final MetricNameFactory factory = new DefaultNameFactory("HintedHandOffManager");
 
+    public static final Counter hintsDispatchedSinceStartup = Metrics.counter(factory.createMetricName("HintsDispatchedSinceStartup"));
+
     /** Total number of hints which are not stored, This is not a cache. */
     private final LoadingCache<InetAddress, DifferencingCounter> notStored = CacheBuilder.newBuilder().build(new CacheLoader<InetAddress, DifferencingCounter>()
     {
