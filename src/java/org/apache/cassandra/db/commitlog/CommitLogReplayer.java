@@ -25,18 +25,16 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
-import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Ordering;
-import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -678,7 +676,8 @@ public class CommitLogReplayer
         return false;
     }
 
-    static void handleReplayError(boolean permissible, String message, Object... messageArgs) throws IOException
+    @VisibleForTesting
+    public static void handleReplayError(boolean permissible, String message, Object... messageArgs)
     {
         String msg = String.format(message, messageArgs);
         IOException e = new CommitLogReplayException(msg);
@@ -686,12 +685,12 @@ public class CommitLogReplayer
             logger.error("Ignoring commit log replay error likely due to incomplete flush to disk", e);
         else if (Boolean.getBoolean(IGNORE_REPLAY_ERRORS_PROPERTY))
             logger.error("Ignoring commit log replay error", e);
-        else if (!CommitLog.handleCommitError("Failed commit log replay", e))
+        else
         {
             logger.error("Replay stopped. If you wish to override this error and continue starting the node ignoring " +
                          "commit log replay problems, specify -D" + IGNORE_REPLAY_ERRORS_PROPERTY + "=true " +
                          "on the command line");
-            throw e;
+            JVMStabilityInspector.killCurrentJVM(e, false);
         }
     }
 
