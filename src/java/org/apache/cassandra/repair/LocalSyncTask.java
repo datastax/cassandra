@@ -75,9 +75,9 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
     {
         InetAddress local = FBUtilities.getBroadcastAddress();
         // We can take anyone of the node as source or destination, however if one is localhost, we put at source to avoid a forwarding
-        InetAddress dst = r2.endpoint.equals(local) ? r1.endpoint : r2.endpoint;
-        List<Range<Token>> toRequest = r2.endpoint.equals(local) ? transferToRight : transferToLeft;
-        List<Range<Token>> toTransfer = r2.endpoint.equals(local) ? transferToLeft : transferToRight;
+        InetAddress dst = endpoint2.equals(local) ? endpoint1 : endpoint2;
+        List<Range<Token>> toRequest = endpoint2.equals(local) ? transferToRight : transferToLeft;
+        List<Range<Token>> toTransfer = endpoint2.equals(local) ? transferToLeft : transferToRight;
 
         InetAddress preferred = SystemKeyspace.getPreferredIP(dst);
 
@@ -130,7 +130,7 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
 
     public void onSuccess(StreamState result)
     {
-        String message = String.format("Sync complete using session %s between %s and %s on %s", desc.sessionId, r1.endpoint, r2.endpoint, desc.columnFamily);
+        String message = String.format("Sync complete using session %s between %s and %s on %s", desc.sessionId, endpoint1, endpoint2, desc.columnFamily);
         logger.info("[repair #{}] {}", desc.sessionId, message);
         Tracing.traceRepair(message);
         set(stat);
