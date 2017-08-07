@@ -1,3 +1,59 @@
+<<<<<<< HEAD
+=======
+3.0.15
+ * Skip materialized view addition if the base table doesn't exist (CASSANDRA-13737)
+ * Drop table should remove corresponding entries in dropped_columns table (CASSANDRA-13730)
+ * Log warn message until legacy auth tables have been migrated (CASSANDRA-13371)
+ * Fix incorrect [2.1 <- 3.0] serialization of counter cells created in 2.0 (CASSANDRA-13691)
+ * Fix invalid writetime for null cells (CASSANDRA-13711)
+ * Fix ALTER TABLE statement to atomically propagate changes to the table and its MVs (CASSANDRA-12952)
+ * Fixed ambiguous output of nodetool tablestats command (CASSANDRA-13722)
+ * JMXEnabledThreadPoolExecutor with corePoolSize equal to maxPoolSize (Backport CASSANDRA-13329)
+ * Fix Digest mismatch Exception if hints file has UnknownColumnFamily (CASSANDRA-13696)
+ * Purge tombstones created by expired cells (CASSANDRA-13643)
+ * Make concat work with iterators that have different subsets of columns (CASSANDRA-13482)
+ * Set test.runners based on cores and memory size (CASSANDRA-13078)
+ * Allow different NUMACTL_ARGS to be passed in (CASSANDRA-13557)
+ * Allow native function calls in CQLSSTableWriter (CASSANDRA-12606)
+ * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
+ * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
+ Merged from 2.2:
+ * Fix queries with LIMIT and filtering on clustering columns (CASSANDRA-11223)
+ * Fix potential NPE when resume bootstrap fails (CASSANDRA-13272)
+ * Fix toJSONString for the UDT, tuple and collection types (CASSANDRA-13592)
+ * Fix nested Tuples/UDTs validation (CASSANDRA-13646)
+Merged from 2.1:
+ * Clone HeartBeatState when building gossip messages. Make its generation/version volatile (CASSANDRA-13700)
+
+
+3.0.14
+ * Ensure int overflow doesn't occur when calculating large partition warning size (CASSANDRA-13172)
+ * Ensure consistent view of partition columns between coordinator and replica in ColumnFilter (CASSANDRA-13004)
+ * Failed unregistering mbean during drop keyspace (CASSANDRA-13346)
+ * nodetool scrub/cleanup/upgradesstables exit code is wrong (CASSANDRA-13542)
+ * Fix the reported number of sstable data files accessed per read (CASSANDRA-13120)
+ * Fix schema digest mismatch during rolling upgrades from versions before 3.0.12 (CASSANDRA-13559)
+ * Upgrade JNA version to 4.4.0 (CASSANDRA-13072)
+ * Interned ColumnIdentifiers should use minimal ByteBuffers (CASSANDRA-13533)
+ * ReverseIndexedReader may drop rows during 2.1 to 3.0 upgrade (CASSANDRA-13525)
+ * Fix repair process violating start/end token limits for small ranges (CASSANDRA-13052)
+ * Add storage port options to sstableloader (CASSANDRA-13518)
+ * Properly handle quoted index names in cqlsh DESCRIBE output (CASSANDRA-12847)
+ * Avoid reading static row twice from old format sstables (CASSANDRA-13236)
+ * Fix NPE in StorageService.excise() (CASSANDRA-13163)
+ * Expire OutboundTcpConnection messages by a single Thread (CASSANDRA-13265)
+ * Fail repair if insufficient responses received (CASSANDRA-13397)
+ * Fix SSTableLoader fail when the loaded table contains dropped columns (CASSANDRA-13276)
+ * Avoid name clashes in CassandraIndexTest (CASSANDRA-13427)
+ * Handling partially written hint files (CASSANDRA-12728)
+ * Interrupt replaying hints on decommission (CASSANDRA-13308)
+ * Fix schema version calculation for rolling upgrades (CASSANDRA-13441)
+Merged from 2.2:
+ * Nodes started with join_ring=False should be able to serve requests when authentication is enabled (CASSANDRA-11381)
+ * cqlsh COPY FROM: increment error count only for failures, not for attempts (CASSANDRA-13209)
+
+
+>>>>>>> 9186679... Skip materialized view addition if the base table doesn't exist
 3.0.13
  * Fix view builder bug that can filter out data on restart (CASSANDRA-13405)
  * Fix 2i page size calculation when there are no regular columns (CASSANDRA-13400)
