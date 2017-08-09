@@ -796,6 +796,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(localHostId));
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getBroadcastRpcAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
+            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
 
             // load the persisted ring state. This used to be done earlier in the init process,
             // but now we always perform a shadow round when preparing to join and we have to
@@ -812,6 +813,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
+            Gossiper.waitToSettle("accepting client requests");
             BatchlogManager.instance.start();
         }
     }
@@ -1103,7 +1105,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean isJoined()
     {
-        return tokenMetadata.isMember(FBUtilities.getBroadcastAddress()) && !isSurveyMode;
+        return joined && !isSurveyMode;
     }
 
     public void rebuild(String sourceDc)
@@ -2666,7 +2668,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void onDead(InetAddress endpoint, EndpointState state)
     {
-        MessagingService.instance().convict(endpoint);
         notifyDown(endpoint);
     }
 

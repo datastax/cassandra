@@ -373,8 +373,6 @@ public class CassandraDaemon
             }
         }
 
-        Gossiper.waitToSettle("accepting client requests");
-
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
         // due to scheduling errors or race conditions
         ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(ColumnFamilyStore.getBackgroundCompactionTaskSubmitter(), 5, 1, TimeUnit.MINUTES);

@@ -55,7 +55,7 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
     private long lastInterpret = System.nanoTime();
     private long lastPause = 0L;
 
-    private static long getMaxLocalPause()
+    protected static long getMaxLocalPause()
     {
         if (System.getProperty("cassandra.max_local_pause_in_ms") != null)
         {
