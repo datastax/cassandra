@@ -37,8 +37,10 @@ import javax.net.ssl.SSLHandshakeException;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
@@ -79,6 +81,7 @@ import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.openjdk.jmh.util.HashsetMultimap;
 
 public final class MessagingService implements MessagingServiceMBean
 {
@@ -627,6 +630,16 @@ public final class MessagingService implements MessagingServiceMBean
         return cp;
     }
 
+    public boolean hasValidIncomingConnections(InetAddress from)
+    {
+        for (SocketThread socketThread : socketThreads)
+        {
+            if (socketThread.connections.containsKey(from))
+                return true;
+        }
+
+        return false;
+    }
 
     public OutboundTcpConnection getConnection(InetAddress to, MessageOut msg)
     {
@@ -1043,7 +1056,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         private final ServerSocket server;
         @VisibleForTesting
-        public final Set<Closeable> connections = Sets.newConcurrentHashSet();
+        public final Multimap<InetAddress, Closeable> connections = Multimaps.synchronizedMultimap(HashMultimap.create());
 
         SocketThread(ServerSocket server, String name)
         {
@@ -1082,7 +1095,7 @@ public final class MessagingService implements MessagingServiceMBean
                                   ? new IncomingStreamingConnection(version, socket, connections)
                                   : new IncomingTcpConnection(version, MessagingService.getBits(header, 2, 1) == 1, socket, connections);
                     thread.start();
-                    connections.add((Closeable) thread);
+                    connections.put(socket.getInetAddress(), (Closeable) thread);
                 }
                 catch (AsynchronousCloseException e)
                 {
@@ -1123,9 +1136,11 @@ public final class MessagingService implements MessagingServiceMBean
                 // see https://issues.apache.org/jira/browse/CASSANDRA-12513
                 handleIOExceptionOnClose(e);
             }
-            for (Closeable connection : connections)
+            synchronized (connections)
             {
-                connection.close();
+                // make a copy to avoid concurrent modification exceptions in close()
+                for (Closeable connection : Lists.newArrayList(connections.values()))
+                    connection.close();
             }
         }
 
