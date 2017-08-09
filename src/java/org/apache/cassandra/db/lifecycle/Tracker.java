@@ -73,7 +73,7 @@ public class Tracker
     public final boolean loadsstables;
 
     /**
-     * @param memtable Initial Memtable. Can be null.
+     * @param memtable     Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
      */
     public Tracker(Memtable memtable, boolean loadsstables)
@@ -198,7 +198,9 @@ public class Tracker
         notifyAdded(sstables);
     }
 
-    /** (Re)initializes the tracker, purging all references. */
+    /**
+     * (Re)initializes the tracker, purging all references.
+     */
     @VisibleForTesting
     public void reset(Memtable memtable)
     {
@@ -207,6 +209,19 @@ public class Tracker
                           Collections.emptyMap(),
                           Collections.emptyMap(),
                           SSTableIntervalTree.empty()));
+    }
+
+    @VisibleForTesting
+    public void removeSSTablesFromTrackerUnsafe(Collection<SSTableReader> sstablesToRemove)
+    {
+        View currentView = view.get();
+        Set<SSTableReader> toRemove = new HashSet<>(sstablesToRemove);
+        Map<SSTableReader, SSTableReader> sstables = new HashMap<>(currentView.sstablesMap);
+        for (SSTableReader sstable : toRemove)
+            sstables.remove(sstable);
+
+        view.set(new View(currentView.liveMemtables, currentView.flushingMemtables, sstables, currentView.compactingMap, currentView.intervalTree));
+        notifySSTablesChanged(sstablesToRemove, Collections.emptyList(), OperationType.UNKNOWN, null);
     }
 
     public Throwable dropSSTablesIfInvalid(Throwable accumulate)

@@ -31,6 +31,7 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -143,7 +144,8 @@ public class LeveledManifest
 
         assert level < generations.length : "Invalid level " + level + " out of " + (generations.length - 1);
         logDistribution();
-        if (canAddSSTable(reader))
+        int pickedLevel = pickSSTableLevel(level, reader);
+        if (pickedLevel == level)
         {
             // adding the sstable does not cause overlap in the level
             logger.trace("Adding {} to L{}", reader, level);
@@ -156,18 +158,20 @@ public class LeveledManifest
             //   was also supposed to add an sstable at the given level.
             // * we are moving sstables from unrepaired to repaired and the sstable
             //   would cause overlap
+            // * we would overflow the level size
             //
-            // The add(..):ed sstable will be sent to level 0
+            // The add(..):ed sstable will be sent to picked level
             try
             {
-                reader.descriptor.getMetadataSerializer().mutateLevel(reader.descriptor, 0);
+                logger.debug("Dropping sstable {} from L{} to L{} due to overlap/overflow in level", reader.descriptor, level, pickedLevel);
+                reader.descriptor.getMetadataSerializer().mutateLevel(reader.descriptor, pickedLevel);
                 reader.reloadSSTableMetadata();
             }
             catch (IOException e)
             {
-                logger.error("Could not change sstable level - adding it at level 0 anyway, we will find it at restart.", e);
+                logger.error("Could not change sstable level - it will end up at L0, we will find it at restart.", e);
             }
-            generations[0].add(reader);
+            generations[pickedLevel].add(reader);
         }
     }
 
@@ -228,28 +232,60 @@ public class LeveledManifest
     }
 
     /**
-     * Checks if adding the sstable creates an overlap in the level
+     * Checks if adding the sstable creates an overlap in the level.
+     *
+     * Also deals with levels that will overflow the size limit of the level
+     * in which case it will attempt to move to the next level.
+     *
+     * This can often happen when streaming from different source nodes
+     * to a central node:
+     *
+     * Node A streams 50Mb of data from L2 to Node C
+     * Node B streams 90Mb of data from L2 to Node C
+     *
+     * Since the L2 limit is 100Mb all the data will be dropped to
+     * L0 unless we put the 40Mb data into L3.  This can work well for streaming
+     * since there should be no overlap (bootstrap, replace, rebuild, decomm).
+     *
+     * Similar to https://github.com/google/leveldb/blob/master/db/version_set.cc#L502
+     *
+     * @param suggestedLevel the suggested level to pick
      * @param sstable the sstable to add
-     * @return true if it is safe to add the sstable in the level.
+     * @return level it is safe to add the sstable in
      */
-    private boolean canAddSSTable(SSTableReader sstable)
+    private int pickSSTableLevel(int suggestedLevel, SSTableReader sstable)
     {
-        int level = sstable.getSSTableLevel();
-        if (level == 0)
-            return true;
+        if (suggestedLevel == 0)
+            return 0;
 
-        List<SSTableReader> copyLevel = new ArrayList<>(generations[level]);
+        List<SSTableReader> copyLevel = new ArrayList<>(generations[suggestedLevel]);
         copyLevel.add(sstable);
         Collections.sort(copyLevel, SSTableReader.sstableComparator);
 
         SSTableReader previous = null;
+        boolean overlapping = false;
         for (SSTableReader current : copyLevel)
         {
+            //Overlaps we move to next strategy
             if (previous != null && current.first.compareTo(previous.last) <= 0)
-                return false;
+            {
+                overlapping = true;
+                break;
+            }
             previous = current;
         }
-        return true;
+
+        //Now check if this will overflow level and if so try moving to a higher level
+        //This can often happen during streaming operations that keep the source level intact
+        if (overlapping || SSTableReader.getTotalBytes(copyLevel) / (double)maxBytesForLevel(suggestedLevel, maxSSTableSizeInBytes) > 1.001)
+        {
+            if (suggestedLevel + 1 < generations.length)
+                return pickSSTableLevel(suggestedLevel + 1, sstable);
+            else
+                suggestedLevel = 0; //Nothing better we can do than move to L0
+        }
+
+        return suggestedLevel;
     }
 
     private synchronized void sendBackToL0(SSTableReader sstable)

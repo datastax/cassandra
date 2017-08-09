@@ -3,6 +3,7 @@ DSE 5.0.10
  * Prevent marking remote SSTables shadowing compacted data as repaired (APOLLO-688)
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
+ * LCS levels are not respected for `nodetool refresh` and replacing a node (APOLLO-639)
  * Keep sstable level for decommision, remove and move operations (APOLLO-908)
 Merged from DSE 4.8.14:
   * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
