@@ -1379,17 +1379,15 @@ public class TokenMetadata
             Pair<String, String> current = currentLocations.get(ep);
             String dc = snitch.getDatacenter(ep);
             String rack = snitch.getRack(ep);
-            if (dc.equals(current.left) && rack.equals(current.right))
+            if (dc.equals(current.left) && rack.equals(current.right) && !snitch.isDefaultDC(current.left))
                 return;
 
             doRemoveEndpoint(ep, current);
             doAddEndpoint(ep, dc, rack);
 
-            String localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
-
             // We reset the connection is the Dc has changed or if the DC is no longer default
             if (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc &&
-                (!dc.equals(current.left) || snitch.isDefaultDC(current.left)) && !snitch.isDefaultDC(localDC))
+                (!dc.equals(current.left) || snitch.isDefaultDC(current.left)))
             {
                 logger.debug("Resetting connection to {} due to dc compression", ep);
                 MessagingService.instance().getConnectionPool(ep).softReset();
