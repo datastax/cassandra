@@ -81,7 +81,7 @@ public class GossipDigestSynVerbHandler implements IVerbHandler<GossipDigestSyn>
             MessagingService.instance()
                             .sendOneWay(new MessageOut<>(MessagingService.Verb.GOSSIP_DIGEST_ACK,
                                                          new GossipDigestAck(new ArrayList<>(), new HashMap<>()),
-                                                         GossipDigestAck.serializer),
+                                                         GossipDigestAck.serializer, true),
                                         from);
             return;
         }

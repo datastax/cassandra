@@ -1006,7 +1006,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
             public void response(MessageIn msg)
             {
-                realMarkAlive(addr, localState);
+                StageManager.getStage(Stage.GOSSIP).submit(() -> realMarkAlive(addr, localState));
             }
         };
 
@@ -1393,7 +1393,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 gDigests);
         MessageOut<GossipDigestSyn> message = new MessageOut<GossipDigestSyn>(MessagingService.Verb.GOSSIP_DIGEST_SYN,
                 digestSynMessage,
-                GossipDigestSyn.serializer);
+                GossipDigestSyn.serializer, true);
 
         inShadowRound = true;
         int slept = 0;
