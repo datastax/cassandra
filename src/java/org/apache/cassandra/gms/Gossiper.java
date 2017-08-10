@@ -184,7 +184,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                        See CASSANDRA-150 for more exposition. */
                     if (!gossipedToSeed || liveEndpoints.size() < seeds.size())
-                        maybeGossipToSeed(message);
+                        gossipToSeed(message);
 
                     doStatusCheck();
                 }
@@ -686,28 +686,19 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     }
 
     /* Possibly gossip to a seed for facilitating partition healing */
-    private void maybeGossipToSeed(MessageOut<GossipDigestSyn> prod)
+    private void gossipToSeed(MessageOut<GossipDigestSyn> prod)
     {
         int size = seeds.size();
         if (size > 0)
         {
             if (size == 1 && seeds.contains(FBUtilities.getBroadcastAddress()))
-            {
                 return;
-            }
 
-            if (liveEndpoints.size() == 0)
-            {
+            /* Gossip with the seed with some probability. */
+            double probability = getSeedGossipProbability();
+            double randDbl = random.nextDouble();
+            if (randDbl <= probability)
                 sendGossip(prod, seeds);
-            }
-            else
-            {
-                /* Gossip with the seed with some probability. */
-                double probability = seeds.size() / (double) (liveEndpoints.size() + unreachableEndpoints.size());
-                double randDbl = random.nextDouble();
-                if (randDbl <= probability)
-                    sendGossip(prod, seeds);
-            }
         }
     }
 
@@ -1631,6 +1622,16 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     public static long computeExpireTime()
     {
         return System.currentTimeMillis() + Gossiper.aVeryLongTime;
+    }
+
+    public double getSeedGossipProbability()
+    {
+        return DatabaseDescriptor.getSeedGossipProbability();
+    }
+
+    public void setSeedGossipProbability(double probability)
+    {
+        DatabaseDescriptor.setSeedGossipProbability(probability);
     }
 
 
