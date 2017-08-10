@@ -100,7 +100,7 @@ public class LeveledManifest
         // ensure all SSTables are in the manifest
         for (SSTableReader ssTableReader : sstables)
         {
-            manifest.add(ssTableReader);
+            manifest.add(ssTableReader, false);
         }
         for (int i = 1; i < manifest.getAllLevelSize().length; i++)
         {
@@ -138,13 +138,24 @@ public class LeveledManifest
         }
     }
 
-    public synchronized void add(SSTableReader reader)
+    public synchronized void add(SSTableReader reader, boolean isStreaming)
     {
         int level = reader.getSSTableLevel();
 
         assert level < generations.length : "Invalid level " + level + " out of " + (generations.length - 1);
         logDistribution();
-        int pickedLevel = pickSSTableLevel(level, reader);
+        if (level > 0)
+            logger.info("Adding {}", reader);
+
+        int pickedLevel = level;
+
+        //Apply different leveling strategies based on if the file is streaming or
+        //normal compaction changes
+        if (isStreaming)
+            pickedLevel = pickSSTableLevel(level, 0, reader);
+        else if (!canAddSSTable(level, reader))
+            pickedLevel = 0;
+
         if (pickedLevel == level)
         {
             // adding the sstable does not cause overlap in the level
@@ -163,7 +174,7 @@ public class LeveledManifest
             // The add(..):ed sstable will be sent to picked level
             try
             {
-                logger.debug("Dropping sstable {} from L{} to L{} due to overlap/overflow in level", reader.descriptor, level, pickedLevel);
+                logger.debug("Moving sstable {} from L{} to L{} due to overlap/overflow in level", reader.descriptor, level, pickedLevel);
                 reader.descriptor.getMetadataSerializer().mutateLevel(reader.descriptor, pickedLevel);
                 reader.reloadSSTableMetadata();
             }
@@ -200,7 +211,7 @@ public class LeveledManifest
             logger.trace("Adding [{}]", toString(added));
 
         for (SSTableReader ssTableReader : added)
-            add(ssTableReader);
+            add(ssTableReader, false);
         lastCompactedKeys[minLevel] = SSTableReader.sstableOrdering.max(added).last;
     }
 
@@ -231,6 +242,32 @@ public class LeveledManifest
         }
     }
 
+
+    /**
+     * Checks if adding the sstable creates an overlap in the level
+     * @param sstable the sstable to add
+     * @return true if it is safe to add the sstable in the level.
+     */
+    private boolean canAddSSTable(int level, SSTableReader sstable)
+    {
+        if (level == 0)
+            return true;
+
+        List<SSTableReader> copyLevel = new ArrayList<>(generations[level]);
+        copyLevel.add(sstable);
+        Collections.sort(copyLevel, SSTableReader.sstableComparator);
+
+        SSTableReader previous = null;
+        for (SSTableReader current : copyLevel)
+        {
+            if (previous != null && current.first.compareTo(previous.last) <= 0)
+                return false;
+            previous = current;
+        }
+        return true;
+    }
+
+
     /**
      * Checks if adding the sstable creates an overlap in the level.
      *
@@ -253,40 +290,53 @@ public class LeveledManifest
      * @param sstable the sstable to add
      * @return level it is safe to add the sstable in
      */
-    private int pickSSTableLevel(int suggestedLevel, SSTableReader sstable)
+    private int pickSSTableLevel(final int suggestedLevel, int firstNonOverlappingLevel, SSTableReader sstable)
     {
         if (suggestedLevel == 0)
             return 0;
 
-        List<SSTableReader> copyLevel = new ArrayList<>(generations[suggestedLevel]);
-        copyLevel.add(sstable);
-        Collections.sort(copyLevel, SSTableReader.sstableComparator);
+        int pickedLevel = suggestedLevel;
+        boolean overlapping = !canAddSSTable(suggestedLevel, sstable);
 
-        SSTableReader previous = null;
-        boolean overlapping = false;
-        for (SSTableReader current : copyLevel)
-        {
-            //Overlaps we move to next strategy
-            if (previous != null && current.first.compareTo(previous.last) <= 0)
-            {
-                overlapping = true;
-                break;
-            }
-            previous = current;
-        }
+        // Track if we are the first non overlapping level
+        // because if all the other levels are overlapping
+        // We might pick this level as a backup
+        if (!overlapping && firstNonOverlappingLevel == 0)
+            firstNonOverlappingLevel = suggestedLevel;
 
-        //Now check if this will overflow level and if so try moving to a higher level
+        //Now check if this will overflow the level size and if so try moving to a higher level
         //This can often happen during streaming operations that keep the source level intact
-        if (overlapping || SSTableReader.getTotalBytes(copyLevel) / (double)maxBytesForLevel(suggestedLevel, maxSSTableSizeInBytes) > 1.001)
+        if (overlapping || levelScoreWithSStable(suggestedLevel, sstable) > 1.001)
         {
             if (suggestedLevel + 1 < generations.length)
-                return pickSSTableLevel(suggestedLevel + 1, sstable);
-            else
-                suggestedLevel = 0; //Nothing better we can do than move to L0
-        }
+            {
+                pickedLevel = pickSSTableLevel(suggestedLevel + 1, firstNonOverlappingLevel, sstable);
 
-        return suggestedLevel;
+                // If all the other are overlapping/full but we are not overlapping we can
+                // Keep in the suggested level (stay where we are)
+                if (pickedLevel == 0)
+                    pickedLevel = firstNonOverlappingLevel;
+            }
+            else
+            {
+                pickedLevel = 0; //All levels full/overlapped nothing we can do
+            }
+        }
+        
+        if (logger.isTraceEnabled())
+            logger.trace("suggested = {}, overlapped = {}, score = {} picked = {}", suggestedLevel, overlapping, levelScoreWithSStable(suggestedLevel, sstable), pickedLevel);
+
+        return pickedLevel;
     }
+
+    private double levelScoreWithSStable(int level, SSTableReader sstable)
+    {
+        List<SSTableReader> copyLevel = new ArrayList<>(generations[level]);
+        copyLevel.add(sstable);
+
+        return SSTableReader.getTotalBytes(copyLevel) / (double)maxBytesForLevel(level, maxSSTableSizeInBytes);
+    }
+
 
     private synchronized void sendBackToL0(SSTableReader sstable)
     {
@@ -295,7 +345,7 @@ public class LeveledManifest
         {
             sstable.descriptor.getMetadataSerializer().mutateLevel(sstable.descriptor, 0);
             sstable.reloadSSTableMetadata();
-            add(sstable);
+            add(sstable, false);
         }
         catch (IOException e)
         {

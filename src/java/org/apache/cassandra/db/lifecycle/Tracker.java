@@ -198,6 +198,13 @@ public class Tracker
         notifyAdded(sstables);
     }
 
+    public void addSSTablesFromStreaming(Iterable<SSTableReader> sstables)
+    {
+        addInitialSSTables(sstables);
+        maybeIncrementallyBackup(sstables);
+        notifyAddedFromStreaming(sstables);
+    }
+
     /**
      * (Re)initializes the tracker, purging all references.
      */
@@ -368,7 +375,7 @@ public class Tracker
         Throwable fail;
         fail = updateSizeTracking(emptySet(), sstables, null);
         // TODO: if we're invalidated, should we notifyadded AND removed, or just skip both?
-        fail = notifyAdded(sstables, fail);
+        fail = notifyAdded(sstables, fail, false);
 
         if (!isDummy() && !cfstore.isValid())
             dropSSTables();
@@ -426,9 +433,9 @@ public class Tracker
         return accumulate;
     }
 
-    Throwable notifyAdded(Iterable<SSTableReader> added, Throwable accumulate)
+    Throwable notifyAdded(Iterable<SSTableReader> added, Throwable accumulate, boolean fromStreaming)
     {
-        INotification notification = new SSTableAddedNotification(added);
+        INotification notification = new SSTableAddedNotification(added, fromStreaming);
         for (INotificationConsumer subscriber : subscribers)
         {
             try
@@ -445,7 +452,12 @@ public class Tracker
 
     public void notifyAdded(Iterable<SSTableReader> added)
     {
-        maybeFail(notifyAdded(added, null));
+        maybeFail(notifyAdded(added, null, false));
+    }
+
+    public void notifyAddedFromStreaming(Iterable<SSTableReader> added)
+    {
+        maybeFail(notifyAdded(added, null, true));
     }
 
     public void notifySSTableRepairedStatusChanged(Collection<SSTableReader> repairStatusesChanged)
