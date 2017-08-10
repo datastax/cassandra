@@ -71,7 +71,7 @@ public class OutboundTcpConnectionPool
      */
     OutboundTcpConnection getConnection(MessageOut msg)
     {
-        if (Stage.GOSSIP == msg.getStage())
+        if (msg.isGossipMessage)
             return gossipMessages;
         return msg.payloadSize(smallMessages.getTargetVersion()) > LARGE_MESSAGE_THRESHOLD
                ? largeMessages

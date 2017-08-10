@@ -969,6 +969,10 @@ windows_timer_interval: 1
 # as corrupted.
 # max_value_size_in_mb: 256
 
+# Probability cassandra will Gossip with one of the seeds during each round of gossip
+# Valid range is between 0.01 and 1.0
+# seed_gossip_probability: 1.0
+
 # Coalescing Strategies #
 # Coalescing multiples messages turns out to significantly boost message processing throughput (think doubling or more).
 # On bare metal, the floor for packet processing throughput is high enough that many applications won't notice, but in

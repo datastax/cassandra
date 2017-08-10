@@ -18,7 +18,6 @@ DSE 5.0.10
 
 Upgrading
 ---------
-
    - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
      after all nodes are on DSE 5.0.10. Upgrading to DSE 5.1 requires at least DSE 5.1.3.
 
@@ -40,8 +39,6 @@ Upgrading
      result into data corruption (see CASSANDRA-13004 for more details).
      Fixing this bug required a messaging protocol version bump. By default,
      Cassandra 3.0.14 will use 3014 version for messaging.
-   - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
-     after all nodes are on 6.0.
 
      Since Schema Migrations rely the on exact messaging protocol version
      match between nodes, if you need schema changes during the upgrade
