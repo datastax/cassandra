@@ -1664,7 +1664,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         int numOkay = 0;
         int backlogChecks = 0;
 
-        //Only include endpoints that have recieved a heartbeat
+        //Only include endpoints that have received a heartbeat
         //Otherwise we would just be looking at data from peers table
         long epSize = Gossiper.instance.getLiveMembers().size();
 
@@ -1678,7 +1678,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 startingCompletedTasks = ((JMXEnabledThreadPoolExecutor) StageManager.getStage(Stage.GOSSIP)).metrics.completedTasks.getValue();
 
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
-            int currentSize = Gossiper.instance.getEndpointStates().size();
+            Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+            unstableEndpoints.addAll(noLongerStable);
+
+            stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
+            stableEndpoints.removeAll(unstableEndpoints);
+            int currentSize = stableEndpoints.size();
             totalPolls++;
             if (currentSize == epSize)
             {
@@ -1725,7 +1730,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                 if (backlogClear || (backlogChecks >= MAX_BACKLOG_CHECKS && completedTasks > startingCompletedTasks + 2))
                 {
-                    Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
+                    noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
                     unstableEndpoints.addAll(noLongerStable);
 
                     stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
