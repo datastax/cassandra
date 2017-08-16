@@ -62,7 +62,7 @@ public class OutboundTcpConnectionPool
 
         smallMessages = new OutboundTcpConnection(this);
         largeMessages = new OutboundTcpConnection(this);
-        gossipMessages = new OutboundTcpConnection(this);
+        gossipMessages = new OutboundTcpConnection(this, true);
     }
 
     /**
