@@ -477,19 +477,22 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     public static boolean handleCommitError(String message, Throwable t)
     {
-        JVMStabilityInspector.inspectCommitLogThrowable(t);
-        switch (DatabaseDescriptor.getCommitFailurePolicy())
+        Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
+        switch (policy)
         {
             // Needed here for unit tests to not fail on default assertion
             case die:
+                JVMStabilityInspector.killCurrentJVM(t, false);
             case stop:
                 StorageService.instance.stopTransports();
                 //$FALL-THROUGH$
             case stop_commit:
-                logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, DatabaseDescriptor.getCommitFailurePolicy()), t);
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message, policy), t);
                 return false;
             case ignore:
-                logger.error(message, t);
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error(String.format("%s. Commit disk failure policy is %s; ignoring", message, policy), t);
                 return true;
             default:
                 throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());
