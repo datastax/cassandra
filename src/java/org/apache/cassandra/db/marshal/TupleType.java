@@ -49,7 +49,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     private static final Pattern AT_PAT = Pattern.compile(AT);
     private static final String ESCAPED_AT = "\\\\@";
     private static final Pattern ESCAPED_AT_PAT = Pattern.compile(ESCAPED_AT);
-    
+
     protected final List<AbstractType<?>> types;
 
     private final TupleSerializer serializer;

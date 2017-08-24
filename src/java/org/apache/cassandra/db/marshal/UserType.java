@@ -94,7 +94,7 @@ public class UserType extends TupleType
     {
         return true;
     }
-    
+
     @Override
     public boolean isMultiCell()
     {
