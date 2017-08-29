@@ -413,6 +413,11 @@ public class OutboundTcpConnection extends Thread
         out.writeInt(header);
     }
 
+    public boolean isSocketOpen()
+    {
+        return socket != null && socket.isConnected();
+    }
+
     private void disconnect()
     {
         if (socket != null)

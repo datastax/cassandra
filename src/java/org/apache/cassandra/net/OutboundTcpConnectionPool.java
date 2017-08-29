@@ -39,9 +39,9 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class OutboundTcpConnectionPool
 {
+    private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
     public static final long LARGE_MESSAGE_THRESHOLD =
             Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
-    private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
 
     // pointer for the real Address.
     private final InetAddress id;
