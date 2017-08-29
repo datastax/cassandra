@@ -35,6 +35,11 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +85,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     }
 
     protected AtomicInteger pendingEcho = new AtomicInteger();
+    protected AtomicInteger failedEchos = new AtomicInteger();
+    protected AtomicInteger successEchos = new AtomicInteger();
     private volatile ScheduledFuture<?> scheduledGossipTask;
     private static final ReentrantLock taskLock = new ReentrantLock();
     public final static int intervalInMillis = 1000;
@@ -1008,10 +1015,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             {
                 realMarkAlive(addr, localState);
                 pendingEcho.decrementAndGet();
+                successEchos.incrementAndGet();
             }
             public void onFailure(InetAddress from)
             {
                 pendingEcho.decrementAndGet();
+                failedEchos.incrementAndGet();
                 logger.debug("Failed to receive echo reply from {}", from);
             }
         };
@@ -1655,6 +1664,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         final long GOSSIP_SETTLE_POLL_INTERVAL_NS = FailureDetector.getMaxLocalPause();
         final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 3);
         final int MAX_BACKLOG_CHECKS = 10;
+        final int MAX_UNSTABLE_FLIPS = 2;
+        final Map<InetAddress, Integer> unstableTracking = new HashMap<>();
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
 
@@ -1679,7 +1690,16 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);
             Set<InetAddress> noLongerStable = Sets.intersection(stableEndpoints, Gossiper.instance.getUnreachableMembers());
-            unstableEndpoints.addAll(noLongerStable);
+
+            for (InetAddress downEp : noLongerStable)
+            {
+                //Allow nodes to be unstable N times before fencing off.
+                int count = unstableTracking.getOrDefault(downEp, 0);
+                unstableTracking.put(downEp, ++count);
+
+                if (count >= MAX_UNSTABLE_FLIPS)
+                    unstableEndpoints.add(downEp);
+            }
 
             stableEndpoints.addAll(Gossiper.instance.getLiveMembers());
             stableEndpoints.removeAll(unstableEndpoints);
@@ -1765,7 +1785,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
             if (Gossiper.instance.pendingEcho.get() <= 0)
             {
-                logger.info("No pending echos; proceeding");
+                logger.info("No pending echos; proceeding.  Echos failed {}, Echos succeeded {}", Gossiper.instance.failedEchos.get(), Gossiper.instance.successEchos.get());
                 break;
             }
             else if (i == forceAfter)
@@ -1779,5 +1799,4 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         else
             logger.info("Gossip settled; proceeding");
     }
-
 }
