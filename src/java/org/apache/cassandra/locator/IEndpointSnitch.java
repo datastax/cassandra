@@ -64,4 +64,13 @@ public interface IEndpointSnitch
      * to be faster than 2 sequential queries, one against l1 followed by one against l2.
      */
     public boolean isWorthMergingForRangeQuery(List<InetAddress> merged, List<InetAddress> l1, List<InetAddress> l2);
+
+    /**
+     * @return true if the specified dc is the snitches default dc string object,
+     * specifially if its the static string the snitch uses when no DC is known.
+     *
+     * Implementers should try to use == comparison vs .equals() since a user
+     * might accidentally use the same name as their real dc name
+     */
+    public boolean isDefaultDC(String dc);
 }

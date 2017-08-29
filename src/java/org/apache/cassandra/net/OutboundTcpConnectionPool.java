@@ -39,6 +39,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class OutboundTcpConnectionPool
 {
+    private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
     public static final long LARGE_MESSAGE_THRESHOLD =
             Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnectionPool.class);
@@ -83,6 +84,13 @@ public class OutboundTcpConnectionPool
         logger.trace("Reset called for {}", id);
         for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
             conn.closeSocket(false);
+    }
+
+    public void softReset()
+    {
+        logger.trace("Soft reset called for {}", id);
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
+            conn.softCloseSocket();
     }
 
     public void resetToNewerVersion(int version)

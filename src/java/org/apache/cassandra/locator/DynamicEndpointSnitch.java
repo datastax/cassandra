@@ -373,4 +373,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         }
         return maxScore;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        return subsnitch.isDefaultDC(dc);
+    }
 }

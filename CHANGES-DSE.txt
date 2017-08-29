@@ -5,9 +5,9 @@ DSE 5.0.10
  * nodetool rebuild & bootstrap improvements (APOLLO-581)
  * LCS levels are not respected for `nodetool refresh` and replacing a node (APOLLO-639)
  * Keep sstable level for decommision, remove and move operations (APOLLO-908)
+ * Fix for Local DC connections are compressed despite internode_compression: dc (APOLLO-734)
 Merged from DSE 4.8.14:
   * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
-
 
 DSE 5.0.9
  * Skip complex column range tombstones on simple columns (APOLLO-480)

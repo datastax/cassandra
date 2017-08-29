@@ -181,7 +181,9 @@ public class OutboundTcpConnection extends Thread
     {
         String remoteDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(targetHost);
         String localDC = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
-        return remoteDC.equals(localDC);
+
+        // When we don't know the DC default to local
+        return remoteDC.equals(localDC) || DatabaseDescriptor.getEndpointSnitch().isDefaultDC(remoteDC);
     }
 
     public void enqueue(MessageOut<?> message, int id)

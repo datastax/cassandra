@@ -264,4 +264,11 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
     {
         gossipStarted = true;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null && defaultDCRack != null;
+        return dc == defaultDCRack[0];
+    }
 }

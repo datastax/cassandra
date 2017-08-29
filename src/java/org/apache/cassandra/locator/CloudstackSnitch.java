@@ -207,4 +207,11 @@ public class CloudstackSnitch extends AbstractNetworkTopologySnitch
 
         return "http://" + endpoint;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
+    }
 }

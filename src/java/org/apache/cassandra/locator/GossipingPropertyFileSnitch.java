@@ -152,4 +152,11 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         if (pendingHelper != null)
             Gossiper.instance.unregister(pendingHelper);
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        assert dc != null;
+        return dc == DEFAULT_DC;
+    }
 }

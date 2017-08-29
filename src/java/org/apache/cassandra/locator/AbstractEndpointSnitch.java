@@ -81,4 +81,10 @@ public abstract class AbstractEndpointSnitch implements IEndpointSnitch
         }
         return false;
     }
+
+    @Override
+    public boolean isDefaultDC(String dc)
+    {
+        return false;
+    }
 }
