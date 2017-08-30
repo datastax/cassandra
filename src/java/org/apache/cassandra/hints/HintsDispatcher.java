@@ -162,7 +162,7 @@ final class HintsDispatcher implements AutoCloseable
         else
         {
             if (reader.descriptor().timestamp > oldestLoadedTimestamp)
-                HintedHandoffMetrics.hintsDispatchedSinceStartup.inc(callbacks.size());
+                HintedHandoffMetrics.hintsSinceStartupDispatchedAndDiscarded.inc(callbacks.size());
             return Action.CONTINUE;
         }
     }

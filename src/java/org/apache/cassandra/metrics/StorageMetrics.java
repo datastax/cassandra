@@ -32,8 +32,9 @@ public class StorageMetrics
     public static final Counter load = Metrics.counter(factory.createMetricName("Load"));
     public static final Counter exceptions = Metrics.counter(factory.createMetricName("Exceptions"));
     public static final Counter totalHintsInProgress  = Metrics.counter(factory.createMetricName("TotalHintsInProgress"));
+    /** Total hints replayed in the target node **/
     public static final Counter totalHintsReplayed = Metrics.counter(factory.createMetricName("TotalHintsReplayed"));
     public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
     public static final Gauge netHintsSinceStartup = Metrics.register(factory.createMetricName("NetHintsSinceStartup"),
-                                                                      () -> totalHints.getCount() - HintedHandoffMetrics.hintsDispatchedSinceStartup.getCount());
+                                                                      () -> totalHints.getCount() - HintedHandoffMetrics.hintsSinceStartupDispatchedAndDiscarded.getCount());
 }
