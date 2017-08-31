@@ -28,7 +28,6 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.repair.RepairParallelism;
-import org.apache.cassandra.tools.nodetool.Repair;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -45,6 +44,7 @@ public class RepairOption
     public static final String DATACENTERS_KEY = "dataCenters";
     public static final String HOSTS_KEY = "hosts";
     public static final String TRACE_KEY = "trace";
+    public static final String RUN_ANTI_COMPACTION_KEY = "runAntiCompaction";
 
     // we don't want to push nodes too much for repair
     public static final int MAX_JOB_THREADS = 4;
@@ -115,6 +115,11 @@ public class RepairOption
      *             Multiple hosts can be given as comma separated values(e.g. cass1,cass2).</td>
      *             <td></td>
      *         </tr>
+     *         <tr>
+     *             <td>runAntiCompaction</td>
+     *             <td>"true" if anticompaction should be performed after full repair</td>
+     *             <td>false</td>
+     *         </tr>
      *     </tbody>
      * </table>
      *
@@ -129,6 +134,7 @@ public class RepairOption
         boolean primaryRange = Boolean.parseBoolean(options.get(PRIMARY_RANGE_KEY));
         boolean incremental = Boolean.parseBoolean(options.get(INCREMENTAL_KEY));
         boolean trace = Boolean.parseBoolean(options.get(TRACE_KEY));
+        boolean runAntiCompaction = Boolean.parseBoolean(options.get(RUN_ANTI_COMPACTION_KEY));
 
         int jobThreads = 1;
         if (options.containsKey(JOB_THREADS_KEY))
@@ -166,7 +172,8 @@ public class RepairOption
             }
         }
 
-        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges, !ranges.isEmpty());
+        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
+                                               !ranges.isEmpty(), runAntiCompaction);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -222,17 +229,20 @@ public class RepairOption
 
     private final RepairParallelism parallelism;
     private final boolean primaryRange;
-    private final boolean incremental;
+
+    private boolean incremental;
     private final boolean trace;
     private final int jobThreads;
     private final boolean isSubrangeRepair;
+    private final boolean runAntiCompaction;
 
     private final Collection<String> columnFamilies = new HashSet<>();
     private final Collection<String> dataCenters = new HashSet<>();
     private final Collection<String> hosts = new HashSet<>();
     private final Collection<Range<Token>> ranges = new HashSet<>();
 
-    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair)
+    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads,
+                        Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean runAntiCompaction)
     {
         if (FBUtilities.isWindows() &&
             (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
@@ -250,6 +260,7 @@ public class RepairOption
         this.jobThreads = jobThreads;
         this.ranges.addAll(ranges);
         this.isSubrangeRepair = isSubrangeRepair;
+        this.runAntiCompaction = runAntiCompaction;
     }
 
     public RepairParallelism getParallelism()
@@ -299,7 +310,7 @@ public class RepairOption
 
     public boolean isGlobal()
     {
-        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair();
+        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair() && (isIncremental() || runAntiCompaction);
     }
 
     public boolean isSubrangeRepair()
@@ -309,6 +320,11 @@ public class RepairOption
 
     public boolean isInLocalDCOnly() {
         return dataCenters.size() == 1 && dataCenters.contains(DatabaseDescriptor.getLocalDataCenter());
+    }
+
+    public void setIncremental(boolean incremental)
+    {
+        this.incremental = incremental;
     }
 
     @Override
@@ -322,7 +338,8 @@ public class RepairOption
                        ", ColumnFamilies: " + columnFamilies +
                        ", dataCenters: " + dataCenters +
                        ", hosts: " + hosts +
+                       ", runAntiCompaction: " + runAntiCompaction +
                        ", # of ranges: " + ranges.size() +
-                       ')';
+                       ")";
     }
 }

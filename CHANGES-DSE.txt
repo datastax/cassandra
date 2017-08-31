@@ -1,4 +1,8 @@
 DSE 5.0.10
+ * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
+ * Add nodetool mark_unrepaired command (APOLLO-692)
+ * Make full repair default and disallow incremental repair on MV tables (APOLLO-596)
+ * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (APOLLO-1010)
  * Simplify role-permissions handling (APOLLO-796)
  * Prevent marking remote SSTables shadowing compacted data as repaired (APOLLO-688)
  * fix completed rebuild logging always says 0 bytes (APOLLO-810)

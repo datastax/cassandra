@@ -1,4 +1,16 @@
 3.0.15
+ * Better tolerate improperly formatted bcrypt hashes (CASSANDRA-13626) 
+ * Fix race condition in read command serialization (CASSANDRA-13363)
+ * Enable segement creation before recovering commitlogs (CASSANDRA-13587)
+ * Fix AssertionError in short read protection (CASSANDRA-13747)
+ * Don't skip corrupted sstables on startup (CASSANDRA-13620)
+ * Fix the merging of cells with different user type versions (CASSANDRA-13776)
+ * Copy session properties on cqlsh.py do_login (CASSANDRA-13640)
+ * Potential AssertionError during ReadRepair of range tombstone and partition deletions (CASSANDRA-13719)
+ * Don't let stress write warmup data if n=0 (CASSANDRA-13773)
+ * Gossip thread slows down when using batch commit log (CASSANDRA-12966)
+ * Randomize batchlog endpoint selection with only 1 or 2 racks (CASSANDRA-12884)
+ * Fix digest calculation for counter cells (CASSANDRA-13750)
  * Fix ColumnDefinition.cellValueType() for non-frozen collection and change SSTabledump to use type.toJSONString() (CASSANDRA-13573)
  * Skip materialized view addition if the base table doesn't exist (CASSANDRA-13737)
  * Drop table should remove corresponding entries in dropped_columns table (CASSANDRA-13730)
@@ -16,13 +28,16 @@
  * Allow native function calls in CQLSSTableWriter (CASSANDRA-12606)
  * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
  * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
- Merged from 2.2:
+ * sstabledump reports incorrect usage for argument order (CASSANDRA-13532)
+Merged from 2.2:
+ * Uncaught exceptions in Netty pipeline (CASSANDRA-13649)
  * Prevent integer overflow on exabyte filesystems (CASSANDRA-13067)
  * Fix queries with LIMIT and filtering on clustering columns (CASSANDRA-11223)
  * Fix potential NPE when resume bootstrap fails (CASSANDRA-13272)
  * Fix toJSONString for the UDT, tuple and collection types (CASSANDRA-13592)
  * Fix nested Tuples/UDTs validation (CASSANDRA-13646)
 Merged from 2.1:
+ * Remove stress-test target in CircleCI as it's not existing (CASSANDRA-13775)
  * Clone HeartBeatState when building gossip messages. Make its generation/version volatile (CASSANDRA-13700)
 
 

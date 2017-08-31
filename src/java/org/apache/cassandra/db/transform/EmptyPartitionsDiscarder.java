@@ -15,24 +15,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.batchlog;
+package org.apache.cassandra.db.transform;
 
-public interface BatchlogManagerMBean
+import org.apache.cassandra.db.rows.BaseRowIterator;
+
+public final class EmptyPartitionsDiscarder extends Transformation<BaseRowIterator<?>>
 {
-    /**
-     * Counts all batches currently in the batchlog.
-     *
-     * @return total batch count
-     */
-    public int countAllBatches();
+    @Override
+    protected BaseRowIterator applyToPartition(BaseRowIterator iterator)
+    {
+        if (iterator.isEmpty())
+        {
+            iterator.close();
+            return null;
+        }
 
-    /**
-     * @return total count of batches replayed since node start
-     */
-    public long getTotalBatchesReplayed();
-
-    /**
-     * Forces batchlog replay. Blocks until completion.
-     */
-    public void forceBatchlogReplay() throws Exception;
+        return iterator;
+    }
 }

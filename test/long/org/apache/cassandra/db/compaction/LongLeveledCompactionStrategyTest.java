@@ -28,7 +28,6 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
@@ -38,9 +37,12 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class LongLeveledCompactionStrategyTest
 {
@@ -71,13 +73,94 @@ public class LongLeveledCompactionStrategyTest
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(cfname);
         store.disableAutoCompaction();
 
-        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy)store.getCompactionStrategyManager().getStrategies().get(1);
-
-        ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 KB value, make it easy to have multiple files
+        LeveledCompactionStrategy repaired = (LeveledCompactionStrategy) store.getCompactionStrategyManager().getStrategies().get(0);
+        LeveledCompactionStrategy unrepaired = (LeveledCompactionStrategy) store.getCompactionStrategyManager().getStrategies().get(1);
 
         // Enough data to have a level 1 and 2
-        int rows = 128;
-        int columns = 10;
+        insertData(store, 32, 10);
+
+        // Execute LCS in parallel
+        ExecutorService executor = new ThreadPoolExecutor(4, 4,
+                                                          Long.MAX_VALUE, TimeUnit.SECONDS,
+                                                          new LinkedBlockingDeque<Runnable>());
+        compact(unrepaired, executor);
+
+        // Assert all SSTables are lined up correctly.
+        checkLevels(unrepaired.manifest);
+
+        // Make sure there are no repaired SSTables
+        checkEmpty(repaired);
+
+        // Mark all SSTables as repaired
+        store.mutateRepairedAt(store.getLiveSSTables(), System.currentTimeMillis());
+
+        // Make sure there are no unrepaired sstables
+        checkEmpty(unrepaired);
+
+        // Check repaired levels
+        checkLevels(repaired.manifest);
+
+        //Check that all repaired SSTables are either in L1 or L2
+        assertTrue(repaired.manifest.getLevel(0).size() == 0);
+        assertTrue(repaired.manifest.getLevel(1).size() > 0);
+        assertTrue(repaired.manifest.getLevel(2).size() > 0);
+
+        // Insert more unrepaired data - enough to have L1 but not L2
+        insertData(store, 22, 4);
+
+        compact(unrepaired, executor);
+
+        // Assert all SSTables are lined up correctly.
+        checkLevels(unrepaired.manifest);
+
+        //Check that all unrepaired SSTables are in L1
+        assertEquals(0, unrepaired.manifest.getLevel(0).size());
+        assertTrue(unrepaired.manifest.getLevel(1).size() > 0);
+        assertEquals(0, unrepaired.manifest.getLevel(2).size());
+
+        List<SSTableReader> previousRepairedL1 = new ArrayList<>(repaired.manifest.getLevel(1));
+        List<SSTableReader> previousRepairedL2 = new ArrayList<>(repaired.manifest.getLevel(2));
+        List<SSTableReader> previousUnrepairedL1 = new ArrayList<>(unrepaired.manifest.getLevel(1));
+
+        //Call forceMarkAllSSTablesAsUnrepaired
+        StorageService.instance.forceMarkAllSSTablesAsUnrepaired(ksname, cfname);
+
+        // Make sure there are no repaired SSTables
+        checkEmpty(repaired);
+
+        //Check that all unrepaired SSTables are in L0, L1 or L2
+        assertTrue(unrepaired.manifest.getLevel(0).size() > 0);
+        assertTrue(unrepaired.manifest.getLevel(1).size() > 0);
+        assertTrue(unrepaired.manifest.getLevel(2).size() > 0);
+
+        //After marking sstables as unrepaired, unrepaired L1 should remain unchanged
+        assertTrue(previousUnrepairedL1.stream().allMatch(s -> s.getSSTableLevel() == 1));
+
+        //repaired L1 should be dropped to L0 due to overlap with unrepaired L1
+        previousRepairedL1.stream().forEach(s -> System.out.println(s + " " + s.getSSTableLevel()));
+        assertTrue(previousRepairedL1.stream().allMatch(s -> s.getSSTableLevel() == 0));
+
+        //repaired L2 should remain unchanged since there is no overlap with repaired L2
+        assertTrue(previousRepairedL2.stream().allMatch(s -> s.getSSTableLevel() == 2));
+
+        //now compact unrepaired
+        compact(unrepaired, executor);
+
+        // Assert all SSTables are lined up correctly.
+        checkLevels(unrepaired.manifest);
+
+        //Check that all repaired SSTables are either in L1 or L2
+        assertTrue(unrepaired.manifest.getLevel(0).size() == 0);
+        assertTrue(unrepaired.manifest.getLevel(1).size() > 0);
+        assertTrue(unrepaired.manifest.getLevel(2).size() > 0);
+
+        // Make sure again there are no repaired SSTables
+        checkEmpty(repaired);
+    }
+
+    private void insertData(ColumnFamilyStore store, int rows, int columns)
+    {
+        ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 KB value, make it easy to have multiple files
 
         // Adds enough data to trigger multiple sstable per level
         for (int r = 0; r < rows; r++)
@@ -91,11 +174,10 @@ public class LongLeveledCompactionStrategyTest
             rm.apply();
             store.forceBlockingFlush();
         }
+    }
 
-        // Execute LCS in parallel
-        ExecutorService executor = new ThreadPoolExecutor(4, 4,
-                                                          Long.MAX_VALUE, TimeUnit.SECONDS,
-                                                          new LinkedBlockingDeque<Runnable>());
+    private void compact(LeveledCompactionStrategy lcs, ExecutorService executor)
+    {
         List<Runnable> tasks = new ArrayList<Runnable>();
         while (true)
         {
@@ -122,9 +204,18 @@ public class LongLeveledCompactionStrategyTest
 
             tasks.clear();
         }
+    }
 
-        // Assert all SSTables are lined up correctly.
-        LeveledManifest manifest = lcs.manifest;
+    private void checkEmpty(LeveledCompactionStrategy repaired)
+    {
+        for (Integer size : repaired.getAllLevelSize())
+        {
+            assertEquals((Integer)0, size);
+        }
+    }
+
+    private void checkLevels(LeveledManifest manifest)
+    {
         int levels = manifest.getLevelCount();
         for (int level = 0; level < levels; level++)
         {

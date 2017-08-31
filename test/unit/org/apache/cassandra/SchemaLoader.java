@@ -27,10 +27,13 @@ import org.junit.BeforeClass;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.IndexTarget;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.StubIndex;
@@ -270,6 +273,58 @@ public class SchemaLoader
     public static void createKeyspace(String name, KeyspaceParams params, Tables tables, Types types)
     {
         MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true);
+    }
+
+    public static void createKeyspace(String name, KeyspaceParams params, CFMetaData[] tables, Iterable<ViewDefinition> views)
+    {
+        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables), Views.builder().add(views).build(), Types.none(),
+                                                                     Functions.none()), true);
+    }
+
+    public static void createView(String ks, String baseTableName, String mvName)
+    {
+        CFMetaData baseCfm = Schema.instance.getCFMetaData(ks, baseTableName);
+        createView(baseCfm, mvName);
+    }
+
+    public static ViewDefinition createView(CFMetaData baseCfm, String mvName)
+    {
+        return createView(mvName, baseCfm, 1, AsciiType.instance, AsciiType.instance, AsciiType.instance);
+    }
+
+    public static ViewDefinition createView(String viewName, CFMetaData baseCfm, int columnCount, AbstractType<?> keyType,
+                                            AbstractType<?> valType, AbstractType<?> clusteringType)
+    {
+        UUID baseTableId = baseCfm.cfId;
+
+        StringBuilder whereClauseBuilder = new StringBuilder();
+        Iterator<ColumnDefinition> columns = baseCfm.getColumnMetadata().values().iterator();
+        whereClauseBuilder.append(String.format("%s IS NOT NULL", columns.next().name.toCQLString()));
+        while (columns.hasNext())
+        {
+            whereClauseBuilder.append(String.format(" AND %S IS NOT NULL", columns.next().name.toCQLString()));
+        }
+
+        String rawSelect = View.buildSelectStatement(baseCfm.cfName, baseCfm.allColumns(), whereClauseBuilder.toString());
+        System.out.println("Raw select: " + rawSelect);
+        SelectStatement.RawStatement select = (SelectStatement.RawStatement) QueryProcessor.parseStatement(rawSelect);
+
+        CFMetaData.Builder viewCfm;
+        viewCfm = CFMetaData.Builder.create(baseCfm.ksName, viewName)
+                                    .addPartitionKey("val", keyType)
+                                    .addRegularColumn("key", valType);
+
+        if(clusteringType != null)
+            viewCfm = viewCfm.addClusteringColumn("name", clusteringType);
+
+        for (int i = 0; i < columnCount; i++)
+            viewCfm.addRegularColumn("val" + i, AsciiType.instance);
+
+        ViewDefinition viewDefinition = new ViewDefinition(baseCfm.ksName, viewName, baseTableId, baseCfm.cfName, true, select,
+                                                           whereClauseBuilder.toString(), viewCfm.build());
+
+        MigrationManager.announceNewView(viewDefinition, true);
+        return viewDefinition;
     }
 
     public static ColumnDefinition integerColumn(String ksName, String cfName)

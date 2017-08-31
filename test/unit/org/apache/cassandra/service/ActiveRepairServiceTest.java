@@ -20,7 +20,15 @@ package org.apache.cassandra.service;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -29,7 +37,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -73,7 +80,7 @@ public class ActiveRepairServiceTest
     public InetAddress LOCAL, REMOTE;
 
     private boolean initialized;
-
+    private Set<SSTableReader> toCleanup = new HashSet<>();
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
@@ -110,6 +117,9 @@ public class ActiveRepairServiceTest
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE5);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        // Make sure to wipe all sstables forcefully removed from the tracker
+        store.addSSTables(Sets.difference(toCleanup, store.getLiveSSTables()));
+        toCleanup.clear();
         store.truncateBlocking();
         store = keyspace.getColumnFamilyStore(CF_COUNTER);
         store.truncateBlocking();
@@ -453,7 +463,6 @@ public class ActiveRepairServiceTest
         verifyAntiCompactionTask(antiCompactionTask, Sets.difference(localSSTables, Collections.singleton(localB)), remoteWithTombstones, Sets.newHashSet(localDShadowsLocalAnB, remoteAShadowsLocalAnD, remoteBShadowsLocalBnD), FULL_RANGE);
         cleanup(antiCompactionTask, cfs, prs);
 
-
         // Case 7: remote SSTables received and local SSTable C is compacted
         List<Range<Token>> ranges = Lists.newArrayList(getRange(0,1), getRange(1,2));
         SSTableReader remoteEShadowsRemoteC = writeSSTableWithTombstones(cfs, cfs.metadata, 9, 12, 0, 1, 10);
@@ -538,7 +547,7 @@ public class ActiveRepairServiceTest
         }
 
         // Cleanup
-        cfs.getTracker().removeUnsafe(cfs.getLiveSSTables());
+        removeUnsafe(cfs);
 
         // Case 2 - check resources are released after successful anti-compaction
         ActiveRepairService.ParentRepairSession prs2 = setupRepairSession(cfs, localSSTables, 2);
@@ -611,8 +620,7 @@ public class ActiveRepairServiceTest
         assertTrue(prs.remoteCompactingSSTables.isEmpty());
         assertFalse(cfs.getTracker().getSubscribers().contains(prs));
 
-        // Remove SSTables from tracker
-        cfs.getTracker().removeUnsafe(cfs.getLiveSSTables());
+        removeUnsafe(cfs);
     }
 
     private void simulateReceivedRepairedSSTablesFromStreaming(ColumnFamilyStore cfs, Set<SSTableReader> receivedWithTombstones,
@@ -633,7 +641,7 @@ public class ActiveRepairServiceTest
         }
         catch (AssertionError e)
         {
-            cfs.getTracker().removeUnsafe(receivedSSTables);
+            removeUnsafe(cfs, receivedSSTables);
         }
 
         ActiveRepairService.instance.receiveStreamedSSTables(receivedSSTables);
@@ -652,14 +660,13 @@ public class ActiveRepairServiceTest
     {
         for (SSTableReader reader : repaired)
         {
-            System.out.println(reader);
             assertEquals(repairedAt, reader.getSSTableMetadata().repairedAt);
         }
     }
 
     private void simulateCompaction(ColumnFamilyStore cfs, SSTableReader toBeCompacted)
     {
-        cfs.getTracker().removeUnsafe(Collections.singleton(toBeCompacted));
+        removeUnsafe(cfs, Sets.newHashSet(toBeCompacted));
     }
 
     private void verifyAntiCompactionTask(LocalAntiCompactionTask antiCompactionTask, Set<SSTableReader> localNonCompacted,
@@ -710,5 +717,18 @@ public class ActiveRepairServiceTest
             }
             cfs.forceBlockingFlush();
         }
+    }
+
+    private void removeUnsafe(ColumnFamilyStore cfs)
+    {
+        removeUnsafe(cfs, cfs.getLiveSSTables());
+    }
+
+    private void removeUnsafe(ColumnFamilyStore cfs, Set<SSTableReader> sstables)
+    {
+        // Save sstable set for after-test cleanup
+        toCleanup.addAll(sstables);
+        // Remove SSTables from tracker
+        cfs.getTracker().removeUnsafe(sstables);
     }
 }

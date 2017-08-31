@@ -100,6 +100,12 @@ public abstract class AbstractReadCommandBuilder
         return this;
     }
 
+    public AbstractReadCommandBuilder clusterings(NavigableSet<Clustering> clusterings)
+    {
+        this.clusterings = clusterings;
+        return this;
+    }
+
     public AbstractReadCommandBuilder reverse()
     {
         this.reversed = true;
@@ -189,13 +195,6 @@ public abstract class AbstractReadCommandBuilder
 
     protected ClusteringIndexFilter makeFilter()
     {
-        // StatementRestrictions.isColumnRange() returns false for static compact tables, which means
-        // SelectStatement.makeClusteringIndexFilter uses a names filter with no clusterings for static
-        // compact tables, here we reproduce this behavior (CASSANDRA-11223). Note that this code is only
-        // called by tests.
-        if (cfs.metadata.isStaticCompactTable())
-            return new ClusteringIndexNamesFilter(new TreeSet<>(cfs.metadata.comparator), reversed);
-
         if (clusterings != null)
         {
             return new ClusteringIndexNamesFilter(clusterings, reversed);
@@ -336,7 +335,7 @@ public abstract class AbstractReadCommandBuilder
             else
                 bounds = new ExcludingBounds<>(start, end);
 
-            return new PartitionRangeReadCommand(cfs.metadata, nowInSeconds, makeColumnFilter(), filter, makeLimits(), new DataRange(bounds, makeFilter()), Optional.empty());
+            return PartitionRangeReadCommand.create(false, cfs.metadata, nowInSeconds, makeColumnFilter(), filter, makeLimits(), new DataRange(bounds, makeFilter()));
         }
 
         static DecoratedKey makeKey(CFMetaData metadata, Object... partitionKey)

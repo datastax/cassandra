@@ -130,14 +130,19 @@ public class LocalAntiCompactionTask implements Runnable
                                                                                                                                     r.contains(s.getRange())))
                                                                                .collect(Collectors.toSet());
 
-            // Now anti-compact all SSTables not fully contained in repaired range
             Set<SSTableReader> sstablesToAntiCompact = Sets.newHashSet(Sets.difference(localSSTablesTxn.originals(), localSSTablesFullyContainedInRepairedRange));
+
+            Set<SSTableReader> remoteToMarkRepaired = remoteSSTablesTxns.stream().flatMap(r -> r.originals().stream()).collect(Collectors.toSet());
+
+            // Mark as repaired remote SSTables or local SSTables fully contained in repaired range
+            Set<SSTableReader> markRepairedSet = Sets.union(localSSTablesFullyContainedInRepairedRange, remoteToMarkRepaired);
+
+            logger.info("[repair #{}] Starting anticompaction for {}.{} on {}/{} sstables on {} ranges.", parentSessionId, cfs.keyspace.getName(),
+                        cfs.getTableName(), sstablesToAntiCompact.size() + markRepairedSet.size(), cfs.getLiveSSTables().size(), ranges.size());
+
+            int antiCompactedSSTableCount = 0;
             if (!sstablesToAntiCompact.isEmpty())
             {
-                int antiCompactedSSTableCount = 0;
-                logger.info("[repair #{}] Starting anticompaction for {}.{} on {}/{} sstables on {} ranges", parentSessionId, cfs.keyspace.getName(),
-                            cfs.getTableName(), sstablesToAntiCompact.size(), cfs.getLiveSSTables().size(), ranges.size());
-
                 // Repairs can take place on both unrepaired (incremental + full) and repaired (full) data.
                 // Although anti-compaction could work on repaired sstables as well and would result in having more accurate
                 // repairedAt values for these, we still avoid anti-compacting already repaired sstables, as we currently don't
@@ -160,23 +165,22 @@ public class LocalAntiCompactionTask implements Runnable
                             parentSessionId, sstablesToAntiCompact.size(), antiCompactedSSTableCount);
             }
 
-            // All remote SSTables must be fully contained in repaired range - since we don't anti-compact remote SSTables
-            Set<SSTableReader> remoteToMarkRepaired = remoteSSTablesTxns.stream().flatMap(r -> r.originals().stream()).collect(Collectors.toSet());
-            assert remoteToMarkRepaired.stream().allMatch(s -> normalizedRanges.stream().anyMatch(r -> r.contains(s.getRange())))
-                                : String.format("Some remote SSTables %s are not fully contained in repaired range %s.", remoteToMarkRepaired, ranges);
-
-            // Mark as repaired remote SSTables or local SSTables fully contained in repaired range
-            Set<SSTableReader> markRepairedSet = Sets.union(localSSTablesFullyContainedInRepairedRange, remoteToMarkRepaired);
             if (!markRepairedSet.isEmpty())
             {
                 logger.info("[repair #{}] {} SSTable(s) fully contained in repaired range, mutating repairedAt instead of anticompacting.",
                             parentSessionId, markRepairedSet.size());
                 cfs.mutateRepairedAt(markRepairedSet, repairedAt);
+                antiCompactedSSTableCount += markRepairedSet.size();
             }
 
             if (sstablesToAntiCompact.isEmpty() && markRepairedSet.isEmpty())
             {
                 logger.info("[repair #{}] No SSTables to anti-compact.", parentSessionId);
+            }
+            else
+            {
+                logger.info("[repair #{}] Anticompaction completed successfully, anticompacted from {} to {} sstable(s).",
+                            parentSessionId, sstablesToAntiCompact.size() + markRepairedSet.size(), antiCompactedSSTableCount);
             }
 
             // Release local and remote SSTables sstables fully contained in repaired range and finish local transaction

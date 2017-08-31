@@ -60,8 +60,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
@@ -74,6 +76,7 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -693,17 +696,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
             // force foreign sstables to level 0
             if (resetLevels)
+            {try
             {
-                try
-                {
-                    if (new File(descriptor.filenameFor(Component.STATS)).exists())
-                        descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
-                }
-                catch (IOException e)
-                {
-                    SSTableReader.logOpenException(entry.getKey(), e);
-                    continue;
-                }
+                if (new File(descriptor.filenameFor(Component.STATS)).exists())
+                    descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
+            }
+            catch (IOException e)
+            {
+                FileUtils.handleCorruptSSTable(new CorruptSSTableException(e,entry.getKey().filenameFor(Component.STATS)));
+                logger.error("Cannot read sstable {}; other IO error, skipping table", entry, e);
+                continue;}
             }
 
             // Increment the generation until we find a filename that doesn't exist. This is needed because the new
@@ -729,9 +731,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 reader = SSTableReader.open(newDescriptor, entry.getValue(), metadata);
             }
-            catch (IOException e)
+            catch (CorruptSSTableException ex)
             {
-                SSTableReader.logOpenException(entry.getKey(), e);
+                FileUtils.handleCorruptSSTable(ex);
+                logger.error("Corrupt sstable {}; skipping table", entry, ex);
+                continue;
+            }
+            catch (FSError ex)
+            {
+                FileUtils.handleFSError(ex);
+                logger.error("Cannot read sstable {}; file system error, skipping table", entry, ex);
+                continue;
+            }
+            catch (IOException ex)
+            {
+                FileUtils.handleCorruptSSTable(new CorruptSSTableException(ex, entry.getKey().filenameFor(Component.DATA)));
+                logger.error("Cannot read sstable {}; other IO error, skipping table", entry, ex);
                 continue;
             }
             newSSTables.add(reader);
@@ -2498,5 +2513,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (notify)
             getTracker().notifySSTableRepairedStatusChanged(changedStatus);
         return changedStatus.size();
+    }
+
+    public boolean hasViews()
+    {
+        return !viewManager.isEmpty();
+    }
+
+    public TableInfo getTableInfo()
+    {
+        return new TableInfo(hasViews(), metadata.isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()));
+    }
+
+    public int forceMarkAllSSTablesAsUnrepaired()
+    {
+        return runWithCompactionsDisabled(() ->
+                                   {
+                                       Set<SSTableReader> repairedSSTables = getLiveSSTables().stream().filter(SSTableReader::isRepaired).collect(Collectors.toSet());
+                                       int mutated = mutateRepairedAt(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE);
+                                       logger.debug("Marked {} sstables from table {}.{} as repaired.", mutated, keyspace.getName(), name);
+                                   return mutated;
+                                   }, true, true);
     }
 }

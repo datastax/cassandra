@@ -129,4 +129,37 @@ public class RepairOptionTest
                 Murmur3Partitioner.instance);
         assertTrue(ro.isGlobal());
     }
+
+    @Test
+    public void testRunAntiCompactionFlag() throws Exception
+    {
+        //Full repair is non-global without the anticompaction flag
+        RepairOption ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "false"), Murmur3Partitioner.instance);
+        assertFalse(ro.isGlobal());
+
+        //Full repair is global with the anticompaction flag set to true
+        ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "false", RepairOption.RUN_ANTI_COMPACTION_KEY, "true"),
+                                Murmur3Partitioner.instance);
+        assertTrue(ro.isGlobal());
+
+        //Full repair is non-global with the anticompaction flag set to false
+        ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "false", RepairOption.RUN_ANTI_COMPACTION_KEY, "false"),
+                                Murmur3Partitioner.instance);
+        assertFalse(ro.isGlobal());
+
+        //Incremental repair is global when the anticompaction flag is set to true
+        ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "true", RepairOption.RUN_ANTI_COMPACTION_KEY, "true"),
+                                Murmur3Partitioner.instance);
+        assertTrue(ro.isGlobal());
+
+        //Incremental repair is still global, even with the anticompaction flag set to false
+        ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "true", RepairOption.RUN_ANTI_COMPACTION_KEY, "false"),
+                                Murmur3Partitioner.instance);
+        assertTrue(ro.isGlobal());
+
+        //subrange is never global, even with the runAnticompaction flag set to true
+        ro = RepairOption.parse(ImmutableMap.of(RepairOption.INCREMENTAL_KEY, "false", RepairOption.RANGES_KEY, "42:44", RepairOption.RUN_ANTI_COMPACTION_KEY, "true"),
+                                             Murmur3Partitioner.instance);
+        assertFalse(ro.isGlobal());
+    }
 }

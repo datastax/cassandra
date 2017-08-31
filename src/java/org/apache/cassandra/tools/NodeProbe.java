@@ -81,11 +81,13 @@ import org.apache.cassandra.service.GCInspectorMXBean;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageProxyMBean;
 import org.apache.cassandra.service.StorageServiceMBean;
+import org.apache.cassandra.service.TableInfo;
 import org.apache.cassandra.streaming.StreamManagerMBean;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.management.StreamStateCompositeData;
 
 import com.google.common.base.Function;
+import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -848,6 +850,14 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.getKeyspaces();
     }
 
+    public Map<String, TableInfo> getTableInfos(String keyspace, String... tables)
+    {
+        Map<String, Map<String, String>> tableInfosAsMap = ssProxy.getTableInfos(keyspace, tables);
+        Map<String, TableInfo> tableInfo = new HashMap<>();
+        tableInfosAsMap.entrySet().stream().forEach(e -> tableInfo.put(e.getKey(), TableInfo.fromMap(e.getValue())));
+        return tableInfo;
+    }
+
     public List<String> getNonSystemKeyspaces()
     {
         return ssProxy.getNonSystemKeyspaces();
@@ -1429,6 +1439,23 @@ public class NodeProbe implements AutoCloseable
     public long getPid()
     {
         return ssProxy.getPid();
+    }
+
+    public boolean hasIncrementallyRepairedAnyTable()
+    {
+        return getKeyspaces().stream().anyMatch(k -> getTableInfos(k).values().stream().anyMatch(t -> t.wasIncrementallyRepaired));
+    }
+
+    public void markAllSSTablesAsUnrepaired(PrintStream out, String keyspace, String[] tables) throws IOException
+    {
+        int marked = ssProxy.forceMarkAllSSTablesAsUnrepaired(keyspace, tables);
+        if (marked == 0)
+        {
+            out.println(String.format("No repaired SSTables to mark as unrepaired.", marked));
+        } else
+        {
+            out.println(String.format("Marked %d SSTable(s) as unrepaired.", marked));
+        }
     }
 }
 

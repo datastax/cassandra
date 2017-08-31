@@ -45,7 +45,6 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.SliceableUnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -142,26 +141,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
     private static final RateLimiter meterSyncThrottle = RateLimiter.create(100.0);
 
-    public static final Comparator<SSTableReader> maxTimestampComparator = new Comparator<SSTableReader>()
-    {
-        public int compare(SSTableReader o1, SSTableReader o2)
-        {
-            long ts1 = o1.getMaxTimestamp();
-            long ts2 = o2.getMaxTimestamp();
-            return (ts1 > ts2 ? -1 : (ts1 == ts2 ? 0 : 1));
-        }
-    };
+    public static final Comparator<SSTableReader> maxTimestampComparator = (o1, o2) -> Long.compare(o1.getMaxTimestamp(), o2.getMaxTimestamp());
 
     // it's just an object, which we use regular Object equality on; we introduce a special class just for easy recognition
     public static final class UniqueIdentifier {}
 
-    public static final Comparator<SSTableReader> sstableComparator = new Comparator<SSTableReader>()
-    {
-        public int compare(SSTableReader o1, SSTableReader o2)
-        {
-            return o1.first.compareTo(o2.first);
-        }
-    };
+    public static final Comparator<SSTableReader> sstableComparator = (o1, o2) -> o1.first.compareTo(o2.first);
+
+    public static final Comparator<SSTableReader> generationReverseComparator = (o1, o2) -> -Integer.compare(o1.descriptor.generation, o2.descriptor.generation);
 
     public static final Ordering<SSTableReader> sstableOrdering = Ordering.from(sstableComparator);
 
@@ -460,7 +447,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert !descriptor.version.storeRows() || components.contains(Component.STATS) : "Stats component is missing for sstable " + descriptor;
 
         EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
-        Map<MetadataType, MetadataComponent> sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+
+        Map<MetadataType, MetadataComponent> sstableMetadata;
+        try
+        {
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+        }
+        catch (IOException e)
+        {
+            throw new CorruptSSTableException(e, descriptor.filenameFor(Component.STATS));
+        }
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
         StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
         SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
@@ -501,6 +497,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 logger.trace("key cache contains {}/{} keys", sstable.getKeyCache().size(), sstable.getKeyCache().getCapacity());
 
             return sstable;
+        }
+        catch (IOException e)
+        {
+            sstable.selfRef().release();
+            throw new CorruptSSTableException(e, sstable.getFilename());
         }
         catch (Throwable t)
         {
@@ -548,6 +549,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     }
                     catch (IOException ex)
                     {
+                        FileUtils.handleCorruptSSTable(new CorruptSSTableException(ex, entry.getKey().filenameFor(Component.DATA)));
                         logger.error("Cannot read sstable {}; other IO error, skipping table", entry, ex);
                         return;
                     }
@@ -1191,7 +1193,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         if (this.first.compareTo(this.last) > 0)
         {
-            throw new IllegalStateException(String.format("SSTable first key %s > last key %s", this.first, this.last));
+            throw new CorruptSSTableException(new IllegalStateException(String.format("SSTable first key %s > last key %s", this.first, this.last)), getFilename());
         }
     }
 
@@ -1718,7 +1720,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * Direct I/O SSTableScanner over an iterator of bounds.
      *
-     * @param bounds the keys to cover
+     * @param rangeIterator the keys to cover
      * @return A Scanner for seeking over the rows of the SSTable.
      */
     public abstract ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator);

@@ -20,7 +20,13 @@ Upgrading
 ---------
    - The table system_auth.resource_role_permissons_index is no longer used and should be dropped
      after all nodes are on DSE 5.0.10. Upgrading to DSE 5.1 requires at least DSE 5.1.3.
-
+   - Full repairs are now default if no option is specified on nodetool repair, unless
+     incremental repair was already run on the table/keyspace being repaired, to maintain
+     backward compatibility. Incremental repair may be run on new tables by using the -inc option.
+   - Full repairs will no longer run repair unless the --run-anticompaction option is specified
+   - Incremental repairs are no longer supported on tables with materialized views until
+     its limitations are addressed. An incremental repair triggered on a base table or
+     materialized view run a full repair instead. See CASSANDRA-12888 for details.
 
 3.0.15
 =====

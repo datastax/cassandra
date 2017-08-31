@@ -137,7 +137,8 @@ public class NodeTool
                 DisableHintsForDC.class,
                 EnableHintsForDC.class,
                 FailureDetectorInfo.class,
-                RefreshSizeEstimates.class
+                RefreshSizeEstimates.class,
+                MarkUnrepaired.class
         );
 
         Cli.CliBuilder<Runnable> builder = Cli.builder("nodetool");

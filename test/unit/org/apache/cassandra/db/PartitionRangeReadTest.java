@@ -22,6 +22,8 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.List;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -33,12 +35,16 @@ import org.apache.cassandra.*;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 public class PartitionRangeReadTest
 {
@@ -121,6 +127,8 @@ public class PartitionRangeReadTest
     public void testLimits()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COMPACT1);
+        cfs.truncateBlocking();
+
         for (int i = 0; i < 10; i++)
         {
             new RowUpdateBuilder(cfs.metadata, 0, Integer.toString(i))
@@ -139,6 +147,38 @@ public class PartitionRangeReadTest
 
         for (int i = 0; i < 10; i++)
             assertEquals(i, Util.getAll(Util.cmd(cfs).withLimit(i).build()).size());
+
+        // by setting an empty clusterings set in the cmd builder, we ensure that a names filter with no clusterings will be used.
+        // This is the same behavior of SelectStatement for static compact tables (StatementRestrictions.isColumnRange() returns false,
+        // which means SelectStatement.makeClusteringIndexFilter uses a names filter with no clusterings, CASSANDRA-11223)
+        NavigableSet<Clustering> emptyClusterings = new TreeSet<>(cfs.metadata.comparator);
+        for (int i = 0; i < 10; i++)
+            assertEquals(i, Util.getAll(Util.cmd(cfs).clusterings(emptyClusterings).withLimit(i).build()).size());
+    }
+
+    @Test
+    public void testAddingRegularColumnsToStaticCompactTable()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COMPACT1);
+        cfs.truncateBlocking();
+
+        int nowInSeconds = FBUtilities.nowInSeconds();
+        DecoratedKey key = cfs.metadata.decorateKey(cfs.metadata.getKeyValidator().fromString("key1"));
+
+        ByteBuffer name = ByteBufferUtil.bytes("dyn_1");
+        ColumnDefinition column = cfs.metadata.compactValueColumn();
+        Cell cell = BufferCell.live(cfs.metadata, column, nowInSeconds, column.type.fromString("foo"), null);
+
+        Row.Builder rowBuilder = BTreeRow.unsortedBuilder(nowInSeconds);
+        rowBuilder.newRow(new Clustering(name));
+        rowBuilder.addCell(cell);
+        Mutation mutation = new Mutation(PartitionUpdate.singleRowUpdate(cfs.metadata, key, rowBuilder.build()));
+
+        mutation.apply(false);
+
+        List<FilteredPartition> partitions = Util.getAll(Util.cmd(cfs).build());
+        assertEquals(1, partitions.size());
+        assertTrue(partitions.get(0).iterator().next().getCell(column).value().equals(ByteBufferUtil.bytes("foo")));
     }
 
     @Test

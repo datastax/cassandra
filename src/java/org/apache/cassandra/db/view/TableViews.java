@@ -50,6 +50,8 @@ public class TableViews extends AbstractCollection<View>
     // list is the best option.
     private final List<View> views = new CopyOnWriteArrayList();
 
+    private static final int VIEW_REBUILD_BATCH_SIZE = Integer.getInteger("cassandra.view.rebuild.batch", 100);
+
     public TableViews(CFMetaData baseTableMetadata)
     {
         this.baseTableMetadata = baseTableMetadata;
@@ -274,6 +276,7 @@ public class TableViews extends AbstractCollection<View>
 
                 private Collection<Mutation> buildNext()
                 {
+                    int count = 0;
                     while (updatesIter.hasNext())
                     {
                         Unfiltered update = updatesIter.next();
@@ -283,16 +286,21 @@ public class TableViews extends AbstractCollection<View>
 
                         Row updateRow = (Row) update;
                         addToViewUpdateGenerators(emptyRow(updateRow.clustering(), DeletionTime.LIVE), updateRow, generators, nowInSec);
-
+                        if (++count < VIEW_REBUILD_BATCH_SIZE)
+                            continue;
                         // If the updates have been filtered, then we won't have any mutations; we need to make sure that we
                         // only return if the mutations are empty. Otherwise, we continue to search for an update which is
                         // not filtered
+
                         Collection<Mutation> mutations = buildMutations(baseTableMetadata, generators);
+                        count = 0;
                         if (!mutations.isEmpty())
                             return mutations;
                     }
-
-                    return null;
+                    if (count == 0)
+                        return null;
+                    Collection<Mutation> mutations = buildMutations(baseTableMetadata, generators);
+                    return mutations.isEmpty() ? null : mutations;
                 }
 
                 public boolean hasNext()

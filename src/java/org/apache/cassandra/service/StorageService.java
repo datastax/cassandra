@@ -27,6 +27,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
@@ -1966,23 +1967,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (getTokenMetadata().isMember(endpoint))
             {
+                final ExecutorService executor = StageManager.getStage(Stage.MUTATION);
                 switch (state)
                 {
                     case RELEASE_VERSION:
-                        SystemKeyspace.updatePeerInfo(endpoint, "release_version", value.value);
+                        SystemKeyspace.updatePeerInfo(endpoint, "release_version", value.value, executor);
                         break;
                     case DC:
                         updateTopology(endpoint);
-                        SystemKeyspace.updatePeerInfo(endpoint, "data_center", value.value);
+                        SystemKeyspace.updatePeerInfo(endpoint, "data_center", value.value, executor);
                         break;
                     case RACK:
                         updateTopology(endpoint);
-                        SystemKeyspace.updatePeerInfo(endpoint, "rack", value.value);
+                        SystemKeyspace.updatePeerInfo(endpoint, "rack", value.value, executor);
                         break;
                     case RPC_ADDRESS:
                         try
                         {
-                            SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(value.value));
+                            SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(value.value), executor);
                         }
                         catch (UnknownHostException e)
                         {
@@ -1990,11 +1992,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         }
                         break;
                     case SCHEMA:
-                        SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(value.value));
+                        SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(value.value), executor);
                         MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
                         break;
                     case HOST_ID:
-                        SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(value.value));
+                        SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(value.value), executor);
                         break;
                     case RPC_READY:
                         notifyRpcChange(endpoint, epState.isRpcReady());
@@ -2040,23 +2042,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private void updatePeerInfo(InetAddress endpoint)
     {
         EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        final ExecutorService executor = StageManager.getStage(Stage.MUTATION);
         for (Map.Entry<ApplicationState, VersionedValue> entry : epState.states())
         {
             switch (entry.getKey())
             {
                 case RELEASE_VERSION:
-                    SystemKeyspace.updatePeerInfo(endpoint, "release_version", entry.getValue().value);
+                    SystemKeyspace.updatePeerInfo(endpoint, "release_version", entry.getValue().value, executor);
                     break;
                 case DC:
-                    SystemKeyspace.updatePeerInfo(endpoint, "data_center", entry.getValue().value);
+                    SystemKeyspace.updatePeerInfo(endpoint, "data_center", entry.getValue().value, executor);
                     break;
                 case RACK:
-                    SystemKeyspace.updatePeerInfo(endpoint, "rack", entry.getValue().value);
+                    SystemKeyspace.updatePeerInfo(endpoint, "rack", entry.getValue().value, executor);
                     break;
                 case RPC_ADDRESS:
                     try
                     {
-                        SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value));
+                        SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", InetAddress.getByName(entry.getValue().value), executor);
                     }
                     catch (UnknownHostException e)
                     {
@@ -2064,10 +2067,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     }
                     break;
                 case SCHEMA:
-                    SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(entry.getValue().value));
+                    SystemKeyspace.updatePeerInfo(endpoint, "schema_version", UUID.fromString(entry.getValue().value), executor);
                     break;
                 case HOST_ID:
-                    SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(entry.getValue().value));
+                    SystemKeyspace.updatePeerInfo(endpoint, "host_id", UUID.fromString(entry.getValue().value), executor);
                     break;
             }
         }
@@ -2373,7 +2376,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Gossiper.instance.replacementQuarantine(ep); // quarantine locally longer than normally; see CASSANDRA-8260
         }
         if (!tokensToUpdateInSystemKeyspace.isEmpty())
-            SystemKeyspace.updateTokens(endpoint, tokensToUpdateInSystemKeyspace);
+            SystemKeyspace.updateTokens(endpoint, tokensToUpdateInSystemKeyspace, StageManager.getStage(Stage.MUTATION));
 
         if (isMoving || operationMode == Mode.MOVING)
         {
@@ -3307,7 +3310,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             parallelism = RepairParallelism.PARALLEL;
         }
 
-        RepairOption options = new RepairOption(parallelism, primaryRange, !fullRepair, false, 1, Collections.<Range<Token>>emptyList(), false);
+        RepairOption options = new RepairOption(parallelism, primaryRange, !fullRepair, false,1, Collections.<Range<Token>>emptyList(),
+                                                false, false);
         if (dataCenters != null)
         {
             options.getDataCenters().addAll(dataCenters);
@@ -3399,7 +3403,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         "The repair will occur but without anti-compaction.");
         Collection<Range<Token>> repairingRange = createRepairRangeFrom(beginToken, endToken);
 
-        RepairOption options = new RepairOption(parallelism, false, !fullRepair, false, 1, repairingRange, true);
+        RepairOption options = new RepairOption(parallelism, false, !fullRepair, false, 1,
+                                                repairingRange, true, false);
         if (dataCenters != null)
         {
             options.getDataCenters().addAll(dataCenters);
@@ -3486,9 +3491,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (options.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
+        if (options.isIncremental() && shouldFallBackToFullRepair(keyspace, options.getColumnFamilies().toArray(new String[options.getColumnFamilies().size()])))
+        {
+            logger.info("Incremental repair is not supported on tables{} from keyspace {} with materialized views. " +
+                        "Running full repairs instead.", options.getColumnFamilies().isEmpty()? "" : " " + options.getColumnFamilies(), keyspace);
+            options.setIncremental(false);
+        }
+
         int cmd = nextRepairCommand.incrementAndGet();
         new Thread(NamedThreadFactory.threadLocalDeallocator(createRepairTask(cmd, keyspace, options, legacy))).start();
         return cmd;
+    }
+
+    protected boolean shouldFallBackToFullRepair(String keyspace, String[] tables)
+    {
+        try
+        {
+            Set<ColumnFamilyStore> tablesToRepair = Sets.newHashSet(getValidColumnFamilies(false, false, keyspace, tables));
+            Set<String> baseOrViewsToRepair = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.isView()).map(c -> c.name).collect(Collectors.toSet());
+
+            if (baseOrViewsToRepair.isEmpty())
+                return false;
+
+            if (tablesToRepair.size() == baseOrViewsToRepair.size())
+                return true;
+
+
+            throw new IllegalArgumentException(String.format("Cannot run a single repair command on both MV and non-MV tables (%s) from keyspace %s " +
+                                                             "simultaneously because incremental repair is not supported on tables with materialized views: %s. " +
+                                                             "Please execute a separate command for repairing tables with and without MVs.", tablesToRepair,
+                                                             keyspace, baseOrViewsToRepair));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Could not fetch tables for repair.", e);
+        }
     }
 
     private FutureTask<Object> createRepairTask(final int cmd, final String keyspace, final RepairOption options, boolean legacy)
@@ -3505,7 +3542,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return new FutureTask<>(task, null);
     }
 
-    public void forceTerminateAllRepairSessions() {
+    public void forceTerminateAllRepairSessions()
+    {
         ActiveRepairService.instance.terminateSessions();
     }
 
@@ -4672,6 +4710,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return Collections.unmodifiableList(Schema.instance.getNonLocalStrategyKeyspaces());
     }
 
+    public Map<String, Map<String, String>> getTableInfos(String keyspace, String... tables)
+    {
+        Map<String, Map<String, String>> tableInfos = new HashMap<>();
+
+        try
+        {
+            getValidColumnFamilies(false, false, keyspace, tables).forEach(cfs -> tableInfos.put(cfs.name, cfs.getTableInfo().asMap()));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(String.format("Could not retrieve info for keyspace %s and table(s) %s.", keyspace, tables), e);
+        }
+
+        return tableInfos;
+    }
+
     public void updateSnitch(String epSnitchClassName, Boolean dynamic, Integer dynamicUpdateInterval, Integer dynamicResetInterval, Double dynamicBadnessThreshold) throws ClassNotFoundException
     {
         IEndpointSnitch oldSnitch = DatabaseDescriptor.getEndpointSnitch();
@@ -4995,5 +5049,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public long getPid()
     {
         return NativeLibrary.getProcessID();
+    }
+
+    public int forceMarkAllSSTablesAsUnrepaired(String keyspace, String... tables) throws IOException
+    {
+        int marked = 0;
+        for (ColumnFamilyStore cfs : getValidColumnFamilies(false, false, keyspace, tables))
+        {
+            try
+            {
+                marked += cfs.forceMarkAllSSTablesAsUnrepaired();
+            } catch (Throwable t)
+            {
+                logger.error("Error while marking all SSTables from table {}.{} as unrepaired. Please trigger operation again " +
+                             "or manually mark SSTables as unrepaired otherwise rows already purged on other replicas may be " +
+                             "propagated to other replicas during incremental repair without their respectives tombstones.",
+                             keyspace, cfs.name, t);
+                throw new RuntimeException(t);
+            }
+        }
+        return marked;
     }
 }
