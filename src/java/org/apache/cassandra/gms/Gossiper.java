@@ -1758,7 +1758,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
         }
 
-        for (int i = 0; i <= forceAfter; i++)
+        for (int i = 0; i <= forceAfter || i == 0; i++)
         {
             logger.debug("Waiting for echo replies");
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_NS, TimeUnit.NANOSECONDS);

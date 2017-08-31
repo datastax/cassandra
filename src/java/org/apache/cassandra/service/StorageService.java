@@ -690,6 +690,82 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         initialized = true;
     }
 
+    private void primeConnections()
+    {
+        //Ensure all connections are up
+        Set<InetAddress> liveMembers = Gossiper.instance.getLiveMembers();
+
+        String key = "NULL";
+        String longKey = "";
+        while (longKey.length() < OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD)
+            longKey += key;
+
+        CFMetaData cf = SystemDistributedKeyspace.metadata().tables.getNullable(SystemDistributedKeyspace.REPAIR_HISTORY);
+        ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(key.getBytes())), Slices.ALL);
+        ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(longKey.getBytes())), Slice.ALL);
+
+        // Run priming queries upto 3 times
+        for (int i = 0; i < 3; i++)
+        {
+            HashMultimap<InetAddress, AsyncOneResponse> responses = HashMultimap.create();
+
+            for (InetAddress ep : liveMembers)
+            {
+                if (ep.equals(FBUtilities.getBroadcastAddress()))
+                    continue;
+
+                OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
+                try
+                {
+                    pool.waitForStarted();
+                }
+                catch (IllegalStateException e)
+                {
+                    logger.warn("Outgoing Connection pool failed to start for {}", ep);
+                }
+
+                MessageOut<?> qm = qs.createMessage(MessagingService.instance().getVersion(ep));
+                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
+
+                qm = ql.createMessage(MessagingService.instance().getVersion(ep));
+                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
+            }
+
+            try
+            {
+                FBUtilities.waitOnFutures(Lists.newArrayList(responses.values()), DatabaseDescriptor.getReadRpcTimeout());
+            }
+            catch (TimeoutException tm)
+            {
+                for (Map.Entry<InetAddress, AsyncOneResponse> entry : responses.entries())
+                {
+                    if (!entry.getValue().isDone())
+                        logger.debug("Timeout waiting for priming request from {}", entry.getKey());
+                }
+            }
+
+            logger.debug("All priming requests succeeded");
+            break;
+        }
+
+        for (InetAddress ep : liveMembers)
+        {
+            if (ep.equals(FBUtilities.getBroadcastAddress()))
+                continue;
+
+            OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
+
+            if (!pool.gossipMessages.isSocketOpen())
+                logger.warn("Gossip connection to {} not open", ep);
+
+            if (!pool.smallMessages.isSocketOpen())
+                logger.warn("Small message connection to {} not open", ep);
+
+            if (!pool.largeMessages.isSocketOpen())
+                logger.warn("Large message connection to {} not open", ep);
+        }
+    }
+
     private void loadRingState()
     {
         if (Boolean.parseBoolean(System.getProperty("cassandra.load_ring_state", "true")))
