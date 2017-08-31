@@ -144,9 +144,6 @@ public class LeveledManifest
 
         assert level < generations.length : "Invalid level " + level + " out of " + (generations.length - 1);
         logDistribution();
-        if (level > 0)
-            logger.info("Adding {}", reader);
-
         int pickedLevel = level;
 
         //Apply different leveling strategies based on if the file is streaming or

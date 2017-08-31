@@ -696,7 +696,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         //Ensure all connections are up
         Set<InetAddress> liveMembers = Gossiper.instance.getLiveMembers();
-        HashMultimap<InetAddress, AsyncOneResponse> responses = HashMultimap.create();
 
         String key = "NULL";
         String longKey = "";
@@ -707,44 +706,48 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(key.getBytes())), Slices.ALL);
         ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(longKey.getBytes())), Slice.ALL);
 
-        for (InetAddress ep : liveMembers)
+        // Run priming queries upto 3 times
+        for (int i = 0; i < 3; i++)
         {
-            if (ep.equals(FBUtilities.getBroadcastAddress()))
-                continue;
+            HashMultimap<InetAddress, AsyncOneResponse> responses = HashMultimap.create();
 
-            OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
+            for (InetAddress ep : liveMembers)
+            {
+                if (ep.equals(FBUtilities.getBroadcastAddress()))
+                    continue;
+
+                OutboundTcpConnectionPool pool = MessagingService.instance().getConnectionPool(ep);
+                try
+                {
+                    pool.waitForStarted();
+                }
+                catch (IllegalStateException e)
+                {
+                    logger.warn("Outgoing Connection pool failed to start for {}", ep);
+                }
+
+                MessageOut<?> qm = qs.createMessage(MessagingService.instance().getVersion(ep));
+                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
+
+                qm = ql.createMessage(MessagingService.instance().getVersion(ep));
+                responses.put(ep, MessagingService.instance().sendRR(qm, ep));
+            }
+
             try
             {
-                pool.waitForStarted();
+                FBUtilities.waitOnFutures(Lists.newArrayList(responses.values()), DatabaseDescriptor.getReadRpcTimeout());
             }
-            catch (IllegalStateException e)
+            catch (TimeoutException tm)
             {
-                logger.warn("Outgoing Connection pool failed to start for {}", ep);
+                for (Map.Entry<InetAddress, AsyncOneResponse> entry : responses.entries())
+                {
+                    if (!entry.getValue().isDone())
+                        logger.debug("Timeout waiting for priming request from {}", entry.getKey());
+                }
             }
 
-
-            MessageOut<?> qm = qs.createMessage(MessagingService.instance().getVersion(ep));
-            responses.put(ep, MessagingService.instance().sendRR(qm, ep));
-
-            qm = ql.createMessage(MessagingService.instance().getVersion(ep));
-            responses.put(ep, MessagingService.instance().sendRR(qm, ep));
-        }
-
-        try
-        {
-            FBUtilities.waitOnFutures(Lists.newArrayList(responses.values()), DatabaseDescriptor.getReadRpcTimeout());
-        }
-        catch (TimeoutException tm)
-        {
-            logger.warn("Timed out waiting for priming request to complete");
-        }
-
-        for (Map.Entry<InetAddress, AsyncOneResponse> entry : responses.entries())
-        {
-            if (!entry.getValue().isDone())
-                logger.warn("Timeout waiting for priming request from {}", entry.getKey());
-            else
-                logger.debug("Recieved priming response from {}", entry.getKey());
+            logger.debug("All priming requests succeeded");
+            break;
         }
 
         for (InetAddress ep : liveMembers)
