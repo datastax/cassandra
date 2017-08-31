@@ -743,8 +743,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 for (Map.Entry<InetAddress, AsyncOneResponse> entry : responses.entries())
                 {
                     if (!entry.getValue().isDone())
-                        logger.debug("Timeout waiting for priming request from {}", entry.getKey());
+                        logger.debug("Timeout waiting for priming response from {}", entry.getKey());
                 }
+
+                continue;
             }
 
             logger.debug("All priming requests succeeded");
