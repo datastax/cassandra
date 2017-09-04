@@ -137,7 +137,23 @@ public class Scrubber implements Closeable
 
     private UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, String filename)
     {
+        validatePrimaryKey(iter.partitionKey().getKey(), filename);
         return checkData ? UnfilteredRowIterators.withValidation(iter, filename) : iter;
+    }
+
+    public void validatePrimaryKey(ByteBuffer pk, String filename)
+    {
+        // Collection indexes incorrectly pick up the validator, see APOLLO-418 for details
+        if (cfs.isIndex() && cfs.metadata.getKeyValidator().isCollection())
+            return;
+        try
+        {
+            cfs.metadata.getKeyValidator().validate(pk);
+        }
+        catch (Exception me)
+        {
+            throw new CorruptSSTableException(me, filename);
+        }
     }
 
     public void scrub()

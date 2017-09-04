@@ -70,6 +70,7 @@ import static org.junit.Assume.assumeTrue;
 public class ScrubTest
 {
     public static final String INVALID_LEGACY_SSTABLE_ROOT_PROP = "invalid-legacy-sstable-root";
+    public static final String INVALID_SSTABLE_ROOT_PROP = "invalid-sstable-root";
 
     public static final String KEYSPACE = "Keyspace1";
     public static final String CF = "Standard1";
@@ -741,6 +742,40 @@ public class ScrubTest
         assertEquals(1, rs.size());
         QueryProcessor.executeInternal(String.format("DELETE FROM \"%s\".%s WHERE a=1 AND b =2", KEYSPACE, cf));
         rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".%s", KEYSPACE, cf));
+        assertEquals(0, rs.size());
+    }
+
+    @Test
+    public void testScrubSSTablesWithCorruptedPk() throws Exception
+    {
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        String cf = "cf_with_corrupted_pk";
+        QueryProcessor.process(String.format("CREATE TABLE \"%s\".%s (pk text, ck text, v text, PRIMARY KEY (pk, ck))", KEYSPACE, cf), ConsistencyLevel.ONE);
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cf);
+
+        Path legacySSTableRoot = Paths.get(System.getProperty(INVALID_SSTABLE_ROOT_PROP),
+                                           "Keyspace1",
+                                           cf);
+
+        for (String filename : new String[]{ "mc-1-big-CompressionInfo.db",
+                                             "mc-1-big-Data.db",
+                                             "mc-1-big-Digest.crc32",
+                                             "mc-1-big-Filter.db",
+                                             "mc-1-big-Index.db",
+                                             "mc-1-big-Statistics.db",
+                                             "mc-1-big-Summary.db",
+                                             "mc-1-big-TOC.txt" })
+        {
+            Files.copy(Paths.get(legacySSTableRoot.toString(), filename), cfs.getDirectories().getDirectoryForNewSSTables().toPath().resolve(filename));
+        }
+
+        cfs.loadNewSSTables();
+
+        cfs.scrub(true, true, true, 1);
+
+        UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".%s", KEYSPACE, cf));
         assertEquals(0, rs.size());
     }
 }

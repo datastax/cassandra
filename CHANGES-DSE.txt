@@ -1,4 +1,5 @@
 DSE 5.0.9
+ * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-969)
  * Skip complex column range tombstones on simple columns (APOLLO-480)
  * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
  * On node failure, fail only repair tasks of that node (APOLLO-669)

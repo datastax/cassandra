@@ -28,10 +28,10 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.transform.FilteredRows;
 import org.apache.cassandra.db.transform.MoreRows;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
@@ -267,10 +267,37 @@ public abstract class UnfilteredRowIterators
     }
 
     /**
-     * Validate that the data of the provided iterator is valid, that is that the values
-     * it contains are valid for the type they represent, and more generally that the
-     * infos stored are sensible.
-     *
+     * Transformation that validates that the data of the provided iterator is valid,
+     * that is that the values it contains are valid for the type they represent, and
+     * more generally that the infos stored are sensible.
+     */
+    private static abstract class ValidatorTransformation extends Transformation
+    {
+        @Override
+        public Row applyToStatic(Row row)
+        {
+            validate(row);
+            return row;
+        }
+
+        @Override
+        public Row applyToRow(Row row)
+        {
+            validate(row);
+            return row;
+        }
+
+        @Override
+        public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
+        {
+            validate(marker);
+            return marker;
+        }
+
+        protected abstract void validate(Unfiltered unfiltered);
+    }
+
+    /**
      * This is mainly used by scrubber to detect problems in sstables.
      *
      * @param iterator the partition to check.
@@ -281,30 +308,9 @@ public abstract class UnfilteredRowIterators
      */
     public static UnfilteredRowIterator withValidation(UnfilteredRowIterator iterator, final String filename)
     {
-        class Validator extends Transformation
-        {
-            @Override
-            public Row applyToStatic(Row row)
-            {
-                validate(row);
-                return row;
-            }
 
-            @Override
-            public Row applyToRow(Row row)
-            {
-                validate(row);
-                return row;
-            }
-
-            @Override
-            public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
-            {
-                validate(marker);
-                return marker;
-            }
-
-            private void validate(Unfiltered unfiltered)
+        return Transformation.apply(iterator, new ValidatorTransformation() {
+            protected void validate(Unfiltered unfiltered)
             {
                 try
                 {
@@ -315,8 +321,17 @@ public abstract class UnfilteredRowIterators
                     throw new CorruptSSTableException(me, filename);
                 }
             }
-        }
-        return Transformation.apply(iterator, new Validator());
+        });
+    }
+
+    public static UnfilteredRowIterator withValidation(UnfilteredRowIterator iterator)
+    {
+        return Transformation.apply(iterator, new ValidatorTransformation() {
+            protected void validate(Unfiltered unfiltered)
+            {
+                unfiltered.validateData(iterator.metadata());
+            }
+        });
     }
 
     /**
