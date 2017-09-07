@@ -699,8 +699,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         String key = "NULL";
         String longKey = "";
+        //Make large key but make sure its not too large since it breaks 2.2
         while (longKey.length() < OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD)
             longKey += key;
+        longKey = longKey.substring(0, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD - 1);
 
         CFMetaData cf = SystemDistributedKeyspace.metadata().tables.getNullable(SystemDistributedKeyspace.REPAIR_HISTORY);
         ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(key.getBytes())), Slices.ALL);
@@ -744,6 +746,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     if (!entry.getValue().isDone())
                         logger.debug("Timeout waiting for priming request from {}", entry.getKey());
                 }
+                
+                continue;
             }
 
             logger.debug("All priming requests succeeded");
@@ -1114,13 +1118,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void finishJoiningRing(Collection<Token> tokens)
     {
+        primeConnections();
+
         // start participating in the ring.
         SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
         setTokens(tokens);
 
         assert tokenMetadata.sortedTokens().size() > 0;
 
-        primeConnections();
         doAuthSetup();
     }
 
