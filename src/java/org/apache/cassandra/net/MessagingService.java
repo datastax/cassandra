@@ -491,7 +491,16 @@ public final class MessagingService implements MessagingServiceMBean
         for (ILatencySubscriber subscriber : subscribers)
             subscriber.receiveTiming(address, latency);
     }
-    
+
+    /**
+     * called from gossiper when it notices a node is not responding.
+     */
+    public void convict(InetAddress ep)
+    {
+        logger.debug("Resetting pool for " + ep);
+        getConnectionPool(ep).reset();
+    }
+
     public void listen()
     {
         callbacks.reset(); // hack to allow tests to stop/restart MS

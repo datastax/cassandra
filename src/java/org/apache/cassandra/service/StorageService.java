@@ -2755,6 +2755,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void onDead(InetAddress endpoint, EndpointState state)
     {
+        MessagingService.instance().convict(endpoint);
         notifyDown(endpoint);
     }
 
