@@ -268,7 +268,12 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
     @Override
     public boolean isDefaultDC(String dc)
     {
-        assert dc != null && defaultDCRack != null;
+        assert dc != null;
+
+        // no default may be set
+        if(defaultDCRack == null)
+            return false;
+
         return dc == defaultDCRack[0];
     }
 }
