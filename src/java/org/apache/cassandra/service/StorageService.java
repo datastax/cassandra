@@ -705,7 +705,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             longKey += key;
         longKey = longKey.substring(0, (int) OutboundTcpConnectionPool.LARGE_MESSAGE_THRESHOLD - 1);
 
-        CFMetaData cf = SystemDistributedKeyspace.metadata().tables.getNullable(SystemDistributedKeyspace.REPAIR_HISTORY);
+        CFMetaData cf = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.PEERS);
         ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(key.getBytes())), Slices.ALL);
         ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), cf.decorateKey(ByteBuffer.wrap(longKey.getBytes())), Slice.ALL);
 
