@@ -1,5 +1,6 @@
 3.11.1
 =======
+ * Fix ISE thrown by UPI.Serializer.hasNext() for some SELECT queries (CASSANDRA-13911)
  * Handle limit correctly on tables with strict liveness (CASSANDRA-13883)
  * AbstractTokenTreeBuilder#serializedSize returns wrong value when there is a single leaf and overflow collisions (CASSANDRA-13869)
  * BTree.Builder memory leak (CASSANDRA-13754)
