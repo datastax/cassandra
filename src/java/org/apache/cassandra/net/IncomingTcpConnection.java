@@ -48,6 +48,7 @@ public class IncomingTcpConnection extends Thread implements Closeable
 
     private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 4);
 
+    private final long connectTime;
     private final int version;
     private final boolean compressed;
     private final Socket socket;
@@ -59,6 +60,7 @@ public class IncomingTcpConnection extends Thread implements Closeable
     public IncomingTcpConnection(int version, boolean compressed, Socket socket, Multimap<InetAddress, Closeable> group)
     {
         super("MessagingService-Incoming-" + socket.getInetAddress());
+        this.connectTime = System.nanoTime();
         this.version = version;
         this.compressed = compressed;
         this.socket = socket;
@@ -222,4 +224,10 @@ public class IncomingTcpConnection extends Thread implements Closeable
         }
         return message.from;
     }
+
+    public long getConnectTime()
+    {
+        return connectTime;
+    }
+
 }

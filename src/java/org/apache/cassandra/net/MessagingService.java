@@ -639,12 +639,24 @@ public final class MessagingService implements MessagingServiceMBean
         return cp;
     }
 
-    public boolean hasValidIncomingConnections(InetAddress from)
+    public boolean hasValidIncomingConnections(InetAddress from, int minAgeInSeconds)
     {
+        long now = System.nanoTime();
+
         for (SocketThread socketThread : socketThreads)
         {
-            if (socketThread.connections.containsKey(from))
-                return true;
+            Collection<Closeable> sockets = socketThread.connections.get(from);
+            if (sockets != null)
+            {
+                for (Closeable socket : sockets)
+                {
+                    if (socket instanceof IncomingTcpConnection)
+                    {
+                        if ((now - ((IncomingTcpConnection)socket).getConnectTime()) > TimeUnit.SECONDS.toNanos(minAgeInSeconds))
+                            return true;
+                    }
+                }
+            }
         }
 
         return false;
@@ -1104,6 +1116,8 @@ public final class MessagingService implements MessagingServiceMBean
                                   ? new IncomingStreamingConnection(version, socket, connections)
                                   : new IncomingTcpConnection(version, MessagingService.getBits(header, 2, 1) == 1, socket, connections);
                     thread.start();
+
+                    //The connections are removed from this collection when they are closed.
                     connections.put(socket.getInetAddress(), (Closeable) thread);
                 }
                 catch (AsynchronousCloseException e)

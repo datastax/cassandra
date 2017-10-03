@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.*;
@@ -66,6 +67,7 @@ public class BatchlogManager implements BatchlogManagerMBean
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=BatchlogManager";
     private static final long REPLAY_INTERVAL = 10 * 1000; // milliseconds
     static final int DEFAULT_PAGE_SIZE = 128;
+    private static final int MIN_CONNECTION_AGE = Integer.getInteger(Config.PROPERTY_PREFIX + "batchlog.min_connection_age_seconds", 60);
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
@@ -510,48 +512,15 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             // strip out dead endpoints and localhost
             ListMultimap<String, InetAddress> validated = ArrayListMultimap.create();
-            int numValidated = 0;
             for (Map.Entry<String, InetAddress> entry : endpoints.entries())
             {
                 if (isValid(entry.getValue()))
-                {
                     validated.put(entry.getKey(), entry.getValue());
-                    ++numValidated;
-                }
+
             }
 
             if (validated.size() <= 2)
                 return validated.values();
-
-            // strip out endpoints without an active connection
-            // since the nodes may have just died and phi may have tripped yet
-            ListMultimap<String, InetAddress> validatedConnected = ArrayListMultimap.create();
-            int numValidatedConnected = 0;
-            for (Map.Entry<String, InetAddress> entry : endpoints.entries())
-            {
-                if (isValidAndConnected(entry.getValue()))
-                {
-                    validatedConnected.put(entry.getKey(), entry.getValue());
-                    ++numValidatedConnected;
-                }
-            }
-
-            //If we have a selection of nodes to pick from
-            //we can go forward with the more restricted list
-            if (numValidatedConnected < numValidated)
-            {
-                if (logger.isTraceEnabled())
-                {
-                    Collection<InetAddress> nodes = validated.values();
-                    nodes.removeAll(validatedConnected.values());
-                    logger.trace("Detected node(s) down before gossip. Removed {}", nodes);
-                }
-
-                validated = validatedConnected;
-
-                if (validated.size() <= 2)
-                    return validated.values();
-            }
 
             if (validated.size() - validated.get(localRack).size() >= 2)
             {
@@ -598,17 +567,9 @@ public class BatchlogManager implements BatchlogManagerMBean
         protected boolean isValid(InetAddress input)
         {
             return !input.equals(FBUtilities.getBroadcastAddress()) &&
-                   FailureDetector.instance.isAlive(input);
+                   FailureDetector.instance.isAlive(input) &&
+                   (!Gossiper.instance.isEnabled() || MessagingService.instance().hasValidIncomingConnections(input, MIN_CONNECTION_AGE));
         }
-
-        @VisibleForTesting
-        protected boolean isValidAndConnected(InetAddress input)
-        {
-            // When a node dies our incoming connection should die very quickly since we are using
-            // blocking threads to read.
-            return isValid(input) && (!Gossiper.instance.isEnabled() || MessagingService.instance().hasValidIncomingConnections(input));
-        }
-
 
         @VisibleForTesting
         protected int getRandomInt(int bound)
