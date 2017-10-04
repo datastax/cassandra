@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -39,6 +40,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assume;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -53,6 +55,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -64,6 +67,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner.LocalToken;
 import org.apache.cassandra.dht.Range;
@@ -133,7 +137,9 @@ public class SSTableReaderTest
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2)
+                                                .minIndexInterval(8)
+                                                .maxIndexInterval(8),  // ensure close key count estimation
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD3),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_MOVE_AND_OPEN),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_COMPRESSED).compression(CompressionParams.DEFAULT),
@@ -146,7 +152,7 @@ public class SSTableReaderTest
                                                 .minIndexInterval(4)
                                                 .maxIndexInterval(4)
                                                 .bloomFilterFpChance(0.99));
-        
+
         // All tests in this class assume auto-compaction is disabled.
         CompactionManager.instance.disableAutoCompaction();
     }
@@ -154,6 +160,10 @@ public class SSTableReaderTest
     @After
     public void teardown()
     {
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
+        BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
+
         Throwable exceptions = null;
         for (Ref<?> ref : refsToRelease)
         {
@@ -401,6 +411,79 @@ public class SSTableReaderTest
     private String cut(String s, int n)
     {
         return s.substring(0, s.length() - n);
+    }
+
+    public void testEstimatedKeysForRangesAndKeySamples()
+    {
+        // prepare data
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
+        partitioner = store.getPartitioner();
+
+        Random random = new Random();
+        List<Token> tokens = new ArrayList<>();
+        tokens.add(partitioner.getMinimumToken());
+        if (partitioner.splitter().isPresent())
+            tokens.add(partitioner.getMaximumToken());
+
+        for (int j = 0; j < 100; j++)
+        {
+            Mutation mutation = new RowUpdateBuilder(store.metadata(), j, String.valueOf(random.nextInt())).clustering("0")
+                                                                                                           .add("val",
+                                                                                                                ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                                                                                                           .build();
+            if (j % 4 != 0) // skip some keys
+                mutation.applyUnsafe();
+            tokens.add(mutation.key().getToken());
+        }
+
+        store.forceBlockingFlush(UNIT_TESTS);
+        assertEquals(1, store.getLiveSSTables().size());
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+
+        // verify any combination of start and end point among the keys we have, which includes empty, full and
+        // wrap-around ranges
+        for (int i = 0; i < tokens.size(); i++)
+            for (int j = 0; j < tokens.size(); j++)
+            {
+                verifyEstimatedKeysAndKeySamples(sstable, new Range<Token>(tokens.get(i), tokens.get(j)));
+            }
+    }
+
+    private void verifyEstimatedKeysAndKeySamples(SSTableReader sstable, Range<Token> range)
+    {
+        List<DecoratedKey> expectedKeys = new ArrayList<>();
+        try (ISSTableScanner scanner = sstable.getScanner())
+        {
+            while (scanner.hasNext())
+            {
+                try (UnfilteredRowIterator rowIterator = scanner.next())
+                {
+                    if (range.contains(rowIterator.partitionKey().getToken()))
+                        expectedKeys.add(rowIterator.partitionKey());
+                }
+            }
+        }
+
+        // check estimated key
+        long estimated = sstable.estimatedKeysForRanges(Collections.singleton(range));
+        assertTrue("Range: " + range + " having " + expectedKeys.size() + " partitions, but estimated "
+                   + estimated, closeEstimation(expectedKeys.size(), estimated));
+
+        // check key samples
+        List<DecoratedKey> sampledKeys = new ArrayList<>();
+        sstable.getKeySamples(range).forEach(sampledKeys::add);
+
+        assertTrue("Range: " + range + " having " + expectedKeys + " keys, but keys sampled: "
+                   + sampledKeys, expectedKeys.containsAll(sampledKeys));
+        // no duplicate
+        assertEquals(expectedKeys.size(), expectedKeys.stream().distinct().count());
+        assertEquals(sampledKeys.size(), sampledKeys.stream().distinct().count());
+    }
+
+    private boolean closeEstimation(long expected, long estimated)
+    {
+        return expected <= estimated + 16 && expected >= estimated - 16;
     }
 
     @Test
@@ -1449,6 +1532,180 @@ public class SSTableReaderTest
         Descriptor desc = setUpForTestVerfiyCompressionInfoExistence();
         Set<Component> components = desc.discoverComponents();
         CompressionInfoComponent.verifyCompressionInfoExistenceIfApplicable(desc, components);
+    }
+
+    @Test
+    public void testBloomFilterIsCreatedOnLoad() throws IOException
+    {
+        BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(true);
+
+        final int numKeys = 100;
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_NO_BLOOM_FILTER);
+
+        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+        Assert.assertTrue(getFilterSize(sstable) == 0);
+        Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
+
+        // should do nothing
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
+
+        // should create BF because the FP has changed
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, true);
+
+        // should deserialize the existing BF
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, false);
+        // should create BF because the FP has changed
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
+        // should install empty filter without changing file or metadata
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
+
+        // corrupted bf file should fail to deserialize and we should fall back to recreating it
+        Files.write(sstable.descriptor.fileFor(Components.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
+
+        // missing primary index file should make BF fail to load and we should install the empty one
+        HashSet<Component> nonDataPrimaryComponents = new HashSet<>(sstable.descriptor.getFormat().primaryComponents());
+        nonDataPrimaryComponents.remove(Components.DATA);
+        nonDataPrimaryComponents.remove(Components.COMPRESSION_INFO);
+        nonDataPrimaryComponents.remove(Components.STATS);
+        for (Component component : nonDataPrimaryComponents)
+            sstable.descriptor.fileFor(component).delete();
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
+    }
+
+    @Test
+    public void testOnDiskComponentsSize()
+    {
+        final int numKeys = 1000;
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+        assertEquals(sstable.onDiskLength(), FileUtils.size(sstable.descriptor.pathFor(Components.DATA)));
+
+        assertTrue(sstable.components().contains(Components.DATA));
+        assertTrue(sstable.components().size() > 1);
+        assertTrue(sstable.onDiskComponentsSize() > sstable.onDiskLength());
+    }
+
+    @Test
+    public void testSSTableFlushBloomFilterReachedLimit() throws Exception
+    {
+        final int numKeys = 100; // will use about 128 bytes
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable;
+        long bfSpace = BloomFilter.memoryLimiter.maxMemory -  BloomFilter.memoryLimiter.memoryAllocated() - 100;
+        try
+        {
+            BloomFilter.memoryLimiter.increment(bfSpace);
+            sstable = getNewSSTable(cfs, numKeys, 1);
+            Assert.assertFalse(PathUtils.exists(sstable.descriptor.pathFor(Components.FILTER)));
+            Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
+        }
+        finally
+        {
+            // reset
+            BloomFilter.memoryLimiter.decrement(bfSpace);
+        }
+    }
+
+    private void checkSSTableOpenedWithGivenFPChance(ColumnFamilyStore cfs, SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException
+    {
+        Descriptor desc = sstable.descriptor;
+        TableMetadata metadata = sstable.metadata.get().unbuild().bloomFilterFpChance(fpChance).build();
+        ValidationMetadata prevValidationMetadata = getValidationMetadata(desc);
+        Assert.assertNotNull(prevValidationMetadata);
+        File bfFile = desc.fileFor(Components.FILTER);
+
+        SSTableReader target = null;
+        try
+        {
+            FileTime bf0Time = bfFile.exists() ? Files.getLastModifiedTime(bfFile.toPath()) : FileTime.from(Instant.MIN);
+
+            // make sure we wait enough - some JDK implementations use seconds granularity and we need to wait a bit to actually see the change
+            Uninterruptibles.sleepUninterruptibly(1, Util.supportedMTimeGranularity);
+
+            target = SSTableReader.open(cfs,
+                                        desc,
+                                        TOCComponent.loadTOC(desc),
+                                        TableMetadataRef.forOfflineTools(metadata),
+                                        false,
+                                        false);
+            IFilter bloomFilter = getFilter(target);
+            ValidationMetadata validationMetadata = getValidationMetadata(desc);
+            Assert.assertNotNull(validationMetadata);
+            FileTime bf1Time = bfFile.exists() ? Files.getLastModifiedTime(bfFile.toPath()) : FileTime.from(Instant.MIN);
+
+            if (expectRecreated)
+            {
+                Assert.assertTrue(bf0Time.compareTo(bf1Time) < 0);
+            }
+            else
+            {
+                assertEquals(bf0Time, bf1Time);
+            }
+
+            if (bfShouldExist)
+            {
+                Assert.assertNotEquals(FilterFactory.AlwaysPresent, bloomFilter);
+                Assert.assertTrue(bloomFilter.serializedSize(false) > 0);
+                Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BF_FP_CHANCE_TOLERANCE.getDouble());
+                Assert.assertTrue(bfFile.exists());
+                Assert.assertEquals(bloomFilter.serializedSize(false), bfFile.length());
+            }
+            else
+            {
+                Assert.assertEquals(FilterFactory.AlwaysPresent, getFilter(sstable));
+                Assert.assertTrue(getFilterSize(sstable) == 0);
+                Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BF_FP_CHANCE_TOLERANCE.getDouble());
+                Assert.assertEquals(bfFile.exists(), bfFile.exists());
+            }
+
+            // verify all keys are present according to the BF
+            Token token = new Murmur3Partitioner.LongToken(0L);
+            for (int i = 0; i < numKeys; i++)
+            {
+                DecoratedKey key = new BufferDecoratedKey(token, ByteBufferUtil.bytes(String.valueOf(i)));
+                Assert.assertTrue("Expected key to be in BF: " + i, bloomFilter.isPresent(key));
+            }
+        }
+        finally
+        {
+            if (target != null)
+                target.selfRef().release();
+        }
+    }
+
+    static long getFilterSize(SSTableReader rdr)
+    {
+        return ((SSTableReaderWithFilter) rdr).getFilterSerializedSize();
+    }
+
+    static IFilter getFilter(SSTableReader rdr)
+    {
+        return ((SSTableReaderWithFilter) rdr).getFilter();
+    }
+
+    private static ValidationMetadata getValidationMetadata(Descriptor descriptor)
+    {
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION);
+
+        Map<MetadataType, MetadataComponent> sstableMetadata;
+        try
+        {
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+        }
+        catch (Throwable t)
+        {
+            throw new CorruptSSTableException(t, descriptor.fileFor(Components.STATS));
+        }
+
+        return (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
     }
 
     private Descriptor setUpForTestVerfiyCompressionInfoExistence()
