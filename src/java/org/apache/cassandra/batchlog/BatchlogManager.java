@@ -56,6 +56,7 @@ import org.apache.cassandra.net.OutboundTcpConnectionPool;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static com.google.common.collect.Iterables.transform;
@@ -506,61 +507,92 @@ public class BatchlogManager implements BatchlogManagerMBean
          */
         public Collection<InetAddress> filter()
         {
-            // special case for single-node data centers
-            if (endpoints.values().size() == 1)
-                return endpoints.values();
+            StringBuilder sb = new StringBuilder();
 
-            // strip out dead endpoints and localhost
-            ListMultimap<String, InetAddress> validated = ArrayListMultimap.create();
-            for (Map.Entry<String, InetAddress> entry : endpoints.entries())
+            try
             {
-                if (isValid(entry.getValue()))
-                    validated.put(entry.getKey(), entry.getValue());
 
-            }
+                // special case for single-node data centers
+                if (endpoints.values().size() == 1)
+                {
+                    sb.append("Only 1 dc found");
+                    return endpoints.values();
+                }
+                // strip out dead endpoints and localhost
+                ListMultimap<String, InetAddress> validated = ArrayListMultimap.create();
+                for (Map.Entry<String, InetAddress> entry : endpoints.entries())
+                {
+                    if (isValid(entry.getValue()))
+                    {
+                        validated.put(entry.getKey(), entry.getValue());
+                        sb.append("ADDED: " + entry.getKey() + " " + entry.getValue() + "\n");
+                    }
+                    else
+                    {
+                        sb.append("FILTERED: " + entry.getKey() + " " + entry.getValue() + "\n");
+                    }
+                }
 
-            if (validated.size() <= 2)
-                return validated.values();
+                if (validated.size() <= 2)
+                {
+                    sb.append("<=2 values to choose from, done");
+                    return validated.values();
+                }
 
-            if (validated.size() - validated.get(localRack).size() >= 2)
-            {
-                // we have enough endpoints in other racks
-                validated.removeAll(localRack);
-            }
+                if (validated.size() - validated.get(localRack).size() >= 2)
+                {
+                    sb.append("Removing localRack endpoints\n");
+                    // we have enough endpoints in other racks
+                    validated.removeAll(localRack);
+                }
+                else
+                {
+                    sb.append("Keeping localRack endpoints\n");
+                }
 
-            if (validated.keySet().size() == 1)
-            {
+                if (validated.keySet().size() == 1)
+                {
                 /*
                  * we have only 1 `other` rack to select replicas from (whether it be the local rack or a single non-local rack)
                  * pick two random nodes from there; we are guaranteed to have at least two nodes in the single remaining rack
                  * because of the preceding if block.
                  */
-                List<InetAddress> otherRack = Lists.newArrayList(validated.values());
-                shuffle(otherRack);
-                return otherRack.subList(0, 2);
-            }
+                    List<InetAddress> otherRack = Lists.newArrayList(validated.values());
+                    shuffle(otherRack);
+                    sb.append("Only 1 other rack to pick from, picking 2 random endpoint from it. Done.");
+                    return otherRack.subList(0, 2);
+                }
 
-            // randomize which racks we pick from if more than 2 remaining
-            Collection<String> racks;
-            if (validated.keySet().size() == 2)
-            {
-                racks = validated.keySet();
-            }
-            else
-            {
-                racks = Lists.newArrayList(validated.keySet());
-                shuffle((List<String>) racks);
-            }
+                // randomize which racks we pick from if more than 2 remaining
+                Collection<String> racks;
+                if (validated.keySet().size() == 2)
+                {
+                    racks = validated.keySet();
+                    sb.append("2 racks to pick from not including local...\n");
+                }
+                else
+                {
+                    racks = Lists.newArrayList(validated.keySet());
+                    shuffle((List<String>) racks);
+                    sb.append("> 2 racks to pick from, shuffling them\n");
+                }
 
-            // grab a random member of up to two racks
-            List<InetAddress> result = new ArrayList<>(2);
-            for (String rack : Iterables.limit(racks, 2))
-            {
-                List<InetAddress> rackMembers = validated.get(rack);
-                result.add(rackMembers.get(getRandomInt(rackMembers.size())));
-            }
+                // grab a random member of up to two racks
+                List<InetAddress> result = new ArrayList<>(2);
+                for (String rack : Iterables.limit(racks, 2))
+                {
+                    List<InetAddress> rackMembers = validated.get(rack);
+                    InetAddress addr =rackMembers.get(getRandomInt(rackMembers.size()));
+                    sb.append("Picked " + rack + " " + addr + "\n");
+                    result.add(addr);
+                }
 
-            return result;
+                return result;
+            }
+            finally
+            {
+                NoSpamLogger.getLogger(logger, 1, TimeUnit.SECONDS).debug("ENDPOINT SELECTION LOGIC: {}", sb.toString());
+            }
         }
 
         @VisibleForTesting
