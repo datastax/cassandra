@@ -993,6 +993,7 @@ public final class SystemKeyspace
 
     public static void setBootstrapState(BootstrapState state)
     {
+        logger.debug("Setting bootstrap state to {}", state.name());
         String req = "INSERT INTO system.%s (key, bootstrapped) VALUES ('%s', ?)";
         executeInternal(format(req, LOCAL, LOCAL), state.name());
         forceBlockingFlush(LOCAL);

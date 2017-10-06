@@ -89,7 +89,9 @@ class MigrationTask extends WrappedRunnable
             {
                 try
                 {
+                    logger.debug("Got schema migration response from {}", message.from);
                     SchemaKeyspace.mergeSchemaAndAnnounceVersion(message.payload);
+                    logger.debug("Merged schema migration response from {}", message.from);
                 }
                 catch (ConfigurationException e)
                 {
@@ -109,7 +111,10 @@ class MigrationTask extends WrappedRunnable
 
         // Only save the latches if we need bootstrap or are bootstrapping
         if (monitoringBootstrapStates.contains(SystemKeyspace.getBootstrapState()))
+        {
+            logger.debug("Will wait at max {} second(s) for migration response from {}", MigrationManager.MIGRATION_TASK_WAIT_IN_SECONDS, endpoint);
             inflightTasks.offer(completionLatch);
+        }
 
         MessagingService.instance().sendRR(message, endpoint, cb);
     }

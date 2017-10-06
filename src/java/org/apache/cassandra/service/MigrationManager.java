@@ -59,7 +59,7 @@ public class MigrationManager
 
     public static final int MIGRATION_DELAY_IN_MS = 60000;
 
-    private static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.parseInt(System.getProperty("cassandra.migration_task_wait_in_seconds", "1"));
+    public static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.parseInt(System.getProperty("cassandra.migration_task_wait_in_seconds", "1"));
 
     private final List<MigrationListener> listeners = new CopyOnWriteArrayList<>();
 
@@ -75,30 +75,30 @@ public class MigrationManager
         listeners.remove(listener);
     }
 
-    public static void scheduleSchemaPull(InetAddress endpoint, EndpointState state)
+    public static void scheduleSchemaPull(InetAddress endpoint, EndpointState state, String reason)
     {
         VersionedValue value = state.getApplicationState(ApplicationState.SCHEMA);
 
         if (!endpoint.equals(FBUtilities.getBroadcastAddress()) && value != null)
-            maybeScheduleSchemaPull(UUID.fromString(value.value), endpoint);
+            maybeScheduleSchemaPull(UUID.fromString(value.value), endpoint, reason);
     }
 
     /**
      * If versions differ this node sends request with local migration list to the endpoint
      * and expecting to receive a list of migrations to apply locally.
      */
-    private static void maybeScheduleSchemaPull(final UUID theirVersion, final InetAddress endpoint)
+    private static void maybeScheduleSchemaPull(UUID theirVersion, InetAddress endpoint, String reason)
     {
         if ((Schema.instance.getVersion() != null && Schema.instance.getVersion().equals(theirVersion)) || !shouldPullSchemaFrom(endpoint))
         {
-            logger.debug("Not pulling schema because versions match or shouldPullSchemaFrom returned false");
+            logger.debug("Not pulling schema from {} due to {}, because versions match or shouldPullSchemaFrom returned false", endpoint, reason);
             return;
         }
 
         if (Schema.emptyVersion.equals(Schema.instance.getVersion()) || runtimeMXBean.getUptime() < MIGRATION_DELAY_IN_MS)
         {
             // If we think we may be bootstrapping or have recently started, submit MigrationTask immediately
-            logger.debug("Submitting migration task for {}", endpoint);
+            logger.debug("Submitting migration task for {} due to {}", endpoint, reason);
             submitMigrationTask(endpoint);
         }
         else
@@ -121,7 +121,7 @@ public class MigrationManager
                     logger.debug("not submitting migration task for {} because our versions match", endpoint);
                     return;
                 }
-                logger.debug("submitting migration task for {}", endpoint);
+                logger.debug("submitting migration task for {} due to {}", endpoint, reason);
                 submitMigrationTask(endpoint);
             };
             ScheduledExecutors.nonPeriodicTasks.schedule(runnable, MIGRATION_DELAY_IN_MS, TimeUnit.MILLISECONDS);
@@ -162,6 +162,7 @@ public class MigrationManager
 
     public static void waitUntilReadyForBootstrap()
     {
+        logger.info("Waiting until ready to bootstrap ({} timeout)...", MIGRATION_TASK_WAIT_IN_SECONDS);
         CountDownLatch completionLatch;
         while ((completionLatch = MigrationTask.getInflightTasks().poll()) != null)
         {
@@ -176,6 +177,7 @@ public class MigrationManager
                 logger.error("Migration task was interrupted");
             }
         }
+        logger.info("Ready to bootstrap (no more in-flight migration tasks).");
     }
 
     public void notifyCreateKeyspace(KeyspaceMetadata ksm)
