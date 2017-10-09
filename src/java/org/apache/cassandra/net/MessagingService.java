@@ -91,6 +91,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=MessagingService";
 
+    public static final long STARTUP_TIME = System.nanoTime();
+
     // 8 bits version, so don't waste versions
     public static final int VERSION_12 = 6;
     public static final int VERSION_20 = 7;
@@ -652,7 +654,9 @@ public final class MessagingService implements MessagingServiceMBean
                 {
                     if (socket instanceof IncomingTcpConnection)
                     {
-                        if ((now - ((IncomingTcpConnection)socket).getConnectTime()) > TimeUnit.SECONDS.toNanos(minAgeInSeconds))
+                        //If the node just started up we should skip the conenction time check
+                        if ((now - ((IncomingTcpConnection)socket).getConnectTime()) > TimeUnit.SECONDS.toNanos(minAgeInSeconds) ||
+                            TimeUnit.NANOSECONDS.toSeconds(now - STARTUP_TIME) < minAgeInSeconds * 2)
                             return true;
                     }
                 }
