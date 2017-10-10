@@ -57,7 +57,7 @@ public class MigrationManager
 
     private static final RuntimeMXBean runtimeMXBean = ManagementFactory.getRuntimeMXBean();
 
-    public static final int MIGRATION_DELAY_IN_MS = 60000;
+    public static final int MIGRATION_DELAY_IN_MS = Integer.parseInt(System.getProperty("cassandra.migration_delay_in_ms", "60000"));
 
     public static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.parseInt(System.getProperty("cassandra.migration_task_wait_in_seconds", "1"));
 
