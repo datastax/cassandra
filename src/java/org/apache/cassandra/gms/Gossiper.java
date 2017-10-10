@@ -1006,10 +1006,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
             public void response(MessageIn msg)
             {
-                StageManager.getStage(Stage.GOSSIP).submit(() -> realMarkAlive(addr, localState));
+                logger.debug("Received echo reply from {}", msg.from);
+                realMarkAlive(addr, localState); // StageManager.getStage(Stage.GOSSIP).submit(() -> realMarkAlive(addr, localState));
+                logger.debug("Endpoint {} marked alive", msg.from);
                 pendingEcho.decrementAndGet();
                 successEchos.incrementAndGet();
             }
+
             public void onFailure(InetAddress from)
             {
                 pendingEcho.decrementAndGet();
@@ -1390,7 +1393,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         // it may be that the local address is the only entry in the seed
         // list in which case, attempting a shadow round is pointless
         if (seeds.isEmpty())
+        {
+            logger.debug("Aborting shadow-round, no seeds");
             return endpointShadowStateMap;
+        }
 
         seedsInShadowRound.clear();
         endpointShadowStateMap.clear();
@@ -1438,6 +1444,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             throw new RuntimeException(wtf);
         }
+
+        logger.debug("Shadow round finished");
 
         return ImmutableMap.copyOf(endpointShadowStateMap);
     }
