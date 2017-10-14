@@ -23,7 +23,7 @@ import static org.junit.Assert.fail;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +37,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import com.beust.jcommander.internal.Sets;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -82,11 +83,17 @@ public class BootStrapperTest
             int replicationFactor = Keyspace.open(keyspaceName).getReplicationStrategy().getReplicationFactor();
             for (int clusterSize : clusterSizes)
                 if (clusterSize >= replicationFactor)
-                    testSourceTargetComputation(keyspaceName, clusterSize, replicationFactor);
+                {
+                    testSourceTargetComputation(keyspaceName, clusterSize, replicationFactor, true, RangeStreamer.StreamConsistency.ONE);
+                    testSourceTargetComputation(keyspaceName, clusterSize, replicationFactor, false, RangeStreamer.StreamConsistency.GLOBAL_QUORUM);
+                    testSourceTargetComputation(keyspaceName, clusterSize, replicationFactor, false, RangeStreamer.StreamConsistency.LOCAL_DC_QUORUM);
+                }
         }
     }
 
-    private RangeStreamer testSourceTargetComputation(String keyspaceName, int numOldNodes, int replicationFactor) throws UnknownHostException
+    private RangeStreamer testSourceTargetComputation(String keyspaceName, int numOldNodes, int replicationFactor,
+                                                      boolean useStrictConsistency,
+                                                      RangeStreamer.StreamConsistency streamConsistency) throws UnknownHostException
     {
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
@@ -114,7 +121,8 @@ public class BootStrapperTest
                                             null,
                                             myEndpoint,
                                             "Bootstrap",
-                                            true,
+                                            useStrictConsistency, // useConsistentRangeMovement
+                                            streamConsistency, // streamConsistency
                                             DatabaseDescriptor.getEndpointSnitch(),
                                             new StreamStateStore(),
                                             false,
@@ -125,11 +133,21 @@ public class BootStrapperTest
         Collection<Map.Entry<InetAddress, Collection<Range<Token>>>> toFetch = s.toFetch().get(keyspaceName);
 
         // Check we get get RF new ranges in total
-        Set<Range<Token>> ranges = new HashSet<>();
+        Map<Range<Token>, Set<InetAddress>> sourcesByRange = new HashMap<>();
         for (Map.Entry<InetAddress, Collection<Range<Token>>> e : toFetch)
-            ranges.addAll(e.getValue());
+        {
+            for (Range<Token> range : e.getValue())
+            {
+                sourcesByRange.putIfAbsent(range, Sets.newHashSet());
+                sourcesByRange.get(range).add(e.getKey());
+            }
+        }
 
-        assertEquals(replicationFactor, ranges.size());
+        assertEquals(replicationFactor, sourcesByRange.size());
+        for (Set<InetAddress> sources : sourcesByRange.values())
+        {
+            assertEquals(streamConsistency.requiredSources(Keyspace.open(keyspaceName)), sources.size());
+        }
 
         // there isn't any point in testing the size of these collections for any specific size.  When a random partitioner
         // is used, they will vary.

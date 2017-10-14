@@ -65,7 +65,17 @@ public class BootStrapper extends ProgressEventNotifierSupport
         this.tokenMetadata = tmd;
     }
 
-    public ListenableFuture<StreamState> bootstrap(StreamStateStore stateStore, boolean useStrictConsistency)
+    /*
+     * @param stateStore
+     * @param useStrictConsistency
+     *          true if it's not replacing and bootstrap should stream from ranges being replaced
+     * @param useConsistentReplace
+     *          true if it's replacing and bootstrap should stream from quorum replicas
+     *
+     * @return
+     */
+    public ListenableFuture<StreamState> bootstrap(StreamStateStore stateStore, boolean useStrictConsistency,
+                                                   RangeStreamer.StreamConsistency streamConsistency)
     {
         StreamingOptions options = StreamingOptions.forBootStrap(tokenMetadata.cloneOnlyTokenMap());
 
@@ -76,6 +86,7 @@ public class BootStrapper extends ProgressEventNotifierSupport
                                                    address,
                                                    "Bootstrap",
                                                    useStrictConsistency,
+                                                   streamConsistency,
                                                    DatabaseDescriptor.getEndpointSnitch(),
                                                    stateStore,
                                                    true,

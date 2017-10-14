@@ -13,7 +13,10 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+
 DSE 5.0.12
+
+DSE 5.0.11
 ==========
 
 Operations
@@ -21,6 +24,13 @@ Operations
    - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
      The command must be executed on the node where the rebuild operation is running. Streams
      may continue until they finish or timeout.
+    - Added "-Dcassandra.replace_consistency" to support streaming each range from more than one source.
+      By default, node replacement only streams one copy of data which may be stale wrt to QUORUM/LOCAL_QUORUM.
+      After replacing a down node with "-Dcassandra.replace_consistency=LOCAL_DC_QUORUM", replacement node will be up
+      with consistent data assuming data is inserted with LOCAL_QUORUM. Note that streaming multiple copies causes more
+      IO and compactions. Alternatively, operators can run repair before bootstrapping the replacement with the
+      default replace_consistency=ONE.
+      Available options: "ONE"(default), "LOCAL_DC_QUORUM", "GLOBAL_QUORUM".
 
 DSE 5.0.10
 ==========
@@ -443,8 +453,8 @@ Upgrading
      the legacy tables, so clients experience no disruption. Issuing DCL
      statements during an upgrade is not supported.
      Once all nodes are upgraded, an operator with superuser privileges should
-     drop the legacy tables, system_auth.users, system_auth.credentials and 
-     system_auth.permissions. Doing so will prompt Cassandra to switch over to 
+     drop the legacy tables, system_auth.users, system_auth.credentials and
+     system_auth.permissions. Doing so will prompt Cassandra to switch over to
      the new tables without requiring any further intervention.
      While the legacy tables are present a restarted node will re-run the data
      conversion and report the outcome so that operators can verify that it is
@@ -613,8 +623,8 @@ Upgrading
     - cqlsh will now display timestamps with a UTC timezone. Previously,
       timestamps were displayed with the local timezone.
     - Commit log files are no longer recycled by default, due to negative
-      performance implications. This can be enabled again with the 
-      commitlog_segment_recycling option in your cassandra.yaml 
+      performance implications. This can be enabled again with the
+      commitlog_segment_recycling option in your cassandra.yaml
     - JMX methods set/getCompactionStrategyClass have been deprecated, use
       set/getCompactionParameters/set/getCompactionParametersJson instead
 
@@ -743,7 +753,7 @@ New features
 Upgrading
 ---------
    - commitlog_sync_batch_window_in_ms behavior has changed from the
-     maximum time to wait between fsync to the minimum time.  We are 
+     maximum time to wait between fsync to the minimum time.  We are
      working on making this more user-friendly (see CASSANDRA-9533) but in the
      meantime, this means 2.1 needs a much smaller batch window to keep
      writer threads from starving.  The suggested default is now 2ms.

@@ -7,6 +7,14 @@ DSE 5.0.12
  * Add metrics on coordination of read commands (APOLLO-637)
 
 
+DSE 5.0.11
+ * Added "-Dcassandra.replace_consistency" to support replace from multiple sources (APOLLO-247)
+ * Add cross_dc_rtt_in_ms to cross dc requests, default 0 (APOLLO-854)
+ * Backport CASSANDRA-13299, Throttle base partitions during MV repair streaming to prevent OOM (APOLLO-878)
+ * Backport CASSANDRA-13079: Warn user to run full repair when increasing replication factor (APOLLO-602)
+ * Add anticompaction metrics and warn users when incremental repair is inefficient (APOLLO-689)
+
+
 DSE 5.0.10
  * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)
  * Add nodetool mark_unrepaired command (APOLLO-692)
