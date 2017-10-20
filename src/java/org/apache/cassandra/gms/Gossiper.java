@@ -589,7 +589,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         InetAddress endpoint = InetAddress.getByName(address);
         EndpointState epState = endpointStateMap.get(endpoint);
-        Collection<Token> tokens = null;
         logger.warn("Assassinating {} via gossip", endpoint);
 
         if (epState == null)
@@ -614,6 +613,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             epState.getHeartBeatState().forceNewerGenerationUnsafe();
         }
 
+        Collection<Token> tokens = null;
         try
         {
             tokens = StorageService.instance.getTokenMetadata().getTokens(endpoint);
@@ -621,8 +621,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         catch (Throwable th)
         {
             JVMStabilityInspector.inspectThrowable(th);
-            // TODO this is broken
-            logger.warn("Unable to calculate tokens for {}.  Will use a random one", address);
+        }
+        if (tokens == null || tokens.isEmpty())
+        {
+            logger.warn("Trying to assassinate an endpoint {} that does not have any tokens assigned. This should not have happened, trying to continue with a random token.", address);
             tokens = Collections.singletonList(StorageService.instance.getTokenMetadata().partitioner.getRandomToken());
         }
 
