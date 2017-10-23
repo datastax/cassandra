@@ -276,4 +276,9 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
 
         return dc == defaultDCRack[0];
     }
+
+    public String toString()
+    {
+        return "PropertyFileSnitch{" + "gossipStarted=" + gossipStarted + '}';
+    }
 }

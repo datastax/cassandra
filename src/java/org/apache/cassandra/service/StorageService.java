@@ -690,6 +690,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
+        logger.info("Snitch information: {}", DatabaseDescriptor.getEndpointSnitch());
+        logger.info("Local DC:{} / rack:{}", DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress()), DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress()));
+
         initialized = true;
     }
 

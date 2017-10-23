@@ -379,4 +379,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     {
         return subsnitch.isDefaultDC(dc);
     }
+
+    public String toString()
+    {
+        return "DynamicEndpointSnitch{" + "registered=" + registered +
+               ", subsnitch=" + subsnitch +
+               '}';
+    }
 }

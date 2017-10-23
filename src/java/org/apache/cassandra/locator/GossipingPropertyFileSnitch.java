@@ -159,4 +159,14 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
         assert dc != null;
         return dc == DEFAULT_DC;
     }
+
+    public String toString()
+    {
+        return "GossipingPropertyFileSnitch{" + "psnitch=" + psnitch +
+               ", myDC='" + myDC + '\'' +
+               ", myRack='" + myRack + '\'' +
+               ", preferLocal=" + preferLocal +
+               ", snitchHelperReference=" + snitchHelperReference +
+               '}';
+    }
 }
