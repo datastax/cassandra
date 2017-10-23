@@ -44,6 +44,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -1894,7 +1895,7 @@ public class StorageProxy implements StorageProxyMBean
             List<InetAddress> liveEndpoints = getLiveSortedEndpoints(keyspace, range.right);
             return new RangeForQuery(range,
                                      liveEndpoints,
-                                     consistency.filterForQuery(keyspace, liveEndpoints));
+                                     consistency.filterForQuery(keyspace, liveEndpoints, ReadRepairDecision.NONE, "range-iterator"));
         }
     }
 
@@ -1939,7 +1940,7 @@ public class StorageProxy implements StorageProxyMBean
                 if (!consistency.isSufficientLiveNodes(keyspace, merged))
                     break;
 
-                List<InetAddress> filteredMerged = consistency.filterForQuery(keyspace, merged);
+                List<InetAddress> filteredMerged = consistency.filterForQuery(keyspace, merged, ReadRepairDecision.NONE, "range-merge");
 
                 // Estimate whether merging will be a win or not
                 if (!DatabaseDescriptor.getEndpointSnitch().isWorthMergingForRangeQuery(filteredMerged, current.filteredEndpoints, next.filteredEndpoints))

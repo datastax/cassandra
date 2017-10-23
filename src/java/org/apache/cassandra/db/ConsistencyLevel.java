@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
@@ -36,6 +37,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.transport.ProtocolException;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 public enum ConsistencyLevel
 {
@@ -52,6 +54,7 @@ public enum ConsistencyLevel
     LOCAL_ONE   (10, true);
 
     private static final Logger logger = LoggerFactory.getLogger(ConsistencyLevel.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.SECONDS);
 
     // Used by the binary protocol
     public final int code;
@@ -181,6 +184,32 @@ public enum ConsistencyLevel
     }
 
     public List<InetAddress> filterForQuery(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair)
+    {
+        return filterForQuery(keyspace, liveEndpoints, readRepair, null);
+    }
+
+    public List<InetAddress> filterForQuery(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair, String requestType)
+    {
+        List<InetAddress> filtered = filterForQueryInternal(keyspace, liveEndpoints, readRepair);
+
+        int local = 0;
+        int remote = 0;
+        String localDC = DatabaseDescriptor.getLocalDataCenter();
+        for (InetAddress ep : filtered)
+        {
+            String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(ep);
+            if (localDC.equals(dc))
+                local++;
+            else
+                remote++;
+        }
+
+        noSpamLogger.debug("filterForQuery({}) {} ks:{} rr:{} local({}):{}, remote:{}", requestType, name(), keyspace, readRepair,
+                           DatabaseDescriptor.getLocalDataCenter(), local, remote);
+        return filtered;
+    }
+
+    private List<InetAddress> filterForQueryInternal(Keyspace keyspace, List<InetAddress> liveEndpoints, ReadRepairDecision readRepair)
     {
         /*
          * If we are doing an each quorum query, we have to make sure that the endpoints we select
