@@ -193,7 +193,7 @@ public enum ConsistencyLevel
         List<InetAddress> filtered = filterForQueryInternal(keyspace, liveEndpoints, readRepair);
 
         int local = 0;
-        int remote = 0;
+        Map<String, Integer> remote = null;
         String localDC = DatabaseDescriptor.getLocalDataCenter();
         for (InetAddress ep : filtered)
         {
@@ -201,7 +201,12 @@ public enum ConsistencyLevel
             if (localDC.equals(dc))
                 local++;
             else
-                remote++;
+            {
+                if (remote == null)
+                    remote = new HashMap<>();
+                Integer ex = remote.get(dc);
+                remote.put(dc, ex != null ? (ex + 1) : 1);
+            }
         }
 
         noSpamLogger.debug("filterForQuery({}) {} ks:{} rr:{} local({}):{}, remote:{}", requestType, name(), keyspace, readRepair,
