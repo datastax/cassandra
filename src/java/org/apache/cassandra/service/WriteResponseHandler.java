@@ -21,15 +21,21 @@ import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Handles blocking writes for ONE, ANY, TWO, THREE, QUORUM, and ALL consistency levels.
@@ -37,6 +43,7 @@ import org.apache.cassandra.db.WriteType;
 public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(WriteResponseHandler.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.SECONDS);
 
     protected volatile int responses;
     private static final AtomicIntegerFieldUpdater<WriteResponseHandler> responsesUpdater
@@ -51,6 +58,44 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     {
         super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
         responses = totalBlockFor();
+        int clBlockFor = consistencyLevel.blockFor(keyspace);
+        int write = writeEndpoints.size();
+        int pending = pendingEndpoints.size();
+        noSpamLogger.debug("{} type:{} ks:{} cl:{} total-blockFor:{} cl-blockFor:{} pending:{} ({}) endpoints:{} ({})",
+                           getClass().getSimpleName(), writeType, keyspace, consistencyLevel, clBlockFor + pending, clBlockFor,
+                           pending, perDC(pendingEndpoints), write, perDC(writeEndpoints));
+    }
+
+    private String perDC(Collection<InetAddress> endpoints)
+    {
+        int local = 0;
+        int localWaiting = 0;
+        Map<String, Pair<Integer, Integer>> remote = new HashMap<>();
+        String localDC = DatabaseDescriptor.getLocalDataCenter();
+        for (InetAddress ep : endpoints)
+        {
+            boolean waitingFor = waitingFor(ep);
+            String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(ep);
+            if (localDC.equals(dc))
+            {
+                local++;
+                if (waitingFor)
+                    localWaiting++;
+            }
+            else
+            {
+                Pair<Integer, Integer> ex = remote.get(dc);
+                remote.put(dc, ex != null
+                               ? Pair.create(ex.left + 1, ex.right + (waitingFor ? 1 : 0))
+                               : Pair.create(1, waitingFor ? 1 : 0));
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("local:").append(localWaiting).append('/').append(local);
+        for (Map.Entry<String, Pair<Integer, Integer>> e : remote.entrySet())
+            sb.append(' ').append(e.getKey()).append(':').append(e.getValue().right).append('/').append(e.getValue().left);
+        return sb.toString();
     }
 
     public WriteResponseHandler(InetAddress endpoint, WriteType writeType, Runnable callback)
