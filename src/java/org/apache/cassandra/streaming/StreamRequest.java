@@ -100,4 +100,15 @@ public class StreamRequest
             return size;
         }
     }
+
+    public String toString()
+    {
+        final StringBuilder sb = new StringBuilder("StreamRequest{");
+        sb.append("keyspace='").append(keyspace).append('\'');
+        sb.append(", ranges=").append(ranges);
+        sb.append(", columnFamilies=").append(columnFamilies);
+        sb.append(", repairedAt=").append(repairedAt);
+        sb.append('}');
+        return sb.toString();
+    }
 }

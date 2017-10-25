@@ -286,6 +286,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         failIfFinished();
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
+        // TODO can this actually flush the same table more than once?
         if (canFlush && flushTables)
             flushSSTables(stores);
 
@@ -678,12 +679,14 @@ public class StreamSession implements IEndpointStateChangeSubscriber
 
     public void onRemove(InetAddress endpoint)
     {
+        // TODO Why do we close the session if any node is removed ? It doesn't even need to be a node affecting this streaming session.
         logger.error("[Stream #{}] Session failed because remote peer {} has left.", planId(), peer.getHostAddress());
         closeSession(State.FAILED);
     }
 
     public void onRestart(InetAddress endpoint, EndpointState epState)
     {
+        // TODO Why do we close the session if any node is restarted ? It doesn't even need to be a node affecting this streaming session.
         logger.error("[Stream #{}] Session failed because remote peer {} was restarted.", planId(), peer.getHostAddress());
         closeSession(State.FAILED);
     }
@@ -721,9 +724,11 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
         List<Future<?>> flushes = new ArrayList<>();
+        logger.debug("[Stream #{}] Flusing {}.", planId(), stores);
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
         FBUtilities.waitOnFutures(flushes);
+        logger.debug("[Stream #{}] Finished flusing {}.", planId(), stores);
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)
