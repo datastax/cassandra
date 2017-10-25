@@ -128,6 +128,7 @@ public class ExecuteMessage extends Message.Request
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
             Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload());
+            state.maybeLogTimings(logger, "Execute prepared %s", statementId);
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                 ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 

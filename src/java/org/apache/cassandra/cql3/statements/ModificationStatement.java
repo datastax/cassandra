@@ -422,9 +422,16 @@ public abstract class ModificationStatement implements CQLStatement
         else
             cl.validateForWrite(cfm.ksName);
 
+        long t0 = System.nanoTime();
         Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState));
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.modificationGetMutations);
+
+        t0 = System.nanoTime();
         if (!mutations.isEmpty())
-            StorageProxy.mutateWithTriggers(mutations, cl, false);
+            StorageProxy.mutateWithTriggers(queryState, mutations, cl, false);
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.mutateWithTriggers);
 
         return null;
     }

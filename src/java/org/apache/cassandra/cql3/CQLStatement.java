@@ -37,6 +37,15 @@ public interface CQLStatement
      */
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException;
 
+    public default void checkAccess(QueryState state) throws UnauthorizedException, InvalidRequestException
+    {
+        long t0 = System.nanoTime();
+
+        checkAccess(state.getClientState());
+
+        state.addTiming(t0, QueryState.QueryTimingType.checkAccess);
+    }
+
     /**
      * Perform additional validation required by the statment.
      * To be overriden by subclasses if needed.

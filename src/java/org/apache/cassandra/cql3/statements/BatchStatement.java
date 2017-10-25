@@ -340,11 +340,11 @@ public class BatchStatement implements CQLStatement
         if (hasConditions)
             return executeWithConditions(options, queryState);
 
-        executeWithoutConditions(getMutations(options, local, now), options.getConsistency());
+        executeWithoutConditions(queryState, getMutations(options, local, now), options.getConsistency());
         return new ResultMessage.Void();
     }
 
-    private void executeWithoutConditions(Collection<? extends IMutation> mutations, ConsistencyLevel cl) throws RequestExecutionException, RequestValidationException
+    private void executeWithoutConditions(QueryState queryState, Collection<? extends IMutation> mutations, ConsistencyLevel cl) throws RequestExecutionException, RequestValidationException
     {
         if (mutations.isEmpty())
             return;
@@ -362,7 +362,7 @@ public class BatchStatement implements CQLStatement
         verifyBatchType(updates);
 
         boolean mutateAtomic = (isLogged() && mutations.size() > 1);
-        StorageProxy.mutateWithTriggers(mutations, cl, mutateAtomic);
+        StorageProxy.mutateWithTriggers(queryState, mutations, cl, mutateAtomic);
     }
 
     private ResultMessage executeWithConditions(BatchQueryOptions options, QueryState state)

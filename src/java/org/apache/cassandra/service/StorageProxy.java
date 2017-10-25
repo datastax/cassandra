@@ -586,6 +586,11 @@ public class StorageProxy implements StorageProxyMBean
     public static void mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
+        mutate(null, mutations, consistency_level);
+    }
+    public static void mutate(QueryState queryState, Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level)
+    throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
+    {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
@@ -603,15 +608,18 @@ public class StorageProxy implements StorageProxyMBean
                 else
                 {
                     WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                    responseHandlers.add(performWrite(mutation, consistency_level, localDataCenter, standardWritePerformer, null, wt));
+                    responseHandlers.add(performWrite(queryState, mutation, consistency_level, localDataCenter, standardWritePerformer, null, wt));
                 }
             }
 
             // wait for writes.  throws TimeoutException if necessary
+            long t0 = System.nanoTime();
             for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
             {
                 responseHandler.get();
             }
+            if (queryState != null)
+                queryState.addTiming(t0, QueryState.QueryTimingType.mutateBlockingWait);
         }
         catch (WriteTimeoutException|WriteFailureException ex)
         {
@@ -816,6 +824,15 @@ public class StorageProxy implements StorageProxyMBean
                                           boolean mutateAtomically)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
+        mutateWithTriggers(null, mutations, consistencyLevel, mutateAtomically);
+    }
+
+    public static void mutateWithTriggers(QueryState queryState,
+                                          Collection<? extends IMutation> mutations,
+                                          ConsistencyLevel consistencyLevel,
+                                          boolean mutateAtomically)
+    throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
+    {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
 
         boolean updatesView = Keyspace.open(mutations.iterator().next().getKeyspaceName())
@@ -823,13 +840,13 @@ public class StorageProxy implements StorageProxyMBean
                               .updatesAffectView(mutations, true);
 
         if (augmented != null)
-            mutateAtomically(augmented, consistencyLevel, updatesView);
+            mutateAtomically(queryState, augmented, consistencyLevel, updatesView);
         else
         {
             if (mutateAtomically || updatesView)
-                mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView);
+                mutateAtomically(queryState, (Collection<Mutation>) mutations, consistencyLevel, updatesView);
             else
-                mutate(mutations, consistencyLevel);
+                mutate(queryState, mutations, consistencyLevel);
         }
     }
 
@@ -844,6 +861,14 @@ public class StorageProxy implements StorageProxyMBean
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
      */
     public static void mutateAtomically(Collection<Mutation> mutations,
+                                        ConsistencyLevel consistency_level,
+                                        boolean requireQuorumForRemove)
+    throws UnavailableException, OverloadedException, WriteTimeoutException
+    {
+        mutateAtomically(null, mutations, consistency_level, requireQuorumForRemove);
+    }
+    public static void mutateAtomically(QueryState queryState,
+                                        Collection<Mutation> mutations,
                                         ConsistencyLevel consistency_level,
                                         boolean requireQuorumForRemove)
     throws UnavailableException, OverloadedException, WriteTimeoutException
@@ -875,24 +900,38 @@ public class StorageProxy implements StorageProxyMBean
             BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
                                                                                                           () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
 
+            long t0;
             // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
             for (Mutation mutation : mutations)
             {
+                t0 = System.nanoTime();
                 WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
                                                                                consistency_level,
                                                                                batchConsistencyLevel,
                                                                                WriteType.BATCH,
                                                                                cleanup);
-                // exit early if we can't fulfill the CL at this time.
+                if (queryState != null)
+                    queryState.addTiming(t0, QueryState.QueryTimingType.modificationWrapBatchResponseHandler);
+
+                // exit early if we can't fulfill the CL at this time
+                t0 = System.nanoTime();
                 wrapper.handler.assureSufficientLiveNodes();
+                if (queryState != null)
+                    queryState.addTiming(t0, QueryState.QueryTimingType.modificationAssureSufficientLiveNodes);
                 wrappers.add(wrapper);
             }
 
             // write to the batchlog
+            t0 = System.nanoTime();
             syncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID);
+            if (queryState != null)
+                queryState.addTiming(t0, QueryState.QueryTimingType.modificationSyncWriteToBatchlog);
 
             // now actually perform the writes and wait for them to complete
+            t0 = System.nanoTime();
             syncWriteBatchedMutations(wrappers, localDataCenter, Stage.MUTATION);
+            if (queryState != null)
+                queryState.addTiming(t0, QueryState.QueryTimingType.modificationSyncWriteBatchedMutations);
         }
         catch (UnavailableException e)
         {
@@ -914,6 +953,8 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
+            if (queryState != null)
+                queryState.addTiming(startTime, QueryState.QueryTimingType.mutateAtomically);
             writeMetrics.addNano(System.nanoTime() - startTime);
         }
     }
@@ -1030,26 +1071,50 @@ public class StorageProxy implements StorageProxyMBean
      * successful.
      */
     public static AbstractWriteResponseHandler<IMutation> performWrite(IMutation mutation,
-                                                            ConsistencyLevel consistency_level,
-                                                            String localDataCenter,
-                                                            WritePerformer performer,
-                                                            Runnable callback,
-                                                            WriteType writeType)
+                                                                       ConsistencyLevel consistency_level,
+                                                                       String localDataCenter,
+                                                                       WritePerformer performer,
+                                                                       Runnable callback,
+                                                                       WriteType writeType)
+    throws UnavailableException, OverloadedException
+    {
+        return performWrite(null, mutation, consistency_level, localDataCenter, performer, callback, writeType);
+    }
+
+    public static AbstractWriteResponseHandler<IMutation> performWrite(QueryState queryState,
+                                                                       IMutation mutation,
+                                                                       ConsistencyLevel consistency_level,
+                                                                       String localDataCenter,
+                                                                       WritePerformer performer,
+                                                                       Runnable callback,
+                                                                       WriteType writeType)
     throws UnavailableException, OverloadedException
     {
         String keyspaceName = mutation.getKeyspaceName();
         AbstractReplicationStrategy rs = Keyspace.open(keyspaceName).getReplicationStrategy();
 
         Token tk = mutation.key().getToken();
+        long t0 = System.nanoTime();
         List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.getNaturalEndpoints);
+        t0 = System.nanoTime();
         Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.getPendingEndpoints);
 
         AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, callback, writeType);
 
         // exit early if we can't fulfill the CL at this time
+        t0 = System.nanoTime();
         responseHandler.assureSufficientLiveNodes();
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.modificationAssureSufficientLiveNodes);
 
+        t0 = System.nanoTime();
         performer.apply(mutation, Iterables.concat(naturalEndpoints, pendingEndpoints), responseHandler, localDataCenter, consistency_level);
+        if (queryState != null)
+            queryState.addTiming(t0, QueryState.QueryTimingType.performWrite);
         return responseHandler;
     }
 
