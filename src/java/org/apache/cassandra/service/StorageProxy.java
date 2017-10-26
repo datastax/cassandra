@@ -976,6 +976,13 @@ public class StorageProxy implements StorageProxyMBean
 
         Batch batch = Batch.createLocal(uuid, FBUtilities.timestampMicros(), mutations);
 
+        if (logger.isTraceEnabled() || Tracing.isTracing())
+        {
+            String msg = String.format("About to send batchlog to endpoints %s and legacy endpoints %s", endpoints.current, endpoints.legacy);
+            logger.trace("{}", msg);
+            Tracing.trace(msg);
+        }
+
         if (!endpoints.current.isEmpty())
             syncWriteToBatchlog(handler, batch, endpoints.current);
 
@@ -992,17 +999,29 @@ public class StorageProxy implements StorageProxyMBean
 
         for (InetAddress target : endpoints)
         {
-            logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, target, batch.size());
-
             if (canDoLocalRequest(target))
                 performLocally(Stage.MUTATION, () -> BatchlogManager.store(batch), handler);
             else
                 MessagingService.instance().sendRR(message, target, handler);
+
+            if (logger.isTraceEnabled() || Tracing.isTracing())
+            {
+                String msg = String.format("Enqueued batchlog store request %s to %s for %d mutations", batch.id, target, batch.size());
+                logger.trace("{}", msg);
+                Tracing.trace(msg);
+            }
         }
     }
 
     private static void asyncRemoveFromBatchlog(BatchlogEndpoints endpoints, UUID uuid)
     {
+        if (logger.isTraceEnabled() || Tracing.isTracing())
+        {
+            String msg = String.format("About to remove batchlog from endpoints %s and legacy endpoints %s", endpoints.current, endpoints.legacy);
+            logger.trace("{}", msg);
+            Tracing.trace(msg);
+        }
+
         if (!endpoints.current.isEmpty())
             asyncRemoveFromBatchlog(endpoints.current, uuid);
 
@@ -1015,13 +1034,17 @@ public class StorageProxy implements StorageProxyMBean
         MessageOut<UUID> message = new MessageOut<>(MessagingService.Verb.BATCH_REMOVE, uuid, UUIDSerializer.serializer);
         for (InetAddress target : endpoints)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Sending batchlog remove request {} to {}", uuid, target);
-
             if (canDoLocalRequest(target))
                 performLocally(Stage.MUTATION, () -> BatchlogManager.remove(uuid));
             else
                 MessagingService.instance().sendOneWay(message, target);
+
+            if (logger.isTraceEnabled() || Tracing.isTracing())
+            {
+                String msg = String.format("Enqueued batchlog remove request %s to %s", uuid, target);
+                logger.trace("{}", msg);
+                Tracing.trace(msg);
+            }
         }
     }
 
