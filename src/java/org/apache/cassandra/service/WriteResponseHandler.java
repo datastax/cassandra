@@ -58,7 +58,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     {
         super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
         responses = totalBlockFor();
-        int clBlockFor = consistencyLevel.blockFor(keyspace);
+        int clBlockFor = consistencyLevel != null ? consistencyLevel.blockFor(keyspace) : -1;
         int write = writeEndpoints.size();
         int pending = pendingEndpoints.size();
         noSpamLogger.debug("{} type:{} ks:{} cl:{} total-blockFor:{} cl-blockFor:{} pending:{} ({}) endpoints:{} ({})",
