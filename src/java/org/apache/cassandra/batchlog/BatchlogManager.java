@@ -49,6 +49,7 @@ import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
@@ -345,6 +346,13 @@ public class BatchlogManager implements BatchlogManagerMBean
                     return;
                 }
             }
+
+            if (logger.isDebugEnabled())
+            {
+                long age = (System.currentTimeMillis() / 1000) - writtenAt;
+                logger.debug("Finished replay of batchlog of age {} seconds for {} with {} mutations against {}", age, id, mutations.size(), hintedNodes);
+            }
+            StorageMetrics.batchlogReplays.mark();
         }
 
         private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException
