@@ -18,12 +18,8 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
-
-import org.slf4j.Logger;
 
 import org.apache.cassandra.tracing.Tracing;
 
@@ -34,7 +30,6 @@ public class QueryState
 {
     private final ClientState clientState;
     private volatile UUID preparedTracingSession;
-    private final Map<QueryTimingType, QueryTiming> queryTimings = new ConcurrentHashMap<>();
 
     public QueryState(ClientState clientState)
     {
@@ -98,59 +93,5 @@ public class QueryState
         return clientState.isInternal
              ? null
              : clientState.getRemoteAddress().getAddress();
-    }
-
-    public void addTiming(long t0, QueryTimingType type)
-    {
-        long t = System.nanoTime() - t0;
-        QueryTiming prev = queryTimings.putIfAbsent(type, new QueryTiming(type, t));
-        if (prev != null)
-            prev.add(t);
-    }
-
-    public void maybeLogTimings(Logger logger, String format, Object... params)
-    {
-        if (queryTimings.isEmpty())
-            return;
-        String msg = String.format(format, params);
-        StringBuilder sb = new StringBuilder();
-        for (QueryTiming t : queryTimings.values())
-        {
-            sb.append(t.type.name()).append(',').append(t.elapsedNanos).append(',');
-        }
-        logger.debug("{}\n    FINE_GRANULAR_TIMINGS: {}", msg, sb);
-    }
-
-    public enum QueryTimingType
-    {
-        modificationGetMutations,
-        modificationAssureSufficientLiveNodes,
-        modificationWrapBatchResponseHandler,
-        modificationSyncWriteToBatchlog,
-        modificationSyncWriteBatchedMutations,
-        performWrite,
-        mutateBlockingWait,
-        getNaturalEndpoints,
-        getPendingEndpoints,
-        mutateWithTriggers,
-        mutateAtomically,
-        checkAccess
-    }
-
-    public static final class QueryTiming
-    {
-        public final QueryTimingType type;
-        public long elapsedNanos;
-
-        public QueryTiming(QueryTimingType type, long elapsedNanos)
-        {
-            this.type = type;
-            this.elapsedNanos = elapsedNanos;
-        }
-
-        public void add(long t)
-        {
-            this.elapsedNanos += t;
-        }
     }
 }

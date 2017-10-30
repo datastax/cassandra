@@ -113,7 +113,6 @@ public class QueryMessage extends Message.Request
             }
 
             Message.Response response = ClientState.getCQLQueryHandler().process(query, state, options, getCustomPayload());
-            state.maybeLogTimings(logger, "Execute unprepared %s", query);
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                 ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 

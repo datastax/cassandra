@@ -207,7 +207,7 @@ public class QueryProcessor implements QueryHandler
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
-        statement.checkAccess(queryState);
+        statement.checkAccess(clientState);
         statement.validate(clientState);
 
         ResultMessage result = statement.execute(queryState, options);
@@ -507,7 +507,7 @@ public class QueryProcessor implements QueryHandler
     throws RequestExecutionException, RequestValidationException
     {
         ClientState clientState = queryState.getClientState();
-        batch.checkAccess(queryState);
+        batch.checkAccess(clientState);
         batch.validate();
         batch.validate(clientState);
         return batch.execute(queryState, options);
