@@ -1674,7 +1674,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         final long GOSSIP_SETTLE_POLL_INTERVAL_NS = FailureDetector.getMaxLocalPause();
         final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = Integer.getInteger("cassandra.rounds_to_wait_for_gossip_to_settle", 3);
         final int MAX_BACKLOG_CHECKS = 10;
-        final int MAX_UNSTABLE_FLIPS = 2;
+        final int MAX_UNSTABLE_FLIPS = Integer.getInteger("cassandra.max_gossip_settle_state_flips", GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED - 1);
         final Map<InetAddress, Integer> unstableTracking = new HashMap<>();
         final Set<InetAddress> unstableEndpoints = new HashSet<>();
         final Set<InetAddress> stableEndpoints = new HashSet<>();
