@@ -21,7 +21,6 @@ import java.io.Serializable;
 import java.util.Set;
 import java.util.UUID;
 
-import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 
 /**
@@ -42,12 +41,11 @@ public class StreamState implements Serializable
 
     public boolean hasFailedSession()
     {
-        return Iterables.any(sessions, new Predicate<SessionInfo>()
-        {
-            public boolean apply(SessionInfo session)
-            {
-                return session.isFailed();
-            }
-        });
+        return Iterables.any(sessions, SessionInfo::isFailed);
+    }
+
+    public boolean hasAbortedSession()
+    {
+        return Iterables.any(sessions, SessionInfo::isAborted);
     }
 }

@@ -13,6 +13,15 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+DSE 5.0.12
+==========
+
+Operations
+----------
+   - New command 'nodetool abortrebuild' allows to abort a currently running rebuild operation.
+     The command must be executed on the node where the rebuild operation is running. Streams
+     may continue until they finish or timeout.
+
 DSE 5.0.10
 ==========
 

@@ -217,11 +217,25 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
                 logger.warn("[Stream #{}] Stream failed", planId);
                 setException(new StreamException(finalState, "Stream failed"));
             }
+            else if (finalState.hasAbortedSession())
+            {
+                logger.warn("[Stream #{}] Stream aborted", planId);
+                setException(new StreamException(finalState, "Stream aborted"));
+            }
             else
             {
                 logger.info("[Stream #{}] All sessions completed", planId);
                 set(finalState);
             }
         }
+    }
+
+    public void abort(String reason)
+    {
+        ArrayList<StreamSession> sessions = new ArrayList<>(coordinator.getAllStreamSessions());
+
+        logger.warn("Aborting streaming for {} active sessions.", sessions.size());
+
+        sessions.forEach(s -> s.abort(reason));
     }
 }

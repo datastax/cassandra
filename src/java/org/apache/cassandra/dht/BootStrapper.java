@@ -140,6 +140,12 @@ public class BootStrapper extends ProgressEventNotifierSupport
                     type = ProgressEventType.ERROR;
                     message = "Some bootstrap stream failed";
                 }
+                else if (streamState.hasAbortedSession())
+                {
+                    // we don't abort bootstrapping like 'nodetool abortrebuild' but be safe and handle it as an error here
+                    type = ProgressEventType.ERROR;
+                    message = "Some bootstrap stream failed";
+                }
                 else
                 {
                     type = ProgressEventType.SUCCESS;

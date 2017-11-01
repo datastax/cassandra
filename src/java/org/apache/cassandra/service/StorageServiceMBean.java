@@ -523,6 +523,16 @@ public interface StorageServiceMBean extends NotificationEmitter
     public void rebuild(String sourceDc);
 
     /**
+     * Abort a currently running rebuild.
+     *
+     * The rebuild itself is being cancelled and no further streaming sessions will be created. However, currently
+     * active streaming sessions might run until those are finished or time out.
+     *
+     * @param reason some message to log
+     */
+    public void abortRebuild(String reason);
+
+    /**
      * Initiate a process of streaming data for which we are responsible from other nodes. It is similar to bootstrap
      * except meant to be used on a node which is already in the cluster (typically containing no data) as an
      * alternative to running repair.
