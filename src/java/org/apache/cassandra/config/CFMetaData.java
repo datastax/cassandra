@@ -69,6 +69,7 @@ public final class CFMetaData
 
     public static final boolean DISABLE_READ_REPAIR = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_read_repair", "false"));
     public static final boolean DISABLE_BLOCKING_READ_REPAIR = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_blocking_read_repair", "false"));
+    public static final boolean DISABLE_BLOCKING_READ_REPAIR_WRITES = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_blocking_read_repair_writes", "false"));
     public static final boolean DISABLE_SPECULATIVE_RETRY = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_speculative_retry", "false"));
 
     public static final Serializer serializer = new Serializer();

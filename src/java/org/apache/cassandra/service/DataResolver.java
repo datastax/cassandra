@@ -173,7 +173,8 @@ public class DataResolver extends ResponseResolver
         {
             try
             {
-                FBUtilities.waitOnFutures(repairResults, DatabaseDescriptor.getWriteRpcTimeout());
+                if (!CFMetaData.DISABLE_BLOCKING_READ_REPAIR_WRITES)
+                    FBUtilities.waitOnFutures(repairResults, DatabaseDescriptor.getWriteRpcTimeout());
             }
             catch (TimeoutException ex)
             {
