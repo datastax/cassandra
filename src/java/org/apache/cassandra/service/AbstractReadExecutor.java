@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -183,6 +184,8 @@ public abstract class AbstractReadExecutor
 
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().cfId);
         SpeculativeRetryParam retry = cfs.metadata.params.speculativeRetry;
+        if (CFMetaData.DISABLE_SPECULATIVE_RETRY)
+            retry = SpeculativeRetryParam.NONE;
 
         // Speculative retry is disabled *OR* there are simply no extra replicas to speculate.
         // 11980: Disable speculative retry if using EACH_QUORUM in order to prevent miscounting DC responses

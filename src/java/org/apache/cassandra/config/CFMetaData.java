@@ -67,6 +67,9 @@ public final class CFMetaData
 
     private static final Logger logger = LoggerFactory.getLogger(CFMetaData.class);
 
+    public static final boolean DISABLE_READ_REPAIR = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_read_repair", "false"));
+    public static final boolean DISABLE_SPECULATIVE_RETRY = Boolean.parseBoolean(System.getProperty(Config.PROPERTY_PREFIX + "disable_speculative_retry", "false"));
+
     public static final Serializer serializer = new Serializer();
 
     //REQUIRED
@@ -551,6 +554,9 @@ public final class CFMetaData
 
     public ReadRepairDecision newReadRepairDecision()
     {
+        if (DISABLE_READ_REPAIR)
+            return ReadRepairDecision.NONE;
+
         double chance = ThreadLocalRandom.current().nextDouble();
         if (params.readRepairChance > chance)
             return ReadRepairDecision.GLOBAL;
