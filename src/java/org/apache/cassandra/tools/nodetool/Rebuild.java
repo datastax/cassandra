@@ -47,11 +47,12 @@ public class Rebuild extends NodeToolCmd
     private String tokens = null;
 
     @Option(title = "mode",
-    allowedValues = {"normal", "refetch", "reset"},
+    allowedValues = {"normal", "refetch", "reset", "reset-no-shapshot"},
     name = {"-m", "--mode"},
     description = "normal: conventional behaviour, only streams ranges that are not already locally available (this is the default) - " +
                   "refetch: resets the locally available ranges, streams all ranges but leaves current data untouched - " +
-                  "reset: resets the locally available ranges, removes all locally present data (like a TRUNCATE), streams all ranges")
+                  "reset: resets the locally available ranges, removes all locally present data (like a TRUNCATE), streams all ranges - " +
+                  "reset-no-snapshot: like 'reset', but prevents a snapshot if 'auto_snapshot' is enabled.")
     private String mode = "normal";
 
     @Option(title = "specific_sources",

@@ -73,6 +73,32 @@ enum RebuildMode
         {
             throw new IllegalArgumentException("mode=reset is only supported for all ranges");
         }
+    },
+
+    /**
+     * Resets the locally available ranges, removes all locally present data (like a {@code TRUNCATE}),
+     * streams all ranges, but never creates a snapshot during truncate.
+     */
+    RESET_NO_SNAPSHOT
+    {
+        @Override
+        public void beforeStreaming(List<String> keyspaces)
+        {
+            for (String keyspaceName : keyspaces)
+            {
+                // reset the locally available ranges for the keyspaces
+                SystemKeyspace.resetAvailableRanges(keyspaceName);
+
+                // truncate the tables for the keyspaces (local, not cluster wide)
+                Keyspace.open(keyspaceName).getColumnFamilyStores().forEach(cfs -> cfs.truncateBlocking(false));
+            }
+        }
+
+        @Override
+        public void beforeStreaming(Map<String, Collection<Range<Token>>> rangesPerKeyspaces)
+        {
+            throw new IllegalArgumentException("mode=reset-no-snapshot is only supported for all ranges");
+        }
     };
 
     /**
@@ -98,7 +124,7 @@ enum RebuildMode
         if (name == null)
             return NORMAL;
 
-        String modeName = name.toUpperCase(Locale.US);
+        String modeName = name.toUpperCase(Locale.US).replaceAll("-", "_");
         for (RebuildMode mode : RebuildMode.values())
         {
             if (mode.name().equals(modeName))
