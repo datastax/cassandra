@@ -1758,6 +1758,33 @@ public class StorageProxy implements StorageProxyMBean
                     Tracing.trace("Enqueuing full data read to {}", endpoint);
                     MessagingService.instance().sendRRWithFailure(message, endpoint, repairHandler);
                 }
+
+                if (CFMetaData.DISABLE_BLOCKING_READ_REPAIR)
+                {
+                    // There's a chance that two mismatching digest responses arrive before the first data response,
+                    // so we just spin here (as this is a quick-n-dirty try-it-out hack that is NOT meant to survive!).
+                    // NOTE: we do *not* want to change blockFor - but skip the blocking part of RR.
+                    repairHandler = null;
+                    while (true)
+                    {
+                        try
+                        {
+                            result = executor.handler.resolver.getData();
+                            break;
+                        }
+                        catch (AssertionError ignore)
+                        {
+                            try
+                            {
+                                Thread.sleep(1L);
+                            }
+                            catch (InterruptedException e)
+                            {
+                                // ignore me
+                            }
+                        }
+                    }
+                }
             }
         }
 
