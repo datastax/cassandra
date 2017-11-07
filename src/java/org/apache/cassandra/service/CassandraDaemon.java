@@ -49,12 +49,12 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
@@ -469,11 +469,25 @@ public class CassandraDaemon
      */
     public void start()
     {
-        String nativeFlag = System.getProperty("cassandra.start_native_transport");
+        String nativeFlag = System.getProperty(Config.PROPERTY_PREFIX + "start_native_transport");
         if ((nativeFlag != null && Boolean.parseBoolean(nativeFlag)) || (nativeFlag == null && DatabaseDescriptor.startNativeTransport()))
         {
-            startNativeTransport();
-            StorageService.instance.setRpcReady(true);
+            long nativeTransportStartupDelay = Long.getLong(Config.PROPERTY_PREFIX + "native_transport_startup_delay_second", 0);
+
+            Runnable startupNativeTransport = () -> {
+                startNativeTransport();
+                StorageService.instance.setRpcReady(true);
+            };
+
+            if (nativeTransportStartupDelay > 0)
+            {
+                logger.info("Delayed startup of native transport for {} seconds.", nativeTransportStartupDelay);
+                ScheduledExecutors.nonPeriodicTasks.schedule(startupNativeTransport,
+                                                             nativeTransportStartupDelay,
+                                                             TimeUnit.SECONDS);
+            }
+            else
+                startupNativeTransport.run();
         }
         else
             logger.info("Not starting native transport as requested. Use JMX (StorageService->startNativeTransport()) or nodetool (enablebinary) to start it");
