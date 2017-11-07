@@ -872,6 +872,11 @@ public class StorageProxy implements StorageProxyMBean
 
             final BatchlogEndpoints batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
             final UUID batchUUID = UUIDGen.getTimeUUID();
+            if (Math.abs(System.currentTimeMillis() - UUIDGen.getAdjustedTimestamp(batchUUID)) > 2000L)
+                logger.warn("Created a batchlog id with timestamp {}, which is at least two seconds off the system clock {}",
+                            new Date(UUIDGen.getAdjustedTimestamp(batchUUID)),
+                            new Date(System.currentTimeMillis()));
+            StorageMetrics.batchlogCreateAge.update(UUIDGen.microsAge(batchUUID));
             BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
                                                                                                           () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
 
@@ -965,7 +970,10 @@ public class StorageProxy implements StorageProxyMBean
             if (canDoLocalRequest(target))
                 performLocally(Stage.MUTATION, () -> BatchlogManager.store(batch), handler);
             else
+            {
+                StorageMetrics.batchlogStoreSendAge.update(UUIDGen.microsAge(batch.id));
                 MessagingService.instance().sendRR(message, target, handler);
+            }
 
             if (logger.isTraceEnabled() || Tracing.isTracing())
             {
@@ -984,6 +992,8 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("{}", msg);
             Tracing.trace(msg);
         }
+
+        StorageMetrics.batchlogRemoveSendAge.update(UUIDGen.microsAge(uuid));
 
         if (!endpoints.current.isEmpty())
             asyncRemoveFromBatchlog(endpoints.current, uuid);

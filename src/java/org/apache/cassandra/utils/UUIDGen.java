@@ -221,6 +221,11 @@ public class UUIDGen
         return (uuid.timestamp() / 10) + START_EPOCH * 1000;
     }
 
+    public static long microsAge(UUID uuid)
+    {
+        return System.currentTimeMillis() * 1000 - microsTimestamp(uuid);
+    }
+
     /**
      * @param timestamp milliseconds since Unix epoch
      * @return

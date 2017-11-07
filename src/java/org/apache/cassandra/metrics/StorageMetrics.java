@@ -19,6 +19,7 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
+import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
@@ -39,4 +40,11 @@ public class StorageMetrics
     public static final Meter hintedBatchlogReplays = Metrics.meter(factory.createMetricName("HintedBatchlogReplays"));
     public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
     public static final Counter hintsOnDisk = Metrics.counter(factory.createMetricName("HintsOnDisk"));
+
+    public static final Histogram batchlogCreateAge = Metrics.histogram(factory.createMetricName("BatchlogCreateAge"), true);
+    public static final Histogram batchlogStoreSendAge = Metrics.histogram(factory.createMetricName("BatchlogStoreSendAge"), true);
+    public static final Histogram batchlogStoreProcessAge = Metrics.histogram(factory.createMetricName("BatchlogStoreProcessAge"), true);
+    public static final Histogram batchlogRemoveSendAge = Metrics.histogram(factory.createMetricName("BatchlogRemoveSendAge"), true);
+    public static final Histogram batchlogRemoveProcessAge = Metrics.histogram(factory.createMetricName("BatchlogRemoveProcessAge"), true);
+    public static final Histogram batchlogReplayAge = Metrics.histogram(factory.createMetricName("BatchlogReplayAge"), true);
 }

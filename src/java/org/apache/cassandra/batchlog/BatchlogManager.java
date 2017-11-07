@@ -119,6 +119,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void remove(UUID id)
     {
+        StorageMetrics.batchlogRemoveProcessAge.update(UUIDGen.microsAge(id));
+
         new Mutation(PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
                                                          UUIDType.instance.decompose(id),
                                                          FBUtilities.timestampMicros(),
@@ -133,6 +135,8 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch, boolean durableWrites)
     {
+        StorageMetrics.batchlogStoreProcessAge.update(UUIDGen.microsAge(batch.id));
+
         RowUpdateBuilder builder =
             new RowUpdateBuilder(SystemKeyspace.Batches, batch.creationTime, batch.id)
                 .clustering()
@@ -246,6 +250,8 @@ public class BatchlogManager implements BatchlogManagerMBean
             int version = row.getInt("version");
             try
             {
+                StorageMetrics.batchlogReplayAge.update(UUIDGen.microsAge(id));
+
                 ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
                 if (batch.replay(rateLimiter, hintedNodes) > 0)
                 {
