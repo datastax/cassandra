@@ -19,7 +19,6 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -38,5 +37,4 @@ public class StorageMetrics
     public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
     public static final Gauge netHintsSinceStartup = Metrics.register(factory.createMetricName("NetHintsSinceStartup"),
                                                                       () -> totalHints.getCount() - HintedHandoffMetrics.hintsSinceStartupDispatchedAndDiscarded.getCount());
-    public static final Meter batchlogReplays = Metrics.meter(factory.createMetricName("BatchlogReplays"));
 }
