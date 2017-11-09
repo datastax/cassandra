@@ -41,9 +41,6 @@ public class HintedHandoffMetrics
 
     private static final MetricNameFactory factory = new DefaultNameFactory("HintedHandOffManager");
 
-    /** Amount of hints, that have landed the node after it's startup and have been successfully dispatched to the target node and discarded locally **/
-    public static final Counter hintsSinceStartupDispatchedAndDiscarded = Metrics.counter(factory.createMetricName("HintsSinceStartupDispatchedAndDiscarded"));
-
     /** Total number of hints which are not stored, This is not a cache. */
     private final LoadingCache<InetAddress, DifferencingCounter> notStored = CacheBuilder.newBuilder().build(new CacheLoader<InetAddress, DifferencingCounter>()
     {

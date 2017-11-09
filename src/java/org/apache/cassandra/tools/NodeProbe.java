@@ -1317,7 +1317,7 @@ public class NodeProbe implements AutoCloseable
 
     /**
      * Retrieve Proxy metrics
-     * @param metricName Exceptions, Load, TotalHints, TotalHintsInProgress, TotalHintsReplayed or NetHintsSinceStartup.
+     * @param metricName Exceptions, Load, TotalHints or TotalHintsInProgress.
      */
     public long getStorageMetric(String metricName)
     {
