@@ -113,7 +113,6 @@ class HintsWriter implements AutoCloseable
         long hintsWritten = totalHintsWritten.get();
         HintsDescriptor.Statistics statistics = new HintsDescriptor.Statistics(hintsWritten);
         descriptor.setStatistics(statistics);
-        StorageMetrics.hintsOnDisk.inc(hintsWritten);
 
         File file = new File(directory, descriptor.statisticsFileName());
         try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(file.toPath())))
@@ -292,6 +291,7 @@ class HintsWriter implements AutoCloseable
             maybeFsync();
             maybeSkipCache();
             totalHintsWritten.addAndGet(hintsWritten);
+            StorageMetrics.hintsOnDisk.inc(hintsWritten);
         }
 
         private void flushBuffer() throws IOException
