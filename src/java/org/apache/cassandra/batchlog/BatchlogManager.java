@@ -70,6 +70,7 @@ public class BatchlogManager implements BatchlogManagerMBean
     private static final long REPLAY_INTERVAL = Long.getLong("dse.batchlog.replay_interval_in_ms", 10 * 1000); // milliseconds
     static final int DEFAULT_PAGE_SIZE = Integer.getInteger("dse.batchlog.page_size", 128);
     private static final int MIN_CONNECTION_AGE = Integer.getInteger(Config.PROPERTY_PREFIX + "batchlog.min_connection_age_seconds", 60);
+    private static long batchlogTimeout = Long.getLong("dse.batchlog.timeout", DatabaseDescriptor.getWriteRpcTimeout() * 2);  // enough time for the actual write + BM removal mutation
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
@@ -311,7 +312,19 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static long getBatchlogTimeout()
     {
-        return DatabaseDescriptor.getWriteRpcTimeout() * 2; // enough time for the actual write + BM removal mutation
+        return batchlogTimeout;
+    }
+
+    public long getBatchlogTimeoutInMillis()
+    {
+        return batchlogTimeout;
+    }
+
+    public void setBatchlogTimeoutInMillis(long batchlogTimeoutInMillis)
+    {
+        if (batchlogTimeoutInMillis < 100)
+            throw new IllegalArgumentException(String.format("Value %d is not a valid value for the batchlog timeout. It must be at least 100ms.", batchlogTimeoutInMillis));
+        batchlogTimeout = batchlogTimeoutInMillis;
     }
 
     private static class ReplayingBatch

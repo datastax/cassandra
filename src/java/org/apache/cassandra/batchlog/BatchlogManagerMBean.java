@@ -35,4 +35,7 @@ public interface BatchlogManagerMBean
      * Forces batchlog replay. Blocks until completion.
      */
     public void forceBatchlogReplay() throws Exception;
+
+    public long getBatchlogTimeoutInMillis();
+    public void setBatchlogTimeoutInMillis(long batchlogTimeoutInMillis);
 }
