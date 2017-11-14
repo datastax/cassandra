@@ -472,7 +472,7 @@ public class CassandraDaemon
         String nativeFlag = System.getProperty(Config.PROPERTY_PREFIX + "start_native_transport");
         if ((nativeFlag != null && Boolean.parseBoolean(nativeFlag)) || (nativeFlag == null && DatabaseDescriptor.startNativeTransport()))
         {
-            long nativeTransportStartupDelay = Long.getLong(Config.PROPERTY_PREFIX + "native_transport_startup_delay_second", 0);
+            long nativeTransportStartupDelay = Long.getLong(Config.PROPERTY_PREFIX + "native_transport_startup_delay_seconds", 0);
 
             Runnable startupNativeTransport = () -> {
                 startNativeTransport();

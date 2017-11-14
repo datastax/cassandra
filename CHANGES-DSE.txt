@@ -1,5 +1,5 @@
 DSE 5.0.12
- * Add -Dcassandra.native_transport_startup_delay_second to delay startup of native transport, default 0(DB-1315)
+ * Add -Dcassandra.native_transport_startup_delay_seconds to delay startup of native transport, default 0 (DB-1315)
  * New metrics for batchlog-replays (DB-1314)
  * Add new rebuild mode reset-no-snapshot (DB-1224)
  * Add 'nodetool abortrebuild' (DB-1234)
