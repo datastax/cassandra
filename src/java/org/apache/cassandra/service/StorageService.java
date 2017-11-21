@@ -1266,17 +1266,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("starting rebuild for {}", msg);
         long t0 = System.currentTimeMillis();
 
-        RangeStreamer streamer = new RangeStreamer(tokenMetadata,
-                                                   null,
-                                                   FBUtilities.getBroadcastAddress(),
-                                                   "Rebuild",
-                                                   !replacing && useStrictConsistency,
-                                                   DatabaseDescriptor.getEndpointSnitch(),
-                                                   streamStateStore,
-                                                   false,
-                                                   options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
-                                                                          FailureDetector.instance));
-
         try
         {
             RangeStreamer streamer = new RangeStreamer(tokenMetadata,
