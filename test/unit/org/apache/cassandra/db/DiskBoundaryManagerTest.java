@@ -21,6 +21,7 @@ package org.apache.cassandra.db;
 import java.io.File;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.List;
 
 import com.google.common.collect.Lists;
@@ -35,14 +36,36 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class DiskBoundaryManagerTest extends CQLTester
 {
+    private static final List<Directories.DataDirectory> DIRS1 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/2")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/3")));
+
+    private static final List<Directories.DataDirectory> DIRS2 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/11")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/22")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/33")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/44")));
+
+    private static final List<Directories.DataDirectory> DIRS3 = Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/111")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/222")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/333")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/444")),
+                                                                                    new Directories.DataDirectory(new File("/tmp/555")));
+
+    private static final List<List<Directories.DataDirectory>> ALL_DIRS = Arrays.asList(DIRS1, DIRS2, DIRS3);
+
     private DiskBoundaryManager dbm;
     private MockCFS mock;
-    private Directories dirs;
+    private Directories cfDirectories;
+    private Directories custom1Directories;
+    private Directories custom2Directories;
+    private Directories[] allDirectories;
 
     @Before
     public void setup()
@@ -51,65 +74,94 @@ public class DiskBoundaryManagerTest extends CQLTester
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
         metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddress());
         createTable("create table %s (id int primary key, x text)");
-        dbm = getCurrentColumnFamilyStore().diskBoundaryManager;
-        dirs = new Directories(getCurrentColumnFamilyStore().metadata, Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
-                                                                                          new Directories.DataDirectory(new File("/tmp/2")),
-                                                                                          new Directories.DataDirectory(new File("/tmp/3"))));
-        mock = new MockCFS(getCurrentColumnFamilyStore(), dirs);
+        ColumnFamilyStore currentColumnFamilyStore = getCurrentColumnFamilyStore();
+        dbm = currentColumnFamilyStore.diskBoundaryManager;
+
+        cfDirectories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS1);
+        custom1Directories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS2);
+        custom2Directories = new Directories(getCurrentColumnFamilyStore().metadata, DIRS3);
+        allDirectories = new Directories[]{ cfDirectories, custom1Directories, custom2Directories };
+        mock = new MockCFS(getCurrentColumnFamilyStore(), cfDirectories);
     }
 
     @Test
     public void getBoundariesTest()
     {
-        DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
-        assertEquals(dbv.directories, dirs.getWriteableLocations());
+        for (int i = 0; i < allDirectories.length; i++)
+        {
+            Directories dir = allDirectories[i];
+            DiskBoundaries dbv = dbm.getDiskBoundaries(mock, dir);
+            Assert.assertEquals(ALL_DIRS.get(i).size(), dbv.positions.size());
+            Assert.assertEquals(Arrays.asList(dir.getWriteableLocations()), dbv.directories);
+            // fetch again and check that reference is cached
+            assertSame(dbv, dbm.getDiskBoundaries(mock, dir));
+        }
     }
 
     @Test
     public void blackListTest()
     {
-        DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
-        assertEquals(dbv.directories, dirs.getWriteableLocations());
-        BlacklistedDirectories.maybeMarkUnwritable(new File("/tmp/3"));
-        dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(2, dbv.positions.size());
-        Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
-                                        new Directories.DataDirectory(new File("/tmp/2"))),
-                                 dbv.directories);
+        // Fetch disk boundaries
+        DiskBoundaries[] oldBoundaries = getAll();
+
+        // Blacklist directory from cfDir and from custom2
+        File[] blacklisted = new File[]{new File("/tmp/3"), null, new File("/tmp/444")};
+        BlacklistedDirectories.maybeMarkUnwritable(blacklisted[0]);
+        BlacklistedDirectories.maybeMarkUnwritable(blacklisted[2]);
+
+        DiskBoundaries[] newBoundaries = getAll();
+        for (int i = 0; i < allDirectories.length; i++)
+        {
+            // Check that all boundaries were invalidated
+            assertNotSame(oldBoundaries[i], newBoundaries[i]);
+            // Check that blacklisted directories are not returned
+            List<Directories.DataDirectory> newDirs = Lists.newArrayList(ALL_DIRS.get(i));
+            if (blacklisted[i] != null)
+            {
+                Directories.DataDirectory blacklistedDir = new Directories.DataDirectory(blacklisted[i]);
+                newDirs.remove(blacklistedDir);
+            }
+            Assert.assertEquals(newDirs.size(), newBoundaries[i].positions.size());
+            Assert.assertEquals(newDirs, newBoundaries[i].directories);
+        }
+    }
+
+    private DiskBoundaries[] getAll()
+    {
+        DiskBoundaries[] boundaries = new DiskBoundaries[allDirectories.length];
+        for (int i = 0; i < allDirectories.length; i++)
+        {
+            boundaries[i] = dbm.getDiskBoundaries(mock, allDirectories[i]);
+        }
+        return boundaries;
     }
 
     @Test
     public void updateTokensTest() throws UnknownHostException
     {
-        DiskBoundaries dbv1 = dbm.getDiskBoundaries(mock);
+        DiskBoundaries[] oldBoundaries = getAll();
+
         StorageService.instance.getTokenMetadata().updateNormalTokens(BootStrapper.getRandomTokens(StorageService.instance.getTokenMetadata(), 10), InetAddress.getByName("127.0.0.10"));
-        DiskBoundaries dbv2 = dbm.getDiskBoundaries(mock);
-        assertFalse(dbv1.equals(dbv2));
+
+        DiskBoundaries[] newBoundaries = getAll();
+        for (int i = 0; i < allDirectories.length; i++)
+        {
+            assertFalse(oldBoundaries.equals(newBoundaries));
+        }
     }
 
     @Test
     public void alterKeyspaceTest() throws Throwable
     {
-        DiskBoundaries dbv1 = dbm.getDiskBoundaries(mock);
+        DiskBoundaries[] oldBoundaries = getAll();
+
         execute("alter keyspace "+keyspace()+" with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 }");
-        DiskBoundaries dbv2 = dbm.getDiskBoundaries(mock);
-        // == on purpose - we just want to make sure that there is a new instance cached
-        assertFalse(dbv1 == dbv2);
-        DiskBoundaries dbv3 = dbm.getDiskBoundaries(mock);
-        assertTrue(dbv2 == dbv3);
 
-    }
-
-    private static void assertEquals(List<Directories.DataDirectory> dir1, Directories.DataDirectory[] dir2)
-    {
-        if (dir1.size() != dir2.length)
-            fail();
-        for (int i = 0; i < dir2.length; i++)
+        DiskBoundaries[] newBoundaries = getAll();
+        for (int i = 0; i < allDirectories.length; i++)
         {
-            if (!dir1.get(i).equals(dir2[i]))
-                fail();
+            assertNotSame(oldBoundaries[i], newBoundaries[i]);
+            assertSame(newBoundaries[i], dbm.getDiskBoundaries(mock, allDirectories[i]));
         }
     }
 

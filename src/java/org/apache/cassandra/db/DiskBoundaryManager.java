@@ -21,6 +21,7 @@ package org.apache.cassandra.db;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,27 +43,28 @@ public class DiskBoundaryManager
     private static final boolean SPLIT_SSTABLES_BY_TOKEN_RANGE = Boolean.parseBoolean(System.getProperty("cassandra.split_sstables_by_token_range", "true"));
 
     private static final Logger logger = LoggerFactory.getLogger(DiskBoundaryManager.class);
-    private volatile DiskBoundaries diskBoundaries;
+    private ConcurrentHashMap<Directories, DiskBoundaries> diskBoundaries = new ConcurrentHashMap<>();
 
-    public DiskBoundaries getDiskBoundaries(ColumnFamilyStore cfs)
+    public DiskBoundaries getDiskBoundaries(ColumnFamilyStore cfs, Directories directories)
     {
         if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
-            return new DiskBoundaries(cfs.getDirectories().getWriteableLocations(), null, -1, -1);
+            return new DiskBoundaries(directories.getWriteableLocations(), null, -1, -1);
         // copy the reference to avoid getting nulled out by invalidate() below
         // - it is ok to race, compaction will move any incorrect tokens to their correct places, but
         // returning null would be bad
-        DiskBoundaries db = diskBoundaries;
-        if (isOutOfDate(diskBoundaries))
+        DiskBoundaries db = diskBoundaries.get(directories);
+        if (isOutOfDate(db))
         {
             synchronized (this)
             {
-                db = diskBoundaries;
-                if (isOutOfDate(diskBoundaries))
+                db = diskBoundaries.get(directories);
+                if (isOutOfDate(db))
                 {
-                    logger.debug("Refreshing disk boundary cache for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
-                    DiskBoundaries oldBoundaries = diskBoundaries;
-                    db = diskBoundaries = getDiskBoundaryValue(cfs);
-                    logger.debug("Updating boundaries from {} to {} for {}.{}", oldBoundaries, diskBoundaries, cfs.keyspace.getName(), cfs.getTableName());
+                    logger.debug("Refreshing disk boundary cache of {} for {}.{}", directories, cfs.keyspace.getName(), cfs.getTableName());
+                    DiskBoundaries oldBoundaries = db;
+                    db = getDiskBoundaryValue(cfs, directories);
+                    diskBoundaries.put(directories, db);
+                    logger.debug("Updating boundaries of {} from {} to {} for {}.{}", directories, oldBoundaries, diskBoundaries, cfs.keyspace.getName(), cfs.getTableName());
                 }
             }
         }
@@ -81,7 +83,7 @@ public class DiskBoundaryManager
         return currentRingVersion != db.ringVersion || currentDiskVersion != db.directoriesVersion;
     }
 
-    private static DiskBoundaries getDiskBoundaryValue(ColumnFamilyStore cfs)
+    private static DiskBoundaries getDiskBoundaryValue(ColumnFamilyStore cfs, Directories directories)
     {
         Collection<Range<Token>> localRanges;
 
@@ -112,7 +114,7 @@ public class DiskBoundaryManager
         do
         {
             directoriesVersion = BlacklistedDirectories.getDirectoriesVersion();
-            dirs = cfs.getDirectories().getWriteableLocations();
+            dirs = directories.getWriteableLocations();
         }
         while (directoriesVersion != BlacklistedDirectories.getDirectoriesVersion()); // if directoriesVersion has changed we need to recalculate
 
@@ -153,6 +155,6 @@ public class DiskBoundaryManager
 
     public void invalidate()
     {
-        diskBoundaries = null;
+        diskBoundaries.clear();
     }
 }

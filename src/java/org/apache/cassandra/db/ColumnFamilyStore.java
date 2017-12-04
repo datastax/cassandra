@@ -2727,7 +2727,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public DiskBoundaries getDiskBoundaries()
     {
-        return diskBoundaryManager.getDiskBoundaries(this);
+        return diskBoundaryManager.getDiskBoundaries(this, directories);
+    }
+
+    /**
+     * Used by Tiered Storage on DSE
+     */
+    @SuppressWarnings("unused")
+    public DiskBoundaries getDiskBoundaries(Directories directories)
+    {
+        return diskBoundaryManager.getDiskBoundaries(this, directories);
     }
 
     public void invalidateDiskBoundaries()
