@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.gms;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -37,6 +40,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.service.QueryState;
@@ -635,9 +639,91 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         logger.warn("Finished assassinating {}", endpoint);
     }
 
+    /**
+     * Do not call this method unless you know what you are doing.
+     * In case a node went into a hibernate state - i.e. replacing a node with the <em>same</em> address
+     * or bootstrapping a node without letting join the ring - and it's required to bring that node back
+     * to a normal status (e.g. for a failed replace operation), use this method.
+     * It can be called on any node, prefer a seed node, to set the status back to {@code normal}.
+     *
+     * @param address endpoint to revive
+     */
+    public void reviveEndpoint(String address) throws UnknownHostException
+    {
+        InetAddress endpoint = InetAddress.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+        logger.warn("Reviving {} via gossip", endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no endpoint-state");
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                    endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (!isSilentShutdownState(epState))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": not in a (silent) shutdown state: " + epState.getStatus());
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive (failure-detector)");
+
+        logger.info("Sleeping for {}ms to ensure {} does not change", StorageService.RING_DELAY, endpoint);
+        Uninterruptibles.sleepUninterruptibly(StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        // make sure the endpoint state did not change
+        EndpointState newState = endpointStateMap.get(endpoint);
+        if (newState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": endpoint-state disappeared");
+        if (newState.getHeartBeatState().getGeneration() != generation)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, generation changed while trying to reviving it");
+        if (newState.getHeartBeatState().getHeartBeatVersion() != heartbeat)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        // using the tokens from the endpoint-state as that is the real source of truth
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+        if (tokens == null || tokens.isEmpty())
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
+
+        // 3, 2, 1, GO!
+        epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        handleMajorStateChange(endpoint, epState);
+        Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
+        logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
+                    endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
     public boolean isKnownEndpoint(InetAddress endpoint)
     {
         return endpointStateMap.containsKey(endpoint);
+    }
+
+    public Collection<Token> getTokensFor(InetAddress endpoint, IPartitioner partitioner)
+    {
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (state == null)
+            return Collections.emptyList();
+
+        return getTokensFromEndpointState(state, partitioner);
+    }
+
+    public Collection<Token> getTokensFromEndpointState(EndpointState state, IPartitioner partitioner)
+    {
+        try
+        {
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public int getCurrentGenerationNumber(InetAddress endpoint)
@@ -1382,7 +1468,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      * </ul>
      *
      * Method is synchronized, as we use an in-progress flag to indicate that shadow round must be cleared
-     * again by calling {@link Gossiper#finishShadowRound(Map)}. This will update
+     * again by calling {@link Gossiper#maybeFinishShadowRound(InetAddress, boolean, Map)}. This will update
      * {@link Gossiper#endpointShadowStateMap} with received values, in order to return an immutable copy to the
      * caller of {@link Gossiper#doShadowRound()}. Therefor only a single shadow round execution is permitted at
      * the same time.

@@ -29,6 +29,8 @@ public interface GossiperMBean
 
     public void assassinateEndpoint(String address) throws UnknownHostException;
 
+    public void reviveEndpoint(String address) throws UnknownHostException;
+
     public double getSeedGossipProbability();
 
     public void setSeedGossipProbability(double probability);

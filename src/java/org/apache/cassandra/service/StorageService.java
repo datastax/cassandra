@@ -2177,22 +2177,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Collection<Token> getTokensFor(InetAddress endpoint)
     {
-        try
-        {
-            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-            if (state == null)
-                return Collections.emptyList();
-
-            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
-            if (versionedValue == null)
-                return Collections.emptyList();
-
-            return TokenSerializer.deserialize(tokenMetadata.partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return Gossiper.instance.getTokensFor(endpoint, tokenMetadata.partitioner);
     }
 
     /**
