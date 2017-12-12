@@ -52,7 +52,10 @@ public interface Unfiltered extends Clusterable
      * This method only exists in DSE 5.1. See {@code DB-1477}.
      * Same like {@link #digest(MessageDigest)}, but excludes the given columns from digest calculation.
      */
-    public void digest(MessageDigest digest, Set<ByteBuffer> columnsToExclude);
+    public default void digest(MessageDigest digest, Set<ByteBuffer> columnsToExclude)
+    {
+        throw new UnsupportedOperationException("no no no - don't use this one - it's for DB-1477 only");
+    }
 
     /**
      * Validate the data of this atom.
