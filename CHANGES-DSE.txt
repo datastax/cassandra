@@ -1,3 +1,7 @@
+DSE 5.1.6
+ * Prevent continuous schema exchange between DSE 5.0 and DSE 5.1 nodes (DB-1477)
+
+
 DSE 5.1.4
  * Always define execution_profiles in cqlsh.py (APOLLO-1150)
  * Fix stress-tool not outputting row/s (APOLLO-1123)

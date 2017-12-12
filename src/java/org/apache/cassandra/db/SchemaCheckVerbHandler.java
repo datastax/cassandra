@@ -36,7 +36,14 @@ public class SchemaCheckVerbHandler implements IVerbHandler
     public void doVerb(MessageIn message, int id)
     {
         logger.trace("Received schema check request.");
-        MessageOut<UUID> response = new MessageOut<UUID>(MessagingService.Verb.INTERNAL_RESPONSE, Schema.instance.getVersion(), UUIDSerializer.serializer);
+
+        /*
+        DSE 5.1 is special here: We return the DSE 5.0 compatible version, if the requesting node
+        is running DSE 5.0. Otherwise the "real" schema version. (DB-1477)
+        */
+        MessageOut<UUID> response = new MessageOut<>(MessagingService.Verb.INTERNAL_RESPONSE,
+                                                     Schema.instance.getVersion(),
+                                                     UUIDSerializer.serializer);
         MessagingService.instance().sendReply(response, id, message.from);
     }
 }
