@@ -507,6 +507,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         InetAddress replaceAddress = DatabaseDescriptor.getReplaceAddress();
         logger.info("Gathering node replacement information for {}", replaceAddress);
         Map<InetAddress, EndpointState> epStates = Gossiper.instance.doShadowRound();
+        logger.info("While preparing for replacement, we have gossipinfo {}", epStates);
         // as we've completed the shadow round of gossip, we should be able to find the node we're replacing
         if (epStates.get(replaceAddress) == null)
             throw new RuntimeException(String.format("Cannot replace_address %s because it doesn't exist in gossip", replaceAddress));
@@ -893,6 +894,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             loadRingState();
 
             logger.info("Starting up server gossip");
+            logger.info("At start, we have gossipinfo {}", Gossiper.instance.getEndpointStates());
             Gossiper.instance.register(this);
             Gossiper.instance.start(SystemKeyspace.incrementAndGetGeneration(), appStates); // needed for node-ring gathering.
             gossipActive = true;
@@ -1457,6 +1459,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         isBootstrapMode = true;
         SystemKeyspace.updateTokens(tokens); // DON'T use setToken, that makes us part of the ring locally which is incorrect until we are done bootstrapping
+
+        logger.info("At bootstrap, we have gossipinfo {}", Gossiper.instance.getEndpointStates());
 
         if (!replacing || !isReplacingSameAddress())
         {
