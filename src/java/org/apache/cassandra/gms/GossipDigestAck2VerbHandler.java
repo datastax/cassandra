@@ -32,11 +32,8 @@ public class GossipDigestAck2VerbHandler implements IVerbHandler<GossipDigestAck
 
     public void doVerb(MessageIn<GossipDigestAck2> message, int id)
     {
-        if (logger.isTraceEnabled())
-        {
-            InetAddress from = message.from;
-            logger.trace("Received a GossipDigestAck2Message from {}", from);
-        }
+        logger.debug("Received a GossipDigestAck2Message from {}", message.from);
+
         if (!Gossiper.instance.isEnabled())
         {
             if (logger.isTraceEnabled())

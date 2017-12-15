@@ -37,8 +37,7 @@ public class GossipDigestAckVerbHandler implements IVerbHandler<GossipDigestAck>
     public void doVerb(MessageIn<GossipDigestAck> message, int id)
     {
         InetAddress from = message.from;
-        if (logger.isTraceEnabled())
-            logger.trace("Received a GossipDigestAckMessage from {}", from);
+        logger.debug("Received a GossipDigestAckMessage from {}", from);
         if (!Gossiper.instance.isEnabled() && !Gossiper.instance.isInShadowRound())
         {
             if (logger.isTraceEnabled())
@@ -90,8 +89,7 @@ public class GossipDigestAckVerbHandler implements IVerbHandler<GossipDigestAck>
         MessageOut<GossipDigestAck2> gDigestAck2Message = new MessageOut<GossipDigestAck2>(MessagingService.Verb.GOSSIP_DIGEST_ACK2,
                                                                                            new GossipDigestAck2(deltaEpStateMap),
                                                                                            GossipDigestAck2.serializer, true);
-        if (logger.isTraceEnabled())
-            logger.trace("Sending a GossipDigestAck2Message to {}", from);
+        logger.debug("Sending a GossipDigestAck2Message to {}", from);
         MessagingService.instance().sendOneWay(gDigestAck2Message, from);
     }
 }
