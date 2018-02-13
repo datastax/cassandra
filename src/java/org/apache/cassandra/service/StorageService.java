@@ -44,6 +44,8 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
@@ -737,8 +739,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // Run priming queries upto N times
         for (int i = 0; i < MAX_PRIMING_ATTEMPTS; i++)
         {
-            ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dKey, Slices.ALL);
-            ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dLongKey, Slice.ALL);
+            ReadCommand qs = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dKey, ColumnFilter.selection(PartitionColumns.NONE), new ClusteringIndexSliceFilter(Slices.ALL, false));
+            ReadCommand ql = SinglePartitionReadCommand.create(cf, FBUtilities.nowInSeconds(), dLongKey, ColumnFilter.selection(PartitionColumns.NONE), new ClusteringIndexSliceFilter(Slices.ALL, false));
 
             HashMultimap<InetAddress, AsyncOneResponse> responses = HashMultimap.create();
 
