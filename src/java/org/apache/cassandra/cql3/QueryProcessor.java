@@ -389,9 +389,10 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
+        ClientState clientState = ClientState.forInternalCalls();
         try (PartitionIterator iter = partitions)
         {
-            SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
+            SelectStatement ss = (SelectStatement) getStatement(query, clientState).statement;
             ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds());
             return UntypedResultSet.create(cqlRows);
         }

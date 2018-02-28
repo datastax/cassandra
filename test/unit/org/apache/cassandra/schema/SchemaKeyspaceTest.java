@@ -84,7 +84,7 @@ public class SchemaKeyspaceTest
     }
 
     @Test
-    public void testThriftConversion() throws Exception
+    public void testThriftConversion()
     {
         CfDef cfDef = new CfDef().setDefault_validation_class(AsciiType.class.getCanonicalName())
                                  .setComment("Test comment")
@@ -121,8 +121,17 @@ public class SchemaKeyspaceTest
     }
 
     @Test
-    public void testConversionsInverses() throws Exception
+    public void testConversionsInverses()
     {
+        boolean anyThriftCompatible = false;
+
+        String keyspace = "SandBox";
+
+        createTable(keyspace, "CREATE TABLE test1 (a text primary key, b int, c int) WITH COMPACT STORAGE");
+        createTable(keyspace, "CREATE TABLE test2 (a text, b int, c int, PRIMARY KEY (a, b)) WITH COMPACT STORAGE");
+        createTable(keyspace, "CREATE TABLE test3 (a text, b int, c int, PRIMARY KEY ((a, b), c)) WITH COMPACT STORAGE");
+        createTable(keyspace, "CREATE TABLE test4 (a text, b int, c int, d text, PRIMARY KEY ((a, b), c)) WITH COMPACT STORAGE");
+
         for (String keyspaceName : Schema.instance.getNonSystemKeyspaces())
         {
             for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
@@ -130,6 +139,8 @@ public class SchemaKeyspaceTest
                 CFMetaData cfm = cfs.metadata;
                 if (!cfm.isThriftCompatible())
                     continue;
+
+                anyThriftCompatible = true;
 
                 checkInverses(cfm);
 
@@ -139,10 +150,12 @@ public class SchemaKeyspaceTest
                 checkInverses(withCompression);
             }
         }
+
+        assertTrue("No Thrift compatible table found - test is meaningless!", anyThriftCompatible);
     }
 
     @Test
-    public void testExtensions() throws IOException
+    public void testExtensions()
     {
         String keyspace = "SandBox";
 
@@ -178,7 +191,7 @@ public class SchemaKeyspaceTest
         SchemaKeyspace.mergeSchema(Collections.singleton(mutation));
     }
 
-    private static void checkInverses(CFMetaData cfm) throws Exception
+    private static void checkInverses(CFMetaData cfm)
     {
         KeyspaceMetadata keyspace = Schema.instance.getKSMetaData(cfm.ksName);
 

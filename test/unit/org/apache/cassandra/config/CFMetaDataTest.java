@@ -21,14 +21,7 @@ package org.apache.cassandra.config;
 import java.util.*;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.thrift.CfDef;
@@ -36,7 +29,6 @@ import org.apache.cassandra.thrift.ColumnDef;
 import org.apache.cassandra.thrift.IndexType;
 import org.apache.cassandra.thrift.ThriftConversion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -81,7 +73,7 @@ public class CFMetaDataTest
     }
 
     @Test
-    public void testThriftConversion() throws Exception
+    public void testThriftConversion()
     {
         CfDef cfDef = new CfDef().setDefault_validation_class(AsciiType.class.getCanonicalName())
                                  .setComment("Test comment")
@@ -119,56 +111,6 @@ public class CFMetaDataTest
         assertEquals(new HashSet<>(thriftCfDef.column_metadata), new HashSet<>(converted.column_metadata));
     }
 
-    @Test
-    public void testConversionsInverses() throws Exception
-    {
-        for (String keyspaceName : Schema.instance.getNonSystemKeyspaces())
-        {
-            for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
-            {
-                CFMetaData cfm = cfs.metadata;
-                if (!cfm.isThriftCompatible())
-                    continue;
-
-                checkInverses(cfm);
-
-                // Testing with compression to catch #3558
-                CFMetaData withCompression = cfm.copy();
-                withCompression.compression(CompressionParams.snappy(32768));
-                checkInverses(withCompression);
-            }
-        }
-    }
-
-    private void checkInverses(CFMetaData cfm) throws Exception
-    {
-        KeyspaceMetadata keyspace = Schema.instance.getKSMetaData(cfm.ksName);
-
-        // Test thrift conversion
-        CFMetaData before = cfm;
-        CFMetaData after = ThriftConversion.fromThriftForUpdate(ThriftConversion.toThrift(before), before);
-        assert before.equals(after) : String.format("%n%s%n!=%n%s", before, after);
-
-        // Test schema conversion
-        Mutation rm = SchemaKeyspace.makeCreateTableMutation(keyspace, cfm, FBUtilities.timestampMicros()).build();
-        PartitionUpdate cfU = rm.getPartitionUpdate(Schema.instance.getId(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES));
-        PartitionUpdate cdU = rm.getPartitionUpdate(Schema.instance.getId(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.COLUMNS));
-
-        UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES),
-                                                                 UnfilteredRowIterators.filter(cfU.unfilteredIterator(), FBUtilities.nowInSeconds()))
-                                                      .one();
-        TableParams params = SchemaKeyspace.createTableParamsFromRow(tableRow);
-
-        UntypedResultSet columnsRows = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.COLUMNS),
-                                                                UnfilteredRowIterators.filter(cdU.unfilteredIterator(), FBUtilities.nowInSeconds()));
-        Set<ColumnDefinition> columns = new HashSet<>();
-        for (UntypedResultSet.Row row : columnsRows)
-            columns.add(SchemaKeyspace.createColumnFromRow(row, Types.none()));
-
-        assertEquals(cfm.params, params);
-        assertEquals(new HashSet<>(cfm.allColumns()), columns);
-    }
-    
     @Test
     public void testIsNameValidPositive()
     {
