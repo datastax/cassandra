@@ -46,6 +46,7 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.MessagingLogger;
 
 /**
  * A message from the CQL binary protocol.
@@ -455,6 +456,7 @@ public abstract class Message
 
         private static final class Flusher implements Runnable
         {
+            final MessagingLogger messagingLogger;
             final EventLoop eventLoop;
             final ConcurrentLinkedQueue<FlushItem> queued = new ConcurrentLinkedQueue<>();
             final AtomicBoolean running = new AtomicBoolean(false);
@@ -465,57 +467,74 @@ public abstract class Message
             private Flusher(EventLoop eventLoop)
             {
                 this.eventLoop = eventLoop;
+                this.messagingLogger = new MessagingLogger(eventLoop);
             }
             void start()
             {
                 if (!running.get() && running.compareAndSet(false, true))
                 {
+                    messagingLogger.totalAllowed.incrementAndGet();
                     this.eventLoop.execute(this);
                 }
             }
             public void run()
             {
-
-                boolean doneWork = false;
-                FlushItem flush;
-                while ( null != (flush = queued.poll()) )
+                try
                 {
-                    channels.add(flush.ctx);
-                    flush.ctx.write(flush.response, flush.ctx.voidPromise());
-                    flushed.add(flush);
-                    doneWork = true;
-                }
-
-                runsSinceFlush++;
-
-                if (!doneWork || runsSinceFlush > 2 || flushed.size() > 50)
-                {
-                    for (ChannelHandlerContext channel : channels)
-                        channel.flush();
-                    for (FlushItem item : flushed)
-                        item.sourceFrame.release();
-
-                    channels.clear();
-                    flushed.clear();
-                    runsSinceFlush = 0;
-                }
-
-                if (doneWork)
-                {
-                    runsWithNoWork = 0;
-                }
-                else
-                {
-                    // either reschedule or cancel
-                    if (++runsWithNoWork > 5)
+                    messagingLogger.totalFlusherRuns.incrementAndGet();
+                    boolean doneWork = false;
+                    FlushItem flush;
+                    while (null != (flush = queued.poll()))
                     {
-                        running.set(false);
-                        if (queued.isEmpty() || !running.compareAndSet(false, true))
-                            return;
+                        messagingLogger.totalDequeued.incrementAndGet();
+                        channels.add(flush.ctx);
+                        flush.ctx.write(flush.response, flush.ctx.voidPromise());
+                        flushed.add(flush);
+                        doneWork = true;
                     }
-                }
 
-                eventLoop.schedule(this, 10000, TimeUnit.NANOSECONDS);
+                    runsSinceFlush++;
+
+                    if (!doneWork || runsSinceFlush > 2 || flushed.size() > 50)
+                    {
+                        for (ChannelHandlerContext channel : channels)
+                            channel.flush();
+                        for (FlushItem item : flushed)
+                            item.sourceFrame.release();
+
+                        channels.clear();
+                        flushed.clear();
+                        runsSinceFlush = 0;
+                    }
+
+                    if (doneWork)
+                    {
+                        runsWithNoWork = 0;
+                    }
+                    else
+                    {
+                        // either reschedule or cancel
+                        if (++runsWithNoWork > 5)
+                        {
+                            running.set(false);
+                            if (queued.isEmpty() || !running.compareAndSet(false, true))
+                            {
+                                messagingLogger.totalCompletedRuns.incrementAndGet();
+                                messagingLogger.rescheduledLast.getAndSet(false);
+                                return;
+                            }
+                        }
+                    }
+
+                    eventLoop.schedule(this, 10000, TimeUnit.NANOSECONDS);
+
+                    messagingLogger.rescheduledLast.getAndSet(true);
+                    messagingLogger.totalReschedules.incrementAndGet();
+                }
+                catch (Throwable e)
+                {
+                    logger.error("Caught an exception in Flusher.run", e);
+                }
             }
         }
 
@@ -533,6 +552,15 @@ public abstract class Message
             final ServerConnection connection;
             long queryStartNanoTime = System.nanoTime();
 
+            EventLoop loop = ctx.channel().eventLoop();
+            Flusher flusher = flusherLookup.get(loop);
+            if (flusher == null)
+            {
+                Flusher alt = flusherLookup.putIfAbsent(loop, flusher = new Flusher(loop));
+                if (alt != null)
+                    flusher = alt;
+            }
+
             try
             {
                 assert request.connection() instanceof ServerConnection;
@@ -543,7 +571,12 @@ public abstract class Message
                 QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
 
                 logger.trace("Received: {}, v={}", request, connection.getVersion());
+
+                flusher.messagingLogger.inflightRequests.incrementAndGet();
+
                 response = request.execute(qstate, queryStartNanoTime);
+
+                flusher.messagingLogger.completedRequests.incrementAndGet();
 
                 if (!response.sendToClient)
                 {
@@ -583,6 +616,7 @@ public abstract class Message
             }
 
             flusher.queued.add(item);
+            flusher.messagingLogger.totalQueued.incrementAndGet();
             flusher.start();
         }
     }
@@ -664,6 +698,7 @@ public abstract class Message
                 {
                     // Generally unhandled IO exceptions are network issues, not actual ERRORS
                     logger.info(message, exception);
+                    logger.info("This is where we came from", new Throwable());
                 }
             }
             else
