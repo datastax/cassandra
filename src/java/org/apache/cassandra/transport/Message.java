@@ -456,7 +456,7 @@ public abstract class Message
 
         private static final class Flusher implements Runnable
         {
-            final MessagingLogger messagingLogger;
+            final MessagingLogger.FlushStatistics flushStatistics;
             final EventLoop eventLoop;
             final ConcurrentLinkedQueue<FlushItem> queued = new ConcurrentLinkedQueue<>();
             final AtomicBoolean running = new AtomicBoolean(false);
@@ -467,13 +467,13 @@ public abstract class Message
             private Flusher(EventLoop eventLoop)
             {
                 this.eventLoop = eventLoop;
-                this.messagingLogger = new MessagingLogger(eventLoop);
+                this.flushStatistics = MessagingLogger.getFlushStatistics(eventLoop);
             }
             void start()
             {
                 if (!running.get() && running.compareAndSet(false, true))
                 {
-                    messagingLogger.totalAllowed.incrementAndGet();
+                    flushStatistics.totalAllowed.incrementAndGet();
                     this.eventLoop.execute(this);
                 }
             }
@@ -481,12 +481,12 @@ public abstract class Message
             {
                 try
                 {
-                    messagingLogger.totalFlusherRuns.incrementAndGet();
+                    flushStatistics.totalFlusherRuns.incrementAndGet();
                     boolean doneWork = false;
                     FlushItem flush;
                     while (null != (flush = queued.poll()))
                     {
-                        messagingLogger.totalDequeued.incrementAndGet();
+                        flushStatistics.totalDequeued.incrementAndGet();
                         channels.add(flush.ctx);
                         flush.ctx.write(flush.response, flush.ctx.voidPromise());
                         flushed.add(flush);
@@ -519,8 +519,8 @@ public abstract class Message
                             running.set(false);
                             if (queued.isEmpty() || !running.compareAndSet(false, true))
                             {
-                                messagingLogger.totalCompletedRuns.incrementAndGet();
-                                messagingLogger.rescheduledLast.getAndSet(false);
+                                flushStatistics.totalCompletedRuns.incrementAndGet();
+                                flushStatistics.rescheduledLast.getAndSet(false);
                                 return;
                             }
                         }
@@ -528,8 +528,8 @@ public abstract class Message
 
                     eventLoop.schedule(this, 10000, TimeUnit.NANOSECONDS);
 
-                    messagingLogger.rescheduledLast.getAndSet(true);
-                    messagingLogger.totalReschedules.incrementAndGet();
+                    flushStatistics.rescheduledLast.getAndSet(true);
+                    flushStatistics.totalReschedules.incrementAndGet();
                 }
                 catch (Throwable e)
                 {
@@ -572,11 +572,11 @@ public abstract class Message
 
                 logger.trace("Received: {}, v={}", request, connection.getVersion());
 
-                flusher.messagingLogger.inflightRequests.incrementAndGet();
+                flusher.flushStatistics.inflightRequests.incrementAndGet();
 
                 response = request.execute(qstate, queryStartNanoTime);
 
-                flusher.messagingLogger.completedRequests.incrementAndGet();
+                flusher.flushStatistics.completedRequests.incrementAndGet();
 
                 if (!response.sendToClient)
                 {
@@ -616,7 +616,7 @@ public abstract class Message
             }
 
             flusher.queued.add(item);
-            flusher.messagingLogger.totalQueued.incrementAndGet();
+            flusher.flushStatistics.totalQueued.incrementAndGet();
             flusher.start();
         }
     }
