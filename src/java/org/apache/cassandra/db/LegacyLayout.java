@@ -26,7 +26,6 @@ import java.util.*;
 
 import org.apache.cassandra.cql3.SuperColumnCompatibility;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.thrift.Column;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
@@ -249,7 +248,7 @@ public abstract class LegacyLayout
         }
 
         CompositeType ctype = CompositeType.getInstance(metadata.comparator.subtypes());
-        CompositeType.Builder builder = ctype.builder();
+        CompositeType.Builder builder = ctype.builder(false);
         for (int i = 0; i < clustering.size(); i++)
             builder.add(clustering.get(i));
 
@@ -1344,9 +1343,6 @@ public abstract class LegacyLayout
             {
                 clustering = tombstone.start.getAsClustering(metadata);
                 builder.newRow(clustering);
-                builder.addRowDeletion(Row.Deletion.regular(tombstone.deletionTime));
-                rowDeletion = tombstone;
-                return true;
             }
             else if (!clustering.equals(tombstone.start.getAsClustering(metadata)))
             {
@@ -2413,8 +2409,11 @@ public abstract class LegacyLayout
                 LegacyBound start = starts[i];
                 LegacyBound end = ends[i];
 
-                CompositeType.Builder startBuilder = type.builder();
-                CompositeType.Builder endBuilder = type.builder();
+                CompositeType.Builder startBuilder = type.builder(start.isStatic);
+                CompositeType.Builder endBuilder = type.builder(end.isStatic);
+
+                assert !start.isStatic || start.bound.clustering().size() == 0;
+                assert !end.isStatic || end.bound.clustering().size() == 0;
                 for (int j = 0; j < start.bound.clustering().size(); j++)
                 {
                     startBuilder.add(start.bound.get(j));
@@ -2422,9 +2421,9 @@ public abstract class LegacyLayout
                 }
 
                 if (start.collectionName != null)
-                    startBuilder.add(start.collectionName.name.bytes);
+                    startBuilder.add(start.collectionName.name);
                 if (end.collectionName != null)
-                    endBuilder.add(end.collectionName.name.bytes);
+                    endBuilder.add(end.collectionName.name);
 
                 ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
                 ByteBufferUtil.writeWithShortLength(endBuilder.buildAsEndOfRange(), out);
@@ -2485,8 +2484,8 @@ public abstract class LegacyLayout
                 LegacyBound start = starts[i];
                 LegacyBound end = ends[i];
 
-                CompositeType.Builder startBuilder = type.builder();
-                CompositeType.Builder endBuilder = type.builder();
+                CompositeType.Builder startBuilder = type.builder(start.isStatic);
+                CompositeType.Builder endBuilder = type.builder(end.isStatic);
                 for (int j = 0; j < start.bound.clustering().size(); j++)
                 {
                     startBuilder.add(start.bound.get(j));
@@ -2494,9 +2493,9 @@ public abstract class LegacyLayout
                 }
 
                 if (start.collectionName != null)
-                    startBuilder.add(start.collectionName.name.bytes);
+                    startBuilder.add(start.collectionName.name);
                 if (end.collectionName != null)
-                    endBuilder.add(end.collectionName.name.bytes);
+                    endBuilder.add(end.collectionName.name);
 
                 size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build());
                 size += ByteBufferUtil.serializedSizeWithShortLength(endBuilder.buildAsEndOfRange());

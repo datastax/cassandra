@@ -18,35 +18,211 @@
 
 package org.apache.cassandra.db;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.function.Function;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.serializers.Int32Serializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.*;
 
 public class LegacyLayoutTest
 {
+    private static final ByteBuffer FOO_KEY = UTF8Type.instance.fromString("foo");
+    private static final long someTimestamp = 123001002L;
+    private static final DeletionTime SOME_DELETION_TIME = new DeletionTime(someTimestamp, 123);
+    private static final ByteBuffer INT_1 = Int32Serializer.instance.serialize(1);
+    private static final ByteBuffer INT_2 = Int32Serializer.instance.serialize(2);
+    private static final ByteBuffer[] SINGLE_INT_2 = { INT_2 };
+    private static CFMetaData table;
+
+    @BeforeClass
+    public static void init()
+    {
+        table = CFMetaData.Builder.create("ks", "crt")
+                                  .addPartitionKey("k", UTF8Type.instance)
+                                  .addClusteringColumn("c1", Int32Type.instance)
+                                  .addClusteringColumn("c2", Int32Type.instance)
+                                  .addStaticColumn("sm", MapType.getInstance(UTF8Type.instance, UTF8Type.instance, true))
+                                  .addStaticColumn("ss", TimeUUIDType.instance)
+                                  .addRegularColumn("rm", MapType.getInstance(UTF8Type.instance, UTF8Type.instance, true))
+                                  .addRegularColumn("rs", TimeUUIDType.instance)
+                                  .build();
+        Keyspace.setInitialized();
+        Schema.instance.addKeyspace(KeyspaceMetadata.create("ks", KeyspaceParams.simple(1)));
+        Schema.instance.addTable(table);
+    }
+
     @Test
-    public void testFromUnfilteredRowIterator() throws Throwable
+    @SuppressWarnings("resource")
+    public void testRTForStaticComplex() throws Throwable
+    {
+        // Simulate DELETE sm FROM table WHERE partition_key = 'foo'
+
+        ColumnDefinition sm = table.getColumnDefinition(new ColumnIdentifier("sm", false));
+
+        Row.Builder builder = BTreeRow.unsortedBuilder(0);
+        builder.newRow(Clustering.EMPTY);
+        builder.addComplexDeletion(sm, SOME_DELETION_TIME);
+        Row row = builder.build();
+
+        PartitionUpdate upd = PartitionUpdate.singleRowUpdate(table, FOO_KEY, row);
+        UnfilteredRowIterator uri = reserialize(upd);
+        assertEquals(DeletionTime.LIVE, uri.partitionLevelDeletion());
+
+        Row staticRow = uri.staticRow();
+
+        verifyRTForComplex(sm, staticRow);
+
+        assertFalse(uri.hasNext());
+    }
+
+    @Test
+    @SuppressWarnings("resource")
+    public void testRTForRegularComplex() throws Throwable
+    {
+        // Simulate DELETE rm FROM table WHERE partition_key = 'foo' AND ck1 = 2
+
+        ColumnDefinition rm = table.getColumnDefinition(new ColumnIdentifier("rm", false));
+
+        Row.Builder builder = BTreeRow.unsortedBuilder(0);
+        builder.newRow(new Clustering(INT_1, INT_2));
+        builder.addComplexDeletion(rm, SOME_DELETION_TIME);
+        Row row = builder.build();
+
+        PartitionUpdate upd = PartitionUpdate.singleRowUpdate(table, FOO_KEY, row);
+        UnfilteredRowIterator uri = reserialize(upd);
+        assertEquals(DeletionTime.LIVE, uri.partitionLevelDeletion());
+
+        assertTrue(uri.staticRow().isEmpty());
+
+        assertTrue(uri.hasNext());
+        Row regularRow = (Row) uri.next();
+
+        verifyRTForComplex(rm, regularRow);
+
+        assertFalse(uri.hasNext());
+    }
+
+    private static void verifyRTForComplex(ColumnDefinition sm, Row row)
+    {
+        assertEquals(1, row.columns().size());
+        ComplexColumnData ccd = row.getComplexColumnData(sm);
+        assertEquals(0, ccd.cellsCount());
+        assertEquals(SOME_DELETION_TIME, ccd.complexDeletion());
+        assertEquals(sm, ccd.column());
+        assertTrue(row.hasComplexDeletion());
+        row.validateData(table);
+    }
+
+    @Test
+    @SuppressWarnings("resource")
+    public void testRTForRow() throws Throwable
+    {
+        // Simulate DELETE FROM table WHERE partition_key = 'foo' AND ck1 = 2
+
+        UpdateParameters updateParameters = new UpdateParameters(table, table.partitionColumns(), QueryOptions.DEFAULT, someTimestamp, -1, null);
+
+        PartitionUpdate upd = new PartitionUpdate(table, table.decorateKey(FOO_KEY), table.partitionColumns(), 1);
+        upd.add(updateParameters.makeRangeTombstone(Slice.make(Slice.Bound.exclusiveStartOf(INT_2),
+                                                               Slice.Bound.inclusiveEndOf(INT_2))));
+
+        UnfilteredRowIterator uri = reserialize(upd);
+        assertEquals(DeletionTime.LIVE, uri.partitionLevelDeletion());
+
+        assertTrue(uri.staticRow().isEmpty());
+
+        verifyBound(uri, rtbm -> rtbm.openBound(false), ClusteringPrefix.Kind.INCL_START_BOUND);
+        verifyBound(uri, rtbm -> rtbm.closeBound(false), ClusteringPrefix.Kind.INCL_END_BOUND);
+
+        assertFalse(uri.hasNext());
+    }
+
+    private static void verifyBound(UnfilteredRowIterator uri,
+                                    Function<RangeTombstoneBoundMarker, RangeTombstone.Bound> boundFunction,
+                                    ClusteringPrefix.Kind kind)
+    {
+        assertTrue(uri.hasNext());
+        RangeTombstoneBoundMarker rtbm = (RangeTombstoneBoundMarker) uri.next();
+        assertFalse(rtbm.isBoundary());
+        RangeTombstone.Bound bound = boundFunction.apply(rtbm);
+        assertEquals(kind, bound.kind());
+        assertArrayEquals(SINGLE_INT_2, bound.values);
+        rtbm.validateData(table);
+    }
+
+    @Test
+    @SuppressWarnings("resource")
+    public void testComplexDeletionForRow() throws Throwable
+    {
+        // Simulate ???
+
+        ColumnDefinition rm = table.getColumnDefinition(new ColumnIdentifier("rm", false));
+
+        Row.Builder builder = BTreeRow.unsortedBuilder(0);
+        builder.newRow(new Clustering(INT_1, INT_2));
+        builder.addRowDeletion(Row.Deletion.regular(SOME_DELETION_TIME));
+        Row row = builder.build();
+
+        PartitionUpdate upd = PartitionUpdate.singleRowUpdate(table, FOO_KEY, row);
+        UnfilteredRowIterator uri = reserialize(upd);
+        assertEquals(DeletionTime.LIVE, uri.partitionLevelDeletion());
+
+        assertTrue(uri.staticRow().isEmpty());
+
+        assertTrue(uri.hasNext());
+        Row regularRow = (Row) uri.next();
+
+        assertEquals(0, regularRow.columns().size());
+        assertNull(regularRow.getComplexColumnData(rm));
+        assertEquals(SOME_DELETION_TIME, regularRow.deletion().time());
+        assertFalse(regularRow.hasComplexDeletion());
+        regularRow.validateData(table);
+
+        assertFalse(uri.hasNext());
+    }
+
+    private static UnfilteredRowIterator reserialize(PartitionUpdate upd) throws IOException
+    {
+        upd.validate();
+
+        byte[] data;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            LegacyLayout.serializeAsLegacyPartition(null, upd.unfilteredIterator(), out, MessagingService.VERSION_21);
+            data = out.toByteArray();
+        }
+
+        try (DataInputBuffer in = new DataInputBuffer(data))
+        {
+            UnfilteredRowIterator uri = LegacyLayout.deserializeLegacyPartition(in, MessagingService.VERSION_21, SerializationHelper.Flag.FROM_REMOTE, FOO_KEY);
+            assertNotNull(uri);
+            assertEquals(FOO_KEY, uri.partitionKey().getKey());
+            return uri;
+        }
+    }
+
+    @Test
+    public void testFromUnfilteredRowIterator()
     {
         CFMetaData table = CFMetaData.Builder.create("ks", "table")
                                              .addPartitionKey("k", Int32Type.instance)

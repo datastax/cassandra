@@ -30,39 +30,39 @@ public class CTypeTest
     {
         CompositeType baseType = CompositeType.getInstance(AsciiType.instance, UUIDType.instance, LongType.instance);
 
-        ByteBuffer a1 = baseType.builder()
+        ByteBuffer a1 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("a"))
                 .add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000"))
                 .add(ByteBufferUtil.bytes(1)).build();
-        ByteBuffer a2 = baseType.builder()
+        ByteBuffer a2 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("a"))
                 .add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000"))
                 .add(ByteBufferUtil.bytes(100)).build();
-        ByteBuffer b1 = baseType.builder()
+        ByteBuffer b1 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("a"))
                 .add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
                 .add(ByteBufferUtil.bytes(1)).build();
-        ByteBuffer b2 = baseType.builder()
+        ByteBuffer b2 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("a"))
                 .add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
                 .add(ByteBufferUtil.bytes(100)).build();
-        ByteBuffer c1 = baseType.builder()
+        ByteBuffer c1 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("z"))
                 .add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000"))
                 .add(ByteBufferUtil.bytes(1)).build();
-        ByteBuffer c2 = baseType.builder()
+        ByteBuffer c2 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("z"))
                 .add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000"))
                 .add(ByteBufferUtil.bytes(100)).build();
-        ByteBuffer d1 = baseType.builder()
+        ByteBuffer d1 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("z"))
                 .add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
                 .add(ByteBufferUtil.bytes(1)).build();
-        ByteBuffer d2 = baseType.builder()
+        ByteBuffer d2 = baseType.builder(false)
                 .add(ByteBufferUtil.bytes("z"))
                 .add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
                 .add(ByteBufferUtil.bytes(100)).build();
-        ByteBuffer z1 = baseType.builder()
+        ByteBuffer z1 = baseType.builder(false)
                 .add(ByteBufferUtil.EMPTY_BYTE_BUFFER)
                 .add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
                 .add(ByteBufferUtil.bytes(100)).build();
@@ -105,8 +105,8 @@ public class CTypeTest
     public void testSimpleType2()
     {
         CompositeType baseType = CompositeType.getInstance(UUIDType.instance);
-        ByteBuffer a = baseType.builder().add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000")).build();
-        ByteBuffer z = baseType.builder().add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff")).build();
+        ByteBuffer a = baseType.builder(false).add(UUIDType.instance.fromString("00000000-0000-0000-0000-000000000000")).build();
+        ByteBuffer z = baseType.builder(false).add(UUIDType.instance.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff")).build();
 
         assert baseType.compare(a,z) < 0;
         assert baseType.compare(z,a) > 0;
@@ -118,8 +118,8 @@ public class CTypeTest
     public void testSimpleType1()
     {
         CompositeType baseType = CompositeType.getInstance(BytesType.instance);
-        ByteBuffer a = baseType.builder().add(ByteBufferUtil.bytes("a")).build();
-        ByteBuffer z = baseType.builder().add(ByteBufferUtil.bytes("z")).build();
+        ByteBuffer a = baseType.builder(false).add(ByteBufferUtil.bytes("a")).build();
+        ByteBuffer z = baseType.builder(false).add(ByteBufferUtil.bytes("z")).build();
 
         assert baseType.compare(a,z) < 0;
         assert baseType.compare(z,a) > 0;

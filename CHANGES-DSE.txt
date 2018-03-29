@@ -1,4 +1,6 @@
 DSE 5.0.13
+=======
+ * Fix legacy complex range tombstone serialization+deserialization for static and regular columns (DB-1757)
  * Fix materialized view schema backup as table (DB-1828)
  * Init timestamp with Long.MIN_VALUE instead of -1 (DB-1823)
  * Fix AssertionError in ThrottledUnfilteredIterator due to empty UnfilteredRowIterator (DB-1859)

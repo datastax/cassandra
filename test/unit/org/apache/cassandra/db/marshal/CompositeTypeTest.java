@@ -263,7 +263,7 @@ public class CompositeTypeTest
 
         for (String[] input : inputs)
         {
-            CompositeType.Builder builder = new CompositeType.Builder(comp);
+            CompositeType.Builder builder = comp.builder(false);
             for (String part : input)
                 builder.add(UTF8Type.instance.fromString(part));
 

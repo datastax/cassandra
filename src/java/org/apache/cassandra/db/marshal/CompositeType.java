@@ -334,11 +334,6 @@ public class CompositeType extends AbstractCompositeType
         return getClass().getName() + TypeParser.stringifyTypeParameters(types);
     }
 
-    public Builder builder()
-    {
-        return new Builder(this);
-    }
-
     public static ByteBuffer build(ByteBuffer... buffers)
     {
         return build(false, buffers);
@@ -365,6 +360,12 @@ public class CompositeType extends AbstractCompositeType
         return out;
     }
 
+    public Builder builder(boolean isStatic)
+    {
+        int capacity = types.size();
+        return new Builder(this, new ArrayList<>(capacity), new byte[capacity], isStatic);
+    }
+
     public static class Builder
     {
         private final CompositeType composite;
@@ -374,31 +375,23 @@ public class CompositeType extends AbstractCompositeType
         private int serializedSize;
         private final boolean isStatic;
 
-        public Builder(CompositeType composite)
-        {
-            this(composite, new ArrayList<ByteBuffer>(composite.types.size()), new byte[composite.types.size()], false);
-        }
-
-        public static Builder staticBuilder(CompositeType composite)
-        {
-            return new Builder(composite, new ArrayList<ByteBuffer>(composite.types.size()), new byte[composite.types.size()], true);
-        }
-
         private Builder(CompositeType composite, List<ByteBuffer> components, byte[] endOfComponents, boolean isStatic)
         {
-            assert endOfComponents.length == composite.types.size();
-
             this.composite = composite;
             this.components = components;
             this.endOfComponents = endOfComponents;
             this.isStatic = isStatic;
             if (isStatic)
+            {
                 serializedSize = 2;
+                for (int i = 0; i < composite.types.size() - 1; i++)
+                    add(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+            }
         }
 
         private Builder(Builder b)
         {
-            this(b.composite, new ArrayList<ByteBuffer>(b.components), Arrays.copyOf(b.endOfComponents, b.endOfComponents.length), b.isStatic);
+            this(b.composite, new ArrayList<>(b.components), Arrays.copyOf(b.endOfComponents, b.endOfComponents.length), b.isStatic);
             this.serializedSize = b.serializedSize;
         }
 
@@ -407,6 +400,11 @@ public class CompositeType extends AbstractCompositeType
             if (components.size() >= composite.types.size())
                 throw new IllegalStateException("Composite column is already fully constructed");
 
+            return addInternal(bb);
+        }
+
+        Builder addInternal(ByteBuffer bb)
+        {
             components.add(bb);
             serializedSize += 3 + bb.remaining(); // 2 bytes lenght + 1 byte eoc
             return this;
@@ -414,7 +412,10 @@ public class CompositeType extends AbstractCompositeType
 
         public Builder add(ColumnIdentifier name)
         {
-            return add(name.bytes);
+            assert components.size() < composite.types.size() : "Collection name already added";
+            assert components.size() == composite.types.size() - 1 : "Clustering not added before collection name";
+
+            return addInternal(name.bytes);
         }
 
         public int componentCount()
