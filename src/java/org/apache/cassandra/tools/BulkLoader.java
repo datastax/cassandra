@@ -32,6 +32,7 @@ import org.apache.commons.cli.Options;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.*;
@@ -51,6 +52,14 @@ public class BulkLoader
         }
         catch (Throwable t)
         {
+            if (t instanceof ConfigurationException)
+            {
+                System.out.println("Exception (" + t.getClass().getName() + ") encountered during startup: " + t.getMessage());
+                if (((ConfigurationException)t).logStackTrace)
+                    t.printStackTrace(System.err);
+            }
+            else if (!(t instanceof BulkLoadException))
+                t.printStackTrace(System.err);
             System.exit(1); // We need that to stop non daemonized threads
         }
         System.exit(0);
