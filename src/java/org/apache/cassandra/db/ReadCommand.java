@@ -1075,7 +1075,7 @@ public abstract class ReadCommand implements ReadQuery
             int compositesToGroup = in.readInt();
 
             // command-level Composite "start" and "stop"
-            LegacyLayout.LegacyBound startBound = LegacyLayout.decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), true);
+            LegacyLayout.LegacyBound startBound = LegacyLayout.decodePageBound(metadata, ByteBufferUtil.readWithShortLength(in), true);
 
             ByteBufferUtil.readWithShortLength(in);  // the composite "stop", which isn't actually needed
 
@@ -1568,8 +1568,8 @@ public abstract class ReadCommand implements ReadQuery
             Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
             for (int i = 0; i < numSlices; i++)
             {
-                LegacyLayout.LegacyBound start = LegacyLayout.decodeBound(metadata, startBuffers[i], true);
-                LegacyLayout.LegacyBound finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], false);
+                LegacyLayout.LegacyBound start = LegacyLayout.decodePageBound(metadata, startBuffers[i], true);
+                LegacyLayout.LegacyBound finish = LegacyLayout.decodePageBound(metadata, finishBuffers[i], false);
 
                 if (start.isStatic)
                 {

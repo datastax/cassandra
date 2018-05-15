@@ -185,6 +185,24 @@ public abstract class LegacyLayout
 
     public static LegacyBound decodeBound(CFMetaData metadata, ByteBuffer bound, boolean isStart)
     {
+        return decodeBound(metadata, bound, isStart, false);
+    }
+
+    /**
+     * Special case methods used to decode the bounnd of read commands. It needs to be specical because said bound is
+     * used for paging and in that can be the cell name of the last returned cell of a previous page, which require
+     * special handling.
+     * <p>
+     * See the long comment within {@link #decodeBound(CFMetaData, ByteBuffer, boolean, boolean)} for why this needs to
+     * be different from {@link #decodeBound(CFMetaData, ByteBuffer, boolean)}.
+     */
+    public static LegacyBound decodePageBound(CFMetaData metadata, ByteBuffer bound, boolean isStart)
+    {
+        return decodeBound(metadata, bound, isStart, true);
+    }
+
+    private static LegacyBound decodeBound(CFMetaData metadata, ByteBuffer bound, boolean isStart, boolean forPageBound)
+    {
         if (!bound.hasRemaining())
             return isStart ? LegacyBound.BOTTOM : LegacyBound.TOP;
 
@@ -200,29 +218,104 @@ public abstract class LegacyLayout
         List<ByteBuffer> components = CompositeType.splitName(bound);
         byte eoc = CompositeType.lastEOC(bound);
 
-        // There can be  more components than the clustering size only in the case this is the bound of a collection
-        // range tombstone. In which case, there is exactly one more component, and that component is the name of the
-        // collection being selected/deleted.
-        assert components.size() <= clusteringSize || (!metadata.isCompactTable() && components.size() == clusteringSize + 1);
+        // Sanity check: compact tables can't have more components than clustering by definition; non-compact ones might
+        // have 2 more (column name, and cell name if a collection) but not more.
+        assert components.size() <= clusteringSize + (metadata.isCompactTable() ? 0 : 2);
+
+        // The subtelty here is that while 3.0+ makes a strong distinction between a "bound" (that either start or stop
+        // a range, being a queried range or a range tombstone) and a "clustering" which identifies a row, those notion
+        // where more implicit in 2.x where everything was a "composite" and it was the context that defined if it was
+        // used for bounds or not.
+        //
+        // This method is call in most cases when we know the underlying composite was meant to be a real "bound", that
+        // is either a slice bound or a range tombstone one:
+        // - If it is a slice bound, we know 2.x was always selecting full rows and so we know the composite is such
+        //   that 'components.size() <= clusteringSize'.
+        // - If it is a range tombstone, it can also be over rows (as above 'components.size() <= clusteringSize'), or
+        //   it can be the deletion of a full collection within a given row (in which case,
+        //   'components.size() == clusteringSize + 1', the additional component being the deleted collection name).
+        // Importantly, this method rely on the knowledge that 2.x never had other types of bounds. We never, for
+        // instance, created slices/range tombstones that selected only a subpart of a row (outside of the specific case
+        // of collection tombstone mentioned above).
+        //
+        // There is, however, one case where this method is called but where the underlying "composite" may not be a
+        // "bound", but rather a full "cell name": this is when paging, in which case the bound was used for 2 things:
+        //  1) on the first page, it was the original bound of the user query. In that case, the composite is indeed a
+        //     "bound", and a slice one at that, so 'components.size() <= clusteringSize'.
+        //  2) on following pages, it was the cell name of the last returned cell of the previous page. It is then that
+        //     the composite is a full cell name (so, can include the name of a non collection column, or, for a
+        //     collection, include a collection component). Importantly, 'LegacyBound' cannot represent a full cell
+        //     name properly and we cannot deserialize this case completely faithfully and there is a trick. The trick
+        //     is that in that case, we know the intend is to restore paging after the row of the cell name to decode.
+        //     So we can simply replace it with an exclusive bound of that row (which we can represent).
+        // The 'forPageBound' is the flag that allow to know if we may be in that last case. Not that we can get in this
+        // case for an 'end' bound due to the reversed case.
 
         ColumnDefinition collectionName = null;
+
+        // Record, when forPageBound == true, if bound was actually a full cell name, so we know to use an exclusive
+        // bound below (see comment above). Ignored otherwise.
+        boolean wasCellName = false;
         if (components.size() > clusteringSize)
-            collectionName = metadata.getColumnDefinition(components.remove(clusteringSize));
+        {
+            if (forPageBound)
+            {
+                // As mentioned above, if we're not a slice bound (more components than clustering size) in that case,
+                // then that mean it's a cell name for the paging case.
+                wasCellName = true;
+            }
+            else
+            {
+                // As per comment above, outside of the 'forPageBound' case, we should have more components than
+                // clustering only for a full collection range tombstone, in which case there should be only a single
+                // additional component, the collection.
+                assert components.size() == clusteringSize + 1
+                    : String.format("For table %s.%s, got bound %s with %d components but clustering size is %d",
+                                    metadata.ksName, metadata.cfName, ByteBufferUtil.bytesToHex(bound),
+                                    components.size(), clusteringSize);
+
+                ColumnDefinition columnName = metadata.getColumnDefinition(components.get(clusteringSize));
+                assert columnName.type.isMultiCell()
+                    : String.format("For table %s.%s, unexpected non-multi-cell column %s of type %s",
+                                    metadata.ksName, metadata.cfName, columnName, columnName.type);
+
+                collectionName = columnName;
+            }
+
+            // In all cases, we now want to only care about the clustering parts of the components.
+            components = components.subList(0, clusteringSize);
+        }
 
         boolean isInclusive;
         if (isStart)
         {
             isInclusive = eoc <= 0;
+            // See comments above why we force an exclusive bound
+            if (wasCellName)
+                isInclusive = false;
         }
         else
         {
             isInclusive = eoc >= 0;
 
-            // for an end bound, if we only have a prefix of all the components and the final EOC is zero,
+            if (wasCellName)
+            {
+                // We get here on a reversed paged slice query. In that case, an exclusive bound should theoretically
+                // be ok like in the forward case, but 2.2 happens to have a bug that make this breaks when there is
+                // static columns (specifically, with an exclusive bound, 3.x+ nodes will not return the last row of
+                // the returned page, but that will make it return one more row than 2.x nodes. This will trigger
+                // on 2.x node a trimming method that is not static aware and wrongfully discard static cells, yieding
+                // to broken results). Anyway, for that reason we actually force an inclusive slice. This is still fine
+                // in that 2.x nodes will generally return the last row of the last page and know how to discard it from
+                // final results. This make 3.x nodes behave more like 2.x ones, making 2.x bug trigger more rarely
+                // (that is, as rarely as in 2.x).
+                isInclusive = true;
+            }
+            // For an end bound, if we only have a prefix of all the components and the final EOC is zero,
             // then it should only match up to the prefix but no further, that is, it is an inclusive bound
             // of the exact prefix but an exclusive bound of anything beyond it, so adding an empty
             // composite value ensures this behavior, see CASSANDRA-12423 for more details
-            if (eoc == 0 && components.size() < clusteringSize)
+            else if (eoc == 0 && components.size() < clusteringSize)
             {
                 components.add(ByteBufferUtil.EMPTY_BYTE_BUFFER);
                 isInclusive = false;
@@ -231,6 +324,7 @@ public abstract class LegacyLayout
 
         Slice.Bound.Kind boundKind = Slice.Bound.boundKind(isStart, isInclusive);
         Slice.Bound sb = Slice.Bound.create(boundKind, components.toArray(new ByteBuffer[components.size()]));
+        // Note that collectionName is only set and used to represent full collection (range) tombstones
         return new LegacyBound(sb, metadata.isCompound() && CompositeType.isStaticName(bound), collectionName);
     }
 
@@ -1491,7 +1585,10 @@ public abstract class LegacyLayout
             if (isStatic)
                 return Clustering.STATIC_CLUSTERING;
 
-            assert bound.size() == metadata.comparator.size();
+            assert bound.size() == metadata.comparator.size()
+                : String.format("For %s.%s, deserialized bound %s (collection name=%s) of size %d, but cluster size = %d",
+                                metadata.ksName, metadata.cfName, bound.toString(metadata), collectionName,
+                                bound.size(), metadata.comparator.size());
             ByteBuffer[] values = new ByteBuffer[bound.size()];
             for (int i = 0; i < bound.size(); i++)
                 values[i] = bound.get(i);

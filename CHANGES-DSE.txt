@@ -4,6 +4,7 @@ DSE 5.0.15
  * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)
  * Reusing table ID with CREATE TABLE causes failure on restart (DB-2032)
  * Add getConcurrentCompactors to JMX in order to avoid loading DatabaseDescriptor to check its value in nodetool (DB-1730)
+ * Fix handling of start bound in legacy paged queries (DB-1984)
 
 
 DSE 5.0.14
