@@ -68,12 +68,12 @@ public class SSTableExport
 
         Option optKey = new Option(KEY_OPTION, true, "Partition key");
         // Number of times -k <key> can be passed on the command line.
-        optKey.setArgs(500);
+        optKey.setArgs(Option.UNLIMITED_VALUES);
         options.addOption(optKey);
 
         Option excludeKey = new Option(EXCLUDE_KEY_OPTION, true, "Excluded partition key");
         // Number of times -x <key> can be passed on the command line.
-        excludeKey.setArgs(500);
+        excludeKey.setArgs(Option.UNLIMITED_VALUES);
         options.addOption(excludeKey);
 
         Option optEnumerate = new Option(ENUMERATE_KEYS_OPTION, false, "enumerate partition keys only");

@@ -230,6 +230,15 @@ public class Descriptor
         return fromFilename(file.getParentFile(), file.getName(), skipComponent).left;
     }
 
+    public static Component componentFromFilename(File file)
+    {
+        String name = file.getName();
+        String[] parts = name.split(String.valueOf(separator));
+        if (parts.length < 4)
+            throw new IllegalArgumentException();
+        return Component.parse(parts[3]);
+    }
+
     public static Pair<Descriptor, String> fromFilename(File directory, String name)
     {
         return fromFilename(directory, name, false);

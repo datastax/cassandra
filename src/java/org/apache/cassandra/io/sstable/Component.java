@@ -147,8 +147,16 @@ public class Component
     {
         Pair<Descriptor,String> path = Descriptor.fromFilename(directory, name);
 
+        String right = path.right;
+        Component component = parse(right);
+
+        return Pair.create(path.left, component);
+    }
+
+    public static Component parse(String right)
+    {
         // parse the component suffix
-        Type type = Type.fromRepresentation(path.right);
+        Type type = Type.fromRepresentation(right);
         // build (or retrieve singleton for) the component object
         Component component;
         switch(type)
@@ -158,23 +166,22 @@ public class Component
             case FILTER:            component = Component.FILTER;                       break;
             case COMPRESSION_INFO:  component = Component.COMPRESSION_INFO;             break;
             case STATS:             component = Component.STATS;                        break;
-            case DIGEST:            switch (path.right)
+            case DIGEST:            switch (right)
                                     {
                                         case digestCrc32:   component = Component.DIGEST_CRC32;     break;
                                         case digestAdler32: component = Component.DIGEST_ADLER32;   break;
                                         case digestSha1:    component = Component.DIGEST_SHA1;      break;
-                                        default:            throw new IllegalArgumentException("Invalid digest component " + path.right);
+                                        default:            throw new IllegalArgumentException("Invalid digest component " + right);
                                     }
                                     break;
             case CRC:               component = Component.CRC;                          break;
             case SUMMARY:           component = Component.SUMMARY;                      break;
             case TOC:               component = Component.TOC;                          break;
-            case CUSTOM:            component = new Component(Type.CUSTOM, path.right); break;
+            case CUSTOM:            component = new Component(Type.CUSTOM, right); break;
             default:
                  throw new IllegalStateException();
         }
-
-        return Pair.create(path.left, component);
+        return component;
     }
 
     @Override
