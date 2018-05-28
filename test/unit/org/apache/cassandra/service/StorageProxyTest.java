@@ -78,7 +78,7 @@ public class StorageProxyTest
     @BeforeClass
     public static void beforeClass() throws Throwable
     {
-        DatabaseDescriptor.getHintsDirectory().mkdir();
+        DatabaseDescriptor.getHintsDirectory().mkdirs();
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
         tmd.updateNormalToken(token("1"), InetAddress.getByName("127.0.0.1"));
         tmd.updateNormalToken(token("6"), InetAddress.getByName("127.0.0.6"));
