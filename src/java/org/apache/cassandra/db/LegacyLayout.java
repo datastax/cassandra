@@ -46,6 +46,8 @@ import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.cassandra.db.LivenessInfo.NO_EXPIRATION_TIME;
+import static org.apache.cassandra.db.LivenessInfo.NO_TTL;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 /**
@@ -1350,7 +1352,7 @@ public abstract class LegacyLayout
                 // The only time in 2.x that we actually delete a row marker is in 2i tables, so in that case we do
                 // want to actually propagate the row deletion. (CASSANDRA-13320)
                 if (!cell.isTombstone())
-                    builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(cell.timestamp, cell.ttl, cell.localDeletionTime));
+                    builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(cell.timestamp, cell.ttl, maybeFixLocalDeletionTime(cell)));
                 else if (metadata.isIndex())
                     builder.addRowDeletion(Row.Deletion.regular(new DeletionTime(cell.timestamp, cell.localDeletionTime)));
                 else
@@ -1374,7 +1376,7 @@ public abstract class LegacyLayout
                         if (!helper.includes(path))
                             return true;
                     }
-                    Cell c = new BufferCell(column, cell.timestamp, cell.ttl, cell.localDeletionTime, cell.value, path);
+                    Cell c = new BufferCell(column, cell.timestamp, cell.ttl, maybeFixLocalDeletionTime(cell), cell.value, path);
                     if (!helper.isDropped(c, column.isComplex()))
                         builder.addCell(c);
                     if (column.isComplex())
@@ -1476,6 +1478,27 @@ public abstract class LegacyLayout
         {
             return builder.build();
         }
+    }
+
+    /**
+     * Due to CASSANDRA-14092 localDeletionTime can overflow when nowInSecs + ttl > MAX_INTEGER.
+     *
+     * When nowInSecs + ttl == MAX_INTEGER, which is the sentinel to represent {@link AbstractCell#NO_DELETION_TIME},
+     * an AssertionError is thrown on {@link org.apache.cassandra.db.LivenessInfo.ExpiringLivenessInfo} constructor
+     * on 3.0 but not on 2.1.
+     *
+     * To avoid this AssertionError on 3.0+ during reading of legacy SSTables, we set the localDeletionTime to {@link Cell#MAX_DELETION_TIME},
+     * which is MAX_INTEGER - 1, when the cell has ttl - since {@link AbstractCell#NO_DELETION_TIME} is only used when the
+     * cell does not have a TTL.
+     */
+    private static int maybeFixLocalDeletionTime(LegacyCell cell)
+    {
+        if (cell.ttl != NO_TTL && cell.localDeletionTime == NO_EXPIRATION_TIME)
+        {
+            logger.trace("Fixing cell with overflowed local deletion time;");
+            return Cell.MAX_DELETION_TIME;
+        }
+        return cell.localDeletionTime;
     }
 
     public static class LegacyUnfilteredPartition
@@ -1672,7 +1695,7 @@ public abstract class LegacyLayout
         public static LegacyCell tombstone(CFMetaData metadata, ByteBuffer superColumnName, ByteBuffer name, long timestamp, int nowInSec)
         throws UnknownColumnException
         {
-            return new LegacyCell(Kind.DELETED, decodeCellName(metadata, superColumnName, name), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp, nowInSec, LivenessInfo.NO_TTL);
+            return new LegacyCell(Kind.DELETED, decodeCellName(metadata, superColumnName, name), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp, nowInSec, NO_TTL);
         }
 
         public static LegacyCell counterUpdate(CFMetaData metadata, ByteBuffer superColumnName, ByteBuffer name, long value)

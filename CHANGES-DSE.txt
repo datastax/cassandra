@@ -1,4 +1,5 @@
 DSE 5.0.15
+ * Fix legacy rows with localDeletionTime set to NO_DELETION_TIME due to TTL overflow (DB-2109)
  * Tool for identifying large partitions (DB-803)
  * Limit max cached direct buffer on NIO to 1MB (DB-2028)
  * Set MX4J_ADDRESS to 127.0.0.1 if not explicitly set (DB-1950)

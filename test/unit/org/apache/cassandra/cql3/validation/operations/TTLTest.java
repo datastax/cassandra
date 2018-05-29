@@ -15,6 +15,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.rows.AbstractCell;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.FBUtilities;
@@ -23,7 +24,7 @@ import org.junit.Test;
 
 public class TTLTest extends CQLTester
 {
-    public static String NEGATIVE_LOCAL_EXPIRATION_TEST_DIR = "test/data/negative-local-expiration-test/%s";
+    public static String NEGATIVE_LOCAL_EXPIRATION_TEST_DIR = "test/data/negative-local-expiration-test/%s%s";
 
     public static int MAX_TTL = Attributes.MAX_TTL;
 
@@ -200,7 +201,7 @@ public class TTLTest extends CQLTester
     public void testCapExpirationDateOverflowPolicy(boolean simple, boolean clustering, boolean flush) throws Throwable
     {
         // Create Table
-        createTable(simple, clustering);
+        createTable(simple, clustering, true);
 
         // Insert data with INSERT and UPDATE
         if (simple)
@@ -251,21 +252,22 @@ public class TTLTest extends CQLTester
         testRecoverOverflowedExpirationWithScrub(false, false, runScrub, reinsertOverflowedTTL);
     }
 
-    private void createTable(boolean simple, boolean clustering)
+    private void createTable(boolean simple, boolean clustering, boolean dynamicName) throws Throwable
     {
+        String tableName = dynamicName ? createTableName() : getTableName(simple, clustering);
         if (simple)
         {
             if (clustering)
-                createTable("create table %s (k int, a int, b int, primary key(k, a))");
+                execute(String.format("create table %s.%s (k int, a int, b int, primary key(k, a))", KEYSPACE, tableName));
             else
-                createTable("create table %s (k int primary key, a int, b int)");
+                execute(String.format("create table %s.%s (k int primary key, a int, b int)", KEYSPACE, tableName));
         }
         else
         {
             if (clustering)
-                createTable("create table %s (k int, a int, b set<text>, primary key(k, a))");
+                execute(String.format("create table %s.%s (k int, a int, b set<text>, primary key(k, a))", KEYSPACE, tableName));
             else
-                createTable("create table %s (k int primary key, a int, b set<text>)");
+                execute(String.format("create table %s.%s (k int primary key, a int, b set<text>)", KEYSPACE, tableName));
         }
     }
 
@@ -320,14 +322,14 @@ public class TTLTest extends CQLTester
             assert runScrub;
         }
 
-        createTable(simple, clustering);
+        createTable(simple, clustering, true);
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(currentTable());
 
         assertEquals(0, cfs.getLiveSSTables().size());
 
-        copySSTablesToTableDir(currentTable(), simple, clustering);
+        copySSTablesToTableDir(currentTable(), simple, clustering, false);
 
         cfs.loadNewSSTables();
 
@@ -356,19 +358,20 @@ public class TTLTest extends CQLTester
         }
     }
 
-    private void copySSTablesToTableDir(String table, boolean simple, boolean clustering) throws IOException
+    private void copySSTablesToTableDir(String table, boolean simple, boolean clustering, boolean legacy) throws IOException
     {
         File destDir = Keyspace.open(keyspace()).getColumnFamilyStore(table).getDirectories().getCFDirectories().iterator().next();
-        File sourceDir = getTableDir(table, simple, clustering);
+        File sourceDir = getTableDir(table, simple, clustering, legacy);
+        logger.info("Copying from {} to {}", sourceDir, destDir);
         for (File file : sourceDir.listFiles())
         {
             copyFile(file, destDir);
         }
     }
 
-    private static File getTableDir(String table, boolean simple, boolean clustering)
+    private static File getTableDir(String table, boolean simple, boolean clustering, boolean legacy)
     {
-        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering)));
+        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering), legacy ? "-legacy" : ""));
     }
 
     private static void copyFile(File src, File dest) throws IOException
@@ -391,5 +394,52 @@ public class TTLTest extends CQLTester
             return clustering ? SIMPLE_CLUSTERING : SIMPLE_NOCLUSTERING;
         else
             return clustering ? COMPLEX_CLUSTERING : COMPLEX_NOCLUSTERING;
+    }
+
+    @Test
+    public void testUpgradeSSTables() throws Throwable
+    {
+        // order matter, table name is part of legacy sstable path
+        testUpgradeSSTables(true, false);
+        testUpgradeSSTables(true, true);
+        testUpgradeSSTables(false, false);
+        testUpgradeSSTables(false, true);
+    }
+
+    public void testUpgradeSSTables(boolean simple, boolean clustering) throws Throwable
+    {
+        String tableName = getTableName(simple, clustering);
+        createTable(simple, clustering, false);
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(tableName);
+
+        assertEquals(0, cfs.getLiveSSTables().size());
+
+        copySSTablesToTableDir(tableName, simple, clustering, true);
+
+        cfs.loadNewSSTables();
+
+        assertTrue("Expect legacy tables are loaded", cfs.getLiveSSTables().size() > 0);
+
+        cfs.getLiveSSTables().stream().forEach(s -> System.out.println("Version before " + s.descriptor.version));
+        cfs.getLiveSSTables().stream().forEach(s -> assertEquals(LivenessInfo.NO_EXPIRATION_TIME, s.getMaxLocalDeletionTime()));
+
+        cfs.sstablesRewrite(false, 1);
+
+        cfs.getLiveSSTables().stream().forEach(s -> System.out.println("Version after " + s.descriptor.version));
+        cfs.getLiveSSTables().stream().forEach(s -> assertEquals(AbstractCell.MAX_DELETION_TIME, s.getMaxLocalDeletionTime()));
+
+        if (simple)
+            assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, tableName)), row(1, 1, 1), row(2, 2, 2));
+        else
+            assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, tableName)), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
+
+        cfs.forceMajorCompaction();
+
+        if (simple)
+            assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, tableName)), row(1, 1, 1), row(2, 2, 2));
+        else
+            assertRows(execute(String.format("SELECT * from %s.%s", KEYSPACE, tableName)), row(1, 1, set("v11", "v12", "v13", "v14")), row(2, 2, set("v21", "v22", "v23", "v24")));
     }
 }

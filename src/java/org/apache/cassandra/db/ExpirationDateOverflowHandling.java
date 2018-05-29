@@ -77,7 +77,7 @@ public class ExpirationDateOverflowHandling
 
         // Check for localExpirationTime overflow (CASSANDRA-14092)
         int nowInSecs = (int)(System.currentTimeMillis() / 1000);
-        if (ttl + nowInSecs < 0)
+        if (ttl + nowInSecs < 0 || ttl + nowInSecs == Cell.NO_DELETION_TIME)
         {
             switch (policy)
             {
@@ -116,6 +116,6 @@ public class ExpirationDateOverflowHandling
     public static int computeLocalExpirationTime(int nowInSec, int timeToLive)
     {
         int localExpirationTime = nowInSec + timeToLive;
-        return localExpirationTime >= 0? localExpirationTime : Cell.MAX_DELETION_TIME;
+        return localExpirationTime >= 0 && localExpirationTime != Cell.NO_DELETION_TIME? localExpirationTime : Cell.MAX_DELETION_TIME;
     }
 }
