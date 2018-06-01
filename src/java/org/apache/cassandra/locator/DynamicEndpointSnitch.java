@@ -327,6 +327,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         return subsnitch.getClass().getName();
     }
 
+    public String getDisplayName()
+    {
+        return subsnitch.getDisplayName();
+    }
+
     public List<Double> dumpTimings(String hostname) throws UnknownHostException
     {
         InetAddress host = InetAddress.getByName(hostname);

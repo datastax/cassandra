@@ -35,7 +35,10 @@ public class DescribeCluster extends NodeToolCmd
         // display cluster name, snitch and partitioner
         System.out.println("Cluster Information:");
         System.out.println("\tName: " + probe.getClusterName());
-        System.out.println("\tSnitch: " + probe.getEndpointSnitchInfoProxy().getSnitchName());
+        String snitch = probe.getEndpointSnitchInfoProxy().getDisplayName();
+        boolean dynamicSnitchEnabled = probe.getEndpointSnitchInfoProxy().isDynamicSnitch();
+        System.out.println("\tSnitch: " + snitch);
+        System.out.println("\tDynamicEndPointSnitch: " + (dynamicSnitchEnabled ? "enabled" : "disabled"));
         System.out.println("\tPartitioner: " + probe.getPartitioner());
 
         // display schema version for each node

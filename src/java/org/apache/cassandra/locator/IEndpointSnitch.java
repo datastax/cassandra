@@ -39,6 +39,11 @@ public interface IEndpointSnitch
      */
     public String getDatacenter(InetAddress endpoint);
 
+    public default String getDisplayName()
+    {
+        return getClass().getName();
+    }
+
     /**
      * returns a new <tt>List</tt> sorted by proximity to the given endpoint
      */

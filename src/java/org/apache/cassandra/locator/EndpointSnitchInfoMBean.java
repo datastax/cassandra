@@ -54,4 +54,14 @@ public interface EndpointSnitchInfoMBean
      */
     public String getSnitchName();
 
+    /**
+     * Provides the snitch name to be displayed to the end-user
+     */
+    public String getDisplayName();
+
+    /**
+     * Returns whether the dynamic snitch is in use
+     */
+    public boolean isDynamicSnitch();
+
 }

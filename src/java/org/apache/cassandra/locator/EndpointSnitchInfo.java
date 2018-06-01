@@ -66,4 +66,14 @@ public class EndpointSnitchInfo implements EndpointSnitchInfoMBean
     {
         return DatabaseDescriptor.getEndpointSnitch().getClass().getName();
     }
+
+    public String getDisplayName()
+    {
+        return DatabaseDescriptor.getEndpointSnitch().getDisplayName();
+    }
+
+    public boolean isDynamicSnitch()
+    {
+        return DatabaseDescriptor.getEndpointSnitch() instanceof DynamicEndpointSnitch;
+    }
 }
