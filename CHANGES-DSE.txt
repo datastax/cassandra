@@ -1,4 +1,5 @@
 DSE 5.0.15
+ * Revert CASSANDRA-10751 (DB-2126)
  * Show delegated snitch in nodetool describecluster (DB-2057)
  * Fix legacy rows with localDeletionTime set to NO_DELETION_TIME due to TTL overflow (DB-2109)
  * Tool for identifying large partitions (DB-803)
