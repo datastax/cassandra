@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.compaction;
 
 
+import java.io.File;
 import java.util.*;
 import java.util.concurrent.Callable;
 
@@ -245,6 +246,12 @@ public class CompactionStrategyManager implements INotificationConsumer
     {
         assert repaired.getClass().equals(unrepaired.getClass());
         return repaired.getDirectories();
+    }
+
+    public File getWriteableLocationAsFile(Collection<SSTableReader> origins, long expectedSize)
+    {
+        assert repaired.getClass().equals(unrepaired.getClass());
+        return repaired.getWriteableLocationAsFile(origins, expectedSize);
     }
 
     public synchronized void handleNotification(INotification notification, Object sender)

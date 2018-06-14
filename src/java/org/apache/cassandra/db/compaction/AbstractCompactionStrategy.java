@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.io.File;
 import java.util.*;
 
 import com.google.common.base.Throwables;
@@ -529,5 +530,10 @@ public abstract class AbstractCompactionStrategy
     public boolean supportsEarlyOpen()
     {
         return true;
+    }
+
+    public File getWriteableLocationAsFile(Collection<SSTableReader> origins, long expectedSize)
+    {
+        return directories.getWriteableLocationAsFile(expectedSize);
     }
 }

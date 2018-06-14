@@ -111,7 +111,7 @@ public class Scrubber implements Closeable
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
         // Calculate the expected compacted filesize
-        this.destination = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(toScrub, OperationType.SCRUB));
+        this.destination = CompactionManager.getWriterLocation(cfs, toScrub, OperationType.SCRUB);
         if (destination == null)
             throw new IOException("disk full");
 

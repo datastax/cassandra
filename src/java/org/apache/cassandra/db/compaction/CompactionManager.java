@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Predicate;
@@ -767,7 +768,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         logger.info("Cleaning up {}", sstable);
 
-        File compactionFileLocation = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(txn.originals(), OperationType.CLEANUP));
+        File compactionFileLocation = getWriterLocation(cfs, Collections.singleton(sstable), OperationType.CLEANUP);
         if (compactionFileLocation == null)
             throw new IOException("disk full");
 
@@ -815,6 +816,13 @@ public class CompactionManager implements CompactionManagerMBean
             logger.info(String.format(format, finished.get(0).getFilename(), startsize, endsize, (int) (ratio * 100), totalkeysWritten, dTime));
         }
 
+    }
+
+    public static File getWriterLocation(final ColumnFamilyStore cfs, Collection<SSTableReader> sstables, OperationType type)
+    {
+        // In case of tiered compaction strategy, if the sstable is managed by tiered storage, new sstables created by cleanup,
+        // anti-compaction, scrub should be written back to the same tier instead of the default data directories. SEE DB-2173
+        return cfs.getWriteableLocationAsFile(sstables, cfs.getExpectedCompactedFileSize(sstables, type));
     }
 
     private static abstract class CleanupStrategy

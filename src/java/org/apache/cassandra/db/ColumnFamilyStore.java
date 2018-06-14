@@ -473,9 +473,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
     }
 
+    /**
+     * @return default data directories
+     */
     public Directories getDirectories()
     {
         return directories;
+    }
+
+    /**
+     * @param origin sstable to be written back via scrub, anti-compaction or cleanup
+     * @param expectedSize of output sstable
+     * @return the directory to place the compacted sstable
+     */
+    public File getWriteableLocationAsFile(Collection<SSTableReader> origins, long expectedSize)
+    {
+        return compactionStrategyManager.getWriteableLocationAsFile(origins, expectedSize);
     }
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, int sstableLevel, SerializationHeader header, LifecycleTransaction txn)

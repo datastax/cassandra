@@ -228,7 +228,7 @@ public class LocalAntiCompactionTask implements Runnable
         logger.info("Anticompacting {}", groupTxn);
         Set<SSTableReader> sstableAsSet = groupTxn.originals();
 
-        File destination = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(sstableAsSet, OperationType.ANTICOMPACTION));
+        File destination = CompactionManager.getWriterLocation(cfs, sstableAsSet, OperationType.ANTICOMPACTION);
         long repairedKeyCount = 0;
         long unrepairedKeyCount = 0;
         int nowInSec = FBUtilities.nowInSeconds();
