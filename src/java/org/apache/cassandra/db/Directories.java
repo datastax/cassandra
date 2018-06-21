@@ -41,6 +41,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSet.Builder;
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -325,6 +326,17 @@ public class Directories
     }
 
     /**
+     * Returns a non-blacklisted disk that the original sstable belongs to,
+     * otherwise find any disk that has enough space
+     *
+     * @throws FSWriteError if all directories are blacklisted or no enough space
+     */
+    public File getWriteableLocationAsFile(SSTableReader original, long writeSize)
+    {
+        return getWriteableLocationAsFile(writeSize);
+    }
+
+    /**
      * Returns a temporary subdirectory on non-blacklisted data directory
      * that _currently_ has {@code writeSize} bytes as usable space.
      * This method does not create the temporary directory.
@@ -442,6 +454,26 @@ public class Directories
             totalAvailable += candidate.availableSpace;
         }
         return totalAvailable > expectedTotalWriteSize;
+    }
+
+    public DataDirectory[] getWriteableLocations()
+    {
+        List<DataDirectory> nonBlacklistedDirs = new ArrayList<>();
+        for (DataDirectory dir : paths)
+        {
+            if (!BlacklistedDirectories.isUnwritable(dir.location))
+                nonBlacklistedDirs.add(dir);
+        }
+
+        Collections.sort(nonBlacklistedDirs, new Comparator<DataDirectory>()
+        {
+            @Override
+            public int compare(DataDirectory o1, DataDirectory o2)
+            {
+                return o1.location.compareTo(o2.location);
+            }
+        });
+        return nonBlacklistedDirs.toArray(new DataDirectory[nonBlacklistedDirs.size()]);
     }
 
     public static File getSnapshotDirectory(Descriptor desc, String snapshotName)
@@ -980,7 +1012,7 @@ public class Directories
         for (int i = 0; i < locations.length; ++i)
             dataDirectories[i] = new DataDirectory(new File(locations[i]));
     }
-    
+
     private class TrueFilesSizeVisitor extends SimpleFileVisitor<Path>
     {
         private final AtomicLong size = new AtomicLong(0);
@@ -1019,11 +1051,11 @@ public class Directories
         }
 
         @Override
-        public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException 
+        public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException
         {
             return FileVisitResult.CONTINUE;
         }
-        
+
         public long getAllocatedSize()
         {
             return size.get();

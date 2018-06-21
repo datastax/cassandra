@@ -1,3 +1,6 @@
+Hotfix
+ * Fixed scrub, anti-compaction, cleanup, snapshot to work with Tiered Storage (DB-2173)
+
 DSE 5.0.10
  * Make scrub validate the partition key, add validation to schema mutation creation (APOLLO-969)
  * Group multiple view updates within the same base partition to speedup view build process(APOLLO-969)

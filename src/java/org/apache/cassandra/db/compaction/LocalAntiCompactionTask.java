@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
@@ -228,7 +229,8 @@ public class LocalAntiCompactionTask implements Runnable
         logger.info("Anticompacting {}", groupTxn);
         Set<SSTableReader> sstableAsSet = groupTxn.originals();
 
-        File destination = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(sstableAsSet, OperationType.ANTICOMPACTION));
+        long writeSize = cfs.getExpectedCompactedFileSize(sstableAsSet, OperationType.ANTICOMPACTION);
+        File destination = cfs.getDirectories().getWriteableLocationAsFile(Iterables.get(sstableAsSet, 0), writeSize);
         long repairedKeyCount = 0;
         long unrepairedKeyCount = 0;
         int nowInSec = FBUtilities.nowInSeconds();

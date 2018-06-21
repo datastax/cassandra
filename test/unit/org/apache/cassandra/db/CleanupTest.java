@@ -18,12 +18,14 @@
 */
 package org.apache.cassandra.db;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +38,11 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.Directories.DataDirectory;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Range;
@@ -50,6 +55,8 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class CleanupTest
 {
@@ -57,6 +64,8 @@ public class CleanupTest
     public static final String KEYSPACE1 = "CleanupTest1";
     public static final String CF_INDEXED1 = "Indexed1";
     public static final String CF_STANDARD1 = "Standard1";
+    public static final String CF_STANDARD_TIERED1 = "StandardTired1";
+
     public static final ByteBuffer COLUMN = ByteBufferUtil.bytes("birthdate");
     public static final ByteBuffer VALUE = ByteBuffer.allocate(8);
     static
@@ -65,6 +74,8 @@ public class CleanupTest
         VALUE.flip();
     }
 
+    private static Directories tieredDirectories;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
@@ -72,6 +83,7 @@ public class CleanupTest
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_TIERED1),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE1, CF_INDEXED1, true));
     }
 
@@ -147,6 +159,50 @@ public class CleanupTest
 
         // 2ary indexes should result in no results, too (although tombstones won't be gone until compacted)
         assertEquals(0, Util.getAll(Util.cmd(cfs).filterOn("birthdate", Operator.EQ, VALUE).build()).size());
+    }
+
+    @Test
+    public void testCleanupWithTier() throws Exception
+    {
+        StorageService.instance.getTokenMetadata().clearUnsafe();
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_TIERED1);
+        setTieredCompactionStrategy(cfs);
+
+        // setup mock tier directories
+        DataDirectory[] mockDataDirectory = new DataDirectory[1];
+        String mockTier = "mock_tier";
+        File mockDir = new File(DatabaseDescriptor.getAllDataFileLocations()[0] + File.separator + mockTier);
+        mockDir.deleteOnExit();
+        mockDataDirectory[0] = new DataDirectory(mockDir);
+        tieredDirectories = new Directories(cfs.metadata, mockDataDirectory);
+        cfs.reload();
+
+        // insert data and verify we get it back w/ range query
+        fillCF(cfs, "val", LOOPS);
+
+        assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).build()).size());
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+
+        Token token1 = cfs.getPartitioner().getMinimumToken();
+        byte[] token2 = new byte[1];
+        token2[0] = 1;
+        tmd.updateNormalToken(token1, InetAddress.getByName("127.0.0.1"));
+        tmd.updateNormalToken(new BytesToken(ByteBufferUtil.bytes(String.valueOf(50))),
+                              InetAddress.getByName("127.0.0.2"));
+        CompactionManager.instance.performCleanup(cfs, 2);
+
+        // verify sstable is rewritten by cleanup
+        int actual = Util.getAll(Util.cmd(cfs).build()).size();
+        assertTrue("Expected more than 0 rows remaining, but got " + actual, actual > 0);
+        assertTrue("Expected less than "+LOOPS+" rows remaining, but got " + actual, actual < LOOPS);
+
+        // verify sstable is written to the mock tier
+        assertFalse(cfs.getLiveSSTables().isEmpty());
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+            assertTrue("Expected sstable being written to mock tier, but got: " + sstable.getFilename(),
+                       sstable.getFilename().contains(mockTier));
     }
 
     @Test
@@ -232,6 +288,7 @@ public class CleanupTest
             assertEquals(testCase.getKey(), CompactionManager.needsCleanup(ssTable, testCase.getValue()));
         }
     }
+
     private static BytesToken token(byte ... value)
     {
         return new BytesToken(value);
@@ -269,5 +326,26 @@ public class CleanupTest
         for (SSTableReader sstable : cfs.getLiveSSTables())
             list.add(sstable.getMaxTimestamp());
         return list;
+    }
+
+    private void setTieredCompactionStrategy(ColumnFamilyStore cfs)
+    {
+        Map<String, String> localOptions = new HashMap<>();
+        localOptions.put("class", "org.apache.cassandra.db.CleanupTest$MockedTieredCompactionStrategy");
+        cfs.setCompactionParameters(localOptions);
+    }
+
+    public static class MockedTieredCompactionStrategy extends SizeTieredCompactionStrategy
+    {
+        public MockedTieredCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
+        {
+            super(cfs, options);
+        }
+
+        @Override
+        public Directories getDirectories()
+        {
+            return tieredDirectories;
+        }
     }
 }

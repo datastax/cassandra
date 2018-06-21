@@ -99,10 +99,8 @@ public class Scrubber implements Closeable
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
         // Calculate the expected compacted filesize
-        this.destination = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(toScrub, OperationType.SCRUB));
-        if (destination == null)
-            throw new IOException("disk full");
-
+        long writeSize = cfs.getExpectedCompactedFileSize(toScrub, OperationType.SCRUB);
+        this.destination = cfs.getDirectories().getWriteableLocationAsFile(sstable, writeSize);
         this.isCommutative = cfs.metadata.isCounter();
 
         boolean hasIndexFile = (new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX))).exists();

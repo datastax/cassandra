@@ -748,8 +748,8 @@ public class CompactionManager implements CompactionManagerMBean
             logger.trace("Expected bloom filter size : {}", expectedBloomFilterSize);
 
         logger.info("Cleaning up {}", sstable);
-
-        File compactionFileLocation = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(txn.originals(), OperationType.CLEANUP));
+        long writeSize = cfs.getExpectedCompactedFileSize(txn.originals(), OperationType.CLEANUP);
+        File compactionFileLocation = cfs.getDirectories().getWriteableLocationAsFile(sstable, writeSize);
         if (compactionFileLocation == null)
             throw new IOException("disk full");
 
