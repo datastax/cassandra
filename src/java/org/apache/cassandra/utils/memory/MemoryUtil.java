@@ -22,6 +22,9 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.sun.jna.Native;
 
 import org.apache.cassandra.utils.Architecture;
@@ -31,6 +34,8 @@ import sun.nio.ch.DirectBuffer;
 
 public abstract class MemoryUtil
 {
+    private static final Logger logger = LoggerFactory.getLogger(MemoryUtil.class);
+
     private static final long UNSAFE_COPY_THRESHOLD = 1024 * 1024L; // copied from java.nio.Bits
 
     private static final Unsafe unsafe;
@@ -91,11 +96,15 @@ public abstract class MemoryUtil
 
     public static long allocate(long size)
     {
-        return Native.malloc(size);
+        long peer = Native.malloc(size);
+        if (logger.isTraceEnabled())
+            logger.trace("Allocated {} off-heap bytes for peer {} at call stack:", size, peer, new Exception("Off-heap memory allocation"));
+        return peer;
     }
 
     public static void free(long peer)
     {
+        logger.trace("Freed peer {}", peer);
         Native.free(peer);
     }
 
