@@ -586,6 +586,14 @@ public class Scrubber implements Closeable
 
         private Unfiltered previous;
 
+        // Record the current range tombstone open marker, if any, while iterating so we can properly handle
+        // the case where out-of-order rows starts in the middle of an open range tombstone.
+        private RangeTombstoneMarker openMarker;
+        // Flag that is used in the out-of-order-rows-within-an-open-range-tombstone case to force this iterator to
+        // return false on the next hasNext() call.
+        private boolean done;
+
+
         /**
          * The partition containing the rows which are out of order.
          */
@@ -655,17 +663,80 @@ public class Scrubber implements Closeable
 
         protected Unfiltered computeNext()
         {
-            if (!iterator.hasNext())
+            if (!iterator.hasNext() || done)
                 return endOfData();
 
+            boolean reversed = isReverseOrder();
             Unfiltered next = iterator.next();
 
             // If we detect that some rows are out of order we will store and sort the remaining ones to insert them
             // in a separate SSTable.
             if (previous != null && comparator.compare(next, previous) < 0)
             {
-                rowsOutOfOrder = ImmutableBTreePartition.create(UnfilteredRowIterators.concat(next, iterator), false);
-                return endOfData();
+                // We may have to return one more close marker in this call, but we're done no matter what after that.
+                done = true;
+                Unfiltered finalCloseMarker = null;
+                UnfilteredRowIterator outOfOrder = UnfilteredRowIterators.concat(next, iterator);
+                if (openMarker != null)
+                {
+                    // We need to 1) close the open maker in the currently written sstable, and make sure we provide
+                    // the open marker for the remainder that will be written in another sstable.
+                    finalCloseMarker = RangeTombstoneBoundMarker.inclusiveClose(reversed,
+                                                                                previous.clustering().getRawValues(),
+                                                                                openMarker.openDeletionTime(reversed));
+                    RangeTombstoneBoundMarker open = openMarker.isBoundary()
+                                                     ? ((RangeTombstoneBoundaryMarker)openMarker).createCorrespondingOpenMarker(reversed)
+                                                     : (RangeTombstoneBoundMarker)openMarker;
+                    outOfOrder = UnfilteredRowIterators.concat(open, outOfOrder);
+                }
+                rowsOutOfOrder = ImmutableBTreePartition.create(outOfOrder, false);
+                return finalCloseMarker == null ? endOfData() : finalCloseMarker;
+            }
+
+            if (next.isRangeTombstoneMarker())
+            {
+                RangeTombstoneMarker marker = (RangeTombstoneMarker)next;
+                // Marker can be a boundary, and if so, handling his close first is easier.
+                if (marker.isClose(reversed))
+                {
+                    // Use this opportunity to validate invariants of range tombstones markers, namely that:
+                    // - we don't have a close without a previous open.
+                    // - both deletionTime match.
+                    // In both case, there is no "always right" fix: we might either delete or resurrect data we
+                    // shouldn't depending on which "fix" we apply. So for now, we just throw, which will make scrub
+                    // consider the partition as "bad".
+                    // TODO: it might make sense to have a flag that pick some form of resolution (the simplest being
+                    //       to just drop the  close marker if there is no opening, and use the open marker deletion
+                    //       time if there is a mismatch).
+                    if (openMarker == null)
+                        throw new RuntimeException(String.format("Found orphaned close tombstone marker (with no prior " +
+                                                                 "opening marker) at clustering %s of partition %s",
+                                                                 marker.clustering().toString(metadata()),
+                                                                 metadata().getKeyValidator().getString(partitionKey().getKey())));
+                    if (!openMarker.openDeletionTime(reversed).equals(marker.closeDeletionTime(reversed)))
+                        throw new RuntimeException(String.format("Mismatched open and close tombstone markers in partition %s: " +
+                                                                 "open marker at clustering %s had deletion info %s, " +
+                                                                 "but close marker at clustering %s has deletion info %s",
+                                                                 metadata().getKeyValidator().getString(partitionKey().getKey()),
+                                                                 openMarker.clustering().toString(metadata()),
+                                                                 openMarker.openDeletionTime(reversed),
+                                                                 marker.clustering().toString(metadata()),
+                                                                 marker.closeDeletionTime(reversed)));
+                    openMarker = null;
+                }
+                if (marker.isOpen(reversed))
+                {
+                    // Same as above, we check invariants, namely that we should not have a current open marker (it
+                    // should have been closed before any open marker.
+                    if (openMarker != null)
+                        throw new RuntimeException(String.format("Found non-closed open tombstone marker at clustering %s " +
+                                                                 "of partition %s: a new marker is opened at clustering %s " +
+                                                                 "without having seen a prior close.",
+                                                                 openMarker.clustering().toString(metadata()),
+                                                                 metadata().getKeyValidator().getString(partitionKey().getKey()),
+                                                                 marker.clustering().toString(metadata())));
+                    openMarker = marker;
+                }
             }
             previous = next;
             return next;
