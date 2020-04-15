@@ -57,6 +57,7 @@ import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerCDC;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileUtils;
@@ -361,6 +362,13 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContextHotReload();
+
+        applyGuardrailsConfig();
+    }
+
+    private static void applyGuardrailsConfig()
+    {
+        conf.guardrails.validate();
     }
 
     private static void applySimpleConfig()
@@ -3088,6 +3096,11 @@ public class DatabaseDescriptor
     {
         int seconds = conf.validation_preview_purge_head_start_in_sec;
         return Math.max(seconds, 0);
+    }
+
+    public static GuardrailsConfig getGuardrailsConfig()
+    {
+        return conf.guardrails;
     }
 
 }
