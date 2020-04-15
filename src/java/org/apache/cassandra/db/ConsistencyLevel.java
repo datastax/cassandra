@@ -18,6 +18,8 @@
 package org.apache.cassandra.db;
 
 
+import java.util.Locale;
+
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.schema.TableMetadata;
@@ -72,6 +74,11 @@ public enum ConsistencyLevel
     {
         this.code = code;
         this.isDCLocal = isDCLocal;
+    }
+
+    public static ConsistencyLevel fromString(String str)
+    {
+        return valueOf(str.toUpperCase(Locale.US));
     }
 
     public static ConsistencyLevel fromCode(int code)
