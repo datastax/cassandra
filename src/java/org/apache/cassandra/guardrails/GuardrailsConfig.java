@@ -65,6 +65,9 @@ public class GuardrailsConfig
 
     public boolean user_timestamps_enabled = false;
 
+    public long secondary_index_per_table_failure_threshold = 1;
+    public long materialized_view_per_table_failure_threshold = 2;
+
     // TODO: only allowing LOCAL_QUORUM as of current spec, but this can't be right ...
     // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
     public Set<String> consistency_level_disallowed = new LinkedHashSet<>(Arrays.asList(

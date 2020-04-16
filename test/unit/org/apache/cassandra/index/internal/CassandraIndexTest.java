@@ -23,13 +23,24 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.*;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -44,6 +55,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.Util.throwAssert;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -829,5 +842,57 @@ public class CassandraIndexTest extends CQLTester
                     fail(String.format("Timed out waiting for index %s to build (%s)ms", indexName, wait));
             }
         }
+    }
+
+    @Test
+    public void testGuardrails() throws Throwable
+    {
+        // we don't know if it's already enabled and what's the current configured threshold..
+        boolean defaultGuardrailsEnabled = DatabaseDescriptor.getGuardrailsConfig().enabled;
+        long defaultSIPerTableFailureThreshold = DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold;
+        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
+        DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold = 1;
+
+        try
+        {
+            createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");
+            String indexName = createIndex("CREATE INDEX ON %s(v1)");
+            assertThat(getCurrentColumnFamilyStore().indexManager.listIndexes().size()).isEqualTo(1);
+
+            assertGuardrailFailed("", "v2", 1);
+
+            assertGuardrailFailed("custom_index_name", "v2", 1);
+
+            // 2i guardrail won't affect custom index
+            execute("CREATE CUSTOM INDEX ON %s (v2) USING 'org.apache.cassandra.index.sasi.SASIIndex';");
+            assertThat(getCurrentColumnFamilyStore().indexManager.listIndexes().size()).isEqualTo(2);
+
+            // drop the first index, we should be able to create new index again
+            dropIndex(String.format("DROP INDEX %s.%s", keyspace(), indexName));
+            assertThat(getCurrentColumnFamilyStore().indexManager.listIndexes().size()).isEqualTo(1);
+
+            execute("CREATE INDEX ON %s(v2)");
+            assertThat(getCurrentColumnFamilyStore().indexManager.listIndexes().size()).isEqualTo(2);
+
+            // previous guardrail should not apply to another base table
+            createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");
+            execute("CREATE INDEX ON %s(v1)");
+            assertThat(getCurrentColumnFamilyStore().indexManager.listIndexes().size()).isEqualTo(1);
+
+            assertGuardrailFailed("custom_index_name2", "v2", 1);
+        }
+        finally
+        {
+            DatabaseDescriptor.getGuardrailsConfig().enabled = defaultGuardrailsEnabled;
+            DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold = defaultSIPerTableFailureThreshold;
+        }
+    }
+
+    private void assertGuardrailFailed(String indexName, String column, int indexes)
+    {
+        String msg = String.format("failed to create secondary index %son table %s", Strings.isNullOrEmpty(indexName) ? "" : indexName + " ", currentTable());
+        assertThatThrownBy(() -> execute(String.format("CREATE INDEX %s ON %%s(%s)", indexName, column)))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining(msg);
     }
 }
