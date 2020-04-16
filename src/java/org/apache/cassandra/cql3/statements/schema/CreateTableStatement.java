@@ -23,23 +23,27 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
-
-import static java.util.Comparator.comparing;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static com.google.common.collect.Iterables.concat;
+import static java.util.Comparator.comparing;
 
 public final class CreateTableStatement extends AlterSchemaStatement
 {
@@ -106,6 +110,28 @@ public final class CreateTableStatement extends AlterSchemaStatement
         }
 
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.tables.with(table)));
+    }
+
+    public ResultMessage execute(QueryState state, boolean locally)
+    {
+        ResultMessage resultMessage = super.execute(state, locally);
+        AuthenticatedUser user = state.getClientState().getUser();
+
+        // guardrails on table properties / skip super user
+        if (null != user && !user.isSuper())
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
+
+
+        if (!SchemaConstants.isInternalKeyspace(keyspaceName))
+        {
+            // guardrails on number of tables
+            int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
+                                                 .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                 .sum();
+            Guardrails.tablesLimit.guard(totalUserTables + 1, tableName);
+        }
+
+        return resultMessage;
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
