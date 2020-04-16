@@ -18,6 +18,8 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -36,6 +38,7 @@ import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
@@ -136,6 +139,12 @@ public final class CreateViewStatement extends AlterSchemaStatement
 
         if (table.isView())
             throw ire("Materialized views cannot be created against other materialized views");
+
+        // guardrails to limit number of mvs per table.
+        Set<ViewMetadata> baseTableViews = StreamSupport.stream(keyspace.views.forTable(table.id).spliterator(), false)
+                                                        .collect(Collectors.toCollection(HashSet::new));
+        Guardrails.materializedViewsPerTable.guard(baseTableViews.size() + 1,
+                                                   String.format("%s on table %s", viewName, table.name));
 
         if (table.params.gcGraceSeconds == 0)
         {
