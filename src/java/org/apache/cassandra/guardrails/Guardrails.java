@@ -76,6 +76,20 @@ public abstract class Guardrails
                                                                             (x, what, v, t) -> format("Tables cannot have more than %s materialized views, failed to create materialized view %s",
                                                                                                       t, what));
 
+    public static final Threshold tablesLimit = new Threshold("number_of_tables",
+                                                              () -> config.tables_warn_threshold,
+                                                              () -> config.tables_failure_threshold,
+                                                              (isWarning, what, v, t) -> isWarning
+                                                                                         ? format("Creating table %s, current number of tables %s exceeds warning threshold of %s.",
+                                                                                                  what, v, t)
+                                                                                         : format("Cannot have more than %s tables, failed to create table %s",
+                                                                                                  t, what));
+
+    public static final DisallowedValues<String> disallowedTableProperties = new DisallowedValues<>("disallowed_table_properties",
+                                                                                                    () -> config.table_properties_disallowed,
+                                                                                                    String::toLowerCase,
+                                                                                                    "Table Properties");
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()

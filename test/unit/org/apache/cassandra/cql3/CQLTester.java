@@ -25,9 +25,25 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -37,50 +53,87 @@ import java.util.stream.Collectors;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
-import org.junit.*;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.*;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.DataType;
+import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.ResultSet;
-
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.audit.AuditLogManager;
+import org.apache.cassandra.auth.CassandraAuthorizer;
+import org.apache.cassandra.auth.CassandraRoleManager;
+import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.DurationType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.ClientMetrics;
-import org.apache.cassandra.schema.*;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.marshal.TupleType;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.security.ThreadAwareSecurityManager;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.transport.*;
+import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.security.ThreadAwareSecurityManager;
+import org.apache.cassandra.utils.Pair;
 
 import static junit.framework.Assert.assertNotNull;
 
@@ -101,13 +154,18 @@ public abstract class CQLTester
     public static final String DATA_CENTER = "datacenter1";
     public static final String DATA_CENTER_REMOTE = "datacenter2";
     public static final String RACK1 = "rack1";
+    private static final User SUPER_USER = new User("cassandra", "cassandra");
 
     private static org.apache.cassandra.transport.Server server;
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
     protected static final Set<InetAddressAndPort> remoteAddrs = new HashSet<>();
-    private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
-    protected static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
+    private static final Map<Pair<User, ProtocolVersion>, Cluster> clusters = new HashMap<>();
+    protected static final Map<Pair<User, ProtocolVersion>, Session> sessions = new HashMap<>();
+
+    protected static final ThreadPoolExecutor schemaCleanup =
+    new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+
 
     private static boolean isServerPrepared = false;
 
@@ -185,6 +243,7 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
+    private User user;
 
     // We don't use USE_PREPARED_VALUES in the code below so some test can foce value preparation (if the result
     // is not expected to be the same without preparation)
@@ -352,52 +411,58 @@ public abstract class CQLTester
         types = null;
         functions = null;
         aggregates = null;
+        user = null;
 
         // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        ScheduledExecutors.optionalTasks.execute(new Runnable()
-        {
-            public void run()
+        schemaCleanup.execute(() -> {
+            try
             {
-                try
+                for (int i = tablesToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
+
+                for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
+
+                for (int i = functionsToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
+
+                for (int i = typesToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
+
+                for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
+
+                // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
+                // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
+                // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
+                // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
+
+                final CountDownLatch latch = new CountDownLatch(1);
+                ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
                 {
-                    for (int i = tablesToDrop.size() - 1; i >= 0; i--)
-                        schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
-
-                    for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
-                        schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
-
-                    for (int i = functionsToDrop.size() - 1; i >= 0; i--)
-                        schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
-
-                    for (int i = typesToDrop.size() - 1; i >= 0; i--)
-                        schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
-
-                    for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
-                        schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
-
-                    // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
-                    // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
-                    // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
-                    // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
-
-                    final CountDownLatch latch = new CountDownLatch(1);
-                    ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
+                    public void run()
                     {
-                        public void run()
-                        {
-                            latch.countDown();
-                        }
-                    });
-                    latch.await(2, TimeUnit.SECONDS);
+                        latch.countDown();
+                    }
+                });
+                latch.await(2, TimeUnit.SECONDS);
 
-                    removeAllSSTables(KEYSPACE, tablesToDrop);
-                }
-                catch (Exception e)
-                {
-                    throw new RuntimeException(e);
-                }
+                removeAllSSTables(KEYSPACE, tablesToDrop);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
             }
         });
+    }
+
+    protected static void requireAuthentication()
+    {
+        System.setProperty("cassandra.superuser_setup_delay_ms", "-1");
+
+        DatabaseDescriptor.setAuthenticator(new PasswordAuthenticator());
+        DatabaseDescriptor.setRoleManager(new CassandraRoleManager());
+        DatabaseDescriptor.setAuthorizer(new CassandraAuthorizer());
     }
 
     // lazy initialization for all tests that require Java Driver
@@ -415,29 +480,6 @@ public abstract class CQLTester
         server = new Server.Builder().withHost(nativeAddr).withPort(nativePort).build();
         ClientMetrics.instance.init(Collections.singleton(server));
         server.start();
-
-        for (ProtocolVersion version : PROTOCOL_VERSIONS)
-        {
-            if (clusters.containsKey(version))
-                continue;
-
-            Cluster.Builder builder = Cluster.builder()
-                                             .withoutJMXReporting()
-                                             .addContactPoints(nativeAddr)
-                                             .withClusterName("Test Cluster")
-                                             .withPort(nativePort);
-
-            if (version.isBeta())
-                builder = builder.allowBetaProtocolVersion();
-            else
-                builder = builder.withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()));
-
-            Cluster cluster = builder.build();
-            clusters.put(version, cluster);
-            sessions.put(version, cluster.connect());
-
-            logger.info("Started Java Driver instance for protocol version {}", version);
-        }
     }
 
     protected void dropPerTestKeyspace() throws Throwable
@@ -903,6 +945,29 @@ public abstract class CQLTester
         return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 
+    /**
+     * Use the specified user for executing the queries over the network.
+     * @param username the user name
+     * @param password the user password
+     */
+    public void useUser(String username, String password)
+    {
+        this.user = new User(username, password);
+    }
+
+    /**
+     * Use the super user for executing the queries over the network.
+     */
+    public void useSuperUser()
+    {
+        this.user = SUPER_USER;
+    }
+
+    public boolean isSuperUser()
+    {
+        return SUPER_USER.equals(user);
+    }
+
     protected Session sessionNet()
     {
         return sessionNet(getDefaultVersion());
@@ -912,7 +977,56 @@ public abstract class CQLTester
     {
         requireNetwork();
 
-        return sessions.get(protocolVersion);
+        return getSession(protocolVersion);
+    }
+
+    protected Session getSession(ProtocolVersion protocolVersion)
+    {
+        Cluster cluster = getCluster(protocolVersion);
+        return sessions.computeIfAbsent(Pair.create(user, protocolVersion), userProto -> cluster.connect());
+    }
+
+    private Cluster getCluster(ProtocolVersion protocolVersion)
+    {
+        return clusters.computeIfAbsent(Pair.create(user, protocolVersion),
+                                        userProto -> initClientCluster(user, protocolVersion));
+    }
+
+    private static Cluster initClientCluster(User user, ProtocolVersion version)
+    {
+        Pair<User, ProtocolVersion> key = Pair.create(user, version);
+        Cluster cluster = clusters.get(key);
+        if (cluster != null)
+            return cluster;
+
+        Cluster.Builder builder = clusterBuilder(version);
+        if (user != null)
+            builder.withCredentials(user.username, user.password);
+        cluster = builder.build();
+
+        logger.info("Started Java Driver instance for protocol version {}", version);
+
+        return cluster;
+    }
+
+    public static Cluster.Builder clusterBuilder(ProtocolVersion version)
+    {
+        Cluster.Builder builder = clusterBuilder();
+        if (version.isBeta())
+            builder = builder.allowBetaProtocolVersion();
+        else
+            builder = builder.withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()));
+        return builder;
+    }
+
+    public static Cluster.Builder clusterBuilder()
+    {
+        return Cluster.builder()
+                      .addContactPoints(nativeAddr)
+                      .withPort(nativePort)
+                      .withClusterName("Test Cluster")
+                      .withNettyOptions(NettyOptions.DEFAULT_INSTANCE)
+                      .withoutMetrics();
     }
 
     protected SimpleClient newSimpleClient(ProtocolVersion version, boolean compression, boolean checksums, boolean isOverloadedException) throws IOException
@@ -1018,9 +1132,9 @@ public abstract class CQLTester
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
-                com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                                                .getCodecRegistry()
-                                                                                                .codecFor(type);
+                com.datastax.driver.core.TypeCodec<Object> codec = getCluster(protocolVersion).getConfiguration()
+                                                                                              .getCodecRegistry()
+                                                                                              .codecFor(type);
                 ByteBuffer expectedByteValue = codec.serialize(expected[j], com.datastax.driver.core.ProtocolVersion.fromInt(protocolVersion.asInt()));
                 int expectedBytes = expectedByteValue == null ? -1 : expectedByteValue.remaining();
                 ByteBuffer actualValue = actual.getBytesUnsafe(meta.getName(j));
@@ -1876,6 +1990,46 @@ public abstract class CQLTester
         public String toString()
         {
             return "UserTypeValue" + toCQLString();
+        }
+    }
+
+    private static class User
+    {
+        /**
+         * The user name
+         */
+        public final String username;
+
+        /**
+         * The user password
+         */
+        public final String password;
+
+        public User(String username, String password)
+        {
+            this.username = username;
+            this.password = password;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(username, password);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof User))
+                return false;
+
+            User u = (User) o;
+
+            return Objects.equal(username, u.username)
+                   && Objects.equal(password, u.password);
         }
     }
 }

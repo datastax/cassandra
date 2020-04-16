@@ -27,6 +27,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Sets;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -357,6 +358,24 @@ public abstract class Guardrail
                 fail(format("Provided value %s is not allowed for %s (disallowed values are: %s)",
                             value, what, cachedRaw));
             }
+        }
+
+        /**
+         * Triggers a failure if any of the provided values is disallowed by this guardrail.
+         *
+         * @param values the values to check.
+         */
+        public void ensureAllowed(Set<T> values)
+        {
+            if (!Guardrails.enabled())
+                return;
+
+            ensureUpToDate();
+
+            Set<T> intersection = Sets.intersection(values, cachedDisallowed);
+            if (!intersection.isEmpty())
+                fail(format("Provided values %s are not allowed for %s (disallowed values are: %s)",
+                            intersection.stream().sorted().collect(Collectors.toList()), what, cachedRaw));
         }
     }
 }
