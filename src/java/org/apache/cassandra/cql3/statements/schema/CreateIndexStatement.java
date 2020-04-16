@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -33,6 +34,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget.Type;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -98,6 +100,16 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         if (Keyspace.open(table.keyspace).getReplicationStrategy().hasTransientReplicas())
             throw new InvalidRequestException("Secondary indexes are not supported on transiently replicated keyspaces");
+
+        // guardrails to limit number of secondary indexes per table.
+        if (!attrs.isCustom)
+        {
+            long existingSecondaryIndexes = table.indexes.stream().filter(indexMetadata -> !indexMetadata.isCustom()).count();
+            Guardrails.secondaryIndexesPerTable.guard(existingSecondaryIndexes + 1,
+                                                      Strings.isNullOrEmpty(indexName)
+                                                      ? String.format("on table %s", table.name)
+                                                      : String.format("%s on table %s", indexName, table.name));
+        }
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));
 

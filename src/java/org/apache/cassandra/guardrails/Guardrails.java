@@ -64,6 +64,18 @@ public abstract class Guardrails
                                                                                                             ConsistencyLevel::fromString,
                                                                                                             "Consistency Level");
 
+    public static final Threshold secondaryIndexesPerTable = new Threshold("secondary_indexes_per_table",
+                                                                           () -> -1,
+                                                                           () -> config.secondary_index_per_table_failure_threshold,
+                                                                           (x, what, v, t) -> format("Tables cannot have more than %s secondary indexes, failed to create secondary index %s",
+                                                                                                     t, what));
+
+    public static final Threshold materializedViewsPerTable = new Threshold("materialized_views_per_table",
+                                                                            () -> -1,
+                                                                            () -> config.materialized_view_per_table_failure_threshold,
+                                                                            (x, what, v, t) -> format("Tables cannot have more than %s materialized views, failed to create materialized view %s",
+                                                                                                      t, what));
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()
