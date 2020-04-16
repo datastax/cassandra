@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.internal;
 
+import java.util.Collections;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -39,6 +41,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -864,10 +867,13 @@ public class CassandraIndexTest extends CQLTester
     public void testGuardrails() throws Throwable
     {
         // we don't know if it's already enabled and what's the current configured threshold..
-        boolean defaultGuardrailsEnabled = DatabaseDescriptor.getGuardrailsConfig().enabled;
-        long defaultSIPerTableFailureThreshold = DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold;
-        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
-        DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold = 1;
+        GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
+        boolean defaultGuardrailsEnabled = config.enabled;
+        long defaultSIPerTableFailureThreshold = config.secondary_index_per_table_failure_threshold;
+        Set<String> defaultTablePropertiesDisallowed = config.table_properties_disallowed;
+        config.enabled = true;
+        config.table_properties_disallowed = Collections.emptySet();
+        config.secondary_index_per_table_failure_threshold = 1;
 
         try
         {
@@ -899,8 +905,9 @@ public class CassandraIndexTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.getGuardrailsConfig().enabled = defaultGuardrailsEnabled;
-            DatabaseDescriptor.getGuardrailsConfig().secondary_index_per_table_failure_threshold = defaultSIPerTableFailureThreshold;
+            config.enabled = defaultGuardrailsEnabled;
+            config.secondary_index_per_table_failure_threshold = defaultSIPerTableFailureThreshold;
+            config.table_properties_disallowed = defaultTablePropertiesDisallowed;
         }
     }
 

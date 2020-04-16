@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -275,6 +276,17 @@ public class GuardrailsTest
         assertFails(() -> disallowed.ensureAllowed(20),
                     "Provided value 20 is not allowed for integer (disallowed values are: [4, 6, 20])");
         assertNoWarnOrFails(() -> disallowed.ensureAllowed(200));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(set(1, 2, 3)));
+
+        assertFails(() -> disallowed.ensureAllowed(set(4, 6)),
+                    "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
+        assertFails(() -> disallowed.ensureAllowed(set(4, 5, 6, 7)),
+                    "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
+    }
+
+    private Set<Integer> set(Integer... values)
+    {
+        return new HashSet<>(Arrays.asList(values));
     }
 
     private static class TriggerCollector implements Guardrails.Listener
