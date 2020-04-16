@@ -21,17 +21,21 @@ import java.util.*;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.join;
@@ -47,6 +51,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
     {
         super(keyspaceName);
         this.tableName = tableName;
+    }
+
+    public ResultMessage execute(QueryState state, boolean locally)
+    {
+        return super.execute(state, locally);
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -140,6 +149,8 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             TableMetadata.Builder tableBuilder = table.unbuild();
             Views.Builder viewsBuilder = keyspace.views.unbuild();
             newColumns.forEach(c -> addColumn(keyspace, table, c, tableBuilder, viewsBuilder));
+
+            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName);
 
             return keyspace.withSwapped(keyspace.tables.withSwapped(tableBuilder.build()))
                            .withSwapped(viewsBuilder.build());
@@ -357,6 +368,17 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         {
             super(keyspaceName, tableName);
             this.attrs = attrs;
+        }
+
+        public ResultMessage execute(QueryState state, boolean locally)
+        {
+            AuthenticatedUser user = state.getClientState().getUser();
+
+            // guardrails on table properties.
+            if (null != user && !user.isSuper())
+                Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
+
+            return super.execute(state, locally);
         }
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
