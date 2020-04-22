@@ -29,8 +29,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -227,12 +229,19 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
+    private void validateQueryOptions(QueryOptions options)
+    {
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(options.getConsistency());
+    }
+
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead(keyspace());
+        validateQueryOptions(options);
 
         int nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
