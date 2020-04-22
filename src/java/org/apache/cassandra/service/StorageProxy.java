@@ -296,7 +296,7 @@ public class StorageProxy implements StorageProxyMBean
         int contentions = 0;
         try
         {
-            consistencyForPaxos.validateForCas();
+            consistencyForPaxos.validateForCas(keyspaceName);
             consistencyForCommit.validateForCasCommit(keyspaceName);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);

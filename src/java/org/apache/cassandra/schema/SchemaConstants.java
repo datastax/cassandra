@@ -104,4 +104,11 @@ public final class SchemaConstants
                || isReplicatedSystemKeyspace(keyspaceName)
                || isVirtualKeyspace(keyspaceName);
     }
+    /**
+     * @return whether or not the keyspace is a user keyspace
+     */
+    public static boolean isUserKeyspace(String keyspaceName)
+    {
+        return !isInternalKeyspace(keyspaceName);
+    }
 }
