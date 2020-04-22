@@ -19,12 +19,15 @@
 package org.apache.cassandra.guardrails;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -59,25 +62,22 @@ import static java.lang.String.format;
  */
 public class GuardrailsConfig
 {
-    public boolean enabled = false;
+    public Boolean enabled = false;
 
-    public long column_value_size_failure_threshold_in_kb = 5 * 1024L; // 5MB
-    public long columns_per_table_failure_threshold = 20;
+    public Long column_value_size_failure_threshold_in_kb;
+    public Long columns_per_table_failure_threshold;
 
-    public long tables_warn_threshold = 100;
-    public long tables_failure_threshold = 200;
-    public Set<String> table_properties_disallowed = new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList()));
+    public Long tables_warn_threshold;
+    public Long tables_failure_threshold;
+    public Set<String> table_properties_disallowed;
 
 
-    public boolean user_timestamps_enabled = false;
+    public Boolean user_timestamps_enabled = false;
 
-    public long secondary_index_per_table_failure_threshold = 1;
-    public long materialized_view_per_table_failure_threshold = 2;
+    public Long secondary_index_per_table_failure_threshold;
+    public Long materialized_view_per_table_failure_threshold;
 
-    // TODO: only allowing LOCAL_QUORUM as of current spec, but this can't be right ...
-    // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
-    public Set<String> consistency_level_disallowed = new LinkedHashSet<>(Arrays.asList(
-    "ANY", "ONE", "TWO", "THREE", "QUORUM", "ALL", "EACH_QUORUM", "SERIAL", "LOCAL_SERIAL", "LOCAL_ONE"));
+    public Set<String> write_consistency_levels_disallowed;
 
     /**
      * Validate that the value provided for each guardrail setting is valid.
@@ -98,7 +98,7 @@ public class GuardrailsConfig
 
         validateDisallowedTableProperties();
 
-        for (String rawCL : consistency_level_disallowed)
+        for (String rawCL : write_consistency_levels_disallowed)
         {
             try
             {
@@ -106,10 +106,38 @@ public class GuardrailsConfig
             }
             catch (Exception e)
             {
-                throw new ConfigurationException(format("Invalid value for consistency_level_disallowed guardrail: "
+                throw new ConfigurationException(format("Invalid value for write_consistency_level_disallowed guardrail: "
                                                         + "'%s' does not parse as a Consistency Level", rawCL));
             }
         }
+    }
+
+    /**
+     * If {@link DatabaseDescriptor#isEmulateDbaasDefaults()} is true, apply cloud defaults to guardrails settings that
+     * are not specified in yaml; otherwise, apply on-prem defaults to guardrails settings that are not specified in yaml;
+     */
+    public void applyConfig()
+    {
+        enforceDefault(user_timestamps_enabled, v -> user_timestamps_enabled = v, true, true);
+
+        enforceDefault(column_value_size_failure_threshold_in_kb, v -> column_value_size_failure_threshold_in_kb = v, -1L, 5 * 1024L);
+
+        enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, -1L, 20L);
+        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, -1L, 1L);
+        enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, -1L, 2L);
+        enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, -1L, 100L);
+        enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, -1L, 200L);
+
+        // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
+        enforceDefault(write_consistency_levels_disallowed,
+                       v -> write_consistency_levels_disallowed = v,
+                       Collections.<String>emptySet(),
+                       new LinkedHashSet<>(Arrays.asList("ANY", "ONE", "LOCAL_ONE")));
+
+        enforceDefault(table_properties_disallowed,
+                       v -> table_properties_disallowed = v,
+                       Collections.<String>emptySet(),
+                       new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList())));
     }
 
     private void validateDisallowedTableProperties()
@@ -155,5 +183,23 @@ public class GuardrailsConfig
             throw new ConfigurationException(format("The warn threshold %d for the %s guardrail should be lower "
                                                     + "than the failure threshold %d",
                                                     warnValue, guardName, failValue));
+    }
+
+    /**
+     * Enforce default value based on {@link DatabaseDescriptor#isEmulateDbaasDefaults()} if
+     * it's not specified in yaml
+     *
+     * @param current       current config value defined in yaml
+     * @param optionSetter  setter to updated given config
+     * @param onPremDefault default value for on-prem
+     * @param dbaasDefault  default value for constellation DB-as-a-service
+     * @param <T>
+     */
+    private static <T> void enforceDefault(T current, Consumer<T> optionSetter, T onPremDefault, T dbaasDefault)
+    {
+        if (current != null)
+            return;
+
+        optionSetter.accept(DatabaseDescriptor.isEmulateDbaasDefaults() ? dbaasDefault : onPremDefault);
     }
 }

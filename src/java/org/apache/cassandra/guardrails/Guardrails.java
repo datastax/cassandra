@@ -59,10 +59,10 @@ public abstract class Guardrails
                                                                             () -> !config.user_timestamps_enabled,
                                                                             "User provided timestamps (USING TIMESTAMP)");
 
-    public static final DisallowedValues<ConsistencyLevel> disallowedConsistencies = new DisallowedValues<>("disallowed_write_consistency_levels",
-                                                                                                            () -> config.consistency_level_disallowed,
-                                                                                                            ConsistencyLevel::fromString,
-                                                                                                            "Consistency Level");
+    public static final DisallowedValues<ConsistencyLevel> disallowedWriteConsistencies = new DisallowedValues<>("disallowed_write_consistency_levels",
+                                                                                                                 () -> config.write_consistency_levels_disallowed,
+                                                                                                                 ConsistencyLevel::fromString,
+                                                                                                                 "Consistency Level");
 
     public static final Threshold secondaryIndexesPerTable = new Threshold("secondary_indexes_per_table",
                                                                            () -> -1,

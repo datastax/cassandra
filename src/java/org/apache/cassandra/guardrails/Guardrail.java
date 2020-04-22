@@ -57,7 +57,7 @@ public abstract class Guardrail
     /**
      * A name identifying the guardrail (mainly for shipping with Insights events).
      */
-    private final String name;
+    public final String name;
 
     protected Guardrail(String name)
     {

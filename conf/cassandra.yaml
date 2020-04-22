@@ -1343,3 +1343,64 @@ enable_sasi_indexes: false
 # Enables creation of transiently replicated keyspaces on this node.
 # Transient replication is experimental and is not recommended for production use.
 enable_transient_replication: false
+
+# Emulates database-as-a-service defaults.
+#
+# When enabled, some guardrails defaults are modified to values that are appropriate for cloud environments.
+# This includes (but is not limited to) stricter guardrails defaults.
+#
+# This can be used as an convenience to develop and test applications meant to run in a cloud environment.
+# emulate_dbaas_defaults: false
+
+# Guardrails settings.
+# guardrails:
+  # When executing a scan, within or across a partition, we need to keep the
+  # tombstones seen in memory so we can return them to the coordinator, which
+  # will use them to make sure other replicas also know about the deleted rows.
+  # With workloads that generate a lot of tombstones, this can cause performance
+  # problems and even exhaust the server heap.
+  # (http://www.datastax.com/dev/blog/cassandra-anti-patterns-queues-and-queue-like-datasets)
+  # Adjust the thresholds here if you understand the dangers and want to
+  # scan more tombstones anyway.  These thresholds may also be adjusted at runtime
+  # using the StorageService mbean.
+  #
+  # Default: tombstone_warn_threshold is 1000, may differ if emulate_dbaas_defaults is enabled
+  # Default: tombstone_failure_threshold is 100000, may differ if emulate_dbaas_defaults is enabled
+  # tombstone_warn_threshold: 1000
+  # tombstone_failure_threshold: 100000
+
+  # Failure threshold to prevent writing large a column value into Cassandra.
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # column_value_size_failure_threshold_in_kb: -1
+
+  # Failure threshold to prevent creating more columns per table than threshold.
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # columns_per_table_failure_threshold: -1
+
+  # Failure threshold to prevent creating more secondary indexes per table than threshold
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # secondary_index_per_table_failure_threshold: -1
+
+  # Failure threshold to prevent creating more materialized views per table than threshold.
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # materialized_view_per_table_failure_threshold: -1
+
+  # Warn threshold to warn creating more tables than threshold.
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # tables_warn_threshold: -1
+
+  # Failure threshold to prevent creating more tables than threshold.
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # tables_failure_threshold: -1
+
+  # Prevents creating tables with provided configurations.
+  # Default: all properties are allowed, may differ if emulate_dbaas_defaults is enabled
+  # table_properties_disallowed:
+
+  # Whether to allow user-provided timestamps in write requests
+  # Default: true to allow user-provided timestamps, may differ if emulate_dbaas_defaults is enabled
+  # user_timestamps_enabled: true
+
+  # Preventing a query with provided consistency levels
+  # Default: all consistency levels are allowed.
+  # write_consistency_levels_disallowed:

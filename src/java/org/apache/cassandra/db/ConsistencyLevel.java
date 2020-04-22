@@ -21,7 +21,9 @@ package org.apache.cassandra.db;
 import java.util.Locale;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -207,6 +209,9 @@ public enum ConsistencyLevel
 
     public void validateForWrite(String keyspaceName) throws InvalidRequestException
     {
+        if (SchemaConstants.isUserKeyspace(keyspaceName))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+
         switch (this)
         {
             case SERIAL:
@@ -218,6 +223,9 @@ public enum ConsistencyLevel
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
     public void validateForCasCommit(String keyspaceName) throws InvalidRequestException
     {
+        if (SchemaConstants.isUserKeyspace(keyspaceName))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+
         switch (this)
         {
             case EACH_QUORUM:
@@ -229,8 +237,11 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForCas() throws InvalidRequestException
+    public void validateForCas(String keyspaceName) throws InvalidRequestException
     {
+        if (SchemaConstants.isUserKeyspace(keyspaceName))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
     }
@@ -242,6 +253,9 @@ public enum ConsistencyLevel
 
     public void validateCounterForWrite(TableMetadata metadata) throws InvalidRequestException
     {
+        if (SchemaConstants.isUserKeyspace(metadata.keyspace))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
 

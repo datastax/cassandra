@@ -485,6 +485,7 @@ public class Config
      */
     public volatile int validation_preview_purge_head_start_in_sec = 60 * 60;
 
+    public boolean emulate_dbaas_defaults = false;
     public GuardrailsConfig guardrails = new GuardrailsConfig();
 
     /**
