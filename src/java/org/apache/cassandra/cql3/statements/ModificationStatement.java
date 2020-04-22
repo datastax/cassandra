@@ -460,10 +460,7 @@ public abstract class ModificationStatement implements CQLStatement
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
-        if (isCounter())
-            cl.validateCounterForWrite(metadata());
-        else
-            cl.validateForWrite(metadata.keyspace);
+        validateConsistency(cl);
 
         List<? extends IMutation> mutations =
             getMutations(options,
@@ -475,6 +472,14 @@ public abstract class ModificationStatement implements CQLStatement
             StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
 
         return null;
+    }
+
+    public void validateConsistency(ConsistencyLevel cl)
+    {
+        if (isCounter())
+            cl.validateCounterForWrite(metadata());
+        else
+            cl.validateForWrite(metadata.keyspace);
     }
 
     private ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)

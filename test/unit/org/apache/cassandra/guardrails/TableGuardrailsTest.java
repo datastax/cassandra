@@ -101,8 +101,8 @@ public class TableGuardrailsTest extends CQLTester
 
         int currentTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
                                            .mapToInt(ks -> ks.getColumnFamilyStores().size()).sum();
-        int warn = currentTables + 1;
-        int fail = currentTables + 3;
+        long warn = currentTables + 1;
+        long fail = currentTables + 3;
         DatabaseDescriptor.getGuardrailsConfig().tables_warn_threshold = warn;
         DatabaseDescriptor.getGuardrailsConfig().tables_failure_threshold = fail;
 

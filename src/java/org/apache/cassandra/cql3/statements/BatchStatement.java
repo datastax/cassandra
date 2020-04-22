@@ -29,9 +29,6 @@ import org.slf4j.helpers.MessageFormatter;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.*;
@@ -39,6 +36,9 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.metrics.BatchMetrics;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -47,7 +47,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
 import static java.util.function.Predicate.isEqual;
-
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 
 /**
@@ -385,8 +384,15 @@ public class BatchStatement implements CQLStatement
         long timestamp = options.getTimestamp(queryState);
         int nowInSeconds = options.getNowInSeconds(queryState);
 
-        if (options.getConsistency() == null)
+        ConsistencyLevel cl = options.getConsistency();
+        if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
+
+        for (ModificationStatement statement : statements)
+        {
+            statement.validateConsistency(cl);
+        }
+
         if (options.getSerialConsistency() == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
@@ -396,7 +402,7 @@ public class BatchStatement implements CQLStatement
         if (updatesVirtualTables)
             executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
         else    
-            executeWithoutConditions(getMutations(options, false, timestamp, nowInSeconds, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
+            executeWithoutConditions(getMutations(options, false, timestamp, nowInSeconds, queryStartNanoTime), cl, queryStartNanoTime);
 
         return new ResultMessage.Void();
     }
