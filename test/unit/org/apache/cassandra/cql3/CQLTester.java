@@ -501,6 +501,20 @@ public abstract class CQLTester
         }
     }
 
+    public void compact(String keyspace)
+    {
+        try
+        {
+            ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+            if (store != null)
+                store.forceMajorCompaction();
+        }
+        catch (InterruptedException | ExecutionException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public void disableCompaction()
     {
         disableCompaction(KEYSPACE);
