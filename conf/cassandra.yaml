@@ -1408,3 +1408,7 @@ enable_transient_replication: false
   # Log a warning when compacting partitions larger than this value.
   # Default: 100mb, may differ if emulate_dbaas_defaults is enabled
   # partition_size_warn_threshold_in_mb: 100
+
+  # Failure threshold to prevent IN query containing more partition keys than threshold
+  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # partition_keys_in_select_failure_threshold: -1
