@@ -31,6 +31,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.sstable.*;
@@ -203,6 +204,13 @@ public class BigTableWriter extends SSTableWriter
 
     private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
     {
+        if (Guardrails.partitionSize.triggersOn(rowSize))
+        {
+            String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
+            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata));
+        }
+
+        // TODO: deprecate `compaction_large_partition_warning_threshold_mb` and remove that check
         if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
         {
             String keyString = metadata().partitionKeyType.getString(key.getKey());

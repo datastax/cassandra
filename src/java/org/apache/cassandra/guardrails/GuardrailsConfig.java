@@ -71,13 +71,14 @@ public class GuardrailsConfig
     public Long tables_failure_threshold;
     public Set<String> table_properties_disallowed;
 
-
-    public Boolean user_timestamps_enabled = false;
+    public Boolean user_timestamps_enabled;
 
     public Long secondary_index_per_table_failure_threshold;
     public Long materialized_view_per_table_failure_threshold;
 
     public Set<String> write_consistency_levels_disallowed;
+
+    public Integer partition_size_warn_threshold_in_mb;
 
     /**
      * Validate that the value provided for each guardrail setting is valid.
@@ -95,6 +96,7 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(tables_warn_threshold, "tables_warn_threshold");
         validateStrictlyPositiveInteger(tables_failure_threshold, "tables_failure_threshold");
         validateWarnLowerThanFail(tables_warn_threshold, tables_failure_threshold, "tables");
+        validateStrictlyPositiveInteger(partition_size_warn_threshold_in_mb, "partition_size_warn_threshold_in_mb");
 
         validateDisallowedTableProperties();
 
@@ -138,6 +140,8 @@ public class GuardrailsConfig
                        v -> table_properties_disallowed = v,
                        Collections.<String>emptySet(),
                        new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList())));
+
+        enforceDefault(partition_size_warn_threshold_in_mb, v -> partition_size_warn_threshold_in_mb = v, 100, 100);
     }
 
     private void validateDisallowedTableProperties()

@@ -18,34 +18,55 @@
 package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
-
+import java.util.Optional;
+import java.util.Set;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.collect.*;
-
+import com.google.common.collect.ImmutableCollection;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.Columns;
+import org.apache.cassandra.db.CompactTables;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.github.jamm.Unmetered;
 
+import static com.google.common.collect.Iterables.any;
+import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-
-import static com.google.common.collect.Iterables.any;
-import static com.google.common.collect.Iterables.transform;
 import static org.apache.cassandra.schema.IndexMetadata.isNameValid;
 
 @Unmetered
@@ -690,6 +711,33 @@ public final class TableMetadata
                           .add("indexes", indexes)
                           .add("triggers", triggers)
                           .toString();
+    }
+
+    /**
+     * Returns a string representation of a partition in a CQL-friendly format.
+     *
+     * For non-composite types it returns the result of {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral}
+     * applied to the partition key.
+     * For composite types it applies {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral} to each subkey and combines
+     * the results into a tuple.
+     *
+     * @param partitionKey
+     * @return CQL-like string representation of a partition key
+     */
+    public String partitionKeyAsCQLLiteral(ByteBuffer partitionKey)
+    {
+        if (partitionKeyType instanceof CompositeType)
+        {
+            ByteBuffer[] keys = ((CompositeType) partitionKeyType).split(partitionKey);
+            String[] strkeys = new String[keys.length];
+            for (int i = 0; i < ((CompositeType) partitionKeyType).types.size(); i++)
+            {
+                strkeys[i] = ((CompositeType) partitionKeyType).types.get(i).asCQL3Type().toCQLLiteral(keys[i], ProtocolVersion.CURRENT);
+            }
+
+            return "(" + String.join(", ", strkeys) + ")";
+        }
+        return partitionKeyType.asCQL3Type().toCQLLiteral(partitionKey, ProtocolVersion.CURRENT);
     }
 
     public static final class Builder

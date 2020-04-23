@@ -25,6 +25,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.guardrails.Guardrail.DisableFlag;
 import org.apache.cassandra.guardrails.Guardrail.DisallowedValues;
+import org.apache.cassandra.guardrails.Guardrail.SizeThreshold;
 import org.apache.cassandra.guardrails.Guardrail.Threshold;
 
 import static java.lang.String.format;
@@ -43,7 +44,7 @@ public abstract class Guardrails
     //  - userTimestampsEnabled
     //  - disallowedConsistencies
 
-    public static final Threshold columnValueSize = new Guardrail.SizeThreshold("column_value_size",
+    public static final Threshold columnValueSize = new SizeThreshold("column_value_size",
                                                                                 () -> -1L, // not needed so far
                                                                                 () -> config.column_value_size_failure_threshold_in_kb * 1024L,
                                                                                 (x, what, v, t) -> format("Value of %s of size %s is greater than the maximum allowed (%s)",
@@ -89,6 +90,13 @@ public abstract class Guardrails
                                                                                                     () -> config.table_properties_disallowed,
                                                                                                     String::toLowerCase,
                                                                                                     "Table Properties");
+
+    public static final Threshold partitionSize =
+    new SizeThreshold("partition_size",
+                                () -> config.partition_size_warn_threshold_in_mb * 1024L * 1024L,
+                                () -> -1L,
+                                (x, what, v, t) -> format("Detected partition %s of size %s is greater than the maximum recommended size (%s)",
+                                                what, v, t));
 
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
