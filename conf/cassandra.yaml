@@ -1419,3 +1419,7 @@ enable_transient_replication: false
   # Preventing a query with provided consistency levels
   # Default: all consistency levels are allowed.
   # write_consistency_levels_disallowed:
+
+  # Log a warning when compacting partitions larger than this value.
+  # Default: 100mb, may differ if emulate_dbaas_defaults is enabled
+  # partition_size_warn_threshold_in_mb: 100
