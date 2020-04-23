@@ -62,6 +62,8 @@ import static java.lang.String.format;
  */
 public class GuardrailsConfig
 {
+    public static final Long NO_LIMIT = -1L;
+
     public Boolean enabled = false;
 
     public Long column_value_size_failure_threshold_in_kb;
@@ -79,6 +81,7 @@ public class GuardrailsConfig
     public Set<String> write_consistency_levels_disallowed;
 
     public Integer partition_size_warn_threshold_in_mb;
+    public Integer partition_keys_in_select_failure_threshold;
 
     /**
      * Validate that the value provided for each guardrail setting is valid.
@@ -97,6 +100,7 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(tables_failure_threshold, "tables_failure_threshold");
         validateWarnLowerThanFail(tables_warn_threshold, tables_failure_threshold, "tables");
         validateStrictlyPositiveInteger(partition_size_warn_threshold_in_mb, "partition_size_warn_threshold_in_mb");
+        validateStrictlyPositiveInteger(partition_keys_in_select_failure_threshold, "partition_keys_in_select_failure_threshold");
 
         validateDisallowedTableProperties();
 
@@ -122,13 +126,13 @@ public class GuardrailsConfig
     {
         enforceDefault(user_timestamps_enabled, v -> user_timestamps_enabled = v, true, true);
 
-        enforceDefault(column_value_size_failure_threshold_in_kb, v -> column_value_size_failure_threshold_in_kb = v, -1L, 5 * 1024L);
+        enforceDefault(column_value_size_failure_threshold_in_kb, v -> column_value_size_failure_threshold_in_kb = v, NO_LIMIT, 5 * 1024L);
 
-        enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, -1L, 20L);
-        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, -1L, 1L);
-        enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, -1L, 2L);
-        enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, -1L, 100L);
-        enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, -1L, 200L);
+        enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, NO_LIMIT, 20L);
+        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, NO_LIMIT, 1L);
+        enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, NO_LIMIT, 2L);
+        enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, NO_LIMIT, 100L);
+        enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, NO_LIMIT, 200L);
 
         // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
         enforceDefault(write_consistency_levels_disallowed,
@@ -142,6 +146,7 @@ public class GuardrailsConfig
                        new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList())));
 
         enforceDefault(partition_size_warn_threshold_in_mb, v -> partition_size_warn_threshold_in_mb = v, 100, 100);
+        enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, -1, 20);
     }
 
     private void validateDisallowedTableProperties()
