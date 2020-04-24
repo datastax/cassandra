@@ -108,4 +108,11 @@ public final class SchemaConstants
     {
         return !isLocalSystemKeyspace(keyspaceName) && !isReplicatedSystemKeyspace(keyspaceName) && !isVirtualKeyspace(keyspaceName);
     }
+
+    public static boolean isInternalKeyspace(String keyspaceName)
+    {
+        return isLocalSystemKeyspace(keyspaceName)
+               || isReplicatedSystemKeyspace(keyspaceName)
+               || isVirtualKeyspace(keyspaceName);
+    }
 }

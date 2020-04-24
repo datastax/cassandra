@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.CompactTables;
@@ -715,7 +716,7 @@ public final class TableMetadata
 
     /**
      * Returns a string representation of a partition in a CQL-friendly format.
-     *
+     * <p>
      * For non-composite types it returns the result of {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral}
      * applied to the partition key.
      * For composite types it applies {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral} to each subkey and combines
@@ -726,18 +727,50 @@ public final class TableMetadata
      */
     public String partitionKeyAsCQLLiteral(ByteBuffer partitionKey)
     {
+        return primaryKeyAsCQLLiteral(partitionKey, Clustering.EMPTY);
+    }
+
+    /**
+     * Returns a string representation of a primary key in a CQL-friendly format.
+     *
+     * @param partitionKey the partition key part of the primary key
+     * @param clustering   the clustering key part of the primary key
+     * @return a CQL-like string representation of the specified primary key
+     */
+    public String primaryKeyAsCQLLiteral(ByteBuffer partitionKey, Clustering clustering)
+    {
+        int clusteringSize = clustering.size();
+
+        String[] literals;
+        int i = 0;
+
         if (partitionKeyType instanceof CompositeType)
         {
-            ByteBuffer[] keys = ((CompositeType) partitionKeyType).split(partitionKey);
-            String[] strkeys = new String[keys.length];
-            for (int i = 0; i < ((CompositeType) partitionKeyType).types.size(); i++)
+            ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);
+            int size = ((CompositeType) partitionKeyType).types.size();
+            literals = new String[size + clusteringSize];
+            for (i = 0; i < size; i++)
             {
-                strkeys[i] = ((CompositeType) partitionKeyType).types.get(i).asCQL3Type().toCQLLiteral(keys[i], ProtocolVersion.CURRENT);
+                literals[i] = asCQLLiteral(((CompositeType) partitionKeyType).types.get(i), values[i]);
             }
-
-            return "(" + String.join(", ", strkeys) + ")";
         }
-        return partitionKeyType.asCQL3Type().toCQLLiteral(partitionKey, ProtocolVersion.CURRENT);
+        else
+        {
+            literals = new String[1 + clusteringSize];
+            literals[i++] = asCQLLiteral(partitionKeyType, partitionKey);
+        }
+
+        for (int j = 0; j < clusteringSize; j++)
+        {
+            literals[i++] = asCQLLiteral(clusteringColumns().get(j).type, clustering.get(j));
+        }
+
+        return i == 1 ? literals[0] : "(" + String.join(", ", literals) + ")";
+    }
+
+    private static String asCQLLiteral(AbstractType<?> type, ByteBuffer value)
+    {
+        return type.asCQL3Type().toCQLLiteral(value, ProtocolVersion.CURRENT);
     }
 
     public static final class Builder

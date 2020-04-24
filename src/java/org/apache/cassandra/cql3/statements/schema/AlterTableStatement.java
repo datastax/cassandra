@@ -203,6 +203,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             else
                 tableBuilder.addRegularColumn(name, type);
 
+            if (SchemaConstants.isUserKeyspace(keyspaceName))
+                Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName);
+
             if (!isStatic)
             {
                 for (ViewMetadata view : keyspace.views.forTable(table.id))

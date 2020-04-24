@@ -51,6 +51,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.Types;
@@ -282,6 +283,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (params.defaultTimeToLive > 0)
                 throw ire("Cannot set %s on a table with counters", TableParams.Option.DEFAULT_TIME_TO_LIVE);
         }
+
+        if (SchemaConstants.isUserKeyspace(keyspaceName))
+            Guardrails.columnsPerTable.guard(rawColumns.size(), tableName);
 
         /*
          * Create the builder

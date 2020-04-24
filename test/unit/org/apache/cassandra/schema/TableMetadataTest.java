@@ -23,8 +23,11 @@ import java.util.Arrays;
 
 import org.junit.Test;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -60,5 +63,66 @@ public class TableMetadataTest
 
         TableMetadata metadata3 = TableMetadata.builder(keyspaceName, tableName).addPartitionKeyColumn("key", UTF8Type.instance).build();
         assertEquals("'non-composite test'", metadata3.partitionKeyAsCQLLiteral(UTF8Type.instance.decompose("non-composite test")));
+    }
+
+    @Test
+    public void testPrimaryKeyAsCQLLiteral()
+    {
+        String keyspaceName = "keyspace";
+        String tableName = "table";
+
+        TableMetadata metadata;
+
+        // one partition key column, no clustering key
+        metadata = TableMetadata.builder(keyspaceName, tableName)
+                                .addPartitionKeyColumn("key", UTF8Type.instance)
+                                .build();
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("Test"), Clustering.EMPTY)).isEqualTo("'Test'");
+
+        // two partition key columns, no clustering key
+        metadata = TableMetadata.builder(keyspaceName, tableName)
+                                .addPartitionKeyColumn("k1", UTF8Type.instance)
+                                .addPartitionKeyColumn("k2", Int32Type.instance)
+                                .build();
+        assertThat(metadata.primaryKeyAsCQLLiteral(CompositeType.getInstance(UTF8Type.instance, Int32Type.instance)
+                                                                .decompose("Test", -12), Clustering.EMPTY)).isEqualTo("('Test', -12)");
+
+        // one partition key column, one clustering key column
+        metadata = TableMetadata.builder(keyspaceName, tableName)
+                                .addPartitionKeyColumn("key", UTF8Type.instance)
+                                .addClusteringColumn("clustering", UTF8Type.instance)
+                                .build();
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"),
+                                                   Clustering.make(UTF8Type.instance.decompose("Cluster")))).isEqualTo("('k', 'Cluster')");
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"), Clustering.EMPTY)).isEqualTo("'k'");
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"), Clustering.STATIC_CLUSTERING)).isEqualTo("'k'");
+
+        // one partition key column, two clustering key columns
+        metadata = TableMetadata.builder(keyspaceName, tableName)
+                                .addPartitionKeyColumn("key", UTF8Type.instance)
+                                .addClusteringColumn("c1", UTF8Type.instance)
+                                .addClusteringColumn("c2", UTF8Type.instance)
+                                .build();
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"),
+                                                   Clustering.make(UTF8Type.instance.decompose("c1"),
+                                                                   UTF8Type.instance.decompose("c2")))).isEqualTo("('k', 'c1', 'c2')");
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"), Clustering.EMPTY)).isEqualTo("'k'");
+        assertThat(metadata.primaryKeyAsCQLLiteral(UTF8Type.instance.decompose("k"), Clustering.STATIC_CLUSTERING)).isEqualTo("'k'");
+
+        // two partition key columns, two clustering key columns
+        CompositeType composite = CompositeType.getInstance(Int32Type.instance, BooleanType.instance);
+        metadata = TableMetadata.builder(keyspaceName, tableName)
+                                .addPartitionKeyColumn("k1", Int32Type.instance)
+                                .addPartitionKeyColumn("k2", BooleanType.instance)
+                                .addClusteringColumn("c1", UTF8Type.instance)
+                                .addClusteringColumn("c2", UTF8Type.instance)
+                                .build();
+        assertThat(metadata.primaryKeyAsCQLLiteral(composite.decompose(0, true),
+                                                   Clustering.make(UTF8Type.instance.decompose("Cluster_1"),
+                                                                   UTF8Type.instance.decompose("Cluster_2"))))
+        .isEqualTo("(0, true, 'Cluster_1', 'Cluster_2')");
+
+        assertThat(metadata.primaryKeyAsCQLLiteral(composite.decompose(1, true), Clustering.EMPTY)).isEqualTo("(1, true)");
+        assertThat(metadata.primaryKeyAsCQLLiteral(composite.decompose(2, true), Clustering.STATIC_CLUSTERING)).isEqualTo("(2, true)");
     }
 }

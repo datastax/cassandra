@@ -83,6 +83,13 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
     };
 
     @Test
+    public void testConfigValidation()
+    {
+        testValidationOfStrictlyPositiveProperty((c, v) -> c.partition_size_warn_threshold_in_mb = v.intValue(),
+                                                 "partition_size_warn_threshold_in_mb");
+    }
+
+    @Test
     public void testCompactLargePartition() throws Throwable
     {
         Guardrails.register(testListener);

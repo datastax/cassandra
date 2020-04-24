@@ -28,6 +28,7 @@ import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.UTName;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -96,6 +97,7 @@ public final class CreateTypeStatement extends AlterSchemaStatement
                          .collect(toList());
 
         UserType udt = new UserType(keyspaceName, bytes(typeName), fieldNames, fieldTypes, true);
+        Guardrails.fieldsPerUDT.guard(fieldNames.size(), udt.getNameAsString());
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.types.with(udt)));
     }
 

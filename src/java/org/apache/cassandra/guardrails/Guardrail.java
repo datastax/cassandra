@@ -156,6 +156,17 @@ public abstract class Guardrail
         }
 
         /**
+         * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
+         * ({@link Guardrails#enabled()}) and if any of the thresholds is positive.
+         *
+         * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
+         */
+        public boolean enabled()
+        {
+            return Guardrails.enabled() && (failThreshold.getAsLong() >= 0 || warnThreshold.getAsLong() >= 0);
+        }
+
+        /**
          * Checks whether the provided value would trigger a warning or failure if passed to {@link #guard}.
          *
          * <p>This method is optional (does not have to be called) but can be used in the case where the "what"
