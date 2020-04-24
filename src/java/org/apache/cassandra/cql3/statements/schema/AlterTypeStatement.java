@@ -28,6 +28,7 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.service.ClientState;
@@ -111,6 +112,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
             List<FieldIdentifier> fieldNames = new ArrayList<>(userType.fieldNames()); fieldNames.add(fieldName);
             List<AbstractType<?>> fieldTypes = new ArrayList<>(userType.fieldTypes()); fieldTypes.add(fieldType);
+
+            int newSize = userType.size() + 1;
+            Guardrails.fieldsPerUDT.guard(newSize, userType.getNameAsString());
 
             return new UserType(keyspaceName, userType.name, fieldNames, fieldTypes, true);
         }

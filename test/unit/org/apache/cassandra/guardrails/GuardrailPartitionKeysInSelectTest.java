@@ -51,6 +51,13 @@ public class GuardrailPartitionKeysInSelectTest extends GuardrailTester
     }
 
     @Test
+    public void testConfigValidation()
+    {
+        testValidationOfStrictlyPositiveProperty((c, v) -> c.partition_keys_in_select_failure_threshold = v.intValue(),
+                                                 "partition_keys_in_select_failure_threshold");
+    }
+
+    @Test
     public void testFilterOnFewPartitions() throws Throwable
     {
         // test that it does not throw

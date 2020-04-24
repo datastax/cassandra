@@ -36,22 +36,12 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
     private final AtomicBoolean warnTriggered = new AtomicBoolean(false);
     private final AtomicBoolean failTriggered = new AtomicBoolean(false);
 
-    @BeforeClass
-    public static void setupClass()
-    {
-        partitionSizeThreshold = DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb;
-        DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = 1;
-    }
-
-    @AfterClass
-    public static void tearDownClass()
-    {
-        DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = partitionSizeThreshold;
-    }
-
     @Before
     public void setup()
     {
+        partitionSizeThreshold = DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb;
+        DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = 1;
+
         createTable("CREATE TABLE IF NOT EXISTS %s (k INT, c INT, v TEXT, PRIMARY KEY(k, c))");
         warnTriggered.set(false);
         failTriggered.set(false);
@@ -61,6 +51,7 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
     public void tearDown()
     {
         dropTable("DROP TABLE %s");
+        DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = partitionSizeThreshold;
     }
 
     private final Guardrails.Listener testListener = new Guardrails.Listener()
@@ -81,6 +72,13 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
             failTriggered.set(true);
         }
     };
+
+    @Test
+    public void testConfigValidation()
+    {
+        testValidationOfStrictlyPositiveProperty((c, v) -> c.partition_size_warn_threshold_in_mb = v.intValue(),
+                                                 "partition_size_warn_threshold_in_mb");
+    }
 
     @Test
     public void testCompactLargePartition() throws Throwable
