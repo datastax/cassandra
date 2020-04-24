@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.cql3.functions.Function;
@@ -473,26 +474,40 @@ public abstract class Lists
 
         static void doAppend(Term.Terminal value, ColumnMetadata column, UpdateParameters params) throws InvalidRequestException
         {
-            if (column.type.isMultiCell())
+            if (value == null)
             {
+                // for frozen lists, we're overwriting the whole cell value
+                if (!column.type.isMultiCell())
+                    params.addTombstone(column);
+
                 // If we append null, do nothing. Note that for Setter, we've
                 // already removed the previous value so we're good here too
-                if (value == null)
-                    return;
+                return;
+            }
 
-                for (ByteBuffer buffer : ((Value) value).elements)
+            List<ByteBuffer> elements = ((Value) value).elements;
+
+            if (column.type.isMultiCell())
+            {
+                // Guardrails about collection size are only checked for the added elements without considering
+                // already existent elements. This is done so to avoid read-before-write, having additional checks
+                // during SSTable write.
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+
+                int dataSize = 0;
+                for (ByteBuffer buffer : elements)
                 {
                     ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
-                    params.addCell(column, CellPath.create(uuid), buffer);
+                    Cell cell = params.addCell(column, CellPath.create(uuid), buffer);
+                    dataSize += cell.dataSize();
                 }
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
             }
             else
             {
-                // for frozen lists, we're overwriting the whole cell value
-                if (value == null)
-                    params.addTombstone(column);
-                else
-                    params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Cell cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, column.ksName);
             }
         }
     }
@@ -514,10 +529,16 @@ public abstract class Lists
             List<ByteBuffer> toAdd = ((Value) value).elements;
             final int totalCount = toAdd.size();
 
+            // Guardrails about collection size are only checked for the added elements without considering
+            // already existent elements. This is done so to avoid read-before-write, having additional checks
+            // during SSTable write.
+            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, column.ksName);
+
             // we have to obey MAX_NANOS per batch - in the unlikely event a client has decided to prepend a list with
             // an insane number of entries.
             PrecisionTime pt = null;
             int remainingInBatch = 0;
+            int dataSize = 0;
             for (int i = totalCount - 1; i >= 0; i--)
             {
                 if (remainingInBatch == 0)
@@ -528,8 +549,10 @@ public abstract class Lists
                 }
 
                 ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(pt.millis, (pt.nanos + remainingInBatch--)));
-                params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                Cell cell = params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                dataSize += cell.dataSize();
             }
+            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
         }
     }
 

@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.streaming.CassandraStreamHeader.CassandraStreamHeaderSerializer;
@@ -35,7 +36,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.SerializationUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-public class CassandraStreamHeaderTest
+public class CassandraStreamHeaderTest extends CQLTester
 {
     @Test
     public void serializerTest()

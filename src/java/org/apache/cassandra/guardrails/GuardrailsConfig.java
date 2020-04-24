@@ -83,6 +83,10 @@ public class GuardrailsConfig
     public Integer partition_size_warn_threshold_in_mb;
     public Integer partition_keys_in_select_failure_threshold;
 
+    public Long fields_per_udt_failure_threshold;
+    public Long collection_size_warn_threshold_in_kb;
+    public Long items_per_collection_warn_threshold;
+
     /**
      * Validate that the value provided for each guardrail setting is valid.
      *
@@ -101,6 +105,10 @@ public class GuardrailsConfig
         validateWarnLowerThanFail(tables_warn_threshold, tables_failure_threshold, "tables");
         validateStrictlyPositiveInteger(partition_size_warn_threshold_in_mb, "partition_size_warn_threshold_in_mb");
         validateStrictlyPositiveInteger(partition_keys_in_select_failure_threshold, "partition_keys_in_select_failure_threshold");
+
+        validateStrictlyPositiveInteger(fields_per_udt_failure_threshold, "fields_per_udt_failure_threshold");
+        validateStrictlyPositiveInteger(collection_size_warn_threshold_in_kb, "collection_size_warn_threshold_in_kb");
+        validateStrictlyPositiveInteger(items_per_collection_warn_threshold, "items_per_collection_warn_threshold");
 
         validateDisallowedTableProperties();
 
@@ -147,6 +155,10 @@ public class GuardrailsConfig
 
         enforceDefault(partition_size_warn_threshold_in_mb, v -> partition_size_warn_threshold_in_mb = v, 100, 100);
         enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, -1, 20);
+
+        enforceDefault(fields_per_udt_failure_threshold, v -> fields_per_udt_failure_threshold = v, NO_LIMIT, 10L);
+        enforceDefault(collection_size_warn_threshold_in_kb, v -> collection_size_warn_threshold_in_kb = v, NO_LIMIT, 5 * 1024L);
+        enforceDefault(items_per_collection_warn_threshold, v -> items_per_collection_warn_threshold = v, NO_LIMIT, 20L);
     }
 
     private void validateDisallowedTableProperties()

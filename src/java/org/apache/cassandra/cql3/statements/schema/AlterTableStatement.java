@@ -150,7 +150,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             Views.Builder viewsBuilder = keyspace.views.unbuild();
             newColumns.forEach(c -> addColumn(keyspace, table, c, tableBuilder, viewsBuilder));
 
-            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName);
+            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, keyspaceName);
 
             return keyspace.withSwapped(keyspace.tables.withSwapped(tableBuilder.build()))
                            .withSwapped(viewsBuilder.build());
@@ -202,6 +202,8 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 tableBuilder.addStaticColumn(name, type);
             else
                 tableBuilder.addRegularColumn(name, type);
+
+            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, keyspaceName);
 
             if (!isStatic)
             {

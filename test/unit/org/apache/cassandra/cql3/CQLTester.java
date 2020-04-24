@@ -489,16 +489,7 @@ public abstract class CQLTester
 
     public void compact()
     {
-        try
-        {
-            ColumnFamilyStore store = getCurrentColumnFamilyStore();
-            if (store != null)
-                store.forceMajorCompaction();
-        }
-        catch (InterruptedException | ExecutionException e)
-        {
-            throw new RuntimeException(e);
-        }
+        compact(KEYSPACE);
     }
 
     public void compact(String keyspace)
@@ -613,11 +604,17 @@ public abstract class CQLTester
 
     protected String createType(String query)
     {
-        String typeName = "type_" + seqNumber.getAndIncrement();
+        String typeName = createTypeName();
         String fullQuery = String.format(query, KEYSPACE + "." + typeName);
-        types.add(typeName);
         logger.info(fullQuery);
         schemaChange(fullQuery);
+        return typeName;
+    }
+
+    protected String createTypeName()
+    {
+        String typeName =  "type_" + seqNumber.getAndIncrement();
+        types.add(typeName);
         return typeName;
     }
 
