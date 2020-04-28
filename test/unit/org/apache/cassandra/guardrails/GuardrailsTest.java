@@ -192,11 +192,14 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(50)).isFalse();
         assertThat(guard.triggersOn(110)).isFalse();
 
-        assertNoWarnOrFails(() -> guard.guard(5, "Z"));
-        assertNoWarnOrFails(() -> guard.guard(25, "A"));
-        assertNoWarnOrFails(() -> guard.guard(100, "B"));
-        assertNoWarnOrFails(() -> guard.guard(101, "X"));
-        assertNoWarnOrFails(() -> guard.guard(200, "Y"));
+        for (Boolean containsUserData : Arrays.asList(true, false))
+        {
+            assertNoWarnOrFails(() -> guard.guard(5, "Z", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(25, "A", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(100, "B", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(101, "X", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(200, "Y", containsUserData));
+        }
     }
 
     @Test
@@ -218,12 +221,23 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(110)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
 
         assertWarn(() -> guard.guard(25, "A"), "Warning: for A, 25 > 10");
+        assertWarn(() -> guard.guard(25, "A", true),
+                   "Warning: for A, 25 > 10", "Warning: for <redacted>, 25 > 10");
+
         assertWarn(() -> guard.guard(100, "B"), "Warning: for B, 100 > 10");
+        assertWarn(() -> guard.guard(100, "B", true),
+                   "Warning: for B, 100 > 10", "Warning: for <redacted>, 100 > 10");
 
         assertFails(() -> guard.guard(101, "X"), "Failure: for X, 101 > 100");
+        assertFails(() -> guard.guard(101, "X", true),
+                    "Failure: for X, 101 > 100", "Failure: for <redacted>, 101 > 100");
+
         assertFails(() -> guard.guard(200, "Y"), "Failure: for Y, 200 > 100");
+        assertFails(() -> guard.guard(200, "Y", true),
+                    "Failure: for Y, 200 > 100", "Failure: for <redacted>, 200 > 100");
     }
 
     @Test
@@ -242,7 +256,10 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(11)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
+
         assertWarn(() -> guard.guard(11, "A"), "Warning: for A, 11 > 10");
+        assertWarn(() -> guard.guard(11, "A", true), "Warning: for A, 11 > 10", "Warning: for <redacted>, 11 > 10");
     }
 
     @Test
@@ -261,7 +278,10 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(11)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
+
         assertFails(() -> guard.guard(11, "A"), "Failure: for A, 11 > 10");
+        assertFails(() -> guard.guard(11, "A", true), "Failure: for A, 11 > 10", "Failure: for <redacted>, 11 > 10");
     }
 
     @Test

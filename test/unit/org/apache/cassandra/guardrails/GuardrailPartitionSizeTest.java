@@ -61,8 +61,7 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
         {
             assertThat("partition_size").isEqualTo(guardrailName);
             assertThat(message)
-            .isEqualTo(String.format("Detected partition 100 in %s of size 1.1MB is greater than the maximum recommended size (1MB)",
-                                     currentTableMetadata()));
+            .isEqualTo("Detected partition <redacted> in %s of size 1.1MB is greater than the maximum recommended size (1MB)");
             warnTriggered.set(true);
         }
 
