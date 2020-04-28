@@ -56,7 +56,10 @@ public abstract class Guardrail
     private static final NoSpamLogger logger = NoSpamLogger.getLogger(LoggerFactory.getLogger(Guardrail.class),
                                                                       10, TimeUnit.MINUTES);
 
+    private static final String REDACTED = "<redacted>";
+
     public final String name;
+
 
     protected Guardrail(String name)
     {
@@ -65,20 +68,30 @@ public abstract class Guardrail
 
     protected void warn(String message)
     {
-        logger.warn(message);
+        warn(message, message);
+    }
+
+    protected void warn(String fullMessage, String redactedMessage)
+    {
+        logger.warn(fullMessage);
         // Note that ClientWarn will simply ignore the message if we're not running this as part of a user query
         // (the internal "state" will be null)
-        ClientWarn.instance.warn(message);
+        ClientWarn.instance.warn(fullMessage);
         for (Guardrails.Listener listener : Guardrails.listeners)
-            listener.onWarningTriggered(name, message);
+            listener.onWarningTriggered(name, redactedMessage);
     }
 
     protected void fail(String message)
     {
-        logger.error(message);
+        fail(message, message);
+    }
+
+    protected void fail(String fullMessage, String redactedMessage)
+    {
+        logger.error(fullMessage);
         for (Guardrails.Listener listener : Guardrails.listeners)
-            listener.onFailureTriggered(name, message);
-        throw new InvalidRequestException(message);
+            listener.onFailureTriggered(name, redactedMessage);
+        throw new InvalidRequestException(fullMessage);
     }
 
     /**
@@ -152,6 +165,14 @@ public abstract class Guardrail
         {
             return errorMessageProvider.createMessage(isWarning,
                                                       what,
+                                                      Long.toString(value),
+                                                      Long.toString(thresholdValue));
+        }
+
+        protected String redactedErrMsg(boolean isWarning, long value, long thresholdValue)
+        {
+            return errorMessageProvider.createMessage(isWarning,
+                                                      REDACTED,
                                                       Long.toString(value),
                                                       Long.toString(thresholdValue));
         }
@@ -285,11 +306,18 @@ public abstract class Guardrail
 
             long failValue = failValue();
             if (value > failValue)
-                fail(errMsg(false, what, value, failValue));
+            {
+                String fullMsg = errMsg(false, what, value, failValue);
+                fail(fullMsg, containsUserData ? redactedErrMsg(false, value, failValue) : fullMsg);
+            }
+
 
             long warnValue = warnValue();
             if (value > warnValue)
-                warn(errMsg(true, what, value, warnValue));
+            {
+                String fullMsg = errMsg(true, what, value, warnValue);
+                warn(fullMsg, containsUserData ? redactedErrMsg(true, value, warnValue) : fullMsg);
+            }
         }
     }
 
@@ -314,6 +342,15 @@ public abstract class Guardrail
         {
             return errorMessageProvider.createMessage(isWarning,
                                                       what,
+                                                      Units.toString(value, SizeUnit.BYTES),
+                                                      Units.toString(thresholdValue, SizeUnit.BYTES));
+        }
+
+        @Override
+        protected String redactedErrMsg(boolean isWarning, long value, long thresholdValue)
+        {
+            return errorMessageProvider.createMessage(isWarning,
+                                                      REDACTED,
                                                       Units.toString(value, SizeUnit.BYTES),
                                                       Units.toString(thresholdValue, SizeUnit.BYTES));
         }

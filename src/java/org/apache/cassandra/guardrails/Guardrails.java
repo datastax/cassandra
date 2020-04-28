@@ -37,13 +37,6 @@ public abstract class Guardrails
 {
     private static final GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
 
-    // TODO: The guardrails whose name follows are provided for example sake, but are not
-    //  yet implemented. Please remove the names from the list implemented and remove this message once empty:
-    //  - columnValueSize
-    //  - columnsPerTable
-    //  - userTimestampsEnabled
-    //  - disallowedConsistencies
-
     public static final Threshold columnValueSize = new SizeThreshold("column_value_size",
                                                                                 () -> -1L, // not needed so far
                                                                                 () -> config.column_value_size_failure_threshold_in_kb * 1024L,
