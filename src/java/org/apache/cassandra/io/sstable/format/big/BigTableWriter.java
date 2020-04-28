@@ -251,7 +251,7 @@ public class BigTableWriter extends SSTableWriter
         if (Guardrails.partitionSize.triggersOn(rowSize))
         {
             String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
-            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata));
+            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true);
         }
 
         // TODO: deprecate `compaction_large_partition_warning_threshold_mb` and remove that check
