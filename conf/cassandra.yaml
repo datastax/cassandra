@@ -1440,3 +1440,7 @@ enable_transient_replication: false
   # "a IN (1,2,...10) AND b IN (1,2...10)" results in cartesian product of 100.
   # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
   # in_select_cartesian_product_failure_threshold: -1
+
+  # Whether to allow user-provided timestamps in write request (USING TIMESTAMP ...)
+  # Default: true to allow user-provided timestamp, may differ if apply_dbaas_defaults is enabled
+  # user_timestamps_enabled: true
