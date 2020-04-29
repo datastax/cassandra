@@ -84,6 +84,9 @@ public class GuardrailsConfig
     public Integer partition_size_warn_threshold_in_mb;
     public Integer partition_keys_in_select_failure_threshold;
 
+    // Limit number of terms and their cartesian product in IN query
+    public Integer in_select_cartesian_product_failure_threshold;
+
     public Long fields_per_udt_failure_threshold;
     public Long collection_size_warn_threshold_in_kb;
     public Long items_per_collection_warn_threshold;
@@ -113,6 +116,8 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(fields_per_udt_failure_threshold, "fields_per_udt_failure_threshold");
         validateStrictlyPositiveInteger(collection_size_warn_threshold_in_kb, "collection_size_warn_threshold_in_kb");
         validateStrictlyPositiveInteger(items_per_collection_warn_threshold, "items_per_collection_warn_threshold");
+
+        validateStrictlyPositiveInteger(in_select_cartesian_product_failure_threshold, "in_select_cartesian_product_failure_threshold");
 
         validateDisallowedTableProperties();
 
@@ -169,6 +174,8 @@ public class GuardrailsConfig
         // for node status
         enforceDefault(disk_usage_percentage_warn_threshold, v -> disk_usage_percentage_warn_threshold = v, NO_LIMIT.intValue(), 70);
         enforceDefault(disk_usage_percentage_failure_threshold, v -> disk_usage_percentage_failure_threshold = v, NO_LIMIT.intValue(), 80);
+
+        enforceDefault(in_select_cartesian_product_failure_threshold, v -> in_select_cartesian_product_failure_threshold = v, NO_LIMIT.intValue(), 25);
     }
 
     private void validateDisallowedTableProperties()
