@@ -1421,9 +1421,17 @@ enable_transient_replication: false
   # write_consistency_levels_disallowed:
 
   # Log a warning when compacting partitions larger than this value.
-  # Default: 100mb, may differ if emulate_dbaas_defaults is enabled
+  # Default: 100mb, may differ if apply_dbaas_defaults is enabled
   # partition_size_warn_threshold_in_mb: 100
 
   # Failure threshold to prevent IN query containing more partition keys than threshold
-  # Default: -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
   # partition_keys_in_select_failure_threshold: -1
+
+  # Warning threshold to warn when local disk usage exceeding threshold. Valid values: (1, 100]
+  # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
+  # disk_usage_percentage_warn_threshold: -1
+
+  # Failure threshold to reject write requests if replica disk usage exceeding threshold. Valid values: (1, 100]
+  # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
+  # disk_usage_percentage_failure_threshold: -1
