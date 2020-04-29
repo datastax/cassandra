@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -87,6 +88,9 @@ public class GuardrailsConfig
     public Long collection_size_warn_threshold_in_kb;
     public Long items_per_collection_warn_threshold;
 
+    public Integer disk_usage_percentage_warn_threshold;
+    public Integer disk_usage_percentage_failure_threshold;
+
     /**
      * Validate that the value provided for each guardrail setting is valid.
      *
@@ -111,6 +115,8 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(items_per_collection_warn_threshold, "items_per_collection_warn_threshold");
 
         validateDisallowedTableProperties();
+
+        validateDiskUsageThreshold();
 
         for (String rawCL : write_consistency_levels_disallowed)
         {
@@ -154,11 +160,15 @@ public class GuardrailsConfig
                        new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList())));
 
         enforceDefault(partition_size_warn_threshold_in_mb, v -> partition_size_warn_threshold_in_mb = v, 100, 100);
-        enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, -1, 20);
+        enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, NO_LIMIT.intValue(), 20);
 
         enforceDefault(fields_per_udt_failure_threshold, v -> fields_per_udt_failure_threshold = v, NO_LIMIT, 10L);
         enforceDefault(collection_size_warn_threshold_in_kb, v -> collection_size_warn_threshold_in_kb = v, NO_LIMIT, 5 * 1024L);
         enforceDefault(items_per_collection_warn_threshold, v -> items_per_collection_warn_threshold = v, NO_LIMIT, 20L);
+
+        // for node status
+        enforceDefault(disk_usage_percentage_warn_threshold, v -> disk_usage_percentage_warn_threshold = v, NO_LIMIT.intValue(), 70);
+        enforceDefault(disk_usage_percentage_failure_threshold, v -> disk_usage_percentage_failure_threshold = v, NO_LIMIT.intValue(), 80);
     }
 
     private void validateDisallowedTableProperties()
@@ -222,5 +232,26 @@ public class GuardrailsConfig
             return;
 
         optionSetter.accept(DatabaseDescriptor.isApplyDbaasDefaults() ? dbaasDefault : onPremDefault);
+    }
+
+    /**
+     * @return true if given disk usage threshold disables disk usage guardrail
+     */
+    public static boolean diskUsageGuardrailDisabled(double value)
+    {
+        return value < 0;
+    }
+
+    /**
+     * Validate that the values provided for disk usage are valid.
+     *
+     * @throws ConfigurationException if any of the settings has an invalid setting.
+     */
+    @VisibleForTesting
+    public void validateDiskUsageThreshold()
+    {
+        validatePositiveNumeric(disk_usage_percentage_warn_threshold, 100, false, "disk_usage_percentage_warn_threshold");
+        validatePositiveNumeric(disk_usage_percentage_failure_threshold, 100, false, "disk_usage_percentage_failure_threshold");
+        validateWarnLowerThanFail(disk_usage_percentage_warn_threshold, disk_usage_percentage_failure_threshold, "disk_usage_percentage");
     }
 }
