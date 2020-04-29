@@ -47,6 +47,7 @@ import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
@@ -269,6 +270,10 @@ public abstract class ModificationStatement implements CQLStatement
         checkFalse(isView(), "Cannot directly modify a materialized view");
         checkFalse(isVirtual() && attrs.isTimeToLiveSet(), "Expiring columns are not supported by virtual tables");
         checkFalse(isVirtual() && hasConditions(), "Conditional updates are not supported by virtual tables");
+
+        // there are system queries with USING TIMESTAMP, e.g. SchemaKeyspace#saveSystemKeyspacesSchema
+        if (SchemaConstants.isUserKeyspace(metadata.keyspace) && attrs.isTimestampSet())
+            Guardrails.userTimestampsEnabled.ensureEnabled();
     }
 
     public RegularAndStaticColumns updatedColumns()
