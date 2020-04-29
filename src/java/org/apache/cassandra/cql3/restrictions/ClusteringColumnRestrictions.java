@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
 
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -109,6 +110,9 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             r.appendTo(builder, options);
             if (builder.hasMissingElements())
                 break;
+
+            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled())
+                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false);
         }
         return builder.build();
     }
