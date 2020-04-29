@@ -144,6 +144,12 @@ public abstract class Guardrails
                   (x, what, v, t) -> format("Detected collection %s with %s items, greater than the maximum recommended (%s)",
                                             what, v, t));
 
+    public static final Threshold inSelectCartesianProduct =
+    new Threshold("in_select_cartesian_product",
+                  () -> -1L,
+                  () -> config.in_select_cartesian_product_failure_threshold,
+                  (x, what, v, t) -> format("The query cannot be completed because cartesian product of all values in IN conditions is greater than %s", t));
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()

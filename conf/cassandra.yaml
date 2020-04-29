@@ -1435,3 +1435,8 @@ enable_transient_replication: false
   # Failure threshold to reject write requests if replica disk usage exceeding threshold. Valid values: (1, 100]
   # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
   # disk_usage_percentage_failure_threshold: -1
+
+  # Failure threshold to prevent IN query creating size of cartesian product exceeding threshold, eg.
+  # "a IN (1,2,...10) AND b IN (1,2...10)" results in cartesian product of 100.
+  # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
+  # in_select_cartesian_product_failure_threshold: -1
