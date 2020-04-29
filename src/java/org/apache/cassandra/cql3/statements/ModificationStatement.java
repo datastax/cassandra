@@ -26,10 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.ColumnConditions;
@@ -46,9 +42,18 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.locator.EndpointsForToken;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
@@ -349,6 +354,20 @@ public abstract class ModificationStatement implements CQLStatement
         return appliesOnlyToStaticColumns(operations, conditions);
     }
 
+    public void validateDiskUsage(QueryState state, QueryOptions options)
+    {
+        // reject writes if any replica exceeds disk usage failure limit or warn if exceeds warn limit
+        if (null != state.getClientState().getUser() && !state.getClientState().getUser().isSuper()
+            && DiskUsageBroadcaster.instance.hasStuffedOrFullNode())
+        {
+            for (ByteBuffer keyValue : buildPartitionKeyNames(options))
+            {
+                for (InetAddressAndPort replica : StorageService.instance.getNaturalReplicasForToken(keyspace(), keyValue).endpointList())
+                    Guardrails.replicaDiskUsage.guard(replica);
+            }
+        }
+    }
+
     /**
      * Checks that the specified operations and conditions only apply to static columns.
      * @return <code>true</code> if the specified operations and conditions only apply to static columns,
@@ -461,6 +480,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         ConsistencyLevel cl = options.getConsistency();
         validateConsistency(cl);
+        validateDiskUsage(queryState, options);
 
         List<? extends IMutation> mutations =
             getMutations(options,

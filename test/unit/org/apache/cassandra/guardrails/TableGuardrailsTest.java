@@ -184,7 +184,7 @@ public class TableGuardrailsTest extends CQLTester
             if (noWarning)
                 return;
 
-            assertEquals(format("Got more thant 1 warning (got %d => %s)", warnings.size(), warnings), 1, warnings.size());
+            assertEquals(format("Got more than 1 warning (got %d => %s)", warnings.size(), warnings), 1, warnings.size());
             String warning = warnings.get(0);
             assertTrue(format("Warning message '%s' does not contain expected message '%s'", warning, message), warning.contains(message));
         }
