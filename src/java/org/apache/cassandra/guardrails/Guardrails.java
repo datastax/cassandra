@@ -150,6 +150,11 @@ public abstract class Guardrails
                   () -> config.in_select_cartesian_product_failure_threshold,
                   (x, what, v, t) -> format("The query cannot be completed because cartesian product of all values in IN conditions is greater than %s", t));
 
+    public static final DisableFlag readBeforeWriteListOperationsEnabled =
+    new DisableFlag("read_before_write_list_operations",
+                    () -> !config.read_before_write_list_operations_enabled,
+                    "List operation requiring read before write");
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()
