@@ -419,6 +419,7 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Setting of list items by index requiring read before write");
             return true;
         }
 
@@ -566,6 +567,7 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items requiring read before write");
             return true;
         }
 
@@ -604,6 +606,7 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items by index requiring read before write");
             return true;
         }
 

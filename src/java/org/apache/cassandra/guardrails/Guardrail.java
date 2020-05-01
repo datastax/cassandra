@@ -508,7 +508,8 @@ public abstract class Guardrail
          * @param name     the name of the guardrail (for identification in {@link Guardrails.Listener} events).
          * @param disabled a supplier of boolean indicating whether the feature guarded by this guardrail must be
          *                 disabled.
-         * @param what     the feature that is guarded by this guardrail (for reporting in error messages).
+         * @param what     the feature that is guarded by this guardrail (for reporting in error messages),
+         *                 {@link #ensureEnabled(String)} can specify a different {@code what}.
          */
         DisableFlag(String name, BooleanSupplier disabled, String what)
         {
@@ -524,6 +525,19 @@ public abstract class Guardrail
          * allowed.
          */
         public void ensureEnabled()
+        {
+            ensureEnabled(what);
+        }
+
+        /**
+         * Triggers a failure if this guardrail is disabled.
+         *
+         * <p>This must be called when the feature guarded by this guardrail is used to ensure such use is in fact
+         * allowed.
+         *
+         * @param what the feature that is guarded by this guardrail (for reporting in error messages).
+         */
+        public void ensureEnabled(String what)
         {
             if (enabled(null) && disabled.getAsBoolean())
                 fail(what + " is not allowed");

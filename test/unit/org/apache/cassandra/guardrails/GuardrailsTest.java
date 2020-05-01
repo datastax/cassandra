@@ -330,6 +330,9 @@ public class GuardrailsTest
 
         assertFails(new DisableFlag("x", () -> true, "X")::ensureEnabled, "X is not allowed");
         assertNoWarnOrFails(new DisableFlag("x", () -> false, "X")::ensureEnabled);
+
+        assertFails(() -> new DisableFlag("x", () -> true, "X").ensureEnabled("Y"), "Y is not allowed");
+        assertNoWarnOrFails(() -> new DisableFlag("x", () -> false, "X").ensureEnabled("Y"));
     }
 
     @Test
