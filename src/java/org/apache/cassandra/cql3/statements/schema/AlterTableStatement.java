@@ -36,7 +36,6 @@ import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.join;
 
@@ -127,16 +126,26 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             private final ColumnMetadata.Raw name;
             private final CQL3Type.Raw type;
             private final boolean isStatic;
-
             Column(ColumnMetadata.Raw name, CQL3Type.Raw type, boolean isStatic)
             {
                 this.name = name;
                 this.type = type;
                 this.isStatic = isStatic;
             }
+
         }
 
         private final Collection<Column> newColumns;
+        private QueryState queryState;
+
+        @Override
+        public void validate(QueryState state)
+        {
+            super.validate(state);
+
+            // save the query state to use it for guardrails validation in #apply
+            this.queryState = state;
+        }
 
         private AddColumns(String keyspaceName, String tableName, Collection<Column> newColumns)
         {
@@ -150,7 +159,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             Views.Builder viewsBuilder = keyspace.views.unbuild();
             newColumns.forEach(c -> addColumn(keyspace, table, c, tableBuilder, viewsBuilder));
 
-            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, keyspaceName);
+            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, queryState);
 
             return keyspace.withSwapped(keyspace.tables.withSwapped(tableBuilder.build()))
                            .withSwapped(viewsBuilder.build());
@@ -202,8 +211,6 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 tableBuilder.addStaticColumn(name, type);
             else
                 tableBuilder.addRegularColumn(name, type);
-
-            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, keyspaceName);
 
             if (!isStatic)
             {
@@ -372,15 +379,12 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             this.attrs = attrs;
         }
 
-        public ResultMessage execute(QueryState state, boolean locally)
+        @Override
+        public void validate(QueryState state)
         {
-            AuthenticatedUser user = state.getClientState().getUser();
+            super.validate(state);
 
-            // guardrails on table properties.
-            if (null != user && !user.isSuper())
-                Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
-
-            return super.execute(state, locally);
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
         }
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)

@@ -39,8 +39,8 @@ import org.apache.cassandra.distributed.api.QueryResult;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.QueryPager;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -88,7 +88,7 @@ public class Coordinator implements ICoordinator
         for (Object boundValue : boundValues)
             boundBBValues.add(ByteBufferUtil.objectToBytes(boundValue));
 
-        prepared.validate(QueryState.forInternalCalls().getClientState());
+        prepared.validate(QueryState.forInternalCalls());
         ResultMessage res = prepared.execute(QueryState.forInternalCalls(),
                                              QueryOptions.create(toCassandraCL(consistencyLevel),
                                                                  boundBBValues,
@@ -130,35 +130,35 @@ public class Coordinator implements ICoordinator
             throw new IllegalArgumentException("Page size should be strictly positive but was " + pageSize);
 
         return instance.sync(() -> {
-            ClientState clientState = makeFakeClientState();
+            QueryState state = new QueryState(makeFakeClientState());
             ConsistencyLevel consistencyLevel = ConsistencyLevel.valueOf(consistencyLevelOrigin.name());
-            CQLStatement prepared = QueryProcessor.getStatement(query, clientState);
+            CQLStatement prepared = QueryProcessor.getStatement(query, state.getClientState());
             List<ByteBuffer> boundBBValues = new ArrayList<>();
             for (Object boundValue : boundValues)
             {
                 boundBBValues.add(ByteBufferUtil.objectToBytes(boundValue));
             }
 
-            prepared.validate(clientState);
+            prepared.validate(state);
             assert prepared instanceof SelectStatement : "Only SELECT statements can be executed with paging";
 
             SelectStatement selectStatement = (SelectStatement) prepared;
 
-            QueryPager pager = selectStatement.getQuery(QueryOptions.create(toCassandraCL(consistencyLevel),
+            QueryPager pager = selectStatement.getQuery(state,
+                                                        QueryOptions.create(toCassandraCL(consistencyLevel),
                                                                             boundBBValues,
                                                                             false,
                                                                             pageSize,
                                                                             null,
                                                                             null,
                                                                             ProtocolVersion.CURRENT,
-                                                                            selectStatement.keyspace()),
-                                                        FBUtilities.nowInSeconds())
+                                                                            selectStatement.keyspace()), FBUtilities.nowInSeconds())
                                               .getPager(null, ProtocolVersion.CURRENT);
 
             // Usually pager fetches a single page (see SelectStatement#execute). We need to iterate over all
             // of the results lazily.
             return new Iterator<Object[]>() {
-                Iterator<Object[]> iter = RowUtil.toObjects(UntypedResultSet.create(selectStatement, toCassandraCL(consistencyLevel), clientState, pager,  pageSize));
+                Iterator<Object[]> iter = RowUtil.toObjects(UntypedResultSet.create(selectStatement, toCassandraCL(consistencyLevel), state.getClientState(), pager,  pageSize));
 
                 public boolean hasNext()
                 {

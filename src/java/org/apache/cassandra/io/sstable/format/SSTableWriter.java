@@ -350,11 +350,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public static void guardCollectionSize(UnfilteredRowIterator partition, Unfiltered unfiltered)
     {
-        if (!unfiltered.isRow())
+        if (!unfiltered.isRow() || SchemaConstants.isInternalKeyspace(partition.metadata().keyspace))
             return;
 
-        String keyspace = partition.metadata().keyspace;
-        if (!Guardrails.collectionSize.enabled(keyspace) && !Guardrails.itemsPerCollection.enabled(keyspace))
+        if (!Guardrails.collectionSize.enabled() && !Guardrails.itemsPerCollection.enabled())
             return;
 
         Row row = (Row) unfiltered;
@@ -385,8 +384,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        column.name.toString(),
                                        keyString,
                                        metadata);
-            Guardrails.collectionSize.guard(cellsSize, msg, true, keyspace);
-            Guardrails.itemsPerCollection.guard(cellsCount, msg, true, keyspace);
+            Guardrails.collectionSize.guard(cellsSize, msg, true);
+            Guardrails.itemsPerCollection.guard(cellsCount, msg, true);
         }
     }
 

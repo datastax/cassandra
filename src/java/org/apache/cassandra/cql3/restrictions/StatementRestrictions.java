@@ -35,6 +35,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -621,11 +622,12 @@ public final class StatementRestrictions
      * Returns the partition keys for which the data is requested.
      *
      * @param options the query options
+     * @param queryState the query state
      * @return the partition keys for which the data is requested.
      */
-    public List<ByteBuffer> getPartitionKeys(final QueryOptions options)
+    public List<ByteBuffer> getPartitionKeys(final QueryOptions options, QueryState queryState)
     {
-        return partitionKeyRestrictions.values(options);
+        return partitionKeyRestrictions.values(options, queryState);
     }
 
     /**
@@ -743,9 +745,10 @@ public final class StatementRestrictions
      * Returns the requested clustering columns.
      *
      * @param options the query options
+     * @param queryState the query state
      * @return the requested clustering columns
      */
-    public NavigableSet<Clustering> getClusteringColumns(QueryOptions options)
+    public NavigableSet<Clustering> getClusteringColumns(QueryOptions options, QueryState queryState)
     {
         // If this is a names command and the table is a static compact one, then as far as CQL is concerned we have
         // only a single row which internally correspond to the static parts. In which case we want to return an empty
@@ -753,7 +756,7 @@ public final class StatementRestrictions
         if (table.isStaticCompactTable())
             return BTreeSet.empty(table.comparator);
 
-        return clusteringColumnsRestrictions.valuesAsClustering(options);
+        return clusteringColumnsRestrictions.valuesAsClustering(options, queryState);
     }
 
     /**

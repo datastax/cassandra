@@ -26,12 +26,9 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
@@ -46,7 +43,8 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
         this.keyspaceName = keyspaceName;
     }
 
-    public final void validate(ClientState state)
+    @Override
+    public void validate(QueryState state)
     {
         // no-op; validation is performed while executing the statement, in apply()
     }

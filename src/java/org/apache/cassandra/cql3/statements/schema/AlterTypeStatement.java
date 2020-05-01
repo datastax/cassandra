@@ -32,6 +32,7 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -93,12 +94,22 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
     {
         private final FieldIdentifier fieldName;
         private final CQL3Type.Raw type;
+        private QueryState state;
 
         private AddField(String keyspaceName, String typeName, FieldIdentifier fieldName, CQL3Type.Raw type)
         {
             super(keyspaceName, typeName);
             this.fieldName = fieldName;
             this.type = type;
+        }
+
+        @Override
+        public void validate(QueryState state)
+        {
+            super.validate(state);
+
+            // save the query state to use it for guardrails validation in #apply
+            this.state = state;
         }
 
         UserType apply(KeyspaceMetadata keyspace, UserType userType)
@@ -114,7 +125,7 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             List<AbstractType<?>> fieldTypes = new ArrayList<>(userType.fieldTypes()); fieldTypes.add(fieldType);
 
             int newSize = userType.size() + 1;
-            Guardrails.fieldsPerUDT.guard(newSize, userType.getNameAsString());
+            Guardrails.fieldsPerUDT.guard(newSize, userType.getNameAsString(), state);
 
             return new UserType(keyspaceName, userType.name, fieldNames, fieldTypes, true);
         }

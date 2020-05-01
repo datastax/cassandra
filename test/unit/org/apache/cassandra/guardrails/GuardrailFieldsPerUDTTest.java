@@ -74,6 +74,15 @@ public class GuardrailFieldsPerUDTTest extends GuardrailTester
         assertFails("ALTER TYPE %s ADD c int", name, 3);
     }
 
+    @Test
+    public void testExcludedUsers() throws Throwable
+    {
+        String name = createTypeName();
+        testExcludedUsers(format("CREATE TYPE %s (a int, b int, c int)", name),
+                          format("ALTER TYPE %s ADD d int", name),
+                          format("DROP TYPE %s", name));
+    }
+
     private void assertValid(String query) throws Throwable
     {
         assertValid(query, createTypeName());

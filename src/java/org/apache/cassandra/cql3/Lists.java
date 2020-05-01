@@ -419,7 +419,6 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
-            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Setting of list items by index requiring read before write");
             return true;
         }
 
@@ -430,10 +429,13 @@ public abstract class Lists
             idx.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             // we should not get here for frozen lists
             assert column.type.isMultiCell() : "Attempted to set an individual element on a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Setting of list items by index requiring read before write", params.state);
 
             ByteBuffer index = idx.bindAndGet(params.options);
             ByteBuffer value = t.bindAndGet(params.options);
@@ -466,6 +468,7 @@ public abstract class Lists
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to append to a frozen list";
@@ -493,7 +496,7 @@ public abstract class Lists
                 // Guardrails about collection size are only checked for the added elements without considering
                 // already existent elements. This is done so to avoid read-before-write, having additional checks
                 // during SSTable write.
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
 
                 int dataSize = 0;
                 for (ByteBuffer buffer : elements)
@@ -502,13 +505,13 @@ public abstract class Lists
                     Cell cell = params.addCell(column, CellPath.create(uuid), buffer);
                     dataSize += cell.dataSize();
                 }
-                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
             }
             else
             {
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
                 Cell cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
-                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, params.state);
             }
         }
     }
@@ -533,7 +536,7 @@ public abstract class Lists
             // Guardrails about collection size are only checked for the added elements without considering
             // already existent elements. This is done so to avoid read-before-write, having additional checks
             // during SSTable write.
-            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, column.ksName);
+            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, params.state);
 
             // we have to obey MAX_NANOS per batch - in the unlikely event a client has decided to prepend a list with
             // an insane number of entries.
@@ -553,7 +556,7 @@ public abstract class Lists
                 Cell cell = params.addCell(column, CellPath.create(uuid), toAdd.get(i));
                 dataSize += cell.dataSize();
             }
-            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
+            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
         }
     }
 
@@ -567,13 +570,15 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
-            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items requiring read before write");
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete from a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items requiring read before write", params.state);
 
             // We want to call bind before possibly returning to reject queries where the value provided is not a list.
             Term.Terminal value = t.bind(params.options);
@@ -606,13 +611,15 @@ public abstract class Lists
         @Override
         public boolean requiresRead()
         {
-            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items by index requiring read before write");
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete an item by index from a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled.ensureEnabled("Removal of list items by index requiring read before write", params.state);
             Term.Terminal index = t.bind(params.options);
             if (index == null)
                 throw new InvalidRequestException("Invalid null value for list index");

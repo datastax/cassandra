@@ -156,18 +156,18 @@ public class GuardrailReadBeforeWriteListOperationsTest extends GuardrailTester
                       row(0, list(1)));
     }
 
-//    @Test
-//    public void testExcludedUsers() throws Throwable
-//    {
-//        testExcludedUsers("INSERT INTO %s (k, l) VALUES (0, [1, 2, 3, 4, 5])",
-//                          "UPDATE %s SET l[1] = 4 WHERE k = 0",
-//                          "DELETE l[1] FROM %s WHERE k = 0",
-//                          "INSERT INTO %s (k, l) VALUES (0, [1, 2, 3])",
-//                          "UPDATE %s SET l = l - [2] WHERE k = 0",
-//                          "BEGIN BATCH UPDATE %s SET l[1] = 0 WHERE k = 0; APPLY BATCH",
-//                          "BEGIN BATCH DELETE l[1] FROM %s WHERE k = 0; APPLY BATCH",
-//                          "BEGIN BATCH UPDATE %s SET l = l - [3] WHERE k = 0; APPLY BATCH");
-//    }
+    @Test
+    public void testExcludedUsers() throws Throwable
+    {
+        testExcludedUsers("INSERT INTO %s (k, l) VALUES (0, [1, 2, 3, 4, 5])",
+                          "UPDATE %s SET l[1] = 4 WHERE k = 0",
+                          "DELETE l[1] FROM %s WHERE k = 0",
+                          "INSERT INTO %s (k, l) VALUES (0, [1, 2, 3])",
+                          "UPDATE %s SET l = l - [2] WHERE k = 0",
+                          "BEGIN BATCH UPDATE %s SET l[1] = 0 WHERE k = 0; APPLY BATCH",
+                          "BEGIN BATCH DELETE l[1] FROM %s WHERE k = 0; APPLY BATCH",
+                          "BEGIN BATCH UPDATE %s SET l = l - [3] WHERE k = 0; APPLY BATCH");
+    }
 
     private void assertRows(Object[]... rows) throws Throwable
     {

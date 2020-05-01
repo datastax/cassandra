@@ -34,6 +34,7 @@ import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -60,6 +61,14 @@ public final class CreateTypeStatement extends AlterSchemaStatement
         this.fieldNames = fieldNames;
         this.rawFieldTypes = rawFieldTypes;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        Guardrails.fieldsPerUDT.guard(fieldNames.size(), typeName, state);
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -97,7 +106,6 @@ public final class CreateTypeStatement extends AlterSchemaStatement
                          .collect(toList());
 
         UserType udt = new UserType(keyspaceName, bytes(typeName), fieldNames, fieldTypes, true);
-        Guardrails.fieldsPerUDT.guard(fieldNames.size(), udt.getNameAsString());
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.types.with(udt)));
     }
 

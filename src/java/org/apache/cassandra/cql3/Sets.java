@@ -327,6 +327,7 @@ public abstract class Sets
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to add items to a frozen set";
@@ -353,7 +354,7 @@ public abstract class Sets
                 // Guardrails about collection size are only checked for the added elements without considering
                 // already existent elements. This is done so to avoid read-before-write, having additional checks
                 // during SSTable write.
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
 
                 int dataSize = 0;
                 for (ByteBuffer bb : elements)
@@ -364,13 +365,13 @@ public abstract class Sets
                     Cell cell = params.addCell(column, CellPath.create(bb), ByteBufferUtil.EMPTY_BYTE_BUFFER);
                     dataSize += cell.dataSize();
                 }
-                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
             }
             else
             {
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
                 Cell cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
-                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, params.state);
             }
         }
     }
@@ -383,6 +384,7 @@ public abstract class Sets
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to remove items from a frozen set";
@@ -408,6 +410,7 @@ public abstract class Sets
             super(column, k);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete a single element in a frozen set";

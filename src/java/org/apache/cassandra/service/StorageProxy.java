@@ -18,7 +18,6 @@
 package org.apache.cassandra.service;
 
 import java.nio.ByteBuffer;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -286,7 +285,7 @@ public class StorageProxy implements StorageProxyMBean
                                   CASRequest request,
                                   ConsistencyLevel consistencyForPaxos,
                                   ConsistencyLevel consistencyForCommit,
-                                  ClientState state,
+                                  QueryState state,
                                   int nowInSeconds,
                                   long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException, CasWriteUnknownResultException
@@ -305,7 +304,7 @@ public class StorageProxy implements StorageProxyMBean
                 // for simplicity, we'll do a single liveness check at the start of each attempt
                 ReplicaPlan.ForPaxosWrite replicaPlan = ReplicaPlans.forPaxos(Keyspace.open(keyspaceName), key, consistencyForPaxos);
 
-                final PaxosBallotAndContention pair = beginAndRepairPaxos(queryStartNanoTime, key, metadata, replicaPlan, consistencyForPaxos, consistencyForCommit, true, state);
+                final PaxosBallotAndContention pair = beginAndRepairPaxos(queryStartNanoTime, key, metadata, replicaPlan, consistencyForPaxos, consistencyForCommit, true, state.getClientState());
                 final UUID ballot = pair.ballot;
                 contentions += pair.contentions;
 
@@ -329,7 +328,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 // finish the paxos round w/ the desired updates
                 // TODO turn null updates into delete?
-                PartitionUpdate updates = request.makeUpdates(current);
+                PartitionUpdate updates = request.makeUpdates(current, state);
 
                 long size = updates.dataSize();
                 casWriteMetrics.mutationSize.update(size);

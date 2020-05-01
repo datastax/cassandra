@@ -44,22 +44,23 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     "Detected collection <redacted> with %d items", THRESHOLD + 1);
 
     private long defaultItemsPerCollection;
-    private GuardrailTester.WarnListener listener;
+    private boolean defaultReadBeforeWriteListOperationsEnabled;
 
     @Before
     public void before()
     {
         defaultItemsPerCollection = config().items_per_collection_warn_threshold;
         config().items_per_collection_warn_threshold = (long) THRESHOLD;
-        listener = createWarnListener(Guardrails.itemsPerCollection);
-        Guardrails.register(listener);
+
+        defaultReadBeforeWriteListOperationsEnabled = config().read_before_write_list_operations_enabled;
+        config().read_before_write_list_operations_enabled = true;
     }
 
     @After
     public void after()
     {
         config().items_per_collection_warn_threshold = defaultItemsPerCollection;
-        Guardrails.unregister(listener);
+        config().read_before_write_list_operations_enabled = defaultReadBeforeWriteListOperationsEnabled;
     }
 
     @Test
@@ -74,10 +75,10 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", set(0));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", set(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", set(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", set(0));
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", set(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (4, ?)", set(THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (5, ?)", set(THRESHOLD + 1));
@@ -89,10 +90,10 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<set<text>>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", set(0));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", set(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", set(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", set(0));
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", set(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (4, ?)", set(THRESHOLD));
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (5, ?)", set(THRESHOLD + 1));
 
         // frozen collections size is not checked during sstable write
@@ -104,16 +105,16 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", set(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", set(1, THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", set(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", set(1, THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", set(THRESHOLD + 1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v - ? WHERE k = 0", set(1));
+        assertValid("UPDATE %s SET v = v - ? WHERE k = 0", set(1));
         assertNotWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", set(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 1", set(1, THRESHOLD + 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", set(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 1", set(1, THRESHOLD + 1));
         assertWarnedOnFlush();
     }
 
@@ -123,25 +124,25 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
         disableCompaction();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", set(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", set(1));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", set(1, THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnCompact();
-
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", list(THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", set(1, THRESHOLD));
         assertNotWarnedOnFlush();
         assertNotWarnedOnCompact();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", set(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", list(THRESHOLD));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 1", set(1, THRESHOLD + 1));
+        assertValid("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
+        assertNotWarnedOnFlush();
+        assertNotWarnedOnCompact();
+
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", set(THRESHOLD));
+        assertNotWarnedOnFlush();
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 1", set(1, THRESHOLD + 1));
         assertNotWarnedOnFlush();
         assertWarnedOnCompact();
 
-        assertNotWarnedOnClient("DELETE v FROM %s WHERE k = 1");
+        assertValid("DELETE v FROM %s WHERE k = 1");
         assertNotWarnedOnCompact();
     }
 
@@ -150,11 +151,11 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", list());
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (3, ?)", list(THRESHOLD - 1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", list(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", list());
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", list(THRESHOLD - 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (4, ?)", list(THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (5, ?)", list(THRESHOLD + 1));
@@ -166,11 +167,11 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<list<text>>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", list());
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (3, ?)", list(THRESHOLD - 1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", list(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", list());
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", list(THRESHOLD - 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (4, ?)", list(THRESHOLD));
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (5, ?)", list(THRESHOLD + 1));
 
         // frozen collections size is not checked during sstable write
@@ -183,20 +184,20 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
         disableCompaction();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", list(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", list(1, THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", list(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", list(1, THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", set(THRESHOLD + 1));
-        assertNotWarnedOnClient("UPDATE %s SET v[?] = null WHERE k = 0", THRESHOLD);
+        assertValid("UPDATE %s SET v[?] = null WHERE k = 0", THRESHOLD);
         assertNotWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", list(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 1", list(1, THRESHOLD + 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", list(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 1", list(1, THRESHOLD + 1));
         assertWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = ? + v WHERE k = 2", list(1, THRESHOLD + 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
+        assertValid("UPDATE %s SET v = ? + v WHERE k = 2", list(1, THRESHOLD + 1));
         assertWarnedOnFlush();
     }
 
@@ -206,30 +207,30 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
         disableCompaction();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", list(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", list(1));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", list(1, THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnCompact();
-
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", list(THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v[?] = null WHERE k = 1", 0);
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", list(1, THRESHOLD));
         assertNotWarnedOnFlush();
         assertNotWarnedOnCompact();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", list(THRESHOLD));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 2", list(1, THRESHOLD + 1));
+        assertValid("UPDATE %s SET v[?] = null WHERE k = 1", 0);
+        assertNotWarnedOnFlush();
+        assertNotWarnedOnCompact();
+
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", list(1));
+        assertNotWarnedOnFlush();
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 2", list(1, THRESHOLD + 1));
         assertNotWarnedOnFlush();
         assertWarnedOnCompact();
 
-        assertNotWarnedOnClient("DELETE v[1] FROM %s WHERE k = 2");
+        assertValid("DELETE v[1] FROM %s WHERE k = 2");
         assertNotWarnedOnCompact();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (3, ?)", list(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", list(1));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = ? + v WHERE k = 3", list(1, THRESHOLD + 1));
+        assertValid("UPDATE %s SET v = ? + v WHERE k = 3", list(1, THRESHOLD + 1));
         assertNotWarnedOnFlush();
         assertWarnedOnCompact();
     }
@@ -239,10 +240,10 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v map<text, text>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", map());
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (3, ?)", map(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", map());
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", map(THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", map(THRESHOLD + 1));
@@ -254,10 +255,10 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<map<text, text>>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", map());
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (3, ?)", map(THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", map());
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", map(THRESHOLD));
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (4, ?)", map(THRESHOLD + 1));
 
         // frozen collections size is not checked during sstable write
@@ -269,16 +270,16 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v map<text, text>)");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", map(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", map(1, THRESHOLD));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", map(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", map(1, THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", map(THRESHOLD + 1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
+        assertValid("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
         assertNotWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 2", map(1, THRESHOLD + 1));
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 2", map(1, THRESHOLD + 1));
         assertWarnedOnFlush();
     }
 
@@ -288,25 +289,25 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v map<text, text>)");
         disableCompaction();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (0, ?)", map(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (0, ?)", map(1));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 0", map(1, THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnCompact();
-
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", map(THRESHOLD));
-        assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 0", map(1, THRESHOLD));
         assertNotWarnedOnFlush();
         assertNotWarnedOnCompact();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
+        assertValid("INSERT INTO %s (k, v) VALUES (1, ?)", map(THRESHOLD));
         assertNotWarnedOnFlush();
-        assertNotWarnedOnClient("UPDATE %s SET v = v + ? WHERE k = 2", map(1, THRESHOLD + 1));
+        assertValid("UPDATE %s SET v = v - ? WHERE k = 1", set(1));
+        assertNotWarnedOnFlush();
+        assertNotWarnedOnCompact();
+
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", map(1));
+        assertNotWarnedOnFlush();
+        assertValid("UPDATE %s SET v = v + ? WHERE k = 2", map(1, THRESHOLD + 1));
         assertNotWarnedOnFlush();
         assertWarnedOnCompact();
 
-        assertNotWarnedOnClient("DELETE v FROM %s WHERE k = 2");
+        assertValid("DELETE v FROM %s WHERE k = 2");
         assertNotWarnedOnCompact();
     }
 
@@ -324,21 +325,21 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
                     ")");
 
         // the guardrail won't be triggered when the combined size of all the collections in a row is over the threshold
-        assertNotWarnedOnClient("INSERT INTO %s (k, s, l, m, fs, fl, fm) VALUES (0, ?, ?, ?, ?, ?, ?)",
-                                set(THRESHOLD), list(THRESHOLD), map(THRESHOLD),
-                                set(THRESHOLD), list(THRESHOLD), map(THRESHOLD));
+        assertValid("INSERT INTO %s (k, s, l, m, fs, fl, fm) VALUES (0, ?, ?, ?, ?, ?, ?)",
+                    set(THRESHOLD), list(THRESHOLD), map(THRESHOLD),
+                    set(THRESHOLD), list(THRESHOLD), map(THRESHOLD));
         assertNotWarnedOnFlush();
 
         // the guardrail will produce a log message for each column exceeding the threshold, not just for the first one
-        assertWarnedOnClient(Arrays.asList(format("Detected collection s with %d items", THRESHOLD + 1),
-                                           format("Detected collection l with %d items", THRESHOLD + 2),
-                                           format("Detected collection m with %d items", THRESHOLD + 3),
-                                           format("Detected collection fs with %d items", THRESHOLD + 4),
-                                           format("Detected collection fl with %d items", THRESHOLD + 5),
-                                           format("Detected collection fm with %d items", THRESHOLD + 6)),
-                             "INSERT INTO %s (k, s, l, m, fs, fl, fm) VALUES (1, ?, ?, ?, ?, ?, ?)",
-                             set(THRESHOLD + 1), list(THRESHOLD + 2), map(THRESHOLD + 3),
-                             set(THRESHOLD + 4), list(THRESHOLD + 5), map(THRESHOLD + 6));
+        assertWarns(Arrays.asList(format("Detected collection s with %d items", THRESHOLD + 1),
+                                  format("Detected collection l with %d items", THRESHOLD + 2),
+                                  format("Detected collection m with %d items", THRESHOLD + 3),
+                                  format("Detected collection fs with %d items", THRESHOLD + 4),
+                                  format("Detected collection fl with %d items", THRESHOLD + 5),
+                                  format("Detected collection fm with %d items", THRESHOLD + 6)),
+                    "INSERT INTO %s (k, s, l, m, fs, fl, fm) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                    set(THRESHOLD + 1), list(THRESHOLD + 2), map(THRESHOLD + 3),
+                    set(THRESHOLD + 4), list(THRESHOLD + 5), map(THRESHOLD + 6));
 
         // only the non frozen collections will produce a warning during sstable write
         assertWarnedOnSSTableWrite(false,
@@ -352,10 +353,10 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k1 int, k2 text, v set<text>, PRIMARY KEY((k1, k2)))");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k1, k2, v) VALUES (0, 'a', ?)", set(1));
+        assertValid("INSERT INTO %s (k1, k2, v) VALUES (0, 'a', ?)", set(1));
         assertNotWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k1, k2, v) VALUES (1, 'a', ?)", set(THRESHOLD));
+        assertValid("INSERT INTO %s (k1, k2, v) VALUES (1, 'a', ?)", set(THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k1, k2, v) VALUES (2, 'c', ?)", set(THRESHOLD + 1));
@@ -367,14 +368,32 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     {
         createTable("CREATE TABLE %s (k int, c1 int, c2 text, v set<text>, PRIMARY KEY(k, c1, c2))");
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, c1, c2, v) VALUES (1, 10, 'a', ?)", set(1));
+        assertValid("INSERT INTO %s (k, c1, c2, v) VALUES (1, 10, 'a', ?)", set(1));
         assertNotWarnedOnFlush();
 
-        assertNotWarnedOnClient("INSERT INTO %s (k, c1, c2, v) VALUES (2, 20, 'b', ?)", set(THRESHOLD));
+        assertValid("INSERT INTO %s (k, c1, c2, v) VALUES (2, 20, 'b', ?)", set(THRESHOLD));
         assertNotWarnedOnFlush();
 
         assertWarnedOnClient("INSERT INTO %s (k, c1, c2, v) VALUES (3, 30, 'c', ?)", set(THRESHOLD + 1));
         assertWarnedOnFlush();
+    }
+
+    @Test
+    public void testSuperUser() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
+
+        // regular user should be warned
+        assertWarnedOnClient("INSERT INTO %s (k, v) VALUES (1, ?)", set(THRESHOLD + 1));
+
+        // super user shouldn't be warned
+        useSuperUser();
+        assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", set(THRESHOLD + 1));
+
+        // sstable should produces warnings because the keyspace is not internal, regardless of the user
+        assertWarnedOnSSTableWrite(false,
+                                   format("Detected collection <redacted> with %d items", THRESHOLD + 1),
+                                   format("Detected collection <redacted> with %d items", THRESHOLD + 1));
     }
 
     private static Set<Integer> set(int numElements)
@@ -415,7 +434,7 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
     private void assertWarnedOnClient(String query, Object... args) throws Throwable
     {
         String warning = String.format("Detected collection v with %d items", THRESHOLD + 1);
-        assertWarnedOnClient(Collections.singletonList(warning), query, args);
+        assertWarns(Collections.singletonList(warning), query, args);
     }
 
     private void assertWarnedOnFlush()

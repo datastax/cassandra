@@ -32,9 +32,16 @@ public abstract class GuardrailWarningOnSSTableWriteTester extends GuardrailTest
 
     void assertNotWarnedOnSSTableWrite(boolean compact, String keyspace)
     {
-        listener.clear();
-        writeSSTables(keyspace, compact);
-        listener.assertNotWarned();
+        try
+        {
+            listener.clear();
+            writeSSTables(keyspace, compact);
+            listener.assertNotWarned();
+        }
+        finally
+        {
+            listener.clear();
+        }
     }
 
     void assertWarnedOnFlush(String... expectedMessages)
@@ -49,9 +56,16 @@ public abstract class GuardrailWarningOnSSTableWriteTester extends GuardrailTest
 
     void assertWarnedOnSSTableWrite(boolean compact, String... expectedMessages)
     {
-        listener.clear();
-        writeSSTables(keyspace(), compact);
-        listener.assertContainsWarns(expectedMessages);
+        try
+        {
+            listener.clear();
+            writeSSTables(keyspace(), compact);
+            listener.assertContainsWarns(expectedMessages);
+        }
+        finally
+        {
+            listener.clear();
+        }
     }
 
     private void writeSSTables(String keyspace, boolean compact)

@@ -19,23 +19,18 @@
 package org.apache.cassandra.guardrails;
 
 
-import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.function.Consumer;
+
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
 import com.datastax.driver.core.BatchStatement;
 import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
@@ -47,25 +42,18 @@ import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.service.disk.usage.DiskUsageMonitor;
 import org.apache.cassandra.service.disk.usage.DiskUsageState;
 import org.apache.cassandra.utils.FBUtilities;
-import org.assertj.core.api.Assertions;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.service.disk.usage.DiskUsageState.FULL;
 import static org.apache.cassandra.service.disk.usage.DiskUsageState.NOT_AVAILABLE;
 import static org.apache.cassandra.service.disk.usage.DiskUsageState.SPACIOUS;
 import static org.apache.cassandra.service.disk.usage.DiskUsageState.STUFFED;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class GuardrailDiskUsageTest extends GuardrailTester
 {
-    private static Guardrails.Listener listener;
-    private static final List<String> warnings = new ArrayList<>();
-    private static final List<String> failures = new ArrayList<>();
-
     private static Integer defaultDiskUsagePercentageWarnThreshold;
     private static Integer defaultDiskUsagePercentageFailThreshold;
 
@@ -77,21 +65,6 @@ public class GuardrailDiskUsageTest extends GuardrailTester
 
         DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_warn_threshold = -1;
         DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_failure_threshold = -1;
-
-        listener = new Guardrails.Listener() {
-            @Override
-            public void onWarningTriggered(String guardrailName, String message)
-            {
-                warnings.add(message);
-            }
-
-            @Override
-            public void onFailureTriggered(String guardrailName, String message)
-            {
-                failures.add(message);
-            }
-        };
-        Guardrails.register(listener);
     }
 
     @AfterClass
@@ -99,29 +72,6 @@ public class GuardrailDiskUsageTest extends GuardrailTester
     {
         DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_warn_threshold = defaultDiskUsagePercentageWarnThreshold;
         DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_failure_threshold = defaultDiskUsagePercentageFailThreshold;
-        Guardrails.unregister(listener);
-    }
-
-    @Before
-    public void before() throws Throwable
-    {
-        useSuperUser();
-
-        executeNet("CREATE USER test WITH PASSWORD 'test'");
-        executeNet("GRANT ALL PERMISSIONS ON KEYSPACE " + KEYSPACE + " TO test");
-        executeNet("GRANT ALL PERMISSIONS ON ALL FUNCTIONS IN KEYSPACE " + KEYSPACE + " TO test");
-
-        useUser("test", "test");
-    }
-
-    @After
-    public void after() throws Throwable
-    {
-        useSuperUser();
-        executeNet("DROP USER test");
-
-        warnings.clear();
-        failures.clear();
     }
 
     @Test
@@ -143,7 +93,7 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         config.disk_usage_percentage_warn_threshold = 60;
         config.disk_usage_percentage_failure_threshold = 50;
         assertConfigFails(config::validateDiskUsageThreshold, "60 for the disk_usage_percentage guardrail should be" +
-                                                        " lower than the failure threshold 50");
+                                                              " lower than the failure threshold 50");
 
         // disabled warn
         config.disk_usage_percentage_warn_threshold = -1;
@@ -254,8 +204,8 @@ public class GuardrailDiskUsageTest extends GuardrailTester
 
         // verify memtables are included
         long memtableSizeAfterInsert = monitor.getAllMemtableSize();
-        assertTrue( "Expect at least 10MB more data, but got before: " + memtableSizeBefore + " and after: " + memtableSizeAfterInsert,
-                    memtableSizeAfterInsert - memtableSizeBefore >= rows * mb);
+        assertTrue("Expect at least 10MB more data, but got before: " + memtableSizeBefore + " and after: " + memtableSizeAfterInsert,
+                   memtableSizeAfterInsert - memtableSizeBefore >= rows * mb);
 
         // verify memtable size are reduced after flush
         flush();
@@ -368,17 +318,17 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         String warnMessage = "Replica disk usage exceeds warn threshold";
         String errorMessage = "Write request failed because disk usage exceeds failure threshold";
 
-        Runnable select = () -> {
+        CheckedFunction select = () -> {
             Statement statement = new SimpleStatement("SELECT * FROM " + keyspace() + "." + table);
             statement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
             executeNet(statement);
         };
-        Runnable insert = () -> {
+        CheckedFunction insert = () -> {
             Statement statement = new SimpleStatement("INSERT INTO " + keyspace() + "." + table + " (key, value) VALUES(0, 0)");
             statement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
             executeNet(statement);
         };
-        Runnable batch = () -> {
+        CheckedFunction batch = () -> {
             BatchStatement batchStatement = new BatchStatement();
             batchStatement.add(new SimpleStatement("INSERT INTO " + keyspace() + "." + table + " (key, value) VALUES(1, 1)"));
             batchStatement.add(new SimpleStatement("INSERT INTO " + keyspace() + "." + table + " (key, value) VALUES(2, 2)"));
@@ -420,9 +370,9 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         DiskUsageBroadcaster.instance.onChange(local, ApplicationState.DISK_USAGE, value(STUFFED));
         assertValid(select);
         Guardrails.replicaDiskUsage.resetLastNotifyTime();
-        assertWarn(insert, warnMessage);
+        assertWarns(insert, warnMessage);
         Guardrails.replicaDiskUsage.resetLastNotifyTime();
-        assertWarn(batch, warnMessage);
+        assertWarns(batch, warnMessage);
 
         // verify local node Full, will reject writes
         DiskUsageBroadcaster.instance.onChange(local, ApplicationState.DISK_USAGE, value(FULL));
@@ -438,15 +388,15 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         assertValid(select);
         assertValid(insert);
         assertValid(batch);
-        useUser("test", "test");
+        useUser(USERNAME, PASSWORD);
 
         // verify local node STUFFED won't reject writes
         DiskUsageBroadcaster.instance.onChange(local, ApplicationState.DISK_USAGE, value(STUFFED));
         assertValid(select);
         Guardrails.replicaDiskUsage.resetLastNotifyTime();
-        assertWarn(insert, warnMessage);
+        assertWarns(insert, warnMessage);
         Guardrails.replicaDiskUsage.resetLastNotifyTime();
-        assertWarn(batch, warnMessage);
+        assertWarns(batch, warnMessage);
     }
 
     private VersionedValue value(DiskUsageState state)
@@ -476,46 +426,23 @@ public class GuardrailDiskUsageTest extends GuardrailTester
 
         if (msg == null)
         {
-            assertTrue(format("Expect no warning messages, but got %s", warnings), warnings.isEmpty());
-            assertTrue(format("Expect no failure messages, but got %s", failures), failures.isEmpty());
+            listener.assertNotFailed();
+            listener.assertNotWarned();
+        }
+        else if (isWarn)
+        {
+            listener.assertWarned(msg);
+            listener.assertNotFailed();
         }
         else
         {
-            List<String> expectEmpty = isWarn ? failures : warnings;
-            assertTrue(format("Expect empty %s messages, but got %s", (isWarn ? "warning" : "failure"), expectEmpty), expectEmpty.isEmpty());
-
-            List<String> expectOne = isWarn ? warnings : failures;
-
-            assertEquals(format("Expect exactly one %s message, but got %s", (isWarn ? "failure" : "warning"), expectOne), 1, expectOne.size());
-            String message = expectOne.get(0);
-            assertTrue(format("Message '%s' does not contain expected message '%s'", message, message), message.contains(msg));
+            listener.assertFailed(msg);
+            listener.assertNotWarned();
         }
 
-        warnings.clear();
-        failures.clear();
+        listener.clear();
     }
 
-    private void assertValid(Runnable runnable)
-    {
-        assertFails(runnable, null);
-    }
-
-    private void assertFails(Runnable runnable, String message)
-    {
-        boolean noFailure = message == null;
-        try
-        {
-            runnable.run();
-            if (!noFailure)
-                fail("Expected to fail, but it did not");
-        }
-        catch (RuntimeException e)
-        {
-            assertFalse("Expect no failure, but got " + e.getMessage(), noFailure);
-            assertTrue(format("Error message '%s' does not contain expected message '%s'", e.getMessage(), message),
-                       e.getMessage().contains(message));
-        }
-    }
 
     protected void assertConfigFails(Runnable runnable, String message)
     {
@@ -529,20 +456,6 @@ public class GuardrailDiskUsageTest extends GuardrailTester
             String actualMessage = e.getMessage();
             assertTrue(String.format("Failure message '%s' does not contain expected message '%s'", actualMessage, message),
                        actualMessage.contains(message));
-        }
-    }
-
-    private void assertWarn(Runnable runnable, String message)
-    {
-        try
-        {
-            runnable.run();
-            Assertions.assertThat(warnings.size()).isEqualTo(1);
-            Assertions.assertThat(warnings.get(0)).contains(message);
-        }
-        finally
-        {
-            warnings.clear();
         }
     }
 }

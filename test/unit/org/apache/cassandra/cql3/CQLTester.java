@@ -193,6 +193,7 @@ public abstract class CQLTester
 
     private List<String> keyspaces = new ArrayList<>();
     private List<String> tables = new ArrayList<>();
+    private List<String> views = new ArrayList<>();
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
@@ -356,11 +357,13 @@ public abstract class CQLTester
 
         final List<String> keyspacesToDrop = copy(keyspaces);
         final List<String> tablesToDrop = copy(tables);
+        final List<String> viewsToDrop = copy(views);
         final List<String> typesToDrop = copy(types);
         final List<String> functionsToDrop = copy(functions);
         final List<String> aggregatesToDrop = copy(aggregates);
         keyspaces = null;
         tables = null;
+        views = null;
         types = null;
         functions = null;
         aggregates = null;
@@ -370,6 +373,10 @@ public abstract class CQLTester
         schemaCleanup.execute(() -> {
             try
             {
+                logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
+                for (int i = viewsToDrop.size() - 1; i >= 0; i--)
+                    schemaChange(String.format("DROP MATERIALIZED VIEW IF EXISTS %s.%s", KEYSPACE, viewsToDrop.get(i)));
+
                 for (int i = tablesToDrop.size() - 1; i >= 0; i--)
                     schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
 
@@ -575,6 +582,13 @@ public abstract class CQLTester
         return tables.get(tables.size() - 1);
     }
 
+    protected String currentView()
+    {
+        if (views.isEmpty())
+            return null;
+        return views.get(views.size() - 1);
+    }
+
     protected String currentKeyspace()
     {
         if (keyspaces.isEmpty())
@@ -683,6 +697,13 @@ public abstract class CQLTester
         return createTable(KEYSPACE, query);
     }
 
+    protected String createViewName()
+    {
+        String currentView = "view_" + seqNumber.getAndIncrement();
+        views.add(currentView);
+        return currentView;
+    }
+
     protected String createTable(String keyspace, String query)
     {
         String currentTable = createTableName();
@@ -724,6 +745,12 @@ public abstract class CQLTester
     protected void dropTable(String query)
     {
         dropFormattedTable(String.format(query, KEYSPACE + "." + currentTable()));
+    }
+
+    public void dropView(String view)
+    {
+        dropFormattedTable(String.format("DROP MATERIALIZED VIEW IF EXISTS %s.%s", KEYSPACE, view));
+        views.remove(view);
     }
 
     protected void dropFormattedTable(String formattedQuery)
@@ -871,7 +898,7 @@ public abstract class CQLTester
             QueryState queryState = new QueryState(state);
 
             CQLStatement statement = QueryProcessor.parseStatement(query, queryState.getClientState());
-            statement.validate(state);
+            statement.validate(queryState);
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
 

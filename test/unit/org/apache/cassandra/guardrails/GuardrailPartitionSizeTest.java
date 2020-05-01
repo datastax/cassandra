@@ -21,56 +21,27 @@ package org.apache.cassandra.guardrails;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-public class GuardrailPartitionSizeTest extends GuardrailTester
+public class GuardrailPartitionSizeTest extends GuardrailWarningOnSSTableWriteTester
 {
     private static int partitionSizeThreshold;
-    private final AtomicBoolean warnTriggered = new AtomicBoolean(false);
-    private final AtomicBoolean failTriggered = new AtomicBoolean(false);
 
     @Before
     public void setup()
     {
         partitionSizeThreshold = DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb;
         DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = 1;
-
-        createTable("CREATE TABLE IF NOT EXISTS %s (k INT, c INT, v TEXT, PRIMARY KEY(k, c))");
-        warnTriggered.set(false);
-        failTriggered.set(false);
     }
 
     @After
     public void tearDown()
     {
-        dropTable("DROP TABLE %s");
         DatabaseDescriptor.getGuardrailsConfig().partition_size_warn_threshold_in_mb = partitionSizeThreshold;
     }
-
-    private final Guardrails.Listener testListener = new Guardrails.Listener()
-    {
-        @Override
-        public void onWarningTriggered(String guardrailName, String message)
-        {
-            assertThat("partition_size").isEqualTo(guardrailName);
-            assertThat(message)
-            .isEqualTo("Detected partition <redacted> in %s of size 1.1MB is greater than the maximum recommended size (1MB)");
-            warnTriggered.set(true);
-        }
-
-        @Override
-        public void onFailureTriggered(String guardrailName, String message)
-        {
-            failTriggered.set(true);
-        }
-    };
 
     @Test
     public void testConfigValidation()
@@ -82,19 +53,13 @@ public class GuardrailPartitionSizeTest extends GuardrailTester
     @Test
     public void testCompactLargePartition() throws Throwable
     {
-        Guardrails.register(testListener);
-
+        createTable("CREATE TABLE IF NOT EXISTS %s (k INT, c INT, v TEXT, PRIMARY KEY(k, c))");
         disableCompaction();
+
         // insert stuff into a single partition
         for (int i = 0; i < 23000; i++)
-            execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 100, i, "long string for large partition test");
+            assertValid("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 100, i, "long string for large partition test");
 
-        flush();
-        enableCompaction();
-        compact();
-
-        assertThat(warnTriggered.get()).isTrue();
-        assertThat(failTriggered.get()).isFalse();
-        Guardrails.unregister(testListener);
+        assertWarnedOnCompact("Detected partition <redacted> of size 1.1MB is greater than the maximum recommended size (1MB)");
     }
 }

@@ -130,89 +130,6 @@ public abstract class GuardrailTester extends CQLTester
         return DatabaseDescriptor.getGuardrailsConfig();
     }
 
-    static class TestListener implements Guardrails.Listener
-    {
-        @Nullable
-        private final Guardrail guardrail;
-        private List<String> failures = new CopyOnWriteArrayList<>();
-        private List<String> warnings = new CopyOnWriteArrayList<>();
-
-        private TestListener(@Nullable Guardrail guardrail)
-        {
-            this.guardrail = guardrail;
-        }
-
-        synchronized void assertFailed(String... expectedMessages)
-        {
-            assertThat(failures).isNotEmpty();
-            assertThat(failures.size()).isEqualTo(expectedMessages.length);
-
-            for (int i = 0; i < failures.size(); i++)
-            {
-                String actual = failures.get(i);
-                String expected = expectedMessages[i];
-                assertThat(actual).contains(expected);
-            }
-        }
-
-        synchronized void assertNotFailed()
-        {
-            assertThat(failures).isEmpty();
-        }
-
-        synchronized void assertWarned(String... expectedMessages)
-        {
-            assertThat(warnings).isNotEmpty();
-            assertThat(warnings.size()).isEqualTo(expectedMessages.length);
-
-            for (int i = 0; i < warnings.size(); i++)
-            {
-                String actual = warnings.get(i);
-                String expected = expectedMessages[i];
-                assertThat(actual).contains(expected);
-            }
-        }
-
-        synchronized void assertContainsWarns(String... expectedMessages)
-        {
-            assertThat(warnings).isNotEmpty();
-            for (String msg : expectedMessages)
-            {
-                assertTrue(String.format("Warning messages '%s' don't contain the expected '%s'", warnings, msg),
-                           warnings.stream().anyMatch(m -> m.contains(msg)));
-            }
-        }
-
-        synchronized void assertNotWarned()
-        {
-            assertThat(warnings).isEmpty();
-        }
-
-        synchronized void clear()
-        {
-            failures.clear();
-            warnings.clear();
-        }
-
-        @Override
-        public synchronized void onWarningTriggered(String guardrailName, String message)
-        {
-            if (guardrail == null || guardrailName.equals(guardrail.name))
-            {
-                warnings.add(message);
-            }
-        }
-
-        @Override
-        public void onFailureTriggered(String guardrailName, String message)
-        {
-            if (guardrail == null || guardrailName.equals(guardrail.name))
-            {
-                failures.add(message);
-            }
-        }
-    }
-
     private void assertValidProperty(BiConsumer<GuardrailsConfig, Long> setter, long value)
     {
         setter.accept(config(), value);
@@ -266,98 +183,40 @@ public abstract class GuardrailTester extends CQLTester
         assertValidProperty(setter, Integer.MAX_VALUE);
     }
 
-    void assertNotWarnedOnClient(String query, Object... args) throws Throwable
+    protected void testExcludedUsers(String... queries) throws Throwable
     {
-        withClientWarnings(warnings -> assertTrue("Found unexpected warnings: " + warnings, warnings.isEmpty()),
-                           query, args);
+        assertSuperuserIsExcluded(queries);
+        assertInternalQueriesAreExcluded(queries);
     }
 
-    void assertWarnedOnClient(List<String> expectedMessages, String query, Object... args) throws Throwable
+    protected void assertInternalQueriesAreExcluded(String... queries) throws Throwable
     {
-        withClientWarnings(warnings -> {
-            assertFalse("Expected to warn, but no warning was received", warnings.isEmpty());
-            assertEquals(format("Expected %d warnings, but found %d messages: %s)",
-                                expectedMessages.size(), warnings.size(), warnings),
-                         expectedMessages.size(), warnings.size());
-
-            for (int i = 0; i < warnings.size(); i++)
+        for (String query : queries)
+        {
+            listener.clear();
+            try
             {
-                String actual = warnings.get(i);
-                String expected = expectedMessages.get(i);
-                assertTrue(format("Warning message '%s' does not contain expected message '%s'", actual, expected),
-                           actual.contains(expected));
+                execute(query);
+                listener.assertNotWarned();
+                listener.assertNotFailed();
             }
-        }, query, args);
-    }
-
-    private void withClientWarnings(Consumer<List<String>> consumer, String query, Object... args) throws Throwable
-    {
-        ClientWarn.instance.captureWarnings();
-        try
-        {
-            execute(query, args);
-
-            List<String> warnings = ClientWarn.instance.getWarnings();
-            if (warnings == null)
-                warnings = Collections.emptyList();
-
-            consumer.accept(warnings);
-        }
-        finally
-        {
-            ClientWarn.instance.resetWarnings();
-        }
-    }
-
-    static WarnListener createWarnListener(Guardrail guardrail)
-    {
-        return new WarnListener(guardrail);
-    }
-
-    static class WarnListener implements Guardrails.Listener
-    {
-        private final Guardrail guardrail;
-        private List<String> warnMessages = new CopyOnWriteArrayList<>();
-
-        private WarnListener(Guardrail guardrail)
-        {
-            this.guardrail = guardrail;
-        }
-
-        synchronized void assertWarned(String msg)
-        {
-            assertFalse(warnMessages.isEmpty());
-            assertTrue(String.format("Warning messages '%s' doesn't contain the expected '%s'", warnMessages, msg),
-                       warnMessages.stream().anyMatch(m -> m.contains(msg)));
-        }
-
-        synchronized void assertNotWarned()
-        {
-            assertTrue(warnMessages.isEmpty());
-        }
-
-        synchronized void clear()
-        {
-            warnMessages.clear();
-        }
-
-        @Override
-        public synchronized void onWarningTriggered(String guardrailName, String message)
-        {
-            if (guardrailName.equals(guardrail.name))
+            finally
             {
-                warnMessages.add(message);
+                listener.clear();
             }
         }
+    }
 
-        @Override
-        public void onFailureTriggered(String guardrailName, String message)
-        {
-            if (guardrailName.equals(guardrail.name))
-            {
-                fail("Unexpected guardrail failure");
-            }
-        }
+    protected void assertSuperuserIsExcluded(String... queries) throws Throwable
+    {
+        useSuperUser();
+        executeNet("USE " + keyspace());
+
+        for (String query : queries)
+            assertValid(query);
+
+        useUser(USERNAME, PASSWORD);
+        executeNet("USE " + keyspace());
     }
 
     protected void assertValid(CheckedFunction function) throws Throwable
@@ -377,6 +236,31 @@ public abstract class GuardrailTester extends CQLTester
     protected void assertValid(String query, Object... args) throws Throwable
     {
         assertValid(() -> executeNet(query, args));
+    }
+
+    protected void assertWarns(CheckedFunction function, String... messages) throws Throwable
+    {
+        listener.clear();
+        try
+        {
+            function.apply();
+            listener.assertWarned(messages);
+            listener.assertNotFailed();
+        }
+        finally
+        {
+            listener.clear();
+        }
+    }
+
+    void assertWarns(List<String> messages, String query, Object... args) throws Throwable
+    {
+        assertWarns(() -> executeNet(query, args), messages.toArray(new String[0]));
+    }
+
+    protected void assertWarns(String message, String query, Object... args) throws Throwable
+    {
+        assertWarns(() -> executeNet(query, args), message);
     }
 
     protected void assertFails(CheckedFunction function, String... messages) throws Throwable
@@ -403,28 +287,107 @@ public abstract class GuardrailTester extends CQLTester
         assertFails(() -> executeNet(query, args), message);
     }
 
-    protected void assertWarns(CheckedFunction function, String... messages) throws Throwable
+    protected void assertConfigFails(Runnable runnable, String message)
     {
-        listener.clear();
         try
         {
-            function.apply();
-            listener.assertWarned(messages);
-            listener.assertNotFailed();
+            runnable.run();
+            fail("Expected failure");
         }
-        finally
+        catch (ConfigurationException e)
         {
-            listener.clear();
+            String actualMessage = e.getMessage();
+            assertTrue(String.format("Failure message '%s' does not contain expected message '%s'", actualMessage, message),
+                       actualMessage.contains(message));
         }
     }
 
-    void assertWarns(List<String> messages, String query, Object... args) throws Throwable
+    static class TestListener implements Guardrails.Listener
     {
-        assertWarns(() -> executeNet(query, args), messages.toArray(new String[0]));
-    }
+        @Nullable
+        private final Guardrail guardrail;
+        private List<String> failures = new CopyOnWriteArrayList<>();
+        private List<String> warnings = new CopyOnWriteArrayList<>();
 
-    protected void assertWarns(String message, String query, Object... args) throws Throwable
-    {
-        assertWarns(() -> executeNet(query, args), message);
+        private TestListener(@Nullable Guardrail guardrail)
+        {
+            this.guardrail = guardrail;
+        }
+
+        synchronized void assertFailed(String... expectedMessages)
+        {
+            assertFalse("Expected to fail, but no failures were received", failures == null || failures.isEmpty());
+            assertEquals(format("Expected %d failures, but found %d messages: %s)",
+                                expectedMessages.length, failures.size(), failures),
+                         expectedMessages.length, failures.size());
+
+            for (int i = 0; i < failures.size(); i++)
+            {
+                String actual = failures.get(i);
+                String expected = expectedMessages[i];
+                assertTrue(format("Failure message '%s' does not contain expected message '%s'", actual, expected),
+                           actual.contains(expected));
+            }
+        }
+
+        synchronized void assertNotFailed()
+        {
+            assertTrue(format("No failures expected, but found %d: %s", failures.size(), failures), failures.isEmpty());
+        }
+
+        synchronized void assertWarned(String... expectedMessages)
+        {
+            assertFalse("Expected to warn, but no warnings were received", warnings == null || warnings.isEmpty());
+            assertEquals(format("Expected %d warnings, but found %d messages: %s)",
+                                expectedMessages.length, warnings.size(), warnings),
+                         expectedMessages.length, warnings.size());
+
+            for (int i = 0; i < warnings.size(); i++)
+            {
+                String actual = warnings.get(i);
+                String expected = expectedMessages[i];
+                assertTrue(format("Warning message '%s' does not contain expected message '%s'", actual, expected),
+                           actual.contains(expected));
+            }
+        }
+
+        synchronized void assertContainsWarns(String... expectedMessages)
+        {
+            assertFalse(warnings.isEmpty());
+            for (String msg : expectedMessages)
+            {
+                assertTrue(String.format("Warning messages '%s' don't contain the expected '%s'", warnings, msg),
+                           warnings.stream().anyMatch(m -> m.contains(msg)));
+            }
+        }
+
+        synchronized void assertNotWarned()
+        {
+            assertTrue(format("No warnings expected, but found %d: %s", warnings.size(), warnings), warnings.isEmpty());
+        }
+
+        synchronized void clear()
+        {
+            failures.clear();
+            warnings.clear();
+        }
+
+        @Override
+        public synchronized void onWarningTriggered(String guardrailName, String message)
+        {
+            if (guardrail == null || guardrailName.equals(guardrail.name))
+            {
+                warnings.add(message);
+            }
+        }
+
+        @Override
+        public void onFailureTriggered(String guardrailName, String message)
+        {
+            if (guardrail == null || guardrailName.equals(guardrail.name))
+            {
+                failures.add(message);
+            }
+        }
     }
 }
