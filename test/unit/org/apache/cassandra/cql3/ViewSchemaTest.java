@@ -24,11 +24,9 @@ import java.net.InetAddress;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.junit.After;
@@ -40,9 +38,7 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.concurrent.SEPExecutor;
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -50,9 +46,6 @@ import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 
 public class ViewSchemaTest extends CQLTester
@@ -703,59 +696,5 @@ public class ViewSchemaTest extends CQLTester
                              "CREATE MATERIALIZED VIEW " + keyspace() + ".mv AS SELECT * FROM %s "
                                      + "WHERE b IS NOT NULL AND c IS NOT NULL AND a IS NOT NULL "
                                      + "AND d = 1 PRIMARY KEY (c, b, a)");
-    }
-
-    @Test
-    public void testGuardrails() throws Throwable
-    {
-        // we don't know if it's already enabled and what's the current configured threshold..
-        GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
-        boolean defaultGuardrailsEnabled = config.enabled;
-        long defaultMVPerTableFailureThreshold = config.materialized_view_per_table_failure_threshold;
-        Set<String> defaultTablePropertiesDisallowed = config.table_properties_disallowed;
-        config.enabled = true;
-        config.materialized_view_per_table_failure_threshold = 1L;
-        config.table_properties_disallowed = Collections.emptySet();
-
-        String createViewCql = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k is NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)";
-        try
-        {
-            createTable("CREATE TABLE %s (k int primary key, v int)");
-
-            execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
-
-            createView("mv1_test", createViewCql);
-
-            assertGuardrailFailed("mv2_test", createViewCql, 1);
-
-            // drop the first view, we should be able to create new MV again
-            executeNet(protocolVersion, "DROP MATERIALIZED VIEW mv1_test");
-            views.remove("mv1_test");
-            assertThat(getCurrentColumnFamilyStore().viewManager).isEmpty();
-
-            createView("mv2_test", createViewCql);
-            assertThat(getCurrentColumnFamilyStore().viewManager.size()).isEqualTo(1);
-
-            // previous guardrail should not apply to another base table
-            createTable("CREATE TABLE %s (k int primary key, v int)");
-            createView("mv3_test", createViewCql);
-
-            assertGuardrailFailed("mv4_test", createViewCql, 1);
-        }
-        finally
-        {
-            config.enabled = defaultGuardrailsEnabled;
-            config.materialized_view_per_table_failure_threshold = defaultMVPerTableFailureThreshold;
-            config.table_properties_disallowed = defaultTablePropertiesDisallowed;
-        }
-    }
-
-    private void assertGuardrailFailed(String viewName, String createViewCql, int views)
-    {
-        assertThatThrownBy(() -> createView(viewName, createViewCql))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining(String.format("failed to create materialized view %s on table %s", viewName, currentTable()));
-        assertThat(getCurrentColumnFamilyStore().viewManager.size()).isEqualTo(views);
     }
 }

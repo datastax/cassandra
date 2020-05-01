@@ -28,6 +28,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -102,7 +103,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         return false;
     }
 
-    public NavigableSet<Clustering> valuesAsClustering(QueryOptions options) throws InvalidRequestException
+    public NavigableSet<Clustering> valuesAsClustering(QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
         MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
         for (SingleRestriction r : restrictions)
@@ -111,8 +112,8 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             if (builder.hasMissingElements())
                 break;
 
-            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled())
-                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false);
+            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
+                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", queryState);
         }
         return builder.build();
     }

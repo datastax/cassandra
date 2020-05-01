@@ -315,5 +315,42 @@ public class GuardrailConsistencyTest extends GuardrailTester
                                "INSERT INTO %s (k, c, v) VALUES (1, 2, 'val') IF NOT EXISTS " +
                                "APPLY BATCH", cl, serialCl);
     }
+
+    @Test
+    public void testSuperUser()
+    {
+        queryState = this::superQueryState;
+        testExcludedUser();
+    }
+
+    @Test
+    public void testSystemUser()
+    {
+        queryState = this::internalQueryState;
+        testExcludedUser();
+    }
+
+    private void testExcludedUser()
+    {
+        insert(ConsistencyLevel.ONE);
+        insert(ConsistencyLevel.LOCAL_QUORUM);
+        lwtInsert(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
+        lwtInsert(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
+
+        update(ConsistencyLevel.ONE);
+        update(ConsistencyLevel.LOCAL_QUORUM);
+        lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
+        lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
+
+        delete(ConsistencyLevel.ONE);
+        delete(ConsistencyLevel.LOCAL_QUORUM);
+        lwtDelete(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
+        lwtDelete(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
+
+        batch(ConsistencyLevel.ONE);
+        batch(ConsistencyLevel.LOCAL_QUORUM);
+        lwtBatch(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
+        lwtBatch(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
+    }
 }
 

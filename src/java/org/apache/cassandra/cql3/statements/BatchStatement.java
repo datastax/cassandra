@@ -249,7 +249,8 @@ public class BatchStatement implements CQLStatement
 
     // The batch itself will be validated in either Parsed#prepare() - for regular CQL3 batches,
     //   or in QueryProcessor.processBatch() - for native protocol batches.
-    public void validate(ClientState state) throws InvalidRequestException
+    @Override
+    public void validate(QueryState state) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validate(state);
@@ -260,11 +261,11 @@ public class BatchStatement implements CQLStatement
         return statements;
     }
 
-    private List<? extends IMutation> getMutations(BatchQueryOptions options,
-                                                         boolean local,
-                                                         long batchTimestamp,
-                                                         int nowInSeconds,
-                                                         long queryStartNanoTime)
+    private List<? extends IMutation> getMutations(QueryState state, BatchQueryOptions options,
+                                                   boolean local,
+                                                   long batchTimestamp,
+                                                   int nowInSeconds,
+                                                   long queryStartNanoTime)
     {
         Set<String> tablesWithZeroGcGs = null;
         BatchUpdatesCollector collector = new BatchUpdatesCollector(updatedColumns, updatedRows());
@@ -279,7 +280,7 @@ public class BatchStatement implements CQLStatement
             }
             QueryOptions statementOptions = options.forStatement(i);
             long timestamp = attrs.getTimestamp(batchTimestamp, statementOptions);
-            statement.addUpdates(collector, statementOptions, local, timestamp, nowInSeconds, queryStartNanoTime);
+            statement.addUpdates(collector, state, statementOptions, local, timestamp, nowInSeconds, queryStartNanoTime);
         }
 
         if (tablesWithZeroGcGs != null)
@@ -391,7 +392,7 @@ public class BatchStatement implements CQLStatement
         for (int i = 0; i < statements.size(); i++ )
         {
             ModificationStatement statement = statements.get(i);
-            statement.validateConsistency(cl);
+            statement.validateConsistency(cl, queryState);
             statement.validateDiskUsage(queryState, options.forStatement(i));
         }
 
@@ -404,7 +405,7 @@ public class BatchStatement implements CQLStatement
         if (updatesVirtualTables)
             executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
         else    
-            executeWithoutConditions(getMutations(options, false, timestamp, nowInSeconds, queryStartNanoTime), cl, queryStartNanoTime);
+            executeWithoutConditions(getMutations(queryState, options, false, timestamp, nowInSeconds, queryStartNanoTime), cl, queryStartNanoTime);
 
         return new ResultMessage.Void();
     }
@@ -449,7 +450,7 @@ public class BatchStatement implements CQLStatement
                                                    casRequest,
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
-                                                   state.getClientState(),
+                                                   state,
                                                    options.getNowInSeconds(state),
                                                    queryStartNanoTime))
         {
@@ -476,7 +477,7 @@ public class BatchStatement implements CQLStatement
             ModificationStatement statement = statements.get(i);
             QueryOptions statementOptions = options.forStatement(i);
             long timestamp = attrs.getTimestamp(batchTimestamp, statementOptions);
-            List<ByteBuffer> pks = statement.buildPartitionKeyNames(statementOptions);
+            List<ByteBuffer> pks = statement.buildPartitionKeyNames(statementOptions, state);
             if (statement.getRestrictions().keyIsInRelation())
                 throw new IllegalArgumentException("Batch with conditions cannot span multiple partitions (you cannot use IN on the partition key)");
             if (key == null)
@@ -511,7 +512,7 @@ public class BatchStatement implements CQLStatement
             }
             else
             {
-                Clustering clustering = Iterables.getOnlyElement(statement.createClustering(statementOptions));
+                Clustering clustering = Iterables.getOnlyElement(statement.createClustering(statementOptions, state));
                 if (statement.hasConditions())
                 {
                     statement.addConditions(clustering, casRequest, statementOptions);
@@ -549,7 +550,7 @@ public class BatchStatement implements CQLStatement
         long timestamp = batchOptions.getTimestamp(queryState);
         int nowInSeconds = batchOptions.getNowInSeconds(queryState);
 
-        for (IMutation mutation : getMutations(batchOptions, true, timestamp, nowInSeconds, queryStartNanoTime))
+        for (IMutation mutation : getMutations(queryState, batchOptions, true, timestamp, nowInSeconds, queryStartNanoTime))
             mutation.apply();
         return null;
     }
@@ -566,7 +567,7 @@ public class BatchStatement implements CQLStatement
         long timestamp = options.getTimestamp(state);
         int nowInSeconds = options.getNowInSeconds(state);
 
-        try (RowIterator result = ModificationStatement.casInternal(request, timestamp, nowInSeconds))
+        try (RowIterator result = ModificationStatement.casInternal(request, timestamp, nowInSeconds, state))
         {
             ResultSet resultSet =
                 ModificationStatement.buildCasResultSet(ksName,

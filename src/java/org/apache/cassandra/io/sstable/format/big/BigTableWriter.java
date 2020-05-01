@@ -46,6 +46,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -248,6 +249,9 @@ public class BigTableWriter extends SSTableWriter
 
     private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
     {
+        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
+            return;
+
         if (Guardrails.partitionSize.triggersOn(rowSize))
         {
             String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());

@@ -51,39 +51,37 @@ public class GuardrailPartitionKeysInSelectTest extends GuardrailTester
     }
 
     @Test
-    public void testConfigValidation()
-    {
-        testValidationOfStrictlyPositiveProperty((c, v) -> c.partition_keys_in_select_failure_threshold = v.intValue(),
-                                                 "partition_keys_in_select_failure_threshold");
-    }
-
-    @Test
     public void testFilterOnFewPartitions() throws Throwable
     {
         // test that it does not throw
-        execute("SELECT * FROM %s WHERE k IN (1,2)");
+        assertValid("SELECT * FROM %s WHERE k IN (1,2)");
     }
 
     @Test
     public void testFilterOnManyPartitions() throws Throwable
     {
-        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE k IN (1,2,3,4,5)"))
-                  .isInstanceOf(InvalidRequestException.class)
-                  .hasMessage("Select query cannot be completed because it selects 5 partitions keys - more than the maximum allowed 3");
-    }
-
-    @Test
-    public void testFilterOnClusteringColumns() throws Throwable
-    {
-        // test that it does not throw
-        execute("SELECT * FROM %s WHERE c IN (1,2,3,4,5) ALLOW FILTERING");
-        execute("SELECT * FROM %s WHERE k = 3 AND c IN (1,2,3,4,5)");
+        assertFails("Select query cannot be completed because it selects 5 partitions keys - more than the maximum allowed 3",
+                    "SELECT * FROM %s WHERE k IN (1,2,3,4,5)");
     }
 
     @Test
     public void testFilterOnOneRepeatedPartitions() throws Throwable
     {
         // test that it does not throw
-        execute("SELECT * FROM %s WHERE k IN (1,1,1,1,1)");
+        assertValid("SELECT * FROM %s WHERE k IN (1,1,1,1,1)");
+    }
+
+    @Test
+    public void testFilterOnClusteringColumns() throws Throwable
+    {
+        // test that it does not throw
+        assertValid("SELECT * FROM %s WHERE c IN (1,2,3,4,5) ALLOW FILTERING");
+        assertValid("SELECT * FROM %s WHERE k = 3 AND c IN (1,2,3,4,5)");
+    }
+
+    @Test
+    public void testExcludedUsers() throws Throwable
+    {
+        testExcludedUsers("SELECT * FROM %s WHERE k IN (1,2,3,4,5)");
     }
 }

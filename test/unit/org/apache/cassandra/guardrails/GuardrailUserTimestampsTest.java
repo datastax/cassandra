@@ -141,17 +141,17 @@ public class GuardrailUserTimestampsTest extends GuardrailTester
         batch(true);
     }
 
-//    @Test
-//    public void testExcludedUsers() throws Throwable
-//    {
-//        for (boolean userTimestampsEnabled : new boolean[]{false, true})
-//        {
-//            setGuardrails(userTimestampsEnabled);
-//            testExcludedUsers("INSERT INTO %s (k, c, v) VALUES (1, 2, 'val') USING TIMESTAMP 1",
-//                              "UPDATE %s USING TIMESTAMP 1 SET v = 'val2' WHERE k = 1 and c = 2",
-//                              "DELETE FROM %s USING TIMESTAMP 1 WHERE k=1",
-//                              "BEGIN BATCH USING TIMESTAMP 1 INSERT INTO %s (k, c, v) VALUES (1, 2, 'v'); APPLY BATCH",
-//                              "BEGIN BATCH INSERT INTO %s (k, c, v) VALUES (1, 2, 'v') USING TIMESTAMP 1; APPLY BATCH");
-//        }
-//    }
+    @Test
+    public void testExcludedUsers() throws Throwable
+    {
+        for (boolean userTimestampsEnabled : new boolean[]{ false, true })
+        {
+            setGuardrails(userTimestampsEnabled);
+            testExcludedUsers("INSERT INTO %s (k, c, v) VALUES (1, 2, 'val') USING TIMESTAMP 1",
+                              "UPDATE %s USING TIMESTAMP 1 SET v = 'val2' WHERE k = 1 and c = 2",
+                              "DELETE FROM %s USING TIMESTAMP 1 WHERE k=1",
+                              "BEGIN BATCH USING TIMESTAMP 1 INSERT INTO %s (k, c, v) VALUES (1, 2, 'v'); APPLY BATCH",
+                              "BEGIN BATCH INSERT INTO %s (k, c, v) VALUES (1, 2, 'v') USING TIMESTAMP 1; APPLY BATCH");
+        }
+    }
 }
