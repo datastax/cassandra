@@ -36,11 +36,14 @@ import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.cql3.functions.types.*;
+import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
@@ -49,6 +52,18 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
+/**
+ * Tests for {@link CQLSSTableWriter}.
+ *
+ * Please note: most tests here both create sstables and try to load them, so for the last part, we need to make sure
+ * we have properly "loaded" the table (which we do with {@link SchemaLoader#load(String, String, String...)}). But
+ * a small subtlety is that this <b>must</b> be called before we call {@link CQLSSTableWriter#builder} because
+ * otherwise the guardrail validation in {@link CreateTableStatement#validate(QueryState)} ends up breaking because
+ * the {@link ColumnFamilyStore} is not loaded yet. This would not be a problem in real usage of
+ * {@link CQLSSTableWriter} because the later only calls {@link DatabaseDescriptor#clientInitialization}, not
+ * {@link DatabaseDescriptor#daemonInitialization}, so said guardrail validation don't execute, but this test does
+ * manually call {@link DatabaseDescriptor#daemonInitialization} so...
+ */
 public class CQLSSTableWriterTest
 {
     static
@@ -82,6 +97,9 @@ public class CQLSSTableWriterTest
                           + "  v2 int"
                           + ")";
             String insert = "INSERT INTO cql_keyspace.table1 (k, v1, v2) VALUES (?, ?, ?)";
+
+            SchemaLoader.load(KS, schema);
+
             CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                       .inDirectory(dataDir)
                                                       .forTable(schema)
@@ -143,6 +161,7 @@ public class CQLSSTableWriterTest
         String insert = String.format("UPDATE cql_keyspace.counter1 SET my_counter = my_counter - ? WHERE my_id = ?");
         try
         {
+            SchemaLoader.load(KS, schema);
             CQLSSTableWriter.builder().inDirectory(dataDir)
                             .forTable(schema)
                             .withPartitioner(Murmur3Partitioner.instance)
@@ -172,6 +191,7 @@ public class CQLSSTableWriterTest
                       + "  v blob"
                       + ")";
         String insert = "INSERT INTO ks.test (k, v) VALUES (?, ?)";
+        SchemaLoader.load(KS, schema);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
                                                   .using(insert)
@@ -207,6 +227,7 @@ public class CQLSSTableWriterTest
                         + "  PRIMARY KEY (k)"
                         + ")";
         String insert = "INSERT INTO ks.test2 (k, c) VALUES (?, ?)";
+        SchemaLoader.load("ks", schema);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(tempdir)
                                                   .forTable(schema)
@@ -245,6 +266,7 @@ public class CQLSSTableWriterTest
                     + "  PRIMARY KEY (k, v)"
                     + ")";
             String insert = "INSERT INTO cql_keyspace2.table2 (k, v) VALUES (?, ?)";
+            SchemaLoader.load("cql_keyspace2", schema);
             CQLSSTableWriter writer = CQLSSTableWriter.builder()
                     .inDirectory(dataDir)
                     .forTable(schema)
@@ -317,10 +339,13 @@ public class CQLSSTableWriterTest
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
         assert dataDir.mkdirs();
 
+        String type1 = "CREATE TYPE " + KS + ".tuple2 (a int, b int)";
+        String type2 = "CREATE TYPE " + KS + ".tuple3 (a int, b int, c int)";
+        SchemaLoader.load(KS, schema, type1, type2);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
-                                                  .withType("CREATE TYPE " + KS + ".tuple2 (a int, b int)")
-                                                  .withType("CREATE TYPE " + KS + ".tuple3 (a int, b int, c int)")
+                                                  .withType(type1)
+                                                  .withType(type2)
                                                   .forTable(schema)
                                                   .using("INSERT INTO " + KS + "." + TABLE + " (k, v1, v2) " +
                                                          "VALUES (?, ?, ?)").build();
@@ -389,10 +414,13 @@ public class CQLSSTableWriterTest
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
         assert dataDir.mkdirs();
 
+        String type1 = "CREATE TYPE " + KS + ".tuple2 (a int, b int)";
+        String type2 = "CREATE TYPE " + KS + ".nested_tuple (c int, tpl frozen<tuple2>)";
+        SchemaLoader.load(KS, schema, type1, type2);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
-                                                  .withType("CREATE TYPE " + KS + ".nested_tuple (c int, tpl frozen<tuple2>)")
-                                                  .withType("CREATE TYPE " + KS + ".tuple2 (a int, b int)")
+                                                  .withType(type1)
+                                                  .withType(type2)
                                                   .forTable(schema)
                                                   .using("INSERT INTO " + KS + "." + TABLE + " (k, v1) " +
                                                          "VALUES (?, ?)")
@@ -454,6 +482,7 @@ public class CQLSSTableWriterTest
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
         assert dataDir.mkdirs();
 
+        SchemaLoader.load(KS, schema);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
                                                   .forTable(schema)
@@ -557,6 +586,7 @@ public class CQLSSTableWriterTest
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
         assert dataDir.mkdirs();
 
+        SchemaLoader.load(KS, schema);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
                                                   .forTable(schema)
@@ -606,6 +636,7 @@ public class CQLSSTableWriterTest
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
         assert dataDir.mkdirs();
 
+        SchemaLoader.load(KS, schema);
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
                                                   .forTable(schema)

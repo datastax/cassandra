@@ -100,7 +100,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
             Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, state);
 
             // guardrails on number of tables
-            int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
+            int totalUserTables = Schema.instance.getNonInternalKeyspaces().stream().map(Keyspace::open)
                                                  .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
                                                  .sum();
             Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
@@ -298,10 +298,15 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
     public static TableMetadata.Builder parse(String cql, String keyspace)
     {
+        return parse(cql, keyspace, Types.none());
+    }
+
+    public static TableMetadata.Builder parse(String cql, String keyspace, Types types)
+    {
         return CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE")
-                                .keyspace(keyspace)
-                                .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
-                                .builder(Types.none());
+                         .keyspace(keyspace)
+                         .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
+                         .builder(types);
     }
 
     public final static class Raw extends CQLStatement.Raw
