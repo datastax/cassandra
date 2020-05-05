@@ -115,7 +115,7 @@ public abstract class CQLTester
     private static final Map<Pair<User, ProtocolVersion>, Cluster> clusters = new HashMap<>();
     protected static final Map<Pair<User, ProtocolVersion>, Session> sessions = new HashMap<>();
 
-    // needed in TableGuardrailsTest to check whether dropping schema tasks have been finished
+    // needed in GuardrailsOnTableTest to check whether dropping schema tasks have been finished
     protected static final ThreadPoolExecutor schemaCleanup =
     new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
