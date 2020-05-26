@@ -334,6 +334,8 @@ public class TrieIndexSSTableReader extends SSTableReader
         {
             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
             Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
+            if (updateStats)
+                bloomFilterTracker.addTrueNegative();
             return null;
         }
 
