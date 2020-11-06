@@ -648,7 +648,12 @@ public abstract class ColumnCondition
                 return cell == null ? null : cell.buffer();
             }
 
-            Cell<?> cell = getCell(row, column);
+            // getCell returns Cell<?>, which requires a method call to properly convert.
+            return getCellBuffer(getCell(row, column), userType);
+        }
+
+        private <V> ByteBuffer getCellBuffer(Cell<V> cell, UserType userType)
+        {
             return cell == null
                    ? null
                    : userType.split(ByteBufferAccessor.instance, cell.buffer())[userType.fieldPosition(field)];
