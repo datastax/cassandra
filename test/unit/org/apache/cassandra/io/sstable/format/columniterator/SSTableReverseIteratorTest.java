@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.columniterator;
+package org.apache.cassandra.io.sstable.format.columniterator;
 
 import java.nio.ByteBuffer;
 import java.util.Random;

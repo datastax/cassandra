@@ -55,7 +55,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.Downsampling;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IVerifier;
-import org.apache.cassandra.io.sstable.IndexInfo;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
