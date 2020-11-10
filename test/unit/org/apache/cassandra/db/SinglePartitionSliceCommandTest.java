@@ -76,6 +76,7 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SinglePartitionSliceCommandTest
@@ -231,7 +232,7 @@ public class SinglePartitionSliceCommandTest
         Cell<?> cell = cellIterator.next();
         Assert.assertEquals(s, cell.column());
         Assert.assertEquals(ByteBufferUtil.bytesToHex(cell.buffer()), ByteBufferUtil.bytes("s"), cell.buffer());
-        Assert.assertFalse(cellIterator.hasNext());
+        assertFalse(cellIterator.hasNext());
     }
 
     @Test
@@ -240,7 +241,7 @@ public class SinglePartitionSliceCommandTest
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
 
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')");
-        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").isEmpty());
+        assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").isEmpty());
 
         ColumnFilter columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(s));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.NONE, false);
@@ -481,7 +482,7 @@ public class SinglePartitionSliceCommandTest
                                                             sliceFilter);
         String ret = cmd.toCQLString();
         Assert.assertNotNull(ret);
-        Assert.assertFalse(ret.isEmpty());
+        assertFalse(ret.isEmpty());
     }
 
     public static UnfilteredRowIterator getIteratorFromSinglePartition(String q)
