@@ -17,92 +17,58 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.io.IOException;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 
 public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
 {
-    private final static class In
-    {
-        private final File path;
-        private RandomAccessReader in;
-
-        public In(File path)
-        {
-            this.path = path;
-        }
-
-        private void maybeInit()
-        {
-            if (in == null)
-                in = RandomAccessReader.open(path);
-        }
-
-        public DataInputPlus get()
-        {
-            maybeInit();
-            return in;
-        }
-
-        public boolean isEOF()
-        {
-            maybeInit();
-            return in.isEOF();
-        }
-
-        public void close()
-        {
-            if (in != null)
-                in.close();
-        }
-
-        public long getFilePointer()
-        {
-            maybeInit();
-            return in.getFilePointer();
-        }
-
-        public long length()
-        {
-            maybeInit();
-            return in.length();
-        }
-    }
-
-    private final Descriptor desc;
-    private final In in;
     private final IPartitioner partitioner;
 
-    private long keyPosition;
+    private final PartitionIndexIterator it;
 
-    public KeyIterator(Descriptor desc, TableMetadata metadata)
+    private long keyPosition = -1;
+
+    public KeyIterator(PartitionIndexIterator it, IPartitioner partitioner)
     {
-        this.desc = desc;
-        in = new In(new File(desc.filenameFor(Component.PRIMARY_INDEX)));
-        partitioner = metadata.partitioner;
+        this.it = it;
+        this.partitioner = partitioner;
+    }
+
+    public static KeyIterator forSSTable(SSTableReader ssTableReader) throws IOException
+    {
+        return new KeyIterator(ssTableReader.allKeysIterator(), ssTableReader.getPartitioner());
+    }
+
+    public static KeyIterator create(SSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
+    {
+        return new KeyIterator(factory.indexIterator(descriptor, metadata), metadata.partitioner);
     }
 
     protected DecoratedKey computeNext()
     {
         try
         {
-            if (in.isEOF())
-                return endOfData();
-
-            keyPosition = in.getFilePointer();
-            DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in.get()));
-            RowIndexEntry.Serializer.skip(in.get(), desc.version); // skip remainder of the entry
-            return key;
+            if (keyPosition < 0)
+            {
+                keyPosition = 0;
+                return it.isExhausted()
+                       ? endOfData()
+                       : partitioner.decorateKey(it.key());
+            }
+            else
+            {
+                keyPosition = it.indexPosition();
+                return it.advance()
+                       ? partitioner.decorateKey(it.key())
+                       : endOfData();
+            }
         }
         catch (IOException e)
         {
@@ -112,21 +78,34 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
 
     public void close()
     {
-        in.close();
+        it.close();
     }
 
     public long getBytesRead()
     {
-        return in.getFilePointer();
+        return it.indexPosition();
     }
 
     public long getTotalBytes()
     {
-        return in.length();
+        return it.indexLength();
     }
 
     public long getKeyPosition()
     {
         return keyPosition;
+    }
+
+    public void reset()
+    {
+        try
+        {
+            it.reset();
+            keyPosition = -1;
+        }
+        catch (IOException ex)
+        {
+            throw new RuntimeException(ex);
+        }
     }
 }
