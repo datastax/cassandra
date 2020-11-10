@@ -317,13 +317,13 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
     public abstract class AbstractReader implements Reader
     {
-        private final boolean shouldCloseFile;
         public FileDataInput file;
 
         public UnfilteredDeserializer deserializer;
 
         // Records the currently open range tombstone (if any)
         public DeletionTime openMarker;
+        protected final boolean shouldCloseFile;
 
         protected AbstractReader(FileDataInput file, boolean shouldCloseFile)
         {
@@ -407,6 +407,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
         public abstract void setForSlice(Slice slice) throws IOException;
 
         protected abstract boolean hasNextInternal() throws IOException;
+
         protected abstract Unfiltered nextInternal() throws IOException;
 
         @Override
