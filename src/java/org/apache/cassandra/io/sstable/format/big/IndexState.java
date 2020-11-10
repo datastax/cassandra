@@ -25,7 +25,6 @@ import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.io.sstable.AbstractSSTableIterator;
-import org.apache.cassandra.io.sstable.IndexInfo;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 
