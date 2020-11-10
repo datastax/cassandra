@@ -100,7 +100,7 @@ public class CassandraOutgoingFileTest
     }
 
     @Test
-    public void validateFullyContainedIn_PartialOverlap_Fails()
+    public void validateFullyContainedIn_PartialOverlap_Fails() throws IOException
     {
         List<Range<Token>> requestedRanges = Arrays.asList(new Range<>(store.getPartitioner().getMinimumToken(), getTokenAtIndex(2)));
 
@@ -113,7 +113,7 @@ public class CassandraOutgoingFileTest
     }
 
     @Test
-    public void validateFullyContainedIn_SplitRange_Succeeds()
+    public void validateFullyContainedIn_SplitRange_Succeeds() throws IOException
     {
         List<Range<Token>> requestedRanges = Arrays.asList(new Range<>(store.getPartitioner().getMinimumToken(), getTokenAtIndex(4)),
                                                          new Range<>(getTokenAtIndex(2), getTokenAtIndex(6)),
@@ -128,7 +128,7 @@ public class CassandraOutgoingFileTest
         assertTrue(cof.contained(sections, sstable));
     }
 
-    private DecoratedKey getKeyAtIndex(int i)
+    private DecoratedKey getKeyAtIndex(int i) throws IOException
     {
         int count = 0;
         DecoratedKey key;
@@ -148,7 +148,7 @@ public class CassandraOutgoingFileTest
         return key;
     }
 
-    private Token getTokenAtIndex(int i)
+    private Token getTokenAtIndex(int i) throws IOException
     {
         return getKeyAtIndex(i).getToken();
     }
