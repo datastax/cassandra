@@ -43,6 +43,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+// TODO refactor this test - clustering comparator should be tested independently from slices intersections
+// TODO each intersection test should be done in both directions as "intersects" relation is symmetric
 public class SliceTest
 {
     @Test
