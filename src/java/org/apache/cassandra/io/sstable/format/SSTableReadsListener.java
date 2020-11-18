@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 
 /**
  * Listener for receiving notifications associated with reading SSTables.
@@ -66,7 +66,7 @@ public interface SSTableReadsListener
      * @param indexEntry the index entry
      * @param reason the reason for which the SSTable has been selected
      */
-    default void onSSTableSelected(SSTableReader sstable, RowIndexEntry<?> indexEntry, SelectionReason reason)
+    default void onSSTableSelected(SSTableReader sstable, BigTableRowIndexEntry<?> indexEntry, SelectionReason reason)
     {
     }
 

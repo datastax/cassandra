@@ -24,6 +24,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
@@ -44,7 +45,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
     public SSTableReversedIterator(SSTableReader sstable,
                                    FileDataInput file,
                                    DecoratedKey key,
-                                   RowIndexEntry indexEntry,
+                                   BigTableRowIndexEntry indexEntry,
                                    Slices slices,
                                    ColumnFilter columns,
                                    FileHandle ifile)
@@ -52,7 +53,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns, ifile);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
     {
         return indexEntry.isIndexed()
              ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile)
@@ -262,7 +263,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         // The last index block to consider for the slice
         private int lastBlockIdx;
 
-        private ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ReverseIndexedReader(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
         {
             super(file, shouldCloseFile);
             this.indexState = new IndexState(this, metadata.comparator, indexEntry, true, ifile);

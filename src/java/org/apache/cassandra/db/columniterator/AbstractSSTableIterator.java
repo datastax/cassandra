@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -59,7 +60,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
-                                      RowIndexEntry indexEntry,
+                                      BigTableRowIndexEntry indexEntry,
                                       Slices slices,
                                       ColumnFilter columnFilter,
                                       FileHandle ifile)
@@ -176,9 +177,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         }
     }
 
-    protected abstract Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile);
+    protected abstract Reader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile);
 
-    private Reader createReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    private Reader createReader(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
     {
         return slices.isEmpty() ? new NoRowsReader(file, shouldCloseFile)
                                 : createReaderInternal(indexEntry, file, shouldCloseFile);
@@ -420,8 +421,8 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         private final Reader reader;
         private final ClusteringComparator comparator;
 
-        private final RowIndexEntry indexEntry;
-        private final RowIndexEntry.IndexInfoRetriever indexInfoRetriever;
+        private final BigTableRowIndexEntry indexEntry;
+        private final BigTableRowIndexEntry.IndexInfoRetriever indexInfoRetriever;
         private final boolean reversed;
 
         private int currentIndexIdx;
@@ -429,7 +430,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         // Marks the beginning of the block corresponding to currentIndexIdx.
         private DataPosition mark;
 
-        public IndexState(Reader reader, ClusteringComparator comparator, RowIndexEntry indexEntry, boolean reversed, FileHandle indexFile)
+        public IndexState(Reader reader, ClusteringComparator comparator, BigTableRowIndexEntry indexEntry, boolean reversed, FileHandle indexFile)
         {
             this.reader = reader;
             this.comparator = comparator;

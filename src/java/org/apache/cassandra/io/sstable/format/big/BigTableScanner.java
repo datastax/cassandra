@@ -62,7 +62,7 @@ public class BigTableScanner implements ISSTableScanner
 
     private final ColumnFilter columns;
     private final DataRange dataRange;
-    private final RowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer;
+    private final BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer;
     private final SSTableReadsListener listener;
     private long startScan = -1;
     private long bytesScanned = 0;
@@ -111,7 +111,7 @@ public class BigTableScanner implements ISSTableScanner
         this.sstable = sstable;
         this.columns = columns;
         this.dataRange = dataRange;
-        this.rowIndexEntrySerializer = new RowIndexEntry.Serializer(sstable.descriptor.version, sstable.header);
+        this.rowIndexEntrySerializer = new BigTableRowIndexEntry.Serializer(sstable.descriptor.version, sstable.header);
         this.rangeIterator = rangeIterator;
         this.listener = listener;
     }
@@ -190,14 +190,14 @@ public class BigTableScanner implements ISSTableScanner
                 if (indexDecoratedKey.compareTo(currentRange.left) > 0 || currentRange.contains(indexDecoratedKey))
                 {
                     // Found, just read the dataPosition and seek into index and data files
-                    long dataPosition = RowIndexEntry.Serializer.readPosition(ifile);
+                    long dataPosition = BigTableRowIndexEntry.Serializer.readPosition(ifile);
                     ifile.seek(indexPosition);
                     dfile.seek(dataPosition);
                     break;
                 }
                 else
                 {
-                    RowIndexEntry.Serializer.skip(ifile, sstable.descriptor.version);
+                    BigTableRowIndexEntry.Serializer.skip(ifile, sstable.descriptor.version);
                 }
             }
         }
@@ -281,9 +281,9 @@ public class BigTableScanner implements ISSTableScanner
     protected class KeyScanningIterator extends AbstractIterator<UnfilteredRowIterator>
     {
         private DecoratedKey nextKey;
-        private RowIndexEntry nextEntry;
+        private BigTableRowIndexEntry nextEntry;
         private DecoratedKey currentKey;
-        private RowIndexEntry currentEntry;
+        private BigTableRowIndexEntry currentEntry;
 
         protected UnfilteredRowIterator computeNext()
         {

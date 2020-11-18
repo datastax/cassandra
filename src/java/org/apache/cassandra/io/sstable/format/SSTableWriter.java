@@ -25,7 +25,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -35,6 +34,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -207,7 +207,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      *
      * @throws FSWriteError if a write to the dataFile fails
      */
-    public abstract RowIndexEntry append(UnfilteredRowIterator iterator);
+    public abstract BigTableRowIndexEntry append(UnfilteredRowIterator iterator);
 
     public abstract long getFilePointer();
 
