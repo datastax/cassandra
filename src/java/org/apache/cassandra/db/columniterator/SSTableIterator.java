@@ -23,6 +23,7 @@ import java.util.NoSuchElementException;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
@@ -40,7 +41,7 @@ public class SSTableIterator extends AbstractSSTableIterator
     public SSTableIterator(SSTableReader sstable,
                            FileDataInput file,
                            DecoratedKey key,
-                           RowIndexEntry indexEntry,
+                           BigTableRowIndexEntry indexEntry,
                            Slices slices,
                            ColumnFilter columns,
                            FileHandle ifile)
@@ -48,7 +49,7 @@ public class SSTableIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns, ifile);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
     {
         return indexEntry.isIndexed()
              ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile)
@@ -211,7 +212,7 @@ public class SSTableIterator extends AbstractSSTableIterator
 
         private int lastBlockIdx; // the last index block that has data for the current query
 
-        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ForwardIndexedReader(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
         {
             super(file, shouldCloseFile);
             this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile);

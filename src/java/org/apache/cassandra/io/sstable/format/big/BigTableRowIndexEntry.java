@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db;
+package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -24,6 +24,9 @@ import java.util.List;
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.sstable.IndexInfo;
 import org.apache.cassandra.io.sstable.format.Version;
@@ -103,7 +106,7 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  *     This results in these classes:
  * </p>
  * <ul>
- *     <li>{@link RowIndexEntry} just stores the offset in the data file.</li>
+ *     <li>{@link BigTableRowIndexEntry} just stores the offset in the data file.</li>
  *     <li>{@link IndexedEntry} is for index entries with index samples
  *     and used for both current and legacy sstables, which do not exceed
  *     {@link org.apache.cassandra.config.Config#column_index_cache_size_in_kb}.</li>
@@ -124,9 +127,9 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  * </p>
  *
  */
-public class RowIndexEntry<T> implements IMeasurableMemory
+public class BigTableRowIndexEntry<T> implements IMeasurableMemory
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new RowIndexEntry(0));
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new BigTableRowIndexEntry(0));
 
     // constants for type of row-index-entry as serialized for saved-cache
     static final int CACHE_NOT_INDEXED = 0;
@@ -148,7 +151,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
 
     public final long position;
 
-    public RowIndexEntry(long position)
+    public BigTableRowIndexEntry(long position)
     {
         this.position = position;
     }
@@ -184,20 +187,20 @@ public class RowIndexEntry<T> implements IMeasurableMemory
 
     /**
      * @param dataFilePosition  position of the partition in the {@link org.apache.cassandra.io.sstable.Component.Type#DATA} file
-     * @param indexFilePosition position in the {@link org.apache.cassandra.io.sstable.Component.Type#PRIMARY_INDEX} of the {@link RowIndexEntry}
-     * @param deletionTime      deletion time of {@link RowIndexEntry}
-     * @param headerLength      deletion time of {@link RowIndexEntry}
-     * @param columnIndexCount  number of {@link IndexInfo} entries in the {@link RowIndexEntry}
+     * @param indexFilePosition position in the {@link org.apache.cassandra.io.sstable.Component.Type#PRIMARY_INDEX} of the {@link BigTableRowIndexEntry}
+     * @param deletionTime      deletion time of {@link BigTableRowIndexEntry}
+     * @param headerLength      deletion time of {@link BigTableRowIndexEntry}
+     * @param columnIndexCount  number of {@link IndexInfo} entries in the {@link BigTableRowIndexEntry}
      * @param indexedPartSize   serialized size of all serialized {@link IndexInfo} objects and their offsets
      * @param indexSamples      list with IndexInfo offsets (if total serialized size is less than {@link org.apache.cassandra.config.Config#column_index_cache_size_in_kb}
      * @param offsets           offsets of IndexInfo offsets
      * @param idxInfoSerializer the {@link IndexInfo} serializer
      */
-    public static RowIndexEntry<IndexInfo> create(long dataFilePosition, long indexFilePosition,
-                                                  DeletionTime deletionTime, long headerLength, int columnIndexCount,
-                                                  int indexedPartSize,
-                                                  List<IndexInfo> indexSamples, int[] offsets,
-                                                  ISerializer<IndexInfo> idxInfoSerializer)
+    public static BigTableRowIndexEntry<IndexInfo> create(long dataFilePosition, long indexFilePosition,
+                                                          DeletionTime deletionTime, long headerLength, int columnIndexCount,
+                                                          int indexedPartSize,
+                                                          List<IndexInfo> indexSamples, int[] offsets,
+                                                          ISerializer<IndexInfo> idxInfoSerializer)
     {
         // If the "partition building code" in BigTableWriter.append() via ColumnIndex returns a list
         // of IndexInfo objects, which is the case if the serialized size is less than
@@ -215,7 +218,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
                                            deletionTime, headerLength, columnIndexCount,
                                            indexedPartSize, idxInfoSerializer);
         // Last case is that there are no index samples.
-        return new RowIndexEntry<>(dataFilePosition);
+        return new BigTableRowIndexEntry<>(dataFilePosition);
     }
 
     public IndexInfoRetriever openWithIndex(FileHandle indexFile)
@@ -225,23 +228,23 @@ public class RowIndexEntry<T> implements IMeasurableMemory
 
     public interface IndexSerializer<T>
     {
-        void serialize(RowIndexEntry<T> rie, DataOutputPlus out, ByteBuffer indexInfo) throws IOException;
+        void serialize(BigTableRowIndexEntry<T> rie, DataOutputPlus out, ByteBuffer indexInfo) throws IOException;
 
-        RowIndexEntry<T> deserialize(DataInputPlus in, long indexFilePosition) throws IOException;
-        default RowIndexEntry<T> deserialize(RandomAccessReader reader) throws IOException
+        BigTableRowIndexEntry<T> deserialize(DataInputPlus in, long indexFilePosition) throws IOException;
+        default BigTableRowIndexEntry<T> deserialize(RandomAccessReader reader) throws IOException
         {
             return deserialize(reader, reader.getFilePointer());
 
         }
 
-        default RowIndexEntry<T> deserialize(FileDataInput input) throws IOException
+        default BigTableRowIndexEntry<T> deserialize(FileDataInput input) throws IOException
         {
             return deserialize(input, input.getFilePointer());
 
         }
 
-        void serializeForCache(RowIndexEntry<T> rie, DataOutputPlus out) throws IOException;
-        RowIndexEntry<T> deserializeForCache(DataInputPlus in) throws IOException;
+        void serializeForCache(BigTableRowIndexEntry<T> rie, DataOutputPlus out) throws IOException;
+        BigTableRowIndexEntry<T> deserializeForCache(DataInputPlus in) throws IOException;
 
         long deserializePositionAndSkip(DataInputPlus in) throws IOException;
 
@@ -264,24 +267,24 @@ public class RowIndexEntry<T> implements IMeasurableMemory
             return idxInfoSerializer;
         }
 
-        public void serialize(RowIndexEntry<IndexInfo> rie, DataOutputPlus out, ByteBuffer indexInfo) throws IOException
+        public void serialize(BigTableRowIndexEntry<IndexInfo> rie, DataOutputPlus out, ByteBuffer indexInfo) throws IOException
         {
             rie.serialize(out, indexInfo);
         }
 
-        public void serializeForCache(RowIndexEntry<IndexInfo> rie, DataOutputPlus out) throws IOException
+        public void serializeForCache(BigTableRowIndexEntry<IndexInfo> rie, DataOutputPlus out) throws IOException
         {
             rie.serializeForCache(out);
         }
 
-        public RowIndexEntry<IndexInfo> deserializeForCache(DataInputPlus in) throws IOException
+        public BigTableRowIndexEntry<IndexInfo> deserializeForCache(DataInputPlus in) throws IOException
         {
             long position = in.readUnsignedVInt();
 
             switch (in.readByte())
             {
                 case CACHE_NOT_INDEXED:
-                    return new RowIndexEntry<>(position);
+                    return new BigTableRowIndexEntry<>(position);
                 case CACHE_INDEXED:
                     return new IndexedEntry(position, in, idxInfoSerializer);
                 case CACHE_INDEXED_SHALLOW:
@@ -309,14 +312,14 @@ public class RowIndexEntry<T> implements IMeasurableMemory
             }
         }
 
-        public RowIndexEntry<IndexInfo> deserialize(DataInputPlus in, long indexFilePosition) throws IOException
+        public BigTableRowIndexEntry<IndexInfo> deserialize(DataInputPlus in, long indexFilePosition) throws IOException
         {
             long position = in.readUnsignedVInt();
 
             int size = (int)in.readUnsignedVInt();
             if (size == 0)
             {
-                return new RowIndexEntry<>(position);
+                return new BigTableRowIndexEntry<>(position);
             }
             else
             {
@@ -410,7 +413,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
     /**
      * An entry in the row index for a row whose columns are indexed - used for both legacy and current formats.
      */
-    private static final class IndexedEntry extends RowIndexEntry<IndexInfo>
+    private static final class IndexedEntry extends BigTableRowIndexEntry<IndexInfo>
     {
         private static final long BASE_SIZE;
 
@@ -587,7 +590,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
      * An entry in the row index for a row whose columns are indexed and the {@link IndexInfo} objects
      * are not read into the key cache.
      */
-    private static final class ShallowIndexedEntry extends RowIndexEntry<IndexInfo>
+    private static final class ShallowIndexedEntry extends BigTableRowIndexEntry<IndexInfo>
     {
         private static final long BASE_SIZE;
 

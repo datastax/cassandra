@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.*;
 
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -69,7 +70,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     }
 
     @SuppressWarnings("resource")
-    public static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput dfile, RowIndexEntry<?> indexEntry, DecoratedKey key, boolean tombstoneOnly)
+    public static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput dfile, BigTableRowIndexEntry<?> indexEntry, DecoratedKey key, boolean tombstoneOnly)
     {
         try
         {

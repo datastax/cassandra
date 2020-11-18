@@ -33,7 +33,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -46,6 +45,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -259,19 +259,19 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public void cacheKey(DecoratedKey key, RowIndexEntry info)
+    public void cacheKey(DecoratedKey key, BigTableRowIndexEntry info)
     {
         delegate.cacheKey(key, info);
     }
 
     @Override
-    public RowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
+    public BigTableRowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
     {
         return delegate.getCachedPosition(key, updateStats);
     }
 
     @Override
-    protected RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    protected BigTableRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
     {
         return delegate.getCachedPosition(unifiedKey, updateStats);
     }
@@ -283,7 +283,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+    protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
         return delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
     }
@@ -295,13 +295,13 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
         return delegate.iterator(file, key, indexEntry, slices, selectedColumns, reversed);
     }
 
     @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, boolean tombstoneOnly)
     {
         return delegate.simpleIterator(file, key, indexEntry, tombstoneOnly);
     }
@@ -481,7 +481,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public InstrumentingCache<KeyCacheKey, RowIndexEntry> getKeyCache()
+    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
     {
         return delegate.getKeyCache();
     }
