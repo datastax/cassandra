@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.columniterator;
+package org.apache.cassandra.io.sstable.format.columniterator;
 
 import java.nio.ByteBuffer;
 import java.util.Random;
@@ -84,7 +84,7 @@ public class SSTableReverseIteratorTest
         tbl.forceBlockingFlush();
         SSTableReader sstable = Iterables.getOnlyElement(tbl.getLiveSSTables());
         DecoratedKey dk = tbl.getPartitioner().decorateKey(Int32Type.instance.decompose(key));
-        BigTableRowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
+        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
         Assert.assertTrue(indexEntry.isIndexed());
         Assert.assertTrue(indexEntry.columnsIndexCount() > 2);
 
