@@ -24,7 +24,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.UnfilteredDeserializer;
-import org.apache.cassandra.db.columniterator.AbstractSSTableIterator;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.io.sstable.format.SSTableReader;

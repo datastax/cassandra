@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.columniterator;
+package org.apache.cassandra.io.sstable.format;
 
 import java.io.Closeable;
 import java.io.IOException;
