@@ -77,7 +77,7 @@ public class TombstonesWithIndexedSSTableTest extends CQLTester
             {
                 // The line below failed with key caching off (CASSANDRA-11158)
                 @SuppressWarnings("unchecked")
-                BigTableRowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
+                BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
                 if (indexEntry != null && indexEntry.isIndexed())
                 {
                     try (FileDataInput reader = sstable.openIndexReader())

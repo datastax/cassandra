@@ -27,6 +27,7 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -173,7 +174,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             {
                 for (SSTableReader reader : transaction.originals())
                 {
-                    BigTableRowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE);
+                    RowIndexEntry<?> index = reader.getPosition(key, SSTableReader.Operator.GE);
                     NativeLibrary.trySkipCache(reader.getFilename(), 0, index == null ? 0 : index.position);
                 }
             }

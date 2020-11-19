@@ -31,12 +31,12 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 
-public abstract class AbstractBigTableIterator extends AbstractSSTableIterator
+public abstract class AbstractBigTableIterator extends AbstractSSTableIterator<BigTableRowIndexEntry>
 {
     protected AbstractBigTableIterator(SSTableReader sstable,
                                        FileDataInput file,
                                        DecoratedKey key,
-                                       BigTableRowIndexEntry<?> indexEntry,
+                                       BigTableRowIndexEntry indexEntry,
                                        Slices slices,
                                        ColumnFilter columnFilter,
                                        FileHandle ifile)

@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import com.google.common.util.concurrent.RateLimiter;
 
@@ -285,7 +286,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     @Override
     protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
-        return delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
+        return (BigTableRowIndexEntry) delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
     }
 
     @Override
@@ -295,15 +296,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        return delegate.iterator(file, key, indexEntry, slices, selectedColumns, reversed);
-    }
-
-    @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, boolean tombstoneOnly)
-    {
-        return delegate.simpleIterator(file, key, indexEntry, tombstoneOnly);
+        return delegate.simpleIterator(dfile, key, tombstoneOnly);
     }
 
     @Override
@@ -679,7 +674,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    void setup(boolean trackHotness)
+    protected void setup(boolean trackHotness)
     {
         delegate.setup(trackHotness);
     }

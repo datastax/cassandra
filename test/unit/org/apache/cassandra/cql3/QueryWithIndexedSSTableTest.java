@@ -59,7 +59,7 @@ public class QueryWithIndexedSSTableTest extends CQLTester
         boolean hasIndexed = false;
         for (SSTableReader sstable : getCurrentColumnFamilyStore().getLiveSSTables())
         {
-            BigTableRowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
+            BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
             hasIndexed |= indexEntry != null && indexEntry.isIndexed();
         }
         assert hasIndexed;

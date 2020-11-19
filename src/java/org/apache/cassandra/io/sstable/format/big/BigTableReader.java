@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.big;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Supplier;
 
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
@@ -71,7 +72,7 @@ public class BigTableReader extends SSTableReader
                                           boolean reversed,
                                           SSTableReadsListener listener)
     {
-        BigTableRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, listener);
+        BigTableRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, true, false, listener);
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
@@ -129,9 +130,12 @@ public class BigTableReader extends SSTableReader
 
     @SuppressWarnings("resource") // caller to close
     @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, BigTableRowIndexEntry position, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
+        BigTableRowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        if (position == null)
+            return null;
+        return SSTableIdentityIterator.create(this, dfile.get(), position, key, tombstoneOnly);
     }
 
     /**
@@ -162,7 +166,7 @@ public class BigTableReader extends SSTableReader
         if ((op == Operator.EQ || op == Operator.GE) && (key instanceof DecoratedKey))
         {
             DecoratedKey decoratedKey = (DecoratedKey) key;
-            BigTableRowIndexEntry<IndexInfo> cachedPosition = getCachedPosition(decoratedKey, updateCacheAndStats);
+            BigTableRowIndexEntry cachedPosition = getCachedPosition(decoratedKey, updateCacheAndStats);
             if (cachedPosition != null)
             {
                 listener.onSSTableSelected(this, cachedPosition, SelectionReason.KEY_CACHE_HIT);
@@ -251,7 +255,7 @@ public class BigTableReader extends SSTableReader
                 if (opSatisfied)
                 {
                     // read data position from index entry
-                    BigTableRowIndexEntry<IndexInfo> indexEntry = rowIndexEntrySerializer.deserialize(in);
+                    BigTableRowIndexEntry indexEntry = rowIndexEntrySerializer.deserialize(in);
                     if (exactMatch && updateCacheAndStats)
                     {
                         assert key instanceof DecoratedKey; // key can be == to the index key only if it's a true row key
