@@ -24,8 +24,10 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.format.big.AbstractBigTableIterator;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.IndexState;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
@@ -35,7 +37,7 @@ import org.apache.cassandra.utils.btree.BTree;
 /**
  *  A Cell Iterator in reversed clustering order over SSTable
  */
-public class SSTableReversedIterator extends AbstractSSTableIterator
+public class SSTableReversedIterator extends AbstractBigTableIterator
 {
     /**
      * The index of the slice being processed.
@@ -77,7 +79,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         return slice < slices.size();
     }
 
-    private class ReverseReader extends Reader
+    private class ReverseReader extends RowReader
     {
         protected ReusablePartitionData buffer;
         protected Iterator<Unfiltered> iterator;
