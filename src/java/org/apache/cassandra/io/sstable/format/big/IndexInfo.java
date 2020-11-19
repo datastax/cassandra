@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.io.sstable;
+package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
 import java.util.List;
 
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
