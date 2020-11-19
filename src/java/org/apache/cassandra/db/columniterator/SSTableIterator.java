@@ -23,15 +23,17 @@ import java.util.NoSuchElementException;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.format.big.AbstractBigTableIterator;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.IndexState;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 
 /**
  *  A Cell Iterator over SSTable
  */
-public class SSTableIterator extends AbstractSSTableIterator
+public class SSTableIterator extends AbstractBigTableIterator
 {
     /**
      * The index of the slice being processed.
@@ -49,7 +51,7 @@ public class SSTableIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns, ifile);
     }
 
-    protected Reader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected RowReader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
     {
         return indexEntry.isIndexed()
              ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile)
@@ -73,7 +75,7 @@ public class SSTableIterator extends AbstractSSTableIterator
         return false;
     }
 
-    private class ForwardReader extends Reader
+    private class ForwardReader extends RowReader
     {
         // The start of the current slice. This will be null as soon as we know we've passed that bound.
         protected ClusteringBound<?> start;

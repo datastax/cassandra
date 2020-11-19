@@ -807,7 +807,7 @@ public class BigTableRowIndexEntryTest extends CQLTester
             }
         };
         
-        AbstractSSTableIterator.IndexState indexState = new AbstractSSTableIterator.IndexState(
+        IndexState indexState = new IndexState(
             null, comp, rie, false, null                                                                                              
         );
         
@@ -821,7 +821,7 @@ public class BigTableRowIndexEntryTest extends CQLTester
         assertEquals(3, indexState.indexFor(cn(100L), 2));
         assertEquals(3, indexState.indexFor(cn(100L), 3));
 
-        indexState = new AbstractSSTableIterator.IndexState(
+        indexState = new IndexState(
             null, comp, rie, true, null
         );
 
