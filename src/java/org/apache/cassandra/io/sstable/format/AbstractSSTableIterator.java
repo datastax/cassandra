@@ -22,20 +22,16 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.IndexInfo;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
+public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implements UnfilteredRowIterator
 {
     protected final SSTableReader sstable;
     // We could use sstable.metadata(), but that can change during execution so it's good hygiene to grab an immutable instance
@@ -60,7 +56,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
-                                      BigTableRowIndexEntry indexEntry,
+                                      E indexEntry,
                                       Slices slices,
                                       ColumnFilter columnFilter,
                                       FileHandle ifile)
@@ -177,9 +173,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         }
     }
 
-    protected abstract Reader createReaderInternal(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile);
+    protected abstract Reader createReaderInternal(E indexEntry, FileDataInput file, boolean shouldCloseFile);
 
-    private Reader createReader(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    private Reader createReader(E indexEntry, FileDataInput file, boolean shouldCloseFile)
     {
         return slices.isEmpty() ? new NoRowsReader(file, shouldCloseFile)
                                 : createReaderInternal(indexEntry, file, shouldCloseFile);
@@ -296,7 +292,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         public FileDataInput file;
         protected final boolean shouldCloseFile;
 
-        public Reader(FileDataInput file, boolean shouldCloseFile)
+        protected Reader(FileDataInput file, boolean shouldCloseFile)
         {
             this.file = file;
             this.shouldCloseFile = shouldCloseFile;

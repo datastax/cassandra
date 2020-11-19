@@ -66,7 +66,7 @@ public interface SSTableReadsListener
      * @param indexEntry the index entry
      * @param reason the reason for which the SSTable has been selected
      */
-    default void onSSTableSelected(SSTableReader sstable, BigTableRowIndexEntry<?> indexEntry, SelectionReason reason)
+    default void onSSTableSelected(SSTableReader sstable, RowIndexEntry<?> indexEntry, SelectionReason reason)
     {
     }
 

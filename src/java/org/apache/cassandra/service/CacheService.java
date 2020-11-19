@@ -455,7 +455,7 @@ public class CacheService implements CacheServiceMBean
                 return null;
             }
             BigTableRowIndexEntry.IndexSerializer<?> indexSerializer = new BigTableRowIndexEntry.Serializer(reader.descriptor.version, reader.header);
-            BigTableRowIndexEntry<?> entry = indexSerializer.deserializeForCache(input);
+            BigTableRowIndexEntry entry = indexSerializer.deserializeForCache(input);
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 

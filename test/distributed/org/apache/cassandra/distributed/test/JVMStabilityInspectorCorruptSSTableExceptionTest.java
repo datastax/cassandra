@@ -192,12 +192,6 @@ public class JVMStabilityInspectorCorruptSSTableExceptionTest extends TestBaseIm
             throw throwCorrupted();
         }
 
-        @Override
-        public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
-        {
-            throw throwCorrupted();
-        }
-
         private CorruptSSTableException throwCorrupted()
         {
             throw new CorruptSSTableException(new IOException("failed to get position"), descriptor.baseFilename());

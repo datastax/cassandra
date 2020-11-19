@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -1366,28 +1367,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * allow key selection by token bounds but only if op != * EQ
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      */
-    public final BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op)
+    public final RowIndexEntry<?> getPosition(PartitionPosition key, Operator op)
     {
-        return getPosition(key, op, SSTableReadsListener.NOOP_LISTENER);
+        return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER);
     }
 
-    /**
-     * Retrieves the position while updating the key cache and the stats.
-     * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
-     * allow key selection by token bounds but only if op != * EQ
-     * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
-     * @param listener the {@code SSTableReaderListener} that must handle the notifications.
-     */
-    public final BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
+    public final boolean checkEntryExists(PartitionPosition key,
+                                          Operator op,
+                                          boolean updateCacheAndStats)
     {
-        return getPosition(key, op, true, false, listener);
-    }
-
-    public final BigTableRowIndexEntry getPosition(PartitionPosition key,
-                                                   Operator op,
-                                                   boolean updateCacheAndStats)
-    {
-        return getPosition(key, op, updateCacheAndStats, false, SSTableReadsListener.NOOP_LISTENER);
+        return getPosition(key, op, updateCacheAndStats, false, SSTableReadsListener.NOOP_LISTENER) != null;
     }
 
     /**
@@ -1398,11 +1387,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param listener a listener used to handle internal events
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    protected abstract BigTableRowIndexEntry getPosition(PartitionPosition key,
-                                                         Operator op,
-                                                         boolean updateCacheAndStats,
-                                                         boolean permitMatchPastLast,
-                                                         SSTableReadsListener listener);
+    protected abstract RowIndexEntry<?> getPosition(PartitionPosition key,
+                                                    Operator op,
+                                                    boolean updateCacheAndStats,
+                                                    boolean permitMatchPastLast,
+                                                    SSTableReadsListener listener);
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key,
                                                    Slices slices,
@@ -1410,9 +1399,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                    boolean reversed,
                                                    SSTableReadsListener listener);
 
-    public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
-
-    public abstract UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, boolean tombstoneOnly);
+    public abstract UnfilteredRowIterator simpleIterator(Supplier<FileDataInput> dfile, DecoratedKey key, boolean tombstoneOnly);
 
     /**
      * Finds and returns the first key beyond a given token in this SSTable or null if no such key exists.
@@ -1925,7 +1912,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return selfRef.ref();
     }
 
-    void setup(boolean trackHotness)
+    protected void setup(boolean trackHotness)
     {
         tidy.setup(this, trackHotness);
         this.readMeter = tidy.global.readMeter;
