@@ -32,7 +32,6 @@ import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -403,15 +402,9 @@ public class Verifier implements Closeable
 
     private void deserializeIndex(SSTableReader sstable) throws IOException
     {
-        try (RandomAccessReader primaryIndex = RandomAccessReader.open(new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX))))
-        {
-            long indexSize = primaryIndex.length();
-
-            while ((primaryIndex.getFilePointer()) != indexSize)
-            {
-                ByteBuffer key = ByteBufferUtil.readWithShortLength(primaryIndex);
-                BigTableRowIndexEntry.Serializer.skip(primaryIndex, sstable.descriptor.version);
-            }
+        try (PartitionIndexIterator it = sstable.allKeysIterator()) {
+            //noinspection StatementWithEmptyBody
+            while (it.advance()); // no-op, just check if index is readable
         }
     }
 
