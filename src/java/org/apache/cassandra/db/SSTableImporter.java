@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -40,9 +39,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
 
@@ -177,8 +174,15 @@ public class SSTableImporter
             cfs.getTracker().addSSTables(newSSTables);
             for (SSTableReader reader : newSSTables)
             {
-                if (options.invalidateCaches && cfs.isRowCacheEnabled())
-                    invalidateCachesForSSTable(reader.descriptor);
+                try
+                {
+                    if (options.invalidateCaches && cfs.isRowCacheEnabled())
+                        invalidateCachesForSSTable(reader);
+                }
+                catch (IOException ex)
+                {
+                    throw new RuntimeException(ex);
+                }
             }
 
         }
@@ -288,9 +292,9 @@ public class SSTableImporter
      * Iterates over all keys in the sstable index and invalidates the row cache
      */
     @VisibleForTesting
-    void invalidateCachesForSSTable(Descriptor desc)
+    void invalidateCachesForSSTable(SSTableReader reader) throws IOException
     {
-        try (KeyIterator iter = new KeyIterator(desc, cfs.metadata()))
+        try (KeyIterator iter = KeyIterator.forSSTable(reader))
         {
             while (iter.hasNext())
             {
