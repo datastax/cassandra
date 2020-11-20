@@ -164,7 +164,7 @@ public class BigTableRowIndexEntryTest extends CQLTester
 
         final SequentialWriter dataWriterNew;
         final SequentialWriter dataWriterOld;
-        final org.apache.cassandra.db.ColumnIndex columnIndex;
+        final org.apache.cassandra.io.sstable.format.big.ColumnIndex columnIndex;
 
         BigTableRowIndexEntry rieNew;
         ByteBuffer rieNewSerialized;
@@ -176,8 +176,8 @@ public class BigTableRowIndexEntryTest extends CQLTester
             SequentialWriterOption option = SequentialWriterOption.newBuilder().bufferSize(1024).build();
             File f = FileUtils.createTempFile("RowIndexEntryTest-", "db");
             dataWriterNew = new SequentialWriter(f, option);
-            columnIndex = new org.apache.cassandra.db.ColumnIndex(header, dataWriterNew, version, Collections.emptyList(),
-                                                                  rieSerializer.indexInfoSerializer());
+            columnIndex = new org.apache.cassandra.io.sstable.format.big.ColumnIndex(header, dataWriterNew, version, Collections.emptyList(),
+                                                                                     rieSerializer.indexInfoSerializer());
 
             f = FileUtils.createTempFile("RowIndexEntryTest-", "db");
             dataWriterOld = new SequentialWriter(f, option);
