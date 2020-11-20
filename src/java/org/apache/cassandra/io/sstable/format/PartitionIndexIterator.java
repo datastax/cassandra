@@ -53,4 +53,15 @@ public interface PartitionIndexIterator extends Closeable
      * Returns true if we reach EOF
      */
     boolean isExhausted();
+
+    /**
+     * Returns the current position in index file (which along with {@link #indexLength()}
+     * can be used to track iteration progress
+     */
+    long indexPosition();
+
+    /**
+     * Returns length of the index file
+     */
+    long indexLength();
 }

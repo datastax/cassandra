@@ -91,7 +91,6 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
         {
             key = ByteBufferUtil.readWithShortLength(reader);
             dataPosition = rowIndexEntrySerializer.deserializePositionAndSkip(reader);
-            System.err.println("ADVANCED INDEX ITERATOR TO: " + ByteBufferUtil.bytesToHex(key) + " / " + dataPosition);
             return true;
         }
         else
@@ -118,5 +117,17 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
     public long dataPosition()
     {
         return dataPosition;
+    }
+
+    @Override
+    public long indexPosition()
+    {
+        return reader.getFilePointer();
+    }
+
+    @Override
+    public long indexLength()
+    {
+        return reader.length();
     }
 }

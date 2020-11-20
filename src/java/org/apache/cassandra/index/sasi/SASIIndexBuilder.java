@@ -78,7 +78,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 
                 long previousKeyPosition = 0;
-                try (KeyIterator keys = new KeyIterator(sstable.descriptor, cfs.metadata()))
+                try (KeyIterator keys = KeyIterator.forSSTable(sstable))
                 {
                     while (keys.hasNext())
                     {
@@ -90,25 +90,18 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        try
-                        {
-                            RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                            dataFile.seek(indexEntry.position);
-                            ByteBufferUtil.readWithShortLength(dataFile); // key
+                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                        dataFile.seek(indexEntry.position);
+                        ByteBufferUtil.readWithShortLength(dataFile); // key
 
-                            try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
-                            {
-                                // if the row has statics attached, it has to be indexed separately
-                                if (cfs.metadata().hasStaticColumns())
-                                    indexWriter.nextUnfilteredCluster(partition.staticRow());
-
-                                while (partition.hasNext())
-                                    indexWriter.nextUnfilteredCluster(partition.next());
-                            }
-                        }
-                        catch (IOException ex)
+                        try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
                         {
-                            throw new FSReadError(ex, sstable.getFilename());
+                            // if the row has statics attached, it has to be indexed separately
+                            if (cfs.metadata().hasStaticColumns())
+                                indexWriter.nextUnfilteredCluster(partition.staticRow());
+
+                            while (partition.hasNext())
+                                indexWriter.nextUnfilteredCluster(partition.next());
                         }
 
                         bytesProcessed += keyPosition - previousKeyPosition;
@@ -116,6 +109,10 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                     }
 
                     completeSSTable(indexWriter, sstable, indexes.values());
+                }
+                catch (IOException ex)
+                {
+                    throw new FSReadError(ex, sstable.getFilename());
                 }
             }
         }

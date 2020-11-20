@@ -176,7 +176,7 @@ public class Verifier implements Closeable
         if (options.checkOwnsTokens && !isOffline)
         {
             outputHandler.debug("Checking that all tokens are owned by the current node");
-            try (KeyIterator iter = new KeyIterator(sstable.descriptor, sstable.metadata()))
+            try (KeyIterator iter = KeyIterator.forSSTable(sstable))
             {
                 List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(cfs.metadata.keyspace));
                 if (ownedRanges.isEmpty())
