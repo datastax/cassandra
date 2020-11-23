@@ -19,11 +19,10 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Objects;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry.IndexSerializer;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry.IndexSerializer;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -35,6 +34,7 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
     private final FileHandle indexFile;
     private final RandomAccessReader reader;
     private final IndexSerializer<IndexInfo> rowIndexEntrySerializer;
+    private final long initialPosition;
 
     private ByteBuffer key;
     private long dataPosition;
@@ -46,31 +46,50 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
         this.indexFile = indexFile;
         this.reader = reader;
         this.rowIndexEntrySerializer = rowIndexEntrySerializer;
+        this.initialPosition = reader.getFilePointer();
     }
 
-    public static BigTablePartitionIndexIterator create(FileHandle indexFile, IndexSerializer<IndexInfo> indexSerializer)
+    public static BigTablePartitionIndexIterator create(RandomAccessReader reader, IndexSerializer<IndexInfo> serializer)
     throws IOException
     {
-        FileHandle iFile = null;
-        RandomAccessReader reader = null;
+        BigTablePartitionIndexIterator iterator = new BigTablePartitionIndexIterator(null, reader, serializer);
         try
         {
-            iFile = indexFile.sharedCopy();
-            reader = iFile.createReader();
-
-            BigTablePartitionIndexIterator iterator = new BigTablePartitionIndexIterator(iFile,
-                                                                                         reader,
-                                                                                         Objects.requireNonNull(indexSerializer));
-
             iterator.advance();
             return iterator;
         }
         catch (IOException | RuntimeException ex)
         {
-            if (reader != null)
+            iterator.close();
+            throw ex;
+        }
+    }
+
+    public static BigTablePartitionIndexIterator create(FileHandle indexFile, IndexSerializer<IndexInfo> serializer)
+    throws IOException
+    {
+        FileHandle iFile = null;
+        RandomAccessReader reader = null;
+        BigTablePartitionIndexIterator iterator = null;
+        try
+        {
+            iFile = indexFile.sharedCopy();
+            reader = iFile.createReader();
+            iterator = new BigTablePartitionIndexIterator(iFile, reader, serializer);
+            iterator.advance();
+            return iterator;
+        }
+        catch (IOException | RuntimeException ex)
+        {
+            if (iterator != null)
+            {
+                iterator.close();
+            }
+            else
+            {
                 FileUtils.closeQuietly(reader);
-            if (iFile != null)
                 FileUtils.closeQuietly(iFile);
+            }
             throw ex;
         }
     }
@@ -126,8 +145,28 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
     }
 
     @Override
+    public void indexPosition(long position) throws IOException
+    {
+        if (position > indexLength())
+            throw new IndexOutOfBoundsException("The requested position exceeds the index length");
+        reader.seek(position);
+        key = null;
+        dataPosition = 0;
+        advance();
+    }
+
+    @Override
     public long indexLength()
     {
         return reader.length();
+    }
+
+    @Override
+    public void reset() throws IOException
+    {
+        reader.seek(initialPosition);
+        key = null;
+        dataPosition = 0;
+        advance();
     }
 }

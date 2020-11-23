@@ -61,7 +61,17 @@ public interface PartitionIndexIterator extends Closeable
     long indexPosition();
 
     /**
+     * Sets the current position in index file
+     */
+    void indexPosition(long position) throws IOException;
+
+    /**
      * Returns length of the index file
      */
     long indexLength();
+
+    /**
+     * Resets the iterator to the initial position
+     */
+    void reset() throws IOException;
 }
