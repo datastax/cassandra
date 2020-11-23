@@ -996,25 +996,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     private IndexSummary buildSummaryAtLevel(int newSamplingLevel) throws IOException
     {
         // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
-        RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)));
-        try
+        try (KeyIterator iterator = KeyIterator.forSSTable(this);
+             IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata().params.minIndexInterval, newSamplingLevel))
         {
-            long indexSize = primaryIndex.length();
-            try (IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata().params.minIndexInterval, newSamplingLevel))
-            {
-                long indexPosition;
-                while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
-                {
-                    summaryBuilder.maybeAddEntry(decorateKey(ByteBufferUtil.readWithShortLength(primaryIndex)), indexPosition);
-                    BigTableRowIndexEntry.Serializer.skip(primaryIndex, descriptor.version);
-                }
+            while (iterator.hasNext())
+                summaryBuilder.maybeAddEntry(iterator.next(), iterator.getKeyPosition());
 
-                return summaryBuilder.build(getPartitioner());
-            }
-        }
-        finally
-        {
-            FileUtils.closeQuietly(primaryIndex);
+            return summaryBuilder.build(getPartitioner());
         }
     }
 
@@ -1415,24 +1403,21 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         if (ifile == null)
             return null;
 
-        String path = null;
-        try (FileDataInput in = ifile.createReader(sampledPosition))
-        {
-            path = in.getPath();
-            while (!in.isEOF())
+        try (PartitionIndexIterator iterator = allKeysIterator()) {
+            iterator.indexPosition(sampledPosition);
+            KeyIterator keyIterator = new KeyIterator(iterator, getPartitioner());
+
+            while (keyIterator.hasNext())
             {
-                ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
-                DecoratedKey indexDecoratedKey = decorateKey(indexKey);
+                DecoratedKey indexDecoratedKey = keyIterator.next();
                 if (indexDecoratedKey.compareTo(token) > 0)
                     return indexDecoratedKey;
-
-                BigTableRowIndexEntry.Serializer.skip(in, descriptor.version);
             }
         }
         catch (IOException e)
         {
             markSuspect();
-            throw new CorruptSSTableException(e, path);
+            throw new CorruptSSTableException(e, ifile.path());
         }
 
         return null;
