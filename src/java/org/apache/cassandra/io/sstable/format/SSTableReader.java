@@ -66,6 +66,7 @@ import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
@@ -2158,9 +2159,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         GlobalTidy.lookup.clear();
     }
 
-    public static abstract class Factory
+    public interface Factory
     {
-        public abstract SSTableReader open(SSTableReaderBuilder builder);
+        SSTableReader open(SSTableReaderBuilder builder);
+
+        PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
     }
 
     public static class PartitionPositionBounds

@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.UUID;
 
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -93,12 +97,29 @@ public class BigFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory extends SSTableReader.Factory
+    static class ReaderFactory implements SSTableReader.Factory
     {
         @Override
         public SSTableReader open(SSTableReaderBuilder builder)
         {
             return new BigTableReader(builder);
+        }
+
+        @Override
+        public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
+        {
+            try (FileHandle iFile = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor).complete()) {
+                SerializationHeader.Component headerComponent = (SerializationHeader.Component)
+                                                                descriptor.getMetadataSerializer()
+                                                                          .deserialize(descriptor, MetadataType.HEADER);
+                SerializationHeader header = headerComponent.toHeader(metadata);
+                BigTableRowIndexEntry.Serializer serializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
+                return BigTablePartitionIndexIterator.create(iFile, serializer);
+            }
+            catch (IOException ex)
+            {
+                throw new RuntimeException(ex);
+            }
         }
     }
 

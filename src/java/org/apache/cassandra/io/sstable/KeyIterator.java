@@ -23,6 +23,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -43,6 +44,11 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
     public static KeyIterator forSSTable(SSTableReader ssTableReader) throws IOException
     {
         return new KeyIterator(ssTableReader.allKeysIterator(), ssTableReader.getPartitioner());
+    }
+
+    public static KeyIterator create(SSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
+    {
+        return new KeyIterator(factory.indexIterator(descriptor, metadata), metadata.partitioner);
     }
 
     protected DecoratedKey computeNext()
@@ -88,5 +94,18 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
     public long getKeyPosition()
     {
         return keyPosition;
+    }
+
+    public void reset()
+    {
+        try
+        {
+            it.reset();
+            keyPosition = -1;
+        }
+        catch (IOException ex)
+        {
+            throw new RuntimeException(ex);
+        }
     }
 }

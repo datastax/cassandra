@@ -113,6 +113,13 @@ public abstract class SSTableReaderBuilder
         return this;
     }
 
+    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor)
+    {
+        return new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
+               .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+               .withChunkCache(ChunkCache.instance);
+    }
+
     /**
      * Load index summary, first key and last key from Summary.db file if it exists.
      *
