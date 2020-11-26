@@ -18,12 +18,13 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.ArrayList;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.mockito.Mockito;
+
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class LogReplicationSetTest
 {
@@ -37,9 +38,7 @@ public class LogReplicationSetTest
         replicas.addReplicas(spyFiles);
         spyFiles.forEach(f -> Mockito.when(f.exists()).thenThrow(new RuntimeException()));
 
-        Assert.assertThrows(RuntimeException.class,
-                            () ->
-                            replicas.append(LogRecord.makeAbort(System.currentTimeMillis())));
+        assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> replicas.append(LogRecord.makeAbort(System.currentTimeMillis())));
     }
 
     @Test
