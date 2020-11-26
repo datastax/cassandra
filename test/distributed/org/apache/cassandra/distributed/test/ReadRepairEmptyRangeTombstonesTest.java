@@ -156,10 +156,10 @@ public class ReadRepairEmptyRangeTombstonesTest extends TestBaseImpl
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 3)")
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 4)")
                 .assertRowsDistributed("SELECT * FROM %s WHERE k=0 AND c>=2 AND c<=3",
-                                       paging ? (flush ? 3 : 2) : 1,
+                                       paging ? 2 : 1,
                                        row(0, 2), row(0, 3))
                 .assertRowsDistributed("SELECT * FROM %s WHERE k=0 AND c>=3 AND c<=4",
-                                       paging && flush ? 2 : 1,
+                                       1,
                                        row(0, 3), row(0, 4))
                 .assertRowsInternal("SELECT * FROM %s", row(0, 2), row(0, 3), row(0, 4))
                 .mutate(2, "DELETE FROM %s WHERE k=0 AND c>=1 AND c<=5")
@@ -182,10 +182,10 @@ public class ReadRepairEmptyRangeTombstonesTest extends TestBaseImpl
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 5)")
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 6)")
                 .assertRowsDistributed("SELECT c FROM %s WHERE k=0 AND c>=1 AND c<=4",
-                                       paging ? (flush && !reverse ? 5 : 4) : 1,
+                                       paging ? 4 : 1,
                                        row(1), row(2), row(3), row(4))
                 .assertRowsDistributed("SELECT c FROM %s WHERE k=0 AND c>=2 AND c<=5",
-                                       paging && flush && !reverse ? 2 : 1,
+                                       1,
                                        row(2), row(3), row(4), row(5))
                 .assertRowsInternal("SELECT c FROM %s", row(1), row(2), row(3), row(4), row(5))
                 .mutate(2, "DELETE FROM %s WHERE k=0 AND c>=1 AND c<=6")
@@ -208,10 +208,10 @@ public class ReadRepairEmptyRangeTombstonesTest extends TestBaseImpl
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 5)")
                 .mutate(1, "INSERT INTO %s (k, c) VALUES (0, 6)")
                 .assertRowsDistributed("SELECT c FROM %s WHERE k=0 AND c>=2 AND c<=5",
-                                       paging ? (flush && reverse ? 5 : 4) : 1,
+                                       paging ? 4 : 1,
                                        row(2), row(3), row(4), row(5))
                 .assertRowsDistributed("SELECT c FROM %s WHERE k=0 AND c>=3 AND c<=6",
-                                       paging && flush && reverse ? 2 : 1,
+                                       1,
                                        row(3), row(4), row(5), row(6))
                 .assertRowsInternal("SELECT c FROM %s", row(2), row(3), row(4), row(5), row(6))
                 .mutate(2, "DELETE FROM %s WHERE k=0 AND c>=1 AND c<=6")
