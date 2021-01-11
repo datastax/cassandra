@@ -680,6 +680,7 @@
           <!-- when updating assertj, make sure to also update the corresponding junit-bom dependency -->
           <dependency groupId="org.assertj" artifactId="assertj-core" version="3.15.0"/>
           <dependency groupId="org.awaitility" artifactId="awaitility" version="4.0.3" />
+          <dependency groupId="org.agrona" artifactId="agrona" version="0.9.26" />
 
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
@@ -890,6 +891,7 @@
         <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" />
         <dependency groupId="com.beust" artifactId="jcommander" />
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json"/>
+        <dependency groupId="org.agrona" artifactId="agrona"/>
 
         <!-- sasi deps -->
         <dependency groupId="de.jflex" artifactId="jflex" />
