@@ -493,7 +493,7 @@ public class ScrubTest
             new Mutation(update).applyUnsafe();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     public static void fillIndexCF(ColumnFamilyStore cfs, boolean composite, long ... values)
@@ -517,7 +517,7 @@ public class ScrubTest
             new Mutation(builder.build()).applyUnsafe();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     protected void fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
@@ -530,7 +530,7 @@ public class ScrubTest
             new CounterMutation(new Mutation(update), ConsistencyLevel.ONE).apply();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     @Test
@@ -542,14 +542,14 @@ public class ScrubTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("test_compact_static_columns");
 
         QueryProcessor.executeInternal(String.format("INSERT INTO \"%s\".test_compact_static_columns (a, b, c, d) VALUES (123, c3db07e8-b602-11e3-bc6b-e0b9a54a6d93, true, 'foobar')", KEYSPACE));
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
         QueryProcessor.process("CREATE TABLE \"Keyspace1\".test_scrub_validation (a text primary key, b int)", ConsistencyLevel.ONE);
         ColumnFamilyStore cfs2 = keyspace.getColumnFamilyStore("test_scrub_validation");
 
         new Mutation(UpdateBuilder.create(cfs2.metadata(), "key").newRow().add("b", LongType.instance.decompose(1L)).build()).apply();
-        cfs2.forceBlockingFlush();
+        cfs2.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         CompactionManager.instance.performScrub(cfs2, false, false, 2);
     }
@@ -569,7 +569,7 @@ public class ScrubTest
         QueryProcessor.executeInternal(String.format("INSERT INTO \"%s\".test_compact_dynamic_columns (a, b, c) VALUES (0, 'a', 'foo')", KEYSPACE));
         QueryProcessor.executeInternal(String.format("INSERT INTO \"%s\".test_compact_dynamic_columns (a, b, c) VALUES (0, 'b', 'bar')", KEYSPACE));
         QueryProcessor.executeInternal(String.format("INSERT INTO \"%s\".test_compact_dynamic_columns (a, b, c) VALUES (0, 'c', 'boo')", KEYSPACE));
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         CompactionManager.instance.performScrub(cfs, true, true, 2);
 
         // Scrub is silent, but it will remove broken records. So reading everything back to make sure nothing to "scrubbed away"

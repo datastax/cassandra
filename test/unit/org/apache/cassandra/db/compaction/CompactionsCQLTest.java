@@ -290,7 +290,7 @@ public class CompactionsCQLTest extends CQLTester
         RangeTombstone rt = new RangeTombstone(Slice.ALL, new DeletionTime(System.currentTimeMillis(), -1));
         RowUpdateBuilder rub = new RowUpdateBuilder(getCurrentColumnFamilyStore().metadata(), System.currentTimeMillis() * 1000, 22).clustering(33).addRangeTombstone(rt);
         rub.build().apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         compactAndValidate();
         readAndValidate(true);
         readAndValidate(false);
@@ -304,7 +304,7 @@ public class CompactionsCQLTest extends CQLTester
         // write a standard tombstone with negative local deletion time (LDTs are not set by user and should not be negative):
         RowUpdateBuilder rub = new RowUpdateBuilder(getCurrentColumnFamilyStore().metadata(), -1, System.currentTimeMillis() * 1000, 22).clustering(33).delete("b");
         rub.build().apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         compactAndValidate();
         readAndValidate(true);
         readAndValidate(false);
@@ -318,7 +318,7 @@ public class CompactionsCQLTest extends CQLTester
         // write a partition deletion with negative local deletion time (LDTs are not set by user and should not be negative)::
         PartitionUpdate pu = PartitionUpdate.simpleBuilder(getCurrentColumnFamilyStore().metadata(), 22).nowInSec(-1).delete().build();
         new Mutation(pu).apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         compactAndValidate();
         readAndValidate(true);
         readAndValidate(false);
@@ -331,7 +331,7 @@ public class CompactionsCQLTest extends CQLTester
         prepare();
         // write a row deletion with negative local deletion time (LDTs are not set by user and should not be negative):
         RowUpdateBuilder.deleteRowAt(getCurrentColumnFamilyStore().metadata(), System.currentTimeMillis() * 1000, -1, 22, 33).apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         compactAndValidate();
         readAndValidate(true);
         readAndValidate(false);
@@ -353,7 +353,7 @@ public class CompactionsCQLTest extends CQLTester
         DatabaseDescriptor.setColumnIndexSize(1024);
         prepareWide();
         RowUpdateBuilder.deleteRowAt(getCurrentColumnFamilyStore().metadata(), System.currentTimeMillis() * 1000, -1, 22, 33).apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         readAndValidate(true);
         readAndValidate(false);
         DatabaseDescriptor.setColumnIndexSize(maxSizePre);
@@ -369,7 +369,7 @@ public class CompactionsCQLTest extends CQLTester
         prepareWide();
         RowUpdateBuilder rub = new RowUpdateBuilder(getCurrentColumnFamilyStore().metadata(), -1, System.currentTimeMillis() * 1000, 22).clustering(33).delete("b");
         rub.build().apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         readAndValidate(true);
         readAndValidate(false);
         DatabaseDescriptor.setColumnIndexSize(maxSizePre);
@@ -386,7 +386,7 @@ public class CompactionsCQLTest extends CQLTester
         RangeTombstone rt = new RangeTombstone(Slice.ALL, new DeletionTime(System.currentTimeMillis(), -1));
         RowUpdateBuilder rub = new RowUpdateBuilder(getCurrentColumnFamilyStore().metadata(), System.currentTimeMillis() * 1000, 22).clustering(33).addRangeTombstone(rt);
         rub.build().apply();
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         readAndValidate(true);
         readAndValidate(false);
         DatabaseDescriptor.setColumnIndexSize(maxSizePreKB);
@@ -408,7 +408,7 @@ public class CompactionsCQLTest extends CQLTester
             {
                 execute("insert into %s (id, id2, t) values (?, ?, ?)", i, j, value);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         assertEquals(50, cfs.getLiveSSTables().size());
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getUnrepairedUnsafe().first();
@@ -425,7 +425,7 @@ public class CompactionsCQLTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
         execute("insert into %s (id, id2, t) values (?, ?, ?)", 1,1,"L1");
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         cfs.forceMajorCompaction();
         SSTableReader l1sstable = cfs.getLiveSSTables().iterator().next();
         assertEquals(1, l1sstable.getSSTableLevel());
@@ -439,7 +439,7 @@ public class CompactionsCQLTest extends CQLTester
             {
                 execute("insert into %s (id, id2, t) values (?, ?, ?)", i, j, value);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         assertEquals(51, cfs.getLiveSSTables().size());
 
@@ -533,7 +533,7 @@ public class CompactionsCQLTest extends CQLTester
         {
             execute("INSERT INTO %s (id, b) VALUES (?, ?)", i, String.valueOf(i));
         }
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
 
         assertTombstones(getCurrentColumnFamilyStore().getLiveSSTables().iterator().next(), false);
         if (deletedCell)
@@ -541,7 +541,7 @@ public class CompactionsCQLTest extends CQLTester
         else
             execute("DELETE FROM %s WHERE id = ?", 50);
         getCurrentColumnFamilyStore().setNeverPurgeTombstones(false);
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         Thread.sleep(2000); // wait for gcgs to pass
         getCurrentColumnFamilyStore().forceMajorCompaction();
         assertTombstones(getCurrentColumnFamilyStore().getLiveSSTables().iterator().next(), false);
@@ -550,7 +550,7 @@ public class CompactionsCQLTest extends CQLTester
         else
             execute("DELETE FROM %s WHERE id = ?", 44);
         getCurrentColumnFamilyStore().setNeverPurgeTombstones(true);
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         Thread.sleep(1100);
         getCurrentColumnFamilyStore().forceMajorCompaction();
         assertTombstones(getCurrentColumnFamilyStore().getLiveSSTables().iterator().next(), true);

@@ -83,6 +83,15 @@ public class BigFormat implements SSTableFormat
     static class WriterFactory extends SSTableWriter.Factory
     {
         @Override
+        public long estimateSize(SSTableWriter.SSTableSizeParameters parameters)
+        {
+            return (long) ((parameters.partitionKeyCount() // index entries
+                            + parameters.partitionKeyCount() // keys in data file
+                            + parameters.dataSize()) // data
+                           * 1.2); // bloom filter and row index overhead
+        }
+
+        @Override
         public SSTableWriter open(Descriptor descriptor,
                                   long keyCount,
                                   long repairedAt,
