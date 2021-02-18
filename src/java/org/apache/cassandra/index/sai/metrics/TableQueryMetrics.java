@@ -19,18 +19,25 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public class TableQueryMetrics extends AbstractMetrics
 {
     public static final String TABLE_QUERY_METRIC_TYPE = "TableQueryMetrics";
+    private static final Logger logger = LoggerFactory.getLogger(TableQueryMetrics.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 60, TimeUnit.SECONDS);
 
     public final Timer postFilteringReadLatency;
 
@@ -41,9 +48,12 @@ public class TableQueryMetrics extends AbstractMetrics
     private final Counter totalRowsFiltered;
     private final Counter totalQueriesCompleted;
 
+    private final Meter tokenSkippingLookups;
+    private final Meter tokenSkippingCacheHits;
+
     public TableQueryMetrics(TableMetadata table)
     {
-        super(table.keyspace, table.name, TABLE_QUERY_METRIC_TYPE);
+        super(table, TABLE_QUERY_METRIC_TYPE);
 
         perQueryMetrics = new PerQueryMetrics(table);
 
@@ -53,12 +63,25 @@ public class TableQueryMetrics extends AbstractMetrics
         totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
         totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
         totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
+
+        tokenSkippingLookups = Metrics.meter(createMetricName("Lookups", "TokenSkipping"));
+        tokenSkippingCacheHits = Metrics.meter(createMetricName("CacheHits", "TokenSkipping"));
     }
 
     public void record(QueryContext queryContext)
     {
-        if (queryContext.queryTimedOut)
+        if (queryContext.queryTimeouts > 0)
+        {
+            assert queryContext.queryTimeouts == 1;
+
             totalQueryTimeouts.inc();
+        }
+
+        long skippingLookups = queryContext.tokenSkippingLookups;
+        long skippingCacheHits = queryContext.tokenSkippingCacheHits;
+
+        tokenSkippingLookups.mark(skippingLookups);
+        tokenSkippingCacheHits.mark(skippingCacheHits);
 
         perQueryMetrics.record(queryContext);
     }
@@ -84,15 +107,14 @@ public class TableQueryMetrics extends AbstractMetrics
         private final Histogram rowsFiltered;
 
         /**
-         * Balanced tree index metrics.
+         * BKD index metrics.
          */
-        private final Histogram balancedTreePostingsNumPostings;
+        private final Histogram kdTreePostingsNumPostings;
         /**
-         * Balanced tree index posting lists metrics.
+         * BKD index posting lists metrics.
          */
-        private final Histogram balancedTreePostingsSkips;
-        private final Histogram balancedTreePostingsDecodes;
-
+        private final Histogram kdTreePostingsSkips;
+        private final Histogram kdTreePostingsDecodes;
         /**
          * Trie index posting lists metrics.
          */
@@ -101,17 +123,17 @@ public class TableQueryMetrics extends AbstractMetrics
 
         public PerQueryMetrics(TableMetadata table)
         {
-            super(table.keyspace, table.name, PER_QUERY_METRICS_TYPE);
+            super(table, PER_QUERY_METRICS_TYPE);
 
             queryLatency = Metrics.timer(createMetricName("QueryLatency"));
 
             sstablesHit = Metrics.histogram(createMetricName("SSTableIndexesHit"), false);
             segmentsHit = Metrics.histogram(createMetricName("IndexSegmentsHit"), false);
 
-            balancedTreePostingsSkips = Metrics.histogram(createMetricName("BalancedTreePostingsSkips"), false);
+            kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), false);
 
-            balancedTreePostingsNumPostings = Metrics.histogram(createMetricName("BalancedTreePostingsNumPostings"), false);
-            balancedTreePostingsDecodes = Metrics.histogram(createMetricName("BalancedTreePostingsDecodes"), false);
+            kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
+            kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), false);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
@@ -128,10 +150,10 @@ public class TableQueryMetrics extends AbstractMetrics
 
         private void recordNumericIndexCacheMetrics(QueryContext events)
         {
-            balancedTreePostingsNumPostings.update(events.balancedTreePostingListsHit);
+            kdTreePostingsNumPostings.update(events.bkdPostingListsHit);
 
-            balancedTreePostingsSkips.update(events.balancedTreePostingsSkips);
-            balancedTreePostingsDecodes.update(events.balancedTreePostingsDecodes);
+            kdTreePostingsSkips.update(events.bkdPostingsSkips);
+            kdTreePostingsDecodes.update(events.bkdPostingsDecodes);
         }
 
         public void record(QueryContext queryContext)
@@ -140,20 +162,25 @@ public class TableQueryMetrics extends AbstractMetrics
             queryLatency.update(totalQueryTimeNs, TimeUnit.NANOSECONDS);
             final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(totalQueryTimeNs);
 
-            sstablesHit.update(queryContext.sstablesHit);
-            segmentsHit.update(queryContext.segmentsHit);
+            final long ssTablesHit = queryContext.sstablesHit;
+            final long segmentsHit = queryContext.segmentsHit;
+            final long partitionsRead = queryContext.partitionsRead;
+            final long rowsFiltered = queryContext.rowsFiltered;
 
-            partitionReads.update(queryContext.partitionsRead);
-            totalPartitionReads.inc(queryContext.partitionsRead);
+            sstablesHit.update(ssTablesHit);
+            this.segmentsHit.update(segmentsHit);
 
-            rowsFiltered.update(queryContext.rowsFiltered);
-            totalRowsFiltered.inc(queryContext.rowsFiltered);
+            partitionReads.update(partitionsRead);
+            totalPartitionReads.inc(partitionsRead);
+
+            this.rowsFiltered.update(rowsFiltered);
+            totalRowsFiltered.inc(rowsFiltered);
 
             if (Tracing.isTracing())
             {
                 Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
-                              pluralize(queryContext.sstablesHit, "SSTable index", "es"), pluralize(queryContext.segmentsHit, "segment", "s"),
-                              pluralize(queryContext.rowsFiltered, "row", "s"), pluralize(queryContext.partitionsRead, "partition", "s"),
+                              pluralize(ssTablesHit, "SSTable index", "es"), pluralize(segmentsHit, "segment", "s"),
+                              pluralize(rowsFiltered, "row", "s"), pluralize(partitionsRead, "partition", "s"),
                               queryLatencyMicros);
             }
 
@@ -162,7 +189,7 @@ public class TableQueryMetrics extends AbstractMetrics
                 recordStringIndexCacheMetrics(queryContext);
             }
 
-            if (queryContext.balancedTreeSegmentsHit > 0)
+            if (queryContext.bkdSegmentsHit > 0)
             {
                 recordNumericIndexCacheMetrics(queryContext);
             }

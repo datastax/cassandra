@@ -1016,7 +1016,7 @@ public final class AbstractTypeGenerators
         }
         else
         {
-            throw new UnsupportedOperationException("No TypeSupport for: " + type);
+            throw new UnsupportedOperationException("Unsupported type: " + type);
         }
         return support.withValueDomain(valueDomainGen);
     }

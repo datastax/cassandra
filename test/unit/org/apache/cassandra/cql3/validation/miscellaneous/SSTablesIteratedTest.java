@@ -71,7 +71,7 @@ public class SSTablesIteratedTest extends CQLTester
     }
 
     @Override
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         String ret = super.createTable(KEYSPACE_PER_TEST, query);
         disableCompaction(KEYSPACE_PER_TEST);
@@ -79,7 +79,7 @@ public class SSTablesIteratedTest extends CQLTester
     }
 
     @Override
-    protected UntypedResultSet execute(String query, Object... values)
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }

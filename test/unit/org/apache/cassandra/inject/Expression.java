@@ -56,6 +56,12 @@ public class Expression
         return expr(clazz.getName());
     }
 
+    public Expression innerClass(String clazz)
+    {
+        expression.append("$").append(clazz);
+        return this;
+    }
+
     public Expression method(String method)
     {
         if (expression.length() > 0)
@@ -79,7 +85,7 @@ public class Expression
                                      .collect(Collectors.toList());
 
         Preconditions.checkArgument(methods.size() == 1, "There are " + methods.size() + " methods annotated with " + annotation.getSimpleName());
-        return Expression.clazz(clazz).method(methods.get(0).getName());
+        return expr().clazz(clazz).method(methods.get(0).getName());
     }
 
     public Expression append(String elem)
@@ -102,4 +108,8 @@ public class Expression
     public static String arg(int n) { return "$" + n; }
 
     public final static String THIS = "$this";
+
+    public final static String CLASS = "$CLASS";
+
+    public final static String METHOD = "$METHOD";
 }
