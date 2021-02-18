@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.cql.types.collections;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -36,7 +35,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
 {
     public static class SetDataSet<T> extends CollectionDataSet<Set<T>>
     {
-        protected final DataSet<T> elementDataSet;
+        protected DataSet<T> elementDataSet;
 
         public SetDataSet(DataSet<T> elementDataSet)
         {
@@ -55,7 +54,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.CollectionQuerySet(elementDataSet);
+            return new QuerySet.CollectionQuerySet(this, elementDataSet);
         }
 
         public String toString()
@@ -74,13 +73,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.FrozenCollectionQuerySet();
+            return new QuerySet.FrozenCollectionQuerySet(this);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("FULL(%s)", column));
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -91,7 +90,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
 
     public static class ListDataSet<T> extends CollectionDataSet<List<T>>
     {
-        protected final DataSet<T> elementDataSet;
+        protected DataSet<T> elementDataSet;
 
         public ListDataSet(DataSet<T> elementDataSet)
         {
@@ -110,7 +109,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.CollectionQuerySet(elementDataSet);
+            return new QuerySet.CollectionQuerySet(this, elementDataSet);
         }
 
         public String toString()
@@ -129,13 +128,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.FrozenCollectionQuerySet();
+            return new QuerySet.FrozenCollectionQuerySet(this);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("FULL(%s)", column));
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -146,7 +145,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
 
     public static class MapDataSet<T> extends CollectionDataSet<Map<T, T>>
     {
-        protected final DataSet<T> elementDataSet;
+        protected DataSet<T> elementDataSet;
 
         public MapDataSet(DataSet<T> elementDataSet)
         {
@@ -167,7 +166,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.MapValuesQuerySet(elementDataSet);
+            return new QuerySet.MapValuesQuerySet(this, elementDataSet);
         }
 
         public String toString()
@@ -186,13 +185,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.FrozenCollectionQuerySet();
+            return new QuerySet.FrozenCollectionQuerySet(this);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("FULL(%s)", column));
+            return Arrays.asList(String.format("FULL(%s)", column));
         }
 
         public String toString()
@@ -211,13 +210,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.MapKeysQuerySet(elementDataSet);
+            return new QuerySet.MapKeysQuerySet(this, elementDataSet);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("KEYS(%s)", column));
+            return Arrays.asList(String.format("KEYS(%s)", column));
         }
     }
 
@@ -231,13 +230,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.MapValuesQuerySet(elementDataSet);
+            return new QuerySet.MapValuesQuerySet(this, elementDataSet);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("VALUES(%s)", column));
+            return Arrays.asList(String.format("VALUES(%s)", column));
         }
     }
 
@@ -251,13 +250,13 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.MapEntriesQuerySet(elementDataSet);
+            return new QuerySet.MapEntriesQuerySet(this, elementDataSet);
         }
 
         @Override
         public Collection<String> decorateIndexColumn(String column)
         {
-            return Collections.singletonList(String.format("ENTRIES(%s)", column));
+            return Arrays.asList(String.format("ENTRIES(%s)", column));
         }
     }
 
@@ -271,7 +270,7 @@ public abstract class CollectionDataSet<T> extends DataSet<T>
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.MultiMapQuerySet(elementDataSet);
+            return new QuerySet.MultiMapQuerySet(this, elementDataSet);
         }
 
         @Override

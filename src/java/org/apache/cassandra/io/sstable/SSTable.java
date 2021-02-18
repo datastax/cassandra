@@ -31,7 +31,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -71,7 +70,7 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = CassandraRelevantProperties.STREAMING_HISTOGRAM_ROUND_SECONDS.getInt();
 
     public final Descriptor descriptor;
-    protected final Set<Component> components;
+    public final Set<Component> components;
     public final boolean compression;
 
     protected final TableMetadataRef metadata;
@@ -319,9 +318,7 @@ public abstract class SSTable
      */
     public synchronized void addComponents(Collection<Component> newComponents)
     {
-        Collection<Component> componentsToAdd = Collections2.filter(newComponents, Predicates.not(Predicates.in(components)));
-        TOCComponent.updateTOC(descriptor, componentsToAdd);
-        components.addAll(componentsToAdd);
+        registerComponents(newComponents, null);
     }
 
     /**
@@ -335,11 +332,14 @@ public abstract class SSTable
         TOCComponent.updateTOC(descriptor, componentsToAdd);
         components.addAll(componentsToAdd);
 
+        if (tracker == null)
+            return;
+
         for (Component component : componentsToAdd)
         {
             File file = descriptor.fileFor(component);
             if (file.exists())
-                tracker.updateLiveDiskSpaceUsed(file.length());
+                tracker.updateSizeTracking(file.length());
         }
     }
 
@@ -358,10 +358,10 @@ public abstract class SSTable
         {
             File file = descriptor.fileFor(component);
             if (file.exists())
-                tracker.updateLiveDiskSpaceUsed(-file.length());
+                tracker.updateSizeTracking(-file.length());
         }
     }
-
+    
     public interface Owner
     {
         Double getCrcCheckChance();

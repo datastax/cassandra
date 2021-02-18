@@ -281,17 +281,6 @@ public interface Index
     public void register(IndexRegistry registry);
 
     /**
-     * Unregister current index when it's removed from system
-     *
-     * @param registry the index registry to register the instance with
-     */
-    default void unregister(IndexRegistry registry)
-    {
-        // for singleton index, the group key is the index itself
-        registry.unregisterIndex(this, new Index.Group.Key(this));
-    }
-
-    /**
      * If the index implementation uses a local table to store its index data, this method should return a
      * handle to it. If not, an empty {@link Optional} should be returned. This exists to support legacy
      * implementations, and should always be empty for indexes not belonging to a {@link SingletonIndexGroup}.
@@ -874,6 +863,14 @@ public interface Index
         Set<Component> getComponents();
 
         /**
+         * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
+         */
+        default boolean supportsMultipleContains()
+        {
+            return false;
+        }
+
+        /**
          * Validates all indexes in the group against the specified SSTables.
          *
          * @param sstables SSTables for which indexes in the group should be built
@@ -1001,10 +998,8 @@ public interface Index
          * The function takes a PartitionIterator of the results from the replicas which has already been collated
          * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
          * of the transformation (which may be the same as the input if the transformation is a no-op).
-         *
-         * @param command the read command being executed
          */
-        default Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
+        default Function<PartitionIterator, PartitionIterator> postProcessor()
         {
             return partitions -> partitions;
         }

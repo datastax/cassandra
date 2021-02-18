@@ -19,13 +19,16 @@ package org.apache.cassandra.index.sai.metrics;
 
 import org.junit.Before;
 
-public class TinySegmentFlushingFailureTest extends SegmentFlushingFailureTester
+import org.apache.cassandra.config.DatabaseDescriptor;
+
+public class TinySegmentFlushingFailureTest extends SegmentFlushingFailureTest
 {
     @Before
-    public void setSegmentBufferSpace() throws Throwable
+    public void  setSegmentBufferSpace()
     {
-        setSegmentWriteBufferSpace(0);
+        DatabaseDescriptor.setSAISegmentWriteBufferSpace(0);
     }
+
 
     @Override
     protected long expectedBytesLimit()

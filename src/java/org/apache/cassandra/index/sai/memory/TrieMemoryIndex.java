@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,153 +29,136 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.IndexIdentifier;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-/**
- * This is an in-memory index using the {@link InMemoryTrie} to store a {@link ByteComparable}
- * representation of the indexed values. Data is stored on-heap or off-heap and follows the
- * settings of the {@link TrieMemtable} to determine where.
- */
 public class TrieMemoryIndex extends MemoryIndex
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
+    private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-    private static final int MINIMUM_PRIORITY_QUEUE_SIZE = 128;
+
 
     private final InMemoryTrie<PrimaryKeys> data;
+    private final ClusteringComparator clusteringComparator;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private final AbstractAnalyzer analyzer;
+    private final AbstractType<?> validator;
+    private final boolean isLiteral;
+    private final Object writeLock = new Object();
 
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
-
-    // Maintain the last queue size used on this index to use for the next range match.
-    // This allows for receiving a stream of wide range queries where the queue size
-    // is larger than we would want to default the size to.
-    private final AtomicInteger lastPriorityQueueSize = new AtomicInteger(MINIMUM_PRIORITY_QUEUE_SIZE);
-
-    public TrieMemoryIndex(StorageAttachedIndex index)
+    private static final FastThreadLocal<Integer> lastQueueSize = new FastThreadLocal<Integer>()
     {
-        super(index);
-        this.data = new InMemoryTrie<>(TrieMemtable.BUFFER_TYPE);
+        protected Integer initialValue()
+        {
+            return MINIMUM_QUEUE_SIZE;
+        }
+    };
+
+
+    public TrieMemoryIndex(ColumnContext columnContext)
+    {
+        super(columnContext);
+        //TODO Do we need to follow a setting for this?
+        this.data = new InMemoryTrie<>(BufferType.OFF_HEAP);
+        this.clusteringComparator = columnContext.clusteringComparator();
         this.primaryKeysReducer = new PrimaryKeysReducer();
+        // MemoryIndex is per-core, so analyzer should be thread-safe..
+        this.analyzer = columnContext.getAnalyzer();
+        this.validator = columnContext.getValidator();
+        this.isLiteral = TypeUtil.isLiteral(validator);
     }
 
-    /**
-     * Adds an index value to the in-memory index
-     *
-     * @param key partition key for the indexed value
-     * @param clustering clustering for the indexed value
-     * @param value indexed value
-     * @return amount of heap allocated by the new value
-     */
     @Override
-    public synchronized long add(DecoratedKey key, Clustering<?> clustering, ByteBuffer value)
+    public long add(DecoratedKey key, Clustering clustering, ByteBuffer value)
     {
-        value = index.termType().asIndexBytes(value);
-        final PrimaryKey primaryKey = index.hasClustering() ? index.keyFactory().create(key, clustering)
-                                                            : index.keyFactory().create(key);
-        final long initialSizeOnHeap = data.sizeOnHeap();
-        final long initialSizeOffHeap = data.sizeOffHeap();
-        final long reducerHeapSize = primaryKeysReducer.heapAllocations();
-
-        if (index.hasAnalyzer())
+        synchronized (writeLock)
         {
-            AbstractAnalyzer analyzer = index.analyzer();
-            try
+            AbstractAnalyzer analyzer = columnContext.getAnalyzer();
+            value = TypeUtil.asIndexBytes(value, validator);
+            analyzer.reset(value.duplicate());
+            final PrimaryKey primaryKey = PrimaryKey.of(key, clustering);
+            final long initialSizeOnHeap = data.sizeOnHeap();
+            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+
+
+            while (analyzer.hasNext())
             {
-                analyzer.reset(value);
-                while (analyzer.hasNext())
+                final ByteBuffer term = analyzer.next();
+                setMinMaxTerm(term);
+
+                final ByteComparable encodedTerm = encode(term);
+                try
                 {
-                    addTerm(primaryKey, analyzer.next());
+                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
+                    {
+                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                    }
+                    else
+                    {
+                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                    }
+                }
+                catch (InMemoryTrie.SpaceExhaustedException e)
+                {
+                    //TODO Handle this properly
+                    throw new RuntimeException(e);
                 }
             }
-            finally
-            {
-                analyzer.end();
-            }
+            return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
         }
-        else
-        {
-            addTerm(primaryKey, value);
-        }
-        long onHeap = data.sizeOnHeap();
-        long offHeap = data.sizeOffHeap();
-        long heapAllocations = primaryKeysReducer.heapAllocations();
-        return (onHeap - initialSizeOnHeap) + (offHeap - initialSizeOffHeap) + (heapAllocations - reducerHeapSize);
     }
 
     @Override
-    public long update(DecoratedKey key, Clustering<?> clustering, ByteBuffer oldValue, ByteBuffer newValue)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    /**
-     * Search for an expression in the in-memory index within the {@link AbstractBounds} defined
-     * by keyRange. This can either be an exact match or a range match.
-     * <p>
-     * @param expression the {@link Expression} to search for
-     * @param keyRange the {@link AbstractBounds} containing the key range to restrict the search to
-     * @return a {@link KeyRangeIterator} containing the search results
-     */
-    public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
 
-        switch (expression.getIndexOperator())
+        switch (expression.getOp())
         {
+            case MATCH:
             case EQ:
             case CONTAINS_KEY:
             case CONTAINS_VALUE:
-                return exactMatch(expression, keyRange);
+                return exactMatch(expression);
             case RANGE:
-                KeyRangeIterator keyIterator = rangeMatch(expression, keyRange);
-                int keyCount = (int) keyIterator.getMaxKeys();
-                if (keyCount > MINIMUM_PRIORITY_QUEUE_SIZE)
-                    lastPriorityQueueSize.set(keyCount);
-                return keyIterator;
+                return rangeMatch(expression, keyRange);
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + expression);
         }
     }
 
-    /**
-     * Returns an {@link Iterator} over the entire dataset contained in the trie. This is used
-     * when the index is flushed to disk.
-     *
-     * @return the iterator containing the trie data
-     */
     @Override
     public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<>()
+        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
         {
             @Override
             public boolean hasNext()
@@ -181,96 +170,67 @@ public class TrieMemoryIndex extends MemoryIndex
             public Pair<ByteComparable, PrimaryKeys> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(entry.getKey(), entry.getValue());
+                return Pair.create(decode(entry.getKey()), entry.getValue());
             }
         };
     }
 
-    @Override
-    public SegmentMetadata.ComponentMetadataMap writeDirect(IndexDescriptor indexDescriptor,
-                                                            IndexIdentifier indexIdentifier,
-                                                            Function<PrimaryKey, Integer> postingTransformer)
+    private ByteComparable encode(ByteBuffer input)
     {
-        throw new UnsupportedOperationException();
+        return isLiteral ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
+                         : version -> TypeUtil.asComparableBytes(input, validator, version);
     }
 
-    @Override
-    public boolean isEmpty()
+    private ByteComparable decode(ByteComparable term)
     {
-        return minTerm == null;
+        return isLiteral ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
+                         : term;
+
     }
 
-    @Override
-    public ByteBuffer getMinTerm()
+    private ByteSource append(ByteSource src, int lastByte)
     {
-        return minTerm;
-    }
-
-    @Override
-    public ByteBuffer getMaxTerm()
-    {
-        return maxTerm;
-    }
-
-    private void addTerm(PrimaryKey primaryKey, ByteBuffer term)
-    {
-        if (index.validateTermSize(primaryKey.partitionKey(), term, false, null))
+        return new ByteSource()
         {
-            setMinMaxTerm(term.duplicate());
+            boolean done = false;
 
-            final ByteComparable comparableBytes = asComparableBytes(term);
+            @Override
+            public int next()
+            {
+                if (done)
+                    return END_OF_STREAM;
+                int n = src.next();
+                if (n != END_OF_STREAM)
+                    return n;
 
-            try
-            {
-                if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                {
-                    data.putRecursive(comparableBytes, primaryKey, primaryKeysReducer);
-                }
-                else
-                {
-                    data.apply(Trie.singleton(comparableBytes, primaryKey), primaryKeysReducer);
-                }
+                done = true;
+                return lastByte;
             }
-            catch (InMemoryTrie.SpaceExhaustedException e)
-            {
-                throw new RuntimeException(e);
-            }
+        };
+    }
+
+    private RangeIterator exactMatch(Expression expression)
+    {
+        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
+        final PrimaryKeys primaryKeys = data.get(prefix);
+        if (primaryKeys == null)
+        {
+            return RangeIterator.empty();
         }
+        return new KeyRangeIterator(primaryKeys.partitionKeys());
     }
 
-    private void setMinMaxTerm(ByteBuffer term)
+    public static class Collector
     {
-        assert term != null;
+        long minimumTokenValue = Long.MAX_VALUE;
+        long maximumTokenValue = Long.MIN_VALUE;
+        PriorityQueue<DecoratedKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get(), DecoratedKey.comparator);
 
-        minTerm = index.termType().min(term, minTerm);
-        maxTerm = index.termType().max(term, maxTerm);
-    }
+        AbstractBounds<PartitionPosition> keyRange;
 
-    private ByteComparable asComparableBytes(ByteBuffer input)
-    {
-        return version -> index.termType().asComparableBytes(input, version);
-    }
-
-    private KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
-        ByteComparable comparableMatch = expression.lower() == null ? ByteComparable.EMPTY
-                                                                    : asComparableBytes(expression.lower().value.encoded);
-        PrimaryKeys primaryKeys = data.get(comparableMatch);
-        return primaryKeys == null ? KeyRangeIterator.empty()
-                                   : new FilteringInMemoryKeyRangeIterator(primaryKeys.keys(), keyRange);
-    }
-
-    private static class Collector
-    {
-        final PriorityQueue<PrimaryKey> mergedKeys;
-        final AbstractBounds<PartitionPosition> keyRange;
-
-        PrimaryKey maximumKey = null;
-
-        public Collector(AbstractBounds<PartitionPosition> keyRange, int expectedKeys)
+        public Collector(AbstractBounds<PartitionPosition> keyRange)
         {
             this.keyRange = keyRange;
-            this.mergedKeys = new PriorityQueue<>(expectedKeys);
         }
 
         public void processContent(PrimaryKeys keys)
@@ -278,44 +238,52 @@ public class TrieMemoryIndex extends MemoryIndex
             if (keys.isEmpty())
                 return;
 
-            SortedSet<PrimaryKey> primaryKeys = keys.keys();
+            SortedSet<DecoratedKey> partitionKeys = keys.partitionKeys();
 
             // shortcut to avoid generating iterator
-            if (primaryKeys.size() == 1)
+            if (partitionKeys.size() == 1)
             {
-                processKey(primaryKeys.first());
+                DecoratedKey first = partitionKeys.first();
+                if (keyRange.contains(first))
+                {
+                    mergedKeys.add(first);
+
+                    long currentTokenValue = first.getToken().getLongValue();
+                    minimumTokenValue = Math.min(minimumTokenValue, currentTokenValue);
+                    maximumTokenValue = Math.max(maximumTokenValue, currentTokenValue);
+                }
+
                 return;
             }
 
             // skip entire partition keys if they don't overlap
-            if (!keyRange.right.isMinimum() && primaryKeys.first().partitionKey().compareTo(keyRange.right) > 0
-                || primaryKeys.last().partitionKey().compareTo(keyRange.left) < 0)
+            if (!keyRange.right.isMinimum() && partitionKeys.first().compareTo(keyRange.right) > 0
+                    || partitionKeys.last().compareTo(keyRange.left) < 0)
                 return;
 
-            for (PrimaryKey primaryKey : primaryKeys)
-                processKey(primaryKey);
-        }
-
-        private void processKey(PrimaryKey key)
-        {
-            if (keyRange.contains(key.partitionKey()))
+            for (DecoratedKey key : partitionKeys)
             {
-                mergedKeys.add(key);
+                if (keyRange.contains(key))
+                {
+                    mergedKeys.add(key);
 
-                // We only track the maximum key, as the minimum can be peeked in constant time on the PQ itself.
-                maximumKey = maximumKey == null ? key : key.compareTo(maximumKey) > 0 ? key : maximumKey;
+                    long currentTokenValue = key.getToken().getLongValue();
+                    minimumTokenValue = Math.min(minimumTokenValue, currentTokenValue);
+                    maximumTokenValue = Math.max(maximumTokenValue, currentTokenValue);
+                }
             }
+            return;
         }
     }
 
-    private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         ByteComparable lowerBound, upperBound;
         boolean lowerInclusive, upperInclusive;
-        if (expression.lower() != null)
+        if (expression.lower != null)
         {
-            lowerBound = asComparableBytes(expression.lower().value.encoded);
-            lowerInclusive = expression.lower().inclusive;
+            lowerBound = encode(expression.lower.value.encoded);
+            lowerInclusive = expression.lower.inclusive;
         }
         else
         {
@@ -323,10 +291,10 @@ public class TrieMemoryIndex extends MemoryIndex
             lowerInclusive = false;
         }
 
-        if (expression.upper() != null)
+        if (expression.upper != null)
         {
-            upperBound = asComparableBytes(expression.upper().value.encoded);
-            upperInclusive = expression.upper().inclusive;
+            upperBound = encode(expression.upper.value.encoded);
+            upperInclusive = expression.upper.inclusive;
         }
         else
         {
@@ -334,19 +302,20 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        Collector cd = new Collector(keyRange, lastPriorityQueueSize.get());
-        Iterator<PrimaryKeys> values = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).valueIterator();
+        Collector cd = new Collector(keyRange);
 
-        while (values.hasNext())
-            cd.processContent(values.next());
+        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(pk -> cd.processContent(pk));
 
         if (cd.mergedKeys.isEmpty())
-            return KeyRangeIterator.empty();
+        {
+            return RangeIterator.empty();
+        }
 
-        return new InMemoryKeyRangeIterator(cd.mergedKeys.peek(), cd.maximumKey, cd.mergedKeys);
+        lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
+        return new KeyRangeIterator(cd.minimumTokenValue, cd.maximumTokenValue, cd.mergedKeys);
     }
 
-    private static class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    private class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations = new LongAdder();
 
@@ -355,7 +324,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (existing == null)
             {
-                existing = new PrimaryKeys();
+                existing = PrimaryKeys.create(clusteringComparator);
                 heapAllocations.add(existing.unsharedHeapSize());
             }
             heapAllocations.add(existing.add(neww));
