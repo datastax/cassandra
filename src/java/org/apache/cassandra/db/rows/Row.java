@@ -112,7 +112,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
 
     /**
      * Whether the row has some live information (i.e. it's not just deletion informations).
-     * 
+     *
      * @param nowInSec the current time to decide what is deleted and what isn't
      * @param enforceStrictLiveness whether the row should be purged if there is no PK liveness info,
      *                              normally retrieved from {@link CFMetaData#enforceStrictLiveness()}
@@ -731,8 +731,8 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
 
             // Because some data might have been shadowed by the 'activeDeletion', we could have an empty row
             return rowInfo.isEmpty() && rowDeletion.isLive() && dataBuffer.isEmpty()
-                 ? null
-                 : BTreeRow.create(clustering, rowInfo, rowDeletion, BTree.build(dataBuffer, UpdateFunction.noOp()));
+                   ? null
+                   : BTreeRow.create(clustering, rowInfo, rowDeletion, BTree.build(dataBuffer, UpdateFunction.noOp()));
         }
 
         public Clustering<?> mergedClustering()
@@ -839,7 +839,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 column = null;
                 versions.clear();
@@ -868,7 +868,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
                 return merged;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 merged = null;
             }

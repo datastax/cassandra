@@ -101,9 +101,9 @@ public final class FileUtils
         catch (IllegalAccessException e)
         {
             logger.error("FATAL: Cassandra is unable to access required classes. This usually means it has been " +
-                "run without the aid of the standard startup scripts or the scripts have been edited. If this was " +
-                "intentional, and you are attempting to use Java 11+ you may need to add the --add-exports and " +
-                "--add-opens jvm options from either jvm11-server.options or jvm11-client.options", e);
+                         "run without the aid of the standard startup scripts or the scripts have been edited. If this was " +
+                         "intentional, and you are attempting to use Java 11+ you may need to add the --add-exports and " +
+                         "--add-opens jvm options from either jvm11-server.options or jvm11-client.options", e);
             throw new RuntimeException(e);  // causes ExceptionInInitializerError, will prevent startup
         }
         catch (Throwable t)
@@ -236,7 +236,7 @@ public final class FileUtils
     {
         return deleteWithConfirm(file, accumulate, null);
     }
-    
+
     public static Throwable deleteWithConfirm(File file, Throwable accumulate, RateLimiter rateLimiter)
     {
         try
@@ -434,6 +434,11 @@ public final class FileUtils
         maybeFail(e, IOException.class);
     }
 
+    public static void closeQuietly(Closeable... cs)
+    {
+        closeQuietly(Arrays.asList(cs));
+    }
+
     public static void closeQuietly(Iterable<? extends AutoCloseable> cs)
     {
         for (AutoCloseable c : cs)
@@ -577,7 +582,7 @@ public final class FileUtils
         if (!value.matches("\\d+(\\.\\d+)? (GiB|KiB|MiB|TiB|bytes)"))
         {
             throw new IllegalArgumentException(
-                String.format("value %s is not a valid human-readable file size", value));
+            String.format("value %s is not a valid human-readable file size", value));
         }
         if (value.endsWith(" TiB"))
         {
