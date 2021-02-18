@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,36 +31,38 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.analyzer.filter.BasicFilters;
-import org.apache.cassandra.index.sai.analyzer.filter.FilterPipeline;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.index.sai.analyzer.filter.BasicResultFilters;
+import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineBuilder;
 import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineExecutor;
-import org.apache.cassandra.index.sai.utils.IndexTermType;
+import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineTask;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Analyzer that does *not* tokenize the input. Optionally will
- * apply filters for the input based on {@link NonTokenizingOptions}.
+ * apply filters for the input output as defined in analyzers options
  */
 public class NonTokenizingAnalyzer extends AbstractAnalyzer
 {
     private static final Logger logger = LoggerFactory.getLogger(NonTokenizingAnalyzer.class);
 
-    private final IndexTermType indexTermType;
-    private final NonTokenizingOptions options;
-    private final FilterPipeline filterPipeline;
+    private AbstractType<?> type;
+    private NonTokenizingOptions options;
+    private FilterPipelineTask filterPipeline;
 
     private ByteBuffer input;
     private boolean hasNext = false;
 
-    NonTokenizingAnalyzer(IndexTermType indexTermType, Map<String, String> options)
+    NonTokenizingAnalyzer(AbstractType<?> type, Map<String, String> options)
     {
-        this(indexTermType, NonTokenizingOptions.fromMap(options));
+        this(type, NonTokenizingOptions.fromMap(options));
     }
 
-    NonTokenizingAnalyzer(IndexTermType indexTermType, NonTokenizingOptions tokenizerOptions)
+    NonTokenizingAnalyzer(AbstractType<?> type, NonTokenizingOptions tokenizerOptions)
     {
-        this.indexTermType = indexTermType;
+        this.type = type;
         this.options = tokenizerOptions;
         this.filterPipeline = getFilterPipeline();
     }
@@ -63,19 +71,18 @@ public class NonTokenizingAnalyzer extends AbstractAnalyzer
     public boolean hasNext()
     {
         // check that we know how to handle the input, otherwise bail
-        if (!indexTermType.isString())
-            return false;
+        if (!TypeUtil.isIn(type, ANALYZABLE_TYPES)) return false;
 
         if (hasNext)
         {
             try
             {
-                String input = indexTermType.asString(this.input);
+                String input = type.getString(this.input);
 
                 if (input == null)
                 {
                     throw new MarshalException(String.format("'null' deserialized value for %s with %s",
-                                                             ByteBufferUtil.bytesToHex(this.input), indexTermType));
+                                                             ByteBufferUtil.bytesToHex(this.input), type));
                 }
 
                 String result = FilterPipelineExecutor.execute(filterPipeline, input);
@@ -88,13 +95,13 @@ public class NonTokenizingAnalyzer extends AbstractAnalyzer
                 }
 
                 nextLiteral = result;
-                next = indexTermType.fromString(result);
+                next = type.fromString(result);
 
                 return true;
             }
             catch (MarshalException e)
             {
-                logger.error("Failed to deserialize value with " + indexTermType, e);
+                logger.error("Failed to deserialize value with " + type, e);
                 return false;
             }
             finally
@@ -119,20 +126,26 @@ public class NonTokenizingAnalyzer extends AbstractAnalyzer
         this.hasNext = true;
     }
 
-    private FilterPipeline getFilterPipeline()
+    private FilterPipelineTask getFilterPipeline()
     {
-        FilterPipeline builder = new FilterPipeline(new BasicFilters.NoOperation());
+        FilterPipelineBuilder builder = new FilterPipelineBuilder(new BasicResultFilters.NoOperation());
         
         if (!options.isCaseSensitive())
-            builder = builder.add("to_lower", new BasicFilters.LowerCase());
+        {
+            builder = builder.add("to_lower", new BasicResultFilters.LowerCase());
+        }
         
         if (options.isNormalized())
-            builder = builder.add("normalize", new BasicFilters.Normalize());
+        {
+            builder = builder.add("normalize", new BasicResultFilters.Normalize());
+        }
 
         if (options.isAscii())
-            builder = builder.add("ascii", new BasicFilters.Ascii());
+        {
+            builder = builder.add("ascii", new BasicResultFilters.Ascii());
+        }
         
-        return builder;
+        return builder.build();
     }
 
     @Override

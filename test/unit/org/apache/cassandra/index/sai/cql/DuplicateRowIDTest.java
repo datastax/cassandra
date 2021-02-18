@@ -40,7 +40,9 @@ public class DuplicateRowIDTest extends SAITester
     {
         createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT)");
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForIndexQueryable();
 
+        // fill 2 bkd leaves
         for (int i = 0; i < 2048; ++i)
         {
             execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", Integer.toString(i % 10), i);
@@ -50,12 +52,26 @@ public class DuplicateRowIDTest extends SAITester
         List<Row> rows = executeNet("SELECT * FROM %s WHERE v1 > 0").all();
         assertEquals(10, rows.size());
 
+        flush();
+
+        // tolerate duplicates from 1 sstable
+        // query will match both leaves, one entirely and one with filtering, as it contains a single entry with v1 == 0
+        rows = executeNet("SELECT * FROM %s WHERE v1 > 0").all();
+        assertEquals(10, rows.size());
+
+        // fill 2 bkd leaves again
         for (int i = 0; i < 2048; ++i)
         {
             execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", Integer.toString(i % 10), i);
         }
 
         // tolerate duplicates from memtable and sstable
+        rows = executeNet("SELECT * FROM %s WHERE v1 > 0").all();
+        assertEquals(10, rows.size());
+
+        flush();
+
+        // tolerate duplicates from 2 sstables
         rows = executeNet("SELECT * FROM %s WHERE v1 > 0").all();
         assertEquals(10, rows.size());
     }

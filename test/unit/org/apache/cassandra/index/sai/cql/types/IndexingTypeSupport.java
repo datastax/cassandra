@@ -21,26 +21,18 @@ import java.util.Arrays;
 import java.util.Collection;
 
 import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
 
-@RunWith(Parameterized.class)
 public abstract class IndexingTypeSupport extends SAITester
 {
     public static final int NUMBER_OF_VALUES = 64;
 
-    @Parameterized.Parameter
-    public DataSet<?> dataset;
+    protected final DataSet<?> dataset;
 
-    @Parameterized.Parameter(1)
-    public boolean widePartitions;
-
-    @Parameterized.Parameter(2)
-    public Scenario scenario;
-
+    private final boolean widePartitions;
+    private final Scenario scenario;
     private Object[][] allRows;
 
     public enum Scenario
@@ -69,11 +61,16 @@ public abstract class IndexingTypeSupport extends SAITester
         });
     }
 
+    public IndexingTypeSupport(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
+        this.dataset = dataset;
+        this.widePartitions = widePartitions;
+        this.scenario = scenario;
+    }
+
     @Before
     public void createTable()
     {
-        dataset.init();
-
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, value %s, PRIMARY KEY(pk, ck))", dataset));
 
         disableCompaction();
@@ -81,13 +78,13 @@ public abstract class IndexingTypeSupport extends SAITester
         allRows = generateRows(dataset, widePartitions);
     }
 
-    @Test
-    public void runIndexQueryScenarios() throws Throwable
+    protected void runIndexQueryScenarios() throws Throwable
     {
         if (scenario != Scenario.POST_BUILD_QUERY)
         {
             for (String index : dataset.decorateIndexColumn("value"))
-                createIndex(String.format("CREATE INDEX ON %%s(%s) USING 'sai'", index));
+                createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
+            waitForIndexQueryable();
         }
 
         insertData(this, allRows, scenario);
@@ -104,14 +101,15 @@ public abstract class IndexingTypeSupport extends SAITester
             case POST_BUILD_QUERY:
                 flush();
                 for (String index : dataset.decorateIndexColumn("value"))
-                    createIndex(String.format("CREATE INDEX ON %%s(%s) USING 'sai'", index));
+                    createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
+                waitForIndexQueryable();
                 break;
         }
 
         dataset.querySet().runQueries(this, allRows);
     }
 
-    public static void insertData(SAITester tester, Object[][] allRows, Scenario scenario)
+    public static void insertData(CQLTester tester, Object[][] allRows, Scenario scenario) throws Throwable
     {
         int sstableCounter = 0;
         int sstableIncrement = NUMBER_OF_VALUES / 8;

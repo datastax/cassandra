@@ -31,6 +31,10 @@ import org.apache.cassandra.index.IndexRegistry;
  */
 public interface Restriction
 {
+    /**
+     * Check if the restriction is on a partition key
+     * @return <code>true</code> if the restriction is on a partition key, <code>false</code>
+     */
     public default boolean isOnToken()
     {
         return false;
@@ -91,6 +95,14 @@ public interface Restriction
      * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
      */
     boolean needsFiltering(Index.Group indexGroup);
+
+    /**
+     * Returns whether this restriction would need filtering if the specified index group were used.
+     *
+     * @param indexGroup an index group
+     * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
+     */
+    public boolean needsFiltering(Index.Group indexGroup);
 
     /**
      * Adds to the specified row filter the expressions corresponding to this <code>Restriction</code>.

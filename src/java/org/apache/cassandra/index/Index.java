@@ -281,17 +281,6 @@ public interface Index
     public void register(IndexRegistry registry);
 
     /**
-     * Unregister current index when it's removed from system
-     *
-     * @param registry the index registry to register the instance with
-     */
-    default void unregister(IndexRegistry registry)
-    {
-        // for singleton index, the group key is the index itself
-        registry.unregisterIndex(this, new Index.Group.Key(this));
-    }
-
-    /**
      * If the index implementation uses a local table to store its index data, this method should return a
      * handle to it. If not, an empty {@link Optional} should be returned. This exists to support legacy
      * implementations, and should always be empty for indexes not belonging to a {@link SingletonIndexGroup}.
@@ -445,6 +434,23 @@ public interface Index
     public AbstractType<?> customExpressionValueType();
 
     /**
+     * If the index supports custom search expressions using the
+     * {@code SELECT * FROM table WHERE expr(index_name, expression)} syntax, this method should return a new
+     * {@link RowFilter.CustomExpression} for the specified expression value. Index implementations may provide their
+     * own implementations using method {@link RowFilter.CustomExpression#isSatisfiedBy(TableMetadata, DecoratedKey, Row)}
+     * to filter reconciled rows in the coordinator. Otherwise, the default implementation will accept all rows.
+     * See DB-2185 and DSP-16537 for further details.
+     *
+     * @param metadata the indexed table metadata
+     * @param value the custom expression value
+     * @return a custom index expression for the specified value
+     */
+    default RowFilter.CustomExpression customExpressionFor(TableMetadata metadata, ByteBuffer value)
+    {
+        return new RowFilter.CustomExpression(metadata, getIndexMetadata(), value);
+    }
+
+    /**
      * Transform an initial RowFilter into the filter that will still need to applied
      * to a set of Rows after the index has performed it's initial scan.
      * Used in ReadCommand#executeLocal to reduce the amount of filtering performed on the
@@ -530,8 +536,7 @@ public interface Index
      * @param ctx WriteContext spanning the update operation
      * @param transactionType indicates what kind of update is being performed on the base data
      *                        i.e. a write time insert/update/delete or the result of compaction
-     * @param memtable current memtable that the write goes into. It's to make sure memtable and index memtable
-     *                 are in sync.
+     * @param memtable The current memtable that is the source of the updates
      * @return the newly created indexer or {@code null} if the index is not interested by the update
      * (this could be because the index doesn't care about that particular partition, doesn't care about
      * that type of transaction, ...).
@@ -658,6 +663,24 @@ public interface Index
      */
     default void validate(ReadCommand command) throws InvalidRequestException
     {
+    }
+
+    /**
+     * Tells whether this index supports replica fitering protection or not.
+     *
+     * Replica filtering protection might need to run the query row filter in the coordinator to detect stale results.
+     * An index implementation will be compatible with this protection mechanism if it returns the same results for the
+     * row filter as CQL will return with {@code ALLOW FILTERING} and without using the index. This means that index
+     * implementations using custom query syntax or applying transformations to the indexed data won't support it.
+     * See CASSANDRA-8272 for further details.
+     *
+     * @param rowFilter rowFilter of query to decide if it supports replica filtering protection or not
+     * @return true if this index supports replica filtering protection, false otherwise
+     */
+    //TODO Need to confirm whether SAI needs to implement this as false
+    default boolean supportsReplicaFilteringProtection(RowFilter rowFilter)
+    {
+        return true;
     }
 
     /**
@@ -852,6 +875,14 @@ public interface Index
         Set<Component> getComponents();
 
         /**
+         * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
+         */
+        default boolean supportsMultipleContains()
+        {
+            return false;
+        }
+
+        /**
          * Validates all indexes in the group against the specified SSTables.
          *
          * @param sstables SSTables for which indexes in the group should be built
@@ -979,10 +1010,8 @@ public interface Index
          * The function takes a PartitionIterator of the results from the replicas which has already been collated
          * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
          * of the transformation (which may be the same as the input if the transformation is a no-op).
-         *
-         * @param command the read command being executed
          */
-        default Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
+        default Function<PartitionIterator, PartitionIterator> postProcessor()
         {
             return partitions -> partitions;
         }
