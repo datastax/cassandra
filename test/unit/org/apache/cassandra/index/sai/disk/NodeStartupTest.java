@@ -20,9 +20,11 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ObjectArrays;
@@ -33,21 +35,16 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.schema.Schema;
-import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -97,25 +94,15 @@ public class NodeStartupTest extends SAITester
                                                                      .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexBuilder.class).onMethod("build").atEntry())
                                                                      .build();
 
-    private static final Injections.Counter deletedPerSStableCounter = Injections.newCounter("deletedPrimaryKeyMapCounter")
-                                                                                 .add(InvokePointBuilder.newInvokePoint()
-                                                                                                        .onClass(IndexDescriptor.class)
-                                                                                                        .onMethod("deletePerSSTableIndexComponents")
-                                                                                                        .atEntry())
-                                                                                 .build();
-
-    private static final Injections.Counter deletedPerIndexCounter = Injections.newCounter("deletedColumnIndexCounter")
-                                                                               .add(InvokePointBuilder.newInvokePoint()
-                                                                                                      .onClass(IndexDescriptor.class)
-                                                                                                      .onMethod("deleteColumnIndex")
-                                                                                                      .atEntry())
+    private static final Injections.Counter deleteComponentCounter = Injections.newCounter("deletedComponentCounter")
+                                                                               .add(InvokePointBuilder.newInvokePoint().onClass(IndexComponents.class).onMethod("deleteComponent").atEntry())
                                                                                .build();
 
-    private static final Injections.Counter[] counters = new Injections.Counter[] { buildCounter, deletedPerSStableCounter, deletedPerIndexCounter };
+    private static final Injections.Counter[] counters = new Injections.Counter[] { buildCounter, deleteComponentCounter };
 
     private static Throwable error = null;
 
-    private IndexContext indexContext = null;
+    private String indexName = null;
 
     enum Populator
     {
@@ -155,7 +142,7 @@ public class NodeStartupTest extends SAITester
         PER_SSTABLE_INCOMPLETE,
         PER_COLUMN_INCOMPLETE,
         PER_SSTABLE_CORRUPT,
-        PER_COLUMN_CORRUPT
+        PER_COLUMN_CORRUPT;
     }
 
     enum StartupTaskRunOrder
@@ -180,9 +167,8 @@ public class NodeStartupTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, v1 text)");
-        String indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        indexContext = createIndexContext(indexName, Int32Type.instance);
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, v1 int)");
+        indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
         Injections.inject(ObjectArrays.concat(barriers, counters, Injection.class));
         Stream.of(barriers).forEach(Injections.Barrier::reset);
         Stream.of(barriers).forEach(Injections.Barrier::disable);
@@ -191,7 +177,7 @@ public class NodeStartupTest extends SAITester
         error = null;
     }
 
-    @Parameterized.Parameter
+    @Parameterized.Parameter(0)
     public Populator populator;
     @Parameterized.Parameter(1)
     public IndexStateOnRestart state;
@@ -200,10 +186,8 @@ public class NodeStartupTest extends SAITester
     @Parameterized.Parameter(3)
     public int builds;
     @Parameterized.Parameter(4)
-    public int deletedPerSSTable;
+    public int deletedComponents;
     @Parameterized.Parameter(5)
-    public int deletedPerIndex;
-    @Parameterized.Parameter(6)
     public int expectedDocuments;
 
     @SuppressWarnings("unused")
@@ -212,27 +196,27 @@ public class NodeStartupTest extends SAITester
     {
         List<Object[]> scenarios = new LinkedList<>();
 
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, 0, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, 0, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 1, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 0, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 0, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 0, 1, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 2, 2, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 2, 2, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 2, 2, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 0, 2, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 0, 2, DOCS });
-        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 0, 2, DOCS });
-        scenarios.add( new Object[] { Populator.NON_INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, 0, 0 });
-        scenarios.add( new Object[] { Populator.NON_INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, 0, 0 });
-        scenarios.add( new Object[] { Populator.TOMBSTONES, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, 0, 0 });
-        scenarios.add( new Object[] { Populator.TOMBSTONES, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, 0, 0 });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 2, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 2, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.ALL_EMPTY, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 2, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 9, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 9, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 9, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 5, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 5, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_INCOMPLETE, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 5, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 10, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 10, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_SSTABLE_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 10, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 1, 6, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 1, 6, DOCS });
+        scenarios.add( new Object[] { Populator.INDEXABLE_ROWS, IndexStateOnRestart.PER_COLUMN_CORRUPT, StartupTaskRunOrder.PRE_JOIN_RUNS_MID_BUILD, 1, 6, DOCS });
+        scenarios.add( new Object[] { Populator.NON_INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, 0 });
+        scenarios.add( new Object[] { Populator.NON_INDEXABLE_ROWS, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, 0 });
+        scenarios.add( new Object[] { Populator.TOMBSTONES, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_BEFORE_BUILD, 0, 0, 0 });
+        scenarios.add( new Object[] { Populator.TOMBSTONES, IndexStateOnRestart.VALID, StartupTaskRunOrder.PRE_JOIN_RUNS_AFTER_BUILD, 0, 0, 0 });
 
         return scenarios;
     }
@@ -242,10 +226,10 @@ public class NodeStartupTest extends SAITester
     {
         populator.populate(this);
 
-        Assertions.assertThat(getNotQueryableIndexes()).isEmpty();
+        assertTrue(isIndexQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
-        Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 = '0'").size());
+        Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
 
         setState(state);
 
@@ -253,24 +237,22 @@ public class NodeStartupTest extends SAITester
 
         simulateNodeRestart();
 
-        Assertions.assertThat(getNotQueryableIndexes()).isEmpty();
+        assertTrue(isIndexQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
-        Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 = '0'").size());
+        Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
 
         Assert.assertEquals(builds, buildCounter.get());
-        Assert.assertEquals(deletedPerSSTable, deletedPerSStableCounter.get());
-        Assert.assertEquals(deletedPerIndex, deletedPerIndexCounter.get());
+        Assert.assertEquals(deletedComponents, deleteComponentCounter.get());
     }
 
-    @SuppressWarnings("unused")
     public void populateIndexableRows()
     {
         try
         {
             for (int i = 0; i < DOCS; i++)
             {
-                execute("INSERT INTO %s (id, v1) VALUES (?, '0')", i);
+                execute("INSERT INTO %s (id, v1) VALUES (?, 0)", i);
             }
             flush();
         }
@@ -281,7 +263,6 @@ public class NodeStartupTest extends SAITester
         }
     }
 
-    @SuppressWarnings("unused")
     public void populateNonIndexableRows()
     {
         try
@@ -299,7 +280,6 @@ public class NodeStartupTest extends SAITester
         }
     }
 
-    @SuppressWarnings("unused")
     public void populateTombstones()
     {
         try
@@ -317,16 +297,16 @@ public class NodeStartupTest extends SAITester
         }
     }
 
-    private boolean isGroupIndexComplete()
+    private boolean isGroupIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).isPerSSTableIndexBuildComplete());
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexComponents.isGroupIndexComplete(sstable.descriptor));
     }
 
-    private boolean isColumnIndexComplete()
+    private boolean isColumnIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).isPerColumnIndexBuildComplete(indexContext));
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexComponents.isColumnIndexComplete(sstable.descriptor, indexName));
     }
 
     private void setState(IndexStateOnRestart state)
@@ -336,29 +316,36 @@ public class NodeStartupTest extends SAITester
             case VALID:
                 break;
             case ALL_EMPTY:
-                Version.LATEST.onDiskFormat().perSSTableIndexComponents(false).forEach(this::remove);
-                Version.LATEST.onDiskFormat().perColumnIndexComponents(indexContext).forEach(c -> remove(c, indexContext));
+                allIndexComponents().forEach(this::remove);
                 break;
             case PER_SSTABLE_INCOMPLETE:
-                remove(IndexComponent.GROUP_COMPLETION_MARKER);
+                remove(IndexComponents.GROUP_COMPLETION_MARKER);
                 break;
             case PER_COLUMN_INCOMPLETE:
-                remove(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+                remove(IndexComponents.NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName));
                 break;
             case PER_SSTABLE_CORRUPT:
-                corrupt();
+                corrupt(IndexComponents.GROUP_META);
                 break;
             case PER_COLUMN_CORRUPT:
-                corrupt(indexContext);
+                corrupt(IndexComponents.NDIType.META.newComponent(indexName));
                 break;
         }
     }
 
-    private void remove(IndexComponent component)
+    private Set<Component> allIndexComponents()
+    {
+        Set<Component> components = new HashSet<>();
+        components.addAll(IndexComponents.PER_SSTABLE_COMPONENTS);
+        components.addAll(IndexComponents.perColumnComponents(indexName, false));
+        return components;
+    }
+
+    private void remove(Component component)
     {
         try
         {
-            corruptIndexComponent(component, CorruptionType.REMOVED);
+            corruptNDIComponent(component, CorruptionType.REMOVED);
         }
         catch (Exception e)
         {
@@ -367,37 +354,11 @@ public class NodeStartupTest extends SAITester
         }
     }
 
-    private void remove(IndexComponent component, IndexContext indexContext)
+    private void corrupt(Component component)
     {
         try
         {
-            corruptIndexComponent(component, indexContext, CorruptionType.REMOVED);
-        }
-        catch (Exception e)
-        {
-            error = e;
-            e.printStackTrace();
-        }
-    }
-
-    private void corrupt()
-    {
-        try
-        {
-            corruptIndexComponent(IndexComponent.GROUP_META, CorruptionType.TRUNCATED_HEADER);
-        }
-        catch (Exception e)
-        {
-            error = e;
-            e.printStackTrace();
-        }
-    }
-
-    private void corrupt(IndexContext indexContext)
-    {
-        try
-        {
-            corruptIndexComponent(IndexComponent.META, indexContext, CorruptionType.TRUNCATED_HEADER);
+            corruptNDIComponent(component, CorruptionType.TRUNCATED_HEADER);
         }
         catch (Exception e)
         {

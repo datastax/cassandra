@@ -19,12 +19,7 @@
 package org.apache.cassandra.distributed.test.sai;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 import java.util.Random;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.After;
 import org.junit.Before;
@@ -32,30 +27,53 @@ import org.junit.Test;
 
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
-import org.apache.cassandra.distributed.api.TokenSupplier;
-import org.apache.cassandra.distributed.impl.TracingUtil;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.service.reads.range.RangeCommandIterator;
 
-import static org.awaitility.Awaitility.await;
+import static junit.framework.TestCase.assertEquals;
+import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
 public class ConcurrencyFactorTest extends TestBaseImpl
 {
     private static final String SAI_TABLE = "sai_simple_primary_key";
-    private static final int NODES = 3;
 
-    private Cluster cluster;
+    private static final int nodes = 3;
+
+    private org.apache.cassandra.distributed.Cluster cluster;
 
     @Before
     public void init() throws IOException
     {
-        cluster = init(Cluster.build(NODES).withTokenSupplier(generateTokenSupplier()).withTokenCount(1).start());
+        cluster = init(Cluster.build(nodes).withTokenSupplier(node -> {
+            switch (node)
+            {
+                case 1: return -9223372036854775808L;
+                case 2: return -3074457345618258602L;
+                case 3: return 3074457345618258603L;
+                default: throw new IllegalArgumentException();
+            }
+        }).withConfig(config -> config.with(NETWORK).with(GOSSIP)).start());
     }
 
     @After
     public void cleanup()
     {
         cluster.close();
+    }
+
+    private void insertRows(long startVal, long endVal, long increment)
+    {
+        String template = "INSERT INTO %s.%s (pk, state, gdp) VALUES (%s, %s)";
+        Random rnd = new Random();
+        String fakeState, rowData;
+        int i = 0;
+        for (long val = startVal; val <= endVal; val += increment)
+        {
+            fakeState = String.format("%c%c", (char)(rnd.nextInt(26) + 'A'), (char)(rnd.nextInt(26) + 'A'));
+            rowData = String.format("'%s', %s", fakeState, val);
+            cluster.coordinator(1).execute(String.format(template, KEYSPACE, SAI_TABLE, i++, rowData), ConsistencyLevel.LOCAL_ONE);
+        }
     }
 
     @Test
@@ -65,16 +83,7 @@ public class ConcurrencyFactorTest extends TestBaseImpl
                                            " {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }", KEYSPACE, SAI_TABLE));
         cluster.schemaChange(String.format("CREATE CUSTOM INDEX ON %s.%s (gdp) USING 'StorageAttachedIndex'", KEYSPACE, SAI_TABLE));
 
-        String template = "INSERT INTO %s.%s (pk, state, gdp) VALUES (%s, %s)";
-        Random rnd = new Random();
-        String fakeState, rowData;
-        int i = 0;
-        for (long val = 1_000_000_000L; val <= 16_000_000_000L; val += 1_000_000_000L)
-        {
-            fakeState = String.format("%c%c", (char)(rnd.nextInt(26) + 'A'), (char)(rnd.nextInt(26) + 'A'));
-            rowData = String.format("'%s', %s", fakeState, val);
-            cluster.coordinator(1).execute(String.format(template, KEYSPACE, SAI_TABLE, i++, rowData), ConsistencyLevel.LOCAL_ONE);
-        }
+        insertRows(1_000_000_000L, 16_000_000_000L, 1_000_000_000L);
 
         // flush all nodes, expected row distribution by partition key value
         // node0: 9, 14, 12, 3
@@ -82,52 +91,46 @@ public class ConcurrencyFactorTest extends TestBaseImpl
         // node2: 4, 15, 7, 6
         cluster.forEach((node) -> node.flush(KEYSPACE));
 
-        // We are expecting any of 3 specific trace messages indicating how the query has been handled:
-        //
-        // Submitting range requests on <n> ranges with a concurrency of <n>
-        //   Initial concurrency wasn't estimated and max concurrency was used instead (and SAI index was involved)
-        // Submitting range requests on <n> ranges with a concurrency of <n> (<m> rows per range expected)
-        //   Initial concurrency was estimated based on estimated rows per range (non-SAI range query)
-        // Executing single-partition query on <table>
-        //   Non-range single-partition query
-
-        // SAI range query so should bypass initial concurrency estimation
+        // we expect to use StorageProxy#RangeCommandIterator and the hit count to increase
         String query = String.format("SELECT state FROM %s.%s WHERE gdp > ? AND gdp < ? LIMIT 20", KEYSPACE, SAI_TABLE);
-        runAndValidate("Submitting range requests on 3 ranges with a concurrency of 3", query, 3_000_000_000L, 7_000_000_000L);
+        int prevHistCount = getRangeReadCount();
+        runAndValidate(prevHistCount, 1, query, 3_000_000_000L, 7_000_000_000L);
 
-        // Partition-restricted query so not a range query
+        // partition-restricted query
+        // we don't expect to use StorageProxy#RangeCommandIterator so previous hit count remains the same
         query = String.format("SELECT state FROM %s.%s WHERE pk = ?", KEYSPACE, SAI_TABLE);
-        runAndValidate("Executing single-partition query on sai_simple_primary_key", query, 0);
+        runAndValidate(prevHistCount, 1, query, 0);
 
-        // Token-restricted range query not using SAI so should use initial concurrency estimation
+        // token-restricted query
+        // we expect StorageProxy#RangeCommandIterator to be used so reset previous hit count
         query = String.format("SELECT * FROM %s.%s WHERE token(pk) > 0", KEYSPACE, SAI_TABLE);
-        runAndValidate("Submitting range requests on 2 ranges with a concurrency of 2 (230.4 rows per range expected)", query);
+        prevHistCount = getRangeReadCount();
+        runAndValidate(prevHistCount, 1, query);
 
-        // Token-restricted range query with SAI so should bypass initial concurrency estimation
+        // token-restricted query and index
+        // we expect StorageProxy#RangeCommandIterator to be used so reset previous hit count
         query = String.format("SELECT * FROM %s.%s WHERE token(pk) > 0 AND gdp > ?", KEYSPACE, SAI_TABLE);
-        runAndValidate("Submitting range requests on 2 ranges with a concurrency of 2", query, 3_000_000_000L);
+        prevHistCount = getRangeReadCount();
+        runAndValidate(prevHistCount, 1, query, 3_000_000_000L);
     }
 
-    /**
-     * Run the given query and check that the given trace message exists in the trace entries.
+    /*
+        Run the given query, check the hit count, check the max round trips.
      */
-    private void runAndValidate(String trace, String query, Object... bondValues)
+    private void runAndValidate(int prevHistCount, int maxRoundTrips, String query, Object... bondValues)
     {
-        UUID sessionId = TimeUUID.Generator.nextTimeAsUUID();
-
-        cluster.coordinator(1).executeWithTracingWithResult(sessionId, query, ConsistencyLevel.ALL, bondValues);
-
-        await().atMost(5, TimeUnit.SECONDS).until(() -> {
-            List<TracingUtil.TraceEntry> traceEntries = TracingUtil.getTrace(cluster, sessionId, ConsistencyLevel.ONE);
-            return traceEntries.stream().anyMatch(entry -> entry.activity.equals(trace));
-        });
+        cluster.coordinator(1).execute(query, ConsistencyLevel.ALL, bondValues);
+        assertEquals(prevHistCount + 1,  getRangeReadCount());
+        assertEquals(maxRoundTrips, getMaxRoundTrips());
     }
 
-    private static TokenSupplier generateTokenSupplier()
+    private int getRangeReadCount()
     {
-        List<List<String>> tokens = Arrays.asList(Collections.singletonList("-9223372036854775808"),
-                                                  Collections.singletonList("-3074457345618258602"),
-                                                  Collections.singletonList("3074457345618258603"));
-        return nodeIdx -> tokens.get(nodeIdx - 1);
+        return cluster.get(1).callOnInstance(() -> Math.toIntExact(RangeCommandIterator.rangeMetrics.roundTrips.getCount()));
+    }
+
+    private int getMaxRoundTrips()
+    {
+        return cluster.get(1).callOnInstance(() -> Math.toIntExact(RangeCommandIterator.rangeMetrics.roundTrips.getSnapshot().getMax()));
     }
 }

@@ -18,14 +18,16 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.exceptions.QueryCancelledException;
-import org.apache.cassandra.utils.Clock;
+import com.google.common.annotations.VisibleForTesting;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_DISABLE_TIMEOUT;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -35,9 +37,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_D
 @NotThreadSafe
 public class QueryContext
 {
-    private static final boolean DISABLE_TIMEOUT = SAI_TEST_DISABLE_TIMEOUT.getBoolean();
-
-    private final ReadCommand readCommand;
     private final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
@@ -48,34 +47,56 @@ public class QueryContext
     public long rowsFiltered = 0;
 
     public long trieSegmentsHit = 0;
+
+    public long bkdPostingListsHit = 0;
+    public long bkdSegmentsHit = 0;
+
+    public long bkdPostingsSkips = 0;
+    public long bkdPostingsDecodes = 0;
+
     public long triePostingsSkips = 0;
     public long triePostingsDecodes = 0;
 
-    public long balancedTreePostingListsHit = 0;
-    public long balancedTreeSegmentsHit = 0;
-    public long balancedTreePostingsSkips = 0;
-    public long balancedTreePostingsDecodes = 0;
+    public long tokenSkippingCacheHits = 0;
+    public long tokenSkippingLookups = 0;
 
-    public boolean queryTimedOut = false;
+    public long queryTimeouts = 0;
 
-    public QueryContext(ReadCommand readCommand, long executionQuotaMs)
+    private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
+
+    @VisibleForTesting
+    public QueryContext()
     {
-        this.readCommand = readCommand;
-        executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        queryStartTimeNanos = Clock.Global.nanoTime();
+        this(DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+    }
+
+    public QueryContext(long executionQuotaMs)
+    {
+        this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
+        queryStartTimeNanos = System.nanoTime();
     }
 
     public long totalQueryTimeNs()
     {
-        return Clock.Global.nanoTime() - queryStartTimeNanos;
+        return System.nanoTime() - queryStartTimeNanos;
+    }
+
+    public void incSstablesHit()
+    {
+        sstablesHit++;
+    }
+
+    public SSTableQueryContext getSSTableQueryContext(SSTableReader reader)
+    {
+        return sstableQueryContexts.computeIfAbsent(reader, k -> new SSTableQueryContext(this));
     }
 
     public void checkpoint()
     {
-        if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
+        if (totalQueryTimeNs() >= executionQuotaNano)
         {
-            queryTimedOut = true;
-            throw new QueryCancelledException(readCommand);
+            queryTimeouts++;
+            throw new AbortedOperationException();
         }
     }
 }

@@ -568,7 +568,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn", "foo2"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn"),
@@ -593,7 +593,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn2", "foo"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo"),
@@ -2880,7 +2880,7 @@ public class SelectTest extends CQLTester
             else
             {
                 assertInvalidMessage("Collection column 'l' (list<duration>) cannot be restricted by a 'IN' relation",
-                        "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
+                                     "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
             }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
@@ -2919,13 +2919,13 @@ public class SelectTest extends CQLTester
                            row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))));
 
                 assertRows(execute("SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING"),
-                        row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
-                        row(2, map(1, Duration.from("1s"), 3, Duration.from("3s"))));
+                           row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
+                           row(2, map(1, Duration.from("1s"), 3, Duration.from("3s"))));
             }
             else
             {
                 assertInvalidMessage("Collection column 'm' (map<int, duration>) cannot be restricted by a 'IN' relation",
-                        "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
+                                     "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
             }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
@@ -2994,16 +2994,16 @@ public class SelectTest extends CQLTester
                            row(0, userType("i", 1, "d", Duration.from("2s"))));
 
                 assertRows(execute("SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING"),
-                        row(1, userType("i", 2, "d", Duration.from("3s"))),
-                        row(2, userType("i", 1, "d", Duration.from("3s"))));
+                           row(1, userType("i", 2, "d", Duration.from("3s"))),
+                           row(2, userType("i", 1, "d", Duration.from("3s"))));
             }
             else
             {
                 assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
-                        "SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING");
+                                     "SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING");
 
                 assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
-                        "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
+                                     "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
             }
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
