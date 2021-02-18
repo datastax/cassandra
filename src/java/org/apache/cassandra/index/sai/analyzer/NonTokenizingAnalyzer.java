@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -26,24 +32,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.StringType;
-import org.apache.cassandra.index.sai.analyzer.filter.BasicFilters;
-import org.apache.cassandra.index.sai.analyzer.filter.FilterPipeline;
+import org.apache.cassandra.index.sai.analyzer.filter.BasicResultFilters;
+import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineBuilder;
 import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineExecutor;
+import org.apache.cassandra.index.sai.analyzer.filter.FilterPipelineTask;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Analyzer that does *not* tokenize the input. Optionally will
- * apply filters for the input based on {@link NonTokenizingOptions}.
+ * apply filters for the input output as defined in analyzers options
  */
 public class NonTokenizingAnalyzer extends AbstractAnalyzer
 {
     private static final Logger logger = LoggerFactory.getLogger(NonTokenizingAnalyzer.class);
 
-    private final AbstractType<?> type;
-    private final NonTokenizingOptions options;
-    private final FilterPipeline filterPipeline;
+    private AbstractType<?> type;
+    private NonTokenizingOptions options;
+    private FilterPipelineTask filterPipeline;
 
     private ByteBuffer input;
     private boolean hasNext = false;
@@ -64,7 +71,7 @@ public class NonTokenizingAnalyzer extends AbstractAnalyzer
     public boolean hasNext()
     {
         // check that we know how to handle the input, otherwise bail
-        if (!(type instanceof StringType)) return false;
+        if (!TypeUtil.isIn(type, ANALYZABLE_TYPES)) return false;
 
         if (hasNext)
         {
@@ -119,20 +126,26 @@ public class NonTokenizingAnalyzer extends AbstractAnalyzer
         this.hasNext = true;
     }
 
-    private FilterPipeline getFilterPipeline()
+    private FilterPipelineTask getFilterPipeline()
     {
-        FilterPipeline builder = new FilterPipeline(new BasicFilters.NoOperation());
+        FilterPipelineBuilder builder = new FilterPipelineBuilder(new BasicResultFilters.NoOperation());
         
         if (!options.isCaseSensitive())
-            builder = builder.add("to_lower", new BasicFilters.LowerCase());
+        {
+            builder = builder.add("to_lower", new BasicResultFilters.LowerCase());
+        }
         
         if (options.isNormalized())
-            builder = builder.add("normalize", new BasicFilters.Normalize());
+        {
+            builder = builder.add("normalize", new BasicResultFilters.Normalize());
+        }
 
         if (options.isAscii())
-            builder = builder.add("ascii", new BasicFilters.Ascii());
+        {
+            builder = builder.add("ascii", new BasicResultFilters.Ascii());
+        }
         
-        return builder;
+        return builder.build();
     }
 
     @Override

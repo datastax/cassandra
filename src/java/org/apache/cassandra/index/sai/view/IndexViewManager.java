@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,19 +31,19 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.IndexValidation;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * Maintain an atomic view for read requests, so that requests can read all data during concurrent compactions.
+ * Maintain a atomic view for read requests, so that requests can read all data during concurrent compactions.
  *
  * All per-column {@link SSTableIndex} updates should be proxied by {@link StorageAttachedIndexGroup} to make
  * sure per-sstable {@link SSTableContext} are in-sync.
@@ -46,13 +52,19 @@ public class IndexViewManager
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexViewManager.class);
     
-    private final IndexContext context;
+    private final ColumnContext context;
     private final AtomicReference<View> view = new AtomicReference<>();
 
-    public IndexViewManager(IndexContext context)
+    public IndexViewManager(ColumnContext context)
+    {
+        this(context, Collections.emptySet());
+    }
+
+    @VisibleForTesting
+    IndexViewManager(ColumnContext context, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.view.set(new View(context, Collections.emptySet()));
+        this.view.set(new View(context, indices));
     }
 
     public View getView()
@@ -65,19 +77,21 @@ public class IndexViewManager
      *
      * @param oldSSTables A set of SSTables to remove.
      * @param newSSTableContexts A set of SSTableContexts to add to tracker.
-     * @param validation Controls how indexes should be validated
+     * @param validate if true, per-column index files' header and footer will be validated.
+     * @param rename if true check whether the per-column index components need renaming
      *
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Collection<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, IndexValidation validation)
+    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate, boolean rename)
     {
         // Valid indexes on the left and invalid SSTable contexts on the right...
-        Pair<Collection<SSTableIndex>, Collection<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validation);
+        Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate, rename);
 
         View currentView, newView;
         Collection<SSTableIndex> newViewIndexes = new HashSet<>();
         Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
-
+        Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
+        
         do
         {
             currentView = view.get();
@@ -88,9 +102,9 @@ public class IndexViewManager
             {
                 // When aborting early open transaction, toRemove may have the same sstable files as newSSTableContexts,
                 // but different SSTableReader java objects with different start positions. So we need to release them
-                // from existing view.
+                // from existing view.  see DSP-19677
                 SSTableReader sstable = sstableIndex.getSSTable();
-                if (oldSSTables.contains(sstable) || newViewIndexes.contains(sstableIndex))
+                if (toRemove.contains(sstable) || newViewIndexes.contains(sstableIndex))
                     releasableIndexes.add(sstableIndex);
                 else
                     newViewIndexes.add(sstableIndex);
@@ -130,13 +144,9 @@ public class IndexViewManager
             index.markObsolete();
         }
 
-        update(toRemove, Collections.emptyList(), IndexValidation.NONE);
+        update(toRemove, Collections.emptyList(), false, false);
     }
 
-    /**
-     * Called when index is dropped. Mark all {@link SSTableIndex} as released and per-column index files
-     * will be removed when in-flight queries are completed.
-     */
     public void invalidate()
     {
         View currentView = view.get();

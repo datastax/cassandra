@@ -47,6 +47,13 @@ public enum RequestFailureReason
         this.code = code;
     }
 
+    public int codeForNativeProtocol()
+    {
+        // We explicitly indicated in the protocol spec that drivers should not error out on unknown code, and we
+        // currently support a superset of the OSS codes, so we don't yet worry about the version.
+        return code;
+    }
+
     private static final RequestFailureReason[] codeToReasonMap;
 
     static

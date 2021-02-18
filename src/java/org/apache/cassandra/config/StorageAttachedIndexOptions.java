@@ -17,28 +17,48 @@
  */
 package org.apache.cassandra.config;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public class StorageAttachedIndexOptions
 {
     public static final int DEFAULT_SEGMENT_BUFFER_MB = 1024;
+    public static final double DEFAULT_ZEROCOPY_USED_THRESHOLD = 0.3;
 
-    @VisibleForTesting
-    public static final int MAXIMUM_SEGMENT_BUFFER_MB = 32768;
+    private static final int MAXIMUM_SEGMENT_BUFFER_MB = 32768;
 
-    @VisibleForTesting
-    public static final String INVALID_BUFFER_SIZE_ERROR = "Invalid value for segment_write_buffer_size. " +
-                                                           "Value must be a positive integer less than " + MAXIMUM_SEGMENT_BUFFER_MB + "MiB";
-
-    public DataStorageSpec.IntMebibytesBound segment_write_buffer_size = new DataStorageSpec.IntMebibytesBound(DEFAULT_SEGMENT_BUFFER_MB);
+    public int segment_write_buffer_space_mb = DEFAULT_SEGMENT_BUFFER_MB;
+    public double zerocopy_used_threshold = DEFAULT_ZEROCOPY_USED_THRESHOLD;
 
     public void validate()
     {
-        if (segment_write_buffer_size.toMebibytes() > MAXIMUM_SEGMENT_BUFFER_MB)
+        if ((segment_write_buffer_space_mb < 0) || (segment_write_buffer_space_mb > MAXIMUM_SEGMENT_BUFFER_MB))
         {
-            throw new ConfigurationException(INVALID_BUFFER_SIZE_ERROR);
+            throw new ConfigurationException("Invalid value for segment_write_buffer_space_mb. " +
+                                             "Value must be a positive integer less than 32768");
         }
+
+        if ((zerocopy_used_threshold < 0.0) || (zerocopy_used_threshold > 1.0))
+        {
+            throw new ConfigurationException("Invalid value for zero_copy_used_threshold. " +
+                                             "Value must be between 0.0 and 1.0");
+        }
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        StorageAttachedIndexOptions that = (StorageAttachedIndexOptions) o;
+        return Objects.equal(segment_write_buffer_space_mb, that.segment_write_buffer_space_mb) &&
+               Objects.equal(zerocopy_used_threshold, that.zerocopy_used_threshold);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hashCode(segment_write_buffer_space_mb, zerocopy_used_threshold);
     }
 }

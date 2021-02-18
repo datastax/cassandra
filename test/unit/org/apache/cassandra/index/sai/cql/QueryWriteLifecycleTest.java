@@ -19,11 +19,12 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-public class QueryWriteLifecycleTest extends AbstractQueryTester
+
+public class QueryWriteLifecycleTest extends IndexQuerySupport
 {
     @Test
     public void testWriteLifecycle() throws Throwable
     {
-        IndexQuerySupport.writeLifecycle(executor, dataModel, sets);
+        writeLifecycle();
     }
 }
