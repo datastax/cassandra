@@ -778,6 +778,9 @@
         <dependency groupId="org.junit" artifactId="junit-bom" version="5.6.0" type="pom"/>
         <dependency groupId="org.assertj" artifactId="assertj-core"/>
         <dependency groupId="org.awaitility" artifactId="awaitility"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
+        <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" />
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" version="1.3" />
       </artifact:pom>
       <!-- this build-deps-pom-sources "artifact" is the same as build-deps-pom but only with those
            artifacts that have "-source.jar" files -->
@@ -863,7 +866,11 @@
         <dependency groupId="ch.qos.logback" artifactId="logback-core"/>
         <dependency groupId="ch.qos.logback" artifactId="logback-classic"/>
 
-        <!-- don't need hadoop classes to run, but if you use the hadoop stuff -->
+        <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
+        <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" />
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" version="1.3" />
+
+          <!-- don't need hadoop classes to run, but if you use the hadoop stuff -->
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-core" optional="true"/>
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" optional="true"/>
 
@@ -905,6 +912,9 @@
         <dependency groupId="com.beust" artifactId="jcommander" />
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json"/>
         <dependency groupId="org.agrona" artifactId="agrona"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="7.5.0" />
+        <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" />
+        <dependency groupId="org.hamcrest" artifactId="hamcrest-all" version="1.3" />
 
         <!-- sasi deps -->
         <dependency groupId="de.jflex" artifactId="jflex" />
