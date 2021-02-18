@@ -23,8 +23,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,7 +97,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
     {
-        add(new CustomExpression(metadata, targetIndex, value));
+        add(CustomExpression.build(metadata, targetIndex, value));
     }
 
     private void add(Expression expression)
@@ -193,8 +195,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 continue;
 
             ByteBuffer value = keyValidator instanceof CompositeType
-                             ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
-                             : key.getKey();
+                               ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
+                               : key.getKey();
             if (!e.operator().isSatisfiedBy(e.column.type, value, e.value))
                 return false;
         }
@@ -241,6 +243,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public RowFilter withoutExpressions()
     {
         return withNewExpressions(Collections.emptyList());
+    }
+
+    public RowFilter restrict(Predicate<Expression> filter)
+    {
+        return fromExpressions(expressions.stream().filter(filter).collect(Collectors.toList()));
+    }
+
+    private RowFilter fromExpressions(List<Expression> expressions)
+    {
+        return expressions.isEmpty() ? NONE : withNewExpressions(expressions);
     }
 
     protected abstract RowFilter withNewExpressions(List<Expression> expressions);
@@ -445,8 +457,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             {
                 case PARTITION_KEY:
                     return metadata.partitionKeyType instanceof CompositeType
-                         ? CompositeType.extractComponent(partitionKey.getKey(), column.position())
-                         : partitionKey.getKey();
+                           ? CompositeType.extractComponent(partitionKey.getKey(), column.position())
+                           : partitionKey.getKey();
                 case CLUSTERING:
                     return row.clustering().bufferAt(column.position());
                 default:
@@ -467,9 +479,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             Expression that = (Expression)o;
 
             return Objects.equal(this.kind(), that.kind())
-                && Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
-                && Objects.equal(this.value, that.value);
+                   && Objects.equal(this.column.name, that.column.name)
+                   && Objects.equal(this.operator, that.operator)
+                   && Objects.equal(this.value, that.value);
         }
 
         @Override
@@ -522,9 +534,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
                 {
-                    return new CustomExpression(metadata,
-                            IndexMetadata.serializer.deserialize(in, version, metadata),
-                            ByteBufferUtil.readWithShortLength(in));
+                    return CustomExpression.build(metadata,
+                                                  IndexMetadata.serializer.deserialize(in, version, metadata),
+                                                  ByteBufferUtil.readWithShortLength(in));
                 }
 
                 if (kind == Kind.USER)
@@ -569,11 +581,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     case MAP_EQUALITY:
                         MapEqualityExpression mexpr = (MapEqualityExpression)expression;
                         size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
-                              + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                                + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
                         break;
                     case CUSTOM:
                         size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
-                               + ByteBufferUtil.serializedSizeWithShortLength(expression.value);
+                                + ByteBufferUtil.serializedSizeWithShortLength(expression.value);
                         break;
                     case USER:
                         size += UserExpression.serializedSize((UserExpression)expression, version);
@@ -603,42 +615,43 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             switch (operator)
             {
                 case EQ:
+                case IN:
                 case LT:
                 case LTE:
                 case GTE:
                 case GT:
+                {
+                    assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
+
+                    // In order to support operators on Counter types, their value has to be extracted from internal
+                    // representation. See CASSANDRA-11629
+                    if (column.type.isCounter())
                     {
-                        assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
+                        ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                        if (foundValue == null)
+                            return false;
 
-                        // In order to support operators on Counter types, their value has to be extracted from internal
-                        // representation. See CASSANDRA-11629
-                        if (column.type.isCounter())
-                        {
-                            ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                            if (foundValue == null)
-                                return false;
-
-                            ByteBuffer counterValue = LongType.instance.decompose(CounterContext.instance().total(foundValue, ByteBufferAccessor.instance));
-                            return operator.isSatisfiedBy(LongType.instance, counterValue, value);
-                        }
-                        else
-                        {
-                            // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                            ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                            return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
-                        }
+                        ByteBuffer counterValue = LongType.instance.decompose(CounterContext.instance().total(foundValue, ByteBufferAccessor.instance));
+                        return operator.isSatisfiedBy(LongType.instance, counterValue, value);
                     }
+                    else
+                    {
+                        // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+                        ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                        return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                    }
+                }
                 case NEQ:
                 case LIKE_PREFIX:
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
-                    {
-                        assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
-                        ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                        // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                        return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
-                    }
+                {
+                    assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
+                    ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                    // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+                    return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                }
                 case CONTAINS:
                     assert column.type.isCollection();
                     CollectionType<?> type = (CollectionType<?>)column.type;
@@ -688,18 +701,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     MapType<?, ?> mapType = (MapType<?, ?>)column.type;
                     if (column.isComplex())
                     {
-                         return row.getCell(column, CellPath.create(value)) != null;
+                        return row.getCell(column, CellPath.create(value)) != null;
                     }
                     else
                     {
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row);
                         return foundValue != null && mapType.getSerializer().getSerializedValue(foundValue, value, mapType.getKeysType()) != null;
                     }
-
-                case IN:
-                    // It wouldn't be terribly hard to support this (though doing so would imply supporting
-                    // IN for 2ndary index) but currently we don't.
-                    throw new AssertionError();
             }
             throw new AssertionError();
         }
@@ -811,9 +819,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             MapEqualityExpression that = (MapEqualityExpression)o;
 
             return Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
-                && Objects.equal(this.key, that.key)
-                && Objects.equal(this.value, that.value);
+                   && Objects.equal(this.operator, that.operator)
+                   && Objects.equal(this.key, that.key)
+                   && Objects.equal(this.value, that.value);
         }
 
         @Override
@@ -833,7 +841,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * A custom index expression for use with 2i implementations which support custom syntax and which are not
      * necessarily linked to a single column in the base table.
      */
-    public static final class CustomExpression extends Expression
+    public static class CustomExpression extends Expression
     {
         private final IndexMetadata targetIndex;
         private final TableMetadata table;
@@ -844,6 +852,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(makeDefinition(table, targetIndex), Operator.EQ, value);
             this.targetIndex = targetIndex;
             this.table = table;
+        }
+
+        public static CustomExpression build(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
+        {
+            // delegate the expression creation to the target custom index
+            return Keyspace.openAndGetStore(metadata).indexManager.getIndex(targetIndex).customExpressionFor(metadata, value);
         }
 
         private static ColumnMetadata makeDefinition(TableMetadata table, IndexMetadata index)
@@ -1004,7 +1018,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         public long serializedSize(RowFilter filter, int version)
         {
             long size = 1 // unused boolean
-                      + TypeSizes.sizeofUnsignedVInt(filter.expressions.size());
+                        + TypeSizes.sizeofUnsignedVInt(filter.expressions.size());
             for (Expression expr : filter.expressions)
                 size += Expression.serializer.serializedSize(expr, version);
             return size;

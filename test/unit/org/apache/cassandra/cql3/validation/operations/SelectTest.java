@@ -51,54 +51,54 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s(p, s) values (?, ?)", "p2", "sv2");
 
         assertRows(execute("SELECT * FROM %s WHERE p=?", "p1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=?", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // Ascending order
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c ASC", "p1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c ASC", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // Descending order
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c DESC", "p1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c DESC", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // No order with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c =?", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k0"));
@@ -106,22 +106,22 @@ public class SelectTest extends CQLTester
         // Ascending with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c =? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k0"));
@@ -129,22 +129,22 @@ public class SelectTest extends CQLTester
         // Descending with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c =? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c DESC", "p1", "k0"));
@@ -152,18 +152,18 @@ public class SelectTest extends CQLTester
         // IN
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?)", "p1", "k1", "k2"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?) ORDER BY c ASC", "p1", "k1", "k2"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?) ORDER BY c DESC", "p1", "k1", "k2"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
     }
 
@@ -177,55 +177,55 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s(p, s) values (?, ?)", "p2", "sv2");
 
         assertRows(execute("SELECT * FROM %s WHERE p=?", "p1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=?", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // Ascending order
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c ASC", "p1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c ASC", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // Descending order
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c DESC", "p1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? ORDER BY c DESC", "p2"),
-            row("p2", null, "sv2", null)
+                   row("p2", null, "sv2", null)
         );
 
         // No order with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c=?", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k0"));
@@ -233,22 +233,22 @@ public class SelectTest extends CQLTester
         // Ascending with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c=? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k0"));
@@ -256,22 +256,22 @@ public class SelectTest extends CQLTester
         // Descending with one relation
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k2"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k3"));
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c=? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c DESC", "p1", "k1"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c DESC", "p1", "k0"));
@@ -279,18 +279,18 @@ public class SelectTest extends CQLTester
         // IN
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?)", "p1", "k1", "k2"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?) ORDER BY c ASC", "p1", "k1", "k2"),
-            row("p1", "k1", "sv1", "v1"),
-            row("p1", "k2", "sv1", "v2")
+                   row("p1", "k1", "sv1", "v1"),
+                   row("p1", "k2", "sv1", "v2")
         );
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c IN (?, ?) ORDER BY c DESC", "p1", "k1", "k2"),
-            row("p1", "k2", "sv1", "v2"),
-            row("p1", "k1", "sv1", "v1")
+                   row("p1", "k2", "sv1", "v2"),
+                   row("p1", "k1", "sv1", "v1")
         );
     }
 
@@ -568,7 +568,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn", "foo2"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn"),
@@ -593,7 +593,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn2", "foo"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo"),
@@ -1110,7 +1110,7 @@ public class SelectTest extends CQLTester
         createTable("CREATE TABLE %s ( k int, v int, PRIMARY KEY (k, v))");
 
         execute("INSERT INTO %s (k, v) VALUES (0, 0)");
-        
+
         flush();
 
         assertRows(execute("SELECT v FROM %s WHERE k=0 AND v IN (1, 0)"),
@@ -1255,7 +1255,7 @@ public class SelectTest extends CQLTester
         execute("DELETE FROM %s WHERE a = 2 AND b = 2");
 
         beforeAndAfterFlush(() -> {
-            
+
             // Checks filtering
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c = 4 AND d = 8");
@@ -1276,11 +1276,12 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE s = 1 AND d = 12 ALLOW FILTERING"),
                        row(1, 3, 1, 6, 12));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (c) is not yet supported",
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7)");
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (c) is not yet supported",
-                                 "SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7) ALLOW FILTERING");
+            assertRows(execute("SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7) ALLOW FILTERING"),
+                       row(1, 3, 1, 6, 12),
+                       row(2, 3, 2, 7, 12));
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c > 4");
@@ -1636,24 +1637,24 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT DISTINCT pk0, pk1 FROM %s WHERE pk1 = 1 LIMIT 3");
+                                 "SELECT DISTINCT pk0, pk1 FROM %s WHERE pk1 = 1 LIMIT 3");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT DISTINCT pk0, pk1 FROM %s WHERE pk0 > 0 AND pk1 = 1 LIMIT 3");
+                                 "SELECT DISTINCT pk0, pk1 FROM %s WHERE pk0 > 0 AND pk1 = 1 LIMIT 3");
 
             assertRows(execute("SELECT DISTINCT pk0, pk1 FROM %s WHERE pk0 = 1 LIMIT 1 ALLOW FILTERING"),
-                    row(1, 1));
+                       row(1, 1));
 
             assertRows(execute("SELECT DISTINCT pk0, pk1 FROM %s WHERE pk1 = 1 LIMIT 3 ALLOW FILTERING"),
-                    row(1, 1));
+                       row(1, 1));
 
             assertEmpty(execute("SELECT DISTINCT pk0, pk1 FROM %s WHERE pk0 < 0 AND pk1 = 1 LIMIT 3 ALLOW FILTERING"));
 
             // Test selection validation.
             assertInvalidMessage("queries must request all the partition key columns",
-                    "SELECT DISTINCT pk0 FROM %s ALLOW FILTERING");
+                                 "SELECT DISTINCT pk0 FROM %s ALLOW FILTERING");
             assertInvalidMessage("queries must only request partition key columns",
-                    "SELECT DISTINCT pk0, pk1, ck0 FROM %s ALLOW FILTERING");
+                                 "SELECT DISTINCT pk0, pk1, ck0 FROM %s ALLOW FILTERING");
         });
     }
 
@@ -1669,57 +1670,57 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertInvalidMessage("IN restrictions are not supported when the query involves filtering",
-                    "SELECT * FROM %s WHERE b in (11,12) ALLOW FILTERING");
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE b in (11,12)");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a = 11");
+                                 "SELECT * FROM %s WHERE a = 11");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a > 11");
+                                 "SELECT * FROM %s WHERE a > 11");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a > 11 and b = 1");
+                                 "SELECT * FROM %s WHERE a > 11 and b = 1");
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE a in (11) and b in (12,15,22)"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE b in (12,15,22)");
 
             assertRows(execute("SELECT * FROM %s WHERE a in (11) and b in (12,15,22) ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE a in (11) ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE b = 15 ALLOW FILTERING"),
-                    row(11, 15, 16, 17));
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE b >= 15 ALLOW FILTERING"),
-                    row(11, 15, 16, 17),
-                    row(31, 32, 33, 34),
-                    row(21, 22, 23, 24));
+                       row(11, 15, 16, 17),
+                       row(31, 32, 33, 34),
+                       row(21, 22, 23, 24));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 11 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17),
-                    row(31, 32, 33, 34),
-                    row(21, 22, 23, 24));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17),
+                       row(31, 32, 33, 34),
+                       row(21, 22, 23, 24));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 11 AND b <= 15 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE a <= 11 AND b >= 14 ALLOW FILTERING"),
-                    row(11, 15, 16, 17));
+                       row(11, 15, 16, 17));
 
             Object[][] res = getRows(execute("SELECT * FROM %s WHERE a < 11 ALLOW FILTERING"));
             assertEquals(0, res.length);
@@ -1745,34 +1746,34 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-             assertInvalidMessage("IN restrictions are not supported when the query involves filtering",
-                    "SELECT * FROM %s WHERE b in (11,12) ALLOW FILTERING");
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE b in (11,12)");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a = 11");
+                                 "SELECT * FROM %s WHERE a = 11");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a > 11");
+                                 "SELECT * FROM %s WHERE a > 11");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a > 11 and b = 1");
+                                 "SELECT * FROM %s WHERE a > 11 and b = 1");
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 11 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17),
-                    row(31, 32, 33, 34),
-                    row(21, 22, 23, 24));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17),
+                       row(31, 32, 33, 34),
+                       row(21, 22, 23, 24));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 11 AND b <= 15 ALLOW FILTERING"),
-                    row(11, 12, 13, 14),
-                    row(11, 15, 16, 17));
+                       row(11, 12, 13, 14),
+                       row(11, 15, 16, 17));
 
             assertRows(execute("SELECT * FROM %s WHERE a <= 11 AND b >= 14 ALLOW FILTERING"),
-                    row(11, 15, 16, 17));
+                       row(11, 15, 16, 17));
         });
 
         // ----------------------------------------------
@@ -1793,21 +1794,21 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING"),
-                    row(1, 2, 4));
+                       row(1, 2, 4));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 1 ALLOW FILTERING"),
-                    row(1, 2, 4),
-                    row(2, 1, 6),
-                    row(4, 1, 7),
-                    row(3, 2, 4));
+                       row(1, 2, 4),
+                       row(2, 1, 6),
+                       row(4, 1, 7),
+                       row(3, 2, 4));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 1 AND b >= 2  ALLOW FILTERING"),
-                    row(1, 2, 4),
-                    row(3, 2, 4));
+                       row(1, 2, 4),
+                       row(3, 2, 4));
 
             assertRows(execute("SELECT * FROM %s WHERE a >= 1 AND b >= 2 AND c <= 4 ALLOW FILTERING"),
-                    row(1, 2, 4),
-                    row(3, 2, 4));
+                       row(1, 2, 4),
+                       row(3, 2, 4));
         });
     }
 
@@ -1824,38 +1825,38 @@ public class SelectTest extends CQLTester
         beforeAndAfterFlush(() -> {
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c = 16"),
-                    row(11, 15, 16, 17, 18));
+                       row(11, 15, 16, 17, 18));
 
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
-                    "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d = 14");
+            "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+            "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d = 14");
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c = 16 AND d > 16"),
-                    row(11, 15, 16, 17, 18));
+                       row(11, 15, 16, 17, 18));
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c > 13 AND d >= 17 ALLOW FILTERING"),
-                    row(11, 15, 16, 17, 18));
+                       row(11, 15, 16, 17, 18));
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
-                    "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d > 17");
+            "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+            "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d > 17");
 
             assertRows(execute("SELECT * FROM %s WHERE c > 30 AND d >= 34 ALLOW FILTERING"),
-                    row(31, 32, 33, 34, 35));
+                       row(31, 32, 33, 34, 35));
 
             assertRows(execute("SELECT * FROM %s WHERE a <= 11 AND c > 15 AND d >= 16 ALLOW FILTERING"),
-                    row(11, 15, 16, 17, 18));
+                       row(11, 15, 16, 17, 18));
 
             assertRows(execute("SELECT * FROM %s WHERE a <= 11 AND b >= 15 AND c > 15 AND d >= 16 ALLOW FILTERING"),
-                    row(11, 15, 16, 17, 18));
+                       row(11, 15, 16, 17, 18));
 
             assertRows(execute("SELECT * FROM %s WHERE a <= 100 AND b >= 15 AND c > 0 AND d <= 100 ALLOW FILTERING"),
-                    row(11, 15, 16, 17, 18),
-                    row(31, 32, 33, 34, 35),
-                    row(21, 22, 23, 24, 25));
+                       row(11, 15, 16, 17, 18),
+                       row(31, 32, 33, 34, 35),
+                       row(21, 22, 23, 24, 25));
 
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
-                    "SELECT * FROM %s WHERE a <= 11 AND c > 15 AND d >= 16");
+            "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+            "SELECT * FROM %s WHERE a <= 11 AND c > 15 AND d >= 16");
         });
 
         // test clutering order
@@ -1893,18 +1894,18 @@ public class SelectTest extends CQLTester
 
             // Checks filtering for lists
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE b < 0 AND c CONTAINS 2");
+                                 "SELECT * FROM %s WHERE b < 0 AND c CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE b >= 4 AND c CONTAINS 2 ALLOW FILTERING"),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
             assertRows(
-                    execute("SELECT * FROM %s WHERE a > 0 AND b <= 3 AND c CONTAINS 2 AND c CONTAINS 3 ALLOW FILTERING"),
-                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+            execute("SELECT * FROM %s WHERE a > 0 AND b <= 3 AND c CONTAINS 2 AND c CONTAINS 3 ALLOW FILTERING"),
+            row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
 
             // Checks filtering for sets
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                    "SELECT * FROM %s WHERE a = 1 AND d CONTAINS 4");
+                                 "SELECT * FROM %s WHERE a = 1 AND d CONTAINS 4");
 
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
@@ -1932,8 +1933,8 @@ public class SelectTest extends CQLTester
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
             assertRows(
-                    execute("SELECT * FROM %s WHERE a >= 1 AND b in (3) AND c CONTAINS 2 AND d CONTAINS 4 AND e CONTAINS KEY 3 ALLOW FILTERING"),
-                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+            execute("SELECT * FROM %s WHERE a >= 1 AND b in (3) AND c CONTAINS 2 AND d CONTAINS 4 AND e CONTAINS KEY 3 ALLOW FILTERING"),
+            row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
         });
 
         // Checks filtering with null
@@ -2327,7 +2328,7 @@ public class SelectTest extends CQLTester
         // Test for CASSANDRA-11310 compatibility with 2i
         createTable("CREATE TABLE %s (a text, b int, c text, d int, PRIMARY KEY (a, b, c));");
         createIndex("CREATE INDEX ON %s(c)");
-        
+
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 0, "b", 1);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 1, "b", 2);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 2, "b", 3);
@@ -2836,8 +2837,9 @@ public class SelectTest extends CQLTester
                    row(0, Duration.from("1s")),
                    row(2, Duration.from("1s")));
 
-        assertInvalidMessage("IN predicates on non-primary-key columns (d) is not yet supported",
-                             "SELECT * FROM %s WHERE d IN (1s, 2s) ALLOW FILTERING");
+        assertRows(execute("SELECT * FROM %s WHERE d IN (1s, 3s) ALLOW FILTERING"),
+                   row(0, Duration.from("1s")),
+                   row(2, Duration.from("1s")));
 
         assertInvalidMessage("Slice restrictions are not supported on duration columns",
                              "SELECT * FROM %s WHERE d > 1s ALLOW FILTERING");
@@ -2865,11 +2867,19 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, l) VALUES (2, [1s, 3s])");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE l = [1s, 2s] ALLOW FILTERING"),
                            row(0, list(Duration.from("1s"), Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (l) is not yet supported",
-                                 "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING"),
+                           row(1, list(Duration.from("2s"), Duration.from("3s"))),
+                           row(0, list(Duration.from("1s"), Duration.from("2s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Collection column 'l' (list<duration>) cannot be restricted by a 'IN' relation",
+                                     "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
                                  "SELECT * FROM %s WHERE l > [2s, 3s] ALLOW FILTERING");
@@ -2902,23 +2912,31 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, m) VALUES (2, {1:1s, 3:3s})");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE m = {1:1s, 2:2s} ALLOW FILTERING"),
                            row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (m) is not yet supported",
-                    "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING"),
+                           row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
+                           row(2, map(1, Duration.from("1s"), 3, Duration.from("3s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Collection column 'm' (map<int, duration>) cannot be restricted by a 'IN' relation",
+                                     "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
-                    "SELECT * FROM %s WHERE m > {1:1s, 3:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE m > {1:1s, 3:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
-                    "SELECT * FROM %s WHERE m >= {1:1s, 3:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE m >= {1:1s, 3:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
-                    "SELECT * FROM %s WHERE m <= {1:1s, 3:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE m <= {1:1s, 3:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
-                    "SELECT * FROM %s WHERE m < {1:1s, 3:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE m < {1:1s, 3:3s} ALLOW FILTERING");
 
             assertRows(execute("SELECT * FROM %s WHERE m CONTAINS 1s ALLOW FILTERING"),
                        row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
@@ -2937,20 +2955,21 @@ public class SelectTest extends CQLTester
         assertRows(execute("SELECT * FROM %s WHERE t = (1, 2s) ALLOW FILTERING"),
                    row(0, tuple(1, Duration.from("2s"))));
 
-        assertInvalidMessage("IN predicates on non-primary-key columns (t) is not yet supported",
-                "SELECT * FROM %s WHERE t IN ((1, 2s), (1, 3s)) ALLOW FILTERING");
+        assertRows(execute("SELECT * FROM %s WHERE t IN ((1, 2s), (1, 3s)) ALLOW FILTERING"),
+                   row(0, tuple(1, Duration.from("2s"))),
+                   row(2, tuple(1, Duration.from("3s"))));
 
         assertInvalidMessage("Slice restrictions are not supported on tuples containing durations",
-                "SELECT * FROM %s WHERE t > (1, 2s) ALLOW FILTERING");
+                             "SELECT * FROM %s WHERE t > (1, 2s) ALLOW FILTERING");
 
         assertInvalidMessage("Slice restrictions are not supported on tuples containing durations",
-                "SELECT * FROM %s WHERE t >= (1, 2s) ALLOW FILTERING");
+                             "SELECT * FROM %s WHERE t >= (1, 2s) ALLOW FILTERING");
 
         assertInvalidMessage("Slice restrictions are not supported on tuples containing durations",
-                "SELECT * FROM %s WHERE t <= (1, 2s) ALLOW FILTERING");
+                             "SELECT * FROM %s WHERE t <= (1, 2s) ALLOW FILTERING");
 
         assertInvalidMessage("Slice restrictions are not supported on tuples containing durations",
-                "SELECT * FROM %s WHERE t < (1, 2s) ALLOW FILTERING");
+                             "SELECT * FROM %s WHERE t < (1, 2s) ALLOW FILTERING");
     }
 
     @Test
@@ -2968,23 +2987,34 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, u) VALUES (2, {i: 1, d:3s})");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING"),
                            row(0, userType("i", 1, "d", Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (u) is not yet supported",
-                    "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING"),
+                           row(1, userType("i", 2, "d", Duration.from("3s"))),
+                           row(2, userType("i", 1, "d", Duration.from("3s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
+                                     "SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING");
+
+                assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
+                                     "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
-                    "SELECT * FROM %s WHERE u > {i: 1, d:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE u > {i: 1, d:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
-                    "SELECT * FROM %s WHERE u >= {i: 1, d:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE u >= {i: 1, d:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
-                    "SELECT * FROM %s WHERE u <= {i: 1, d:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE u <= {i: 1, d:3s} ALLOW FILTERING");
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
-                    "SELECT * FROM %s WHERE u < {i: 1, d:3s} ALLOW FILTERING");
+                                 "SELECT * FROM %s WHERE u < {i: 1, d:3s} ALLOW FILTERING");
         }
     }
 

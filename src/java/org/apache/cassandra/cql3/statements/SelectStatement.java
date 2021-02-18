@@ -393,8 +393,8 @@ public class SelectStatement implements CQLStatement
         // We can't properly do post-query ordering if we page (see #6722)
         // For GROUP BY or aggregation queries we always page internally even if the user has turned paging off
         checkFalse(pageSize > 0 && needsPostQueryOrdering(),
-                  "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
-                  + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
+                   "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
+                   + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
         ResultMessage.Rows msg;
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
@@ -585,7 +585,7 @@ public class SelectStatement implements CQLStatement
             return ReadQuery.empty(table);
 
         ReadQuery command =
-            PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
+        PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         command.maybeValidateIndex();
@@ -640,8 +640,8 @@ public class SelectStatement implements CQLStatement
             ClusteringBound<?> start = startBounds.first();
             ClusteringBound<?> end = endBounds.first();
             return Slice.isEmpty(table.comparator, start, end)
-                 ? Slices.NONE
-                 : Slices.with(table.comparator, Slice.make(start, end));
+                   ? Slices.NONE
+                   : Slices.with(table.comparator, Slice.make(start, end));
         }
 
         Slices.Builder builder = new Slices.Builder(table.comparator, startBounds.size());
@@ -997,7 +997,7 @@ public class SelectStatement implements CQLStatement
                     orderingComparator = Collections.reverseOrder(orderingComparator);
             }
 
-            checkNeedsFiltering(restrictions);
+            checkNeedsFiltering(table, restrictions);
 
             return new SelectStatement(table,
                                        bindVariables,
@@ -1051,7 +1051,7 @@ public class SelectStatement implements CQLStatement
                 return false;
 
             return Selectable.selectColumns(selectables, (column) -> column.isStatic())
-                    && !Selectable.selectColumns(selectables, (column) -> !column.isPartitionKey() && !column.isStatic());
+                   && !Selectable.selectColumns(selectables, (column) -> !column.isPartitionKey() && !column.isStatic());
         }
 
         /**
@@ -1115,7 +1115,7 @@ public class SelectStatement implements CQLStatement
         private static void validateDistinctSelection(TableMetadata metadata,
                                                       Selection selection,
                                                       StatementRestrictions restrictions)
-                                                      throws InvalidRequestException
+        throws InvalidRequestException
         {
             checkFalse(restrictions.hasClusteringColumnsRestrictions() ||
                        (restrictions.hasNonPrimaryKeyRestrictions() && !restrictions.nonPKRestrictedColumns(true).stream().allMatch(ColumnMetadata::isStatic)),
@@ -1197,7 +1197,7 @@ public class SelectStatement implements CQLStatement
         private Comparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
                                                                    StatementRestrictions restrictions,
                                                                    Map<ColumnMetadata, Boolean> orderingColumns)
-                                                                   throws InvalidRequestException
+        throws InvalidRequestException
         {
             if (!restrictions.keyIsInRelation())
                 return null;
@@ -1211,7 +1211,7 @@ public class SelectStatement implements CQLStatement
                 sorters.add(orderingColumn.type);
             }
             return idToSort.size() == 1 ? new SingleColumnComparator(idToSort.get(0), sorters.get(0))
-                    : new CompositeComparator(sorters, idToSort);
+                                        : new CompositeComparator(sorters, idToSort);
         }
 
         private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns, StatementRestrictions restrictions) throws InvalidRequestException
@@ -1255,15 +1255,17 @@ public class SelectStatement implements CQLStatement
         }
 
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
-        private void checkNeedsFiltering(StatementRestrictions restrictions) throws InvalidRequestException
+        private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
         {
             // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
             {
-                // We will potentially filter data if either:
-                //  - Have more than one IndexExpression
-                //  - Have no index expression and the row filter is not the identity
-                checkFalse(restrictions.needFiltering(), StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                // We will potentially filter data if the row filter is not the identity and there isn't any index group
+                // supporting all the expressions in the filter.
+                if (restrictions.needFiltering(table))
+                {
+                    restrictions.throwRequiresAllowFilteringError(table);
+                }
             }
         }
 
@@ -1373,7 +1375,7 @@ public class SelectStatement implements CQLStatement
             return 0;
         }
     }
-    
+
     @Override
     public String toString()
     {

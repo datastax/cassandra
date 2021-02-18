@@ -116,7 +116,7 @@ public final class SingleColumnRelation extends Relation
                           Raw raw,
                           String keyspace,
                           VariableSpecifications boundNames)
-                          throws InvalidRequestException
+    throws InvalidRequestException
     {
         assert receivers.size() == 1;
 
@@ -172,10 +172,10 @@ public final class SingleColumnRelation extends Relation
 
         SingleColumnRelation scr = (SingleColumnRelation) o;
         return Objects.equals(entity, scr.entity)
-            && Objects.equals(relationType, scr.relationType)
-            && Objects.equals(mapKey, scr.mapKey)
-            && Objects.equals(value, scr.value)
-            && Objects.equals(inValues, scr.inValues);
+               && Objects.equals(relationType, scr.relationType)
+               && Objects.equals(mapKey, scr.mapKey)
+               && Objects.equals(value, scr.value)
+               && Objects.equals(inValues, scr.inValues);
     }
 
     @Override
@@ -273,16 +273,6 @@ public final class SingleColumnRelation extends Relation
     private List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef) throws InvalidRequestException
     {
         ColumnSpecification receiver = columnDef;
-
-        if (isIN())
-        {
-            // We only allow IN on the row key and the clustering key so far, never on non-PK columns, and this even if
-            // there's an index
-            // Note: for backward compatibility reason, we conside a IN of 1 value the same as a EQ, so we let that
-            // slide.
-            checkFalse(!columnDef.isPrimaryKeyColumn() && !canHaveOnlyOneValue(),
-                       "IN predicates on non-primary-key columns (%s) is not yet supported", columnDef.name);
-        }
 
         checkFalse(isContainsKey() && !(receiver.type instanceof MapType), "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
         checkFalse(isContains() && !(receiver.type.isCollection()), "Cannot use CONTAINS on non-collection column %s", receiver.name);
