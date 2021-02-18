@@ -197,8 +197,8 @@ public class SASIIndexTest
 
                 for (Component c : components)
                 {
-                    Path componentPath = Paths.get(sstable.descriptor + "-" + c.name);
-                    long componentSize = Files.size(componentPath);
+                    File componentPath = sstable.descriptor.fileFor(c);
+                    long componentSize = componentPath.length();
                     if (Component.Type.fromRepresentation(c.name) == Component.Type.SECONDARY_INDEX)
                         indexSize += componentSize;
                     else
