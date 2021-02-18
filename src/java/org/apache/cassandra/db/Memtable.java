@@ -33,10 +33,14 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -108,6 +112,8 @@ public class Memtable implements Comparable<Memtable>
     private final AtomicLong liveDataSize = new AtomicLong(0);
     private final AtomicLong currentOperations = new AtomicLong(0);
 
+    // Allows us to find a Memtable by its tracker
+    private volatile LifecycleNewTracker tracker;
     // the write barrier for directing writes to this memtable or the next during a switch
     private volatile OpOrder.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
@@ -174,6 +180,11 @@ public class Memtable implements Comparable<Memtable>
     public MemtableAllocator getAllocator()
     {
         return allocator;
+    }
+
+    public void allocateExtraOnHeap(long additionalSpace, OpOrder.Group opGroup)
+    {
+        getAllocator().onHeap().allocate(additionalSpace, opGroup);
     }
 
     public long getLiveDataSize()
@@ -306,8 +317,16 @@ public class Memtable implements Comparable<Memtable>
         return partitions.size();
     }
 
+    public LifecycleNewTracker tracker()
+    {
+        return tracker;
+    }
+
     public List<FlushRunnable> flushRunnables(LifecycleTransaction txn)
     {
+        Preconditions.checkState(this.tracker == null, "Attempted to flush Memtable more than once on %s.%s", cfs.keyspace.getName(), cfs.name);
+        this.tracker = txn;
+
         return createFlushRunnables(txn);
     }
 
@@ -367,8 +386,8 @@ public class Memtable implements Comparable<Memtable>
             subMap = stopIsMin ? partitions : partitions.headMap(keyRange.right, includeStop);
         else
             subMap = stopIsMin
-                   ? partitions.tailMap(keyRange.left, includeStart)
-                   : partitions.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+                     ? partitions.tailMap(keyRange.left, includeStart)
+                     : partitions.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
@@ -446,8 +465,8 @@ public class Memtable implements Comparable<Memtable>
                 keySize += ((DecoratedKey) key).getKey().remaining();
             }
             estimatedSize = (long) ((keySize // index entries
-                                    + keySize // keys in data file
-                                    + liveDataSize.get()) // data
+                                     + keySize // keys in data file
+                                     + liveDataSize.get()) // data
                                     * 1.2); // bloom filter and row index overhead
 
             this.isBatchLogTable = cfs.name.equals(SystemKeyspace.BATCHES) && cfs.keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME);
@@ -496,9 +515,9 @@ public class Memtable implements Comparable<Memtable>
 
             long bytesFlushed = writer.getFilePointer();
             logger.info("Completed flushing {} ({}) for commitlog position {}",
-                         writer.getFilename(),
-                         FBUtilities.prettyPrintMemory(bytesFlushed),
-                         commitLogUpperBound);
+                        writer.getFilename(),
+                        FBUtilities.prettyPrintMemory(bytesFlushed),
+                        commitLogUpperBound);
             // Update the metrics
             cfs.metric.bytesFlushed.inc(bytesFlushed);
 
@@ -512,7 +531,7 @@ public class Memtable implements Comparable<Memtable>
                                                     EncodingStats stats)
         {
             MetadataCollector sstableMetadataCollector = new MetadataCollector(cfs.metadata().comparator)
-                    .commitLogIntervals(new IntervalSet<>(commitLogLowerBound.get(), commitLogUpperBound.get()));
+                                                         .commitLogIntervals(new IntervalSet<>(commitLogLowerBound.get(), commitLogUpperBound.get()));
 
             return cfs.createSSTableMultiWriter(descriptor,
                                                 toFlush.size(),

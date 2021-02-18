@@ -115,11 +115,11 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                     throw ire("Duplicate column '%s' in index target list", target.column);
         }
 
-        indexTargets.forEach(t -> validateIndexTarget(table, t));
+        IndexMetadata.Kind kind = attrs.isCustom ? IndexMetadata.Kind.CUSTOM : IndexMetadata.Kind.COMPOSITES;
+
+        indexTargets.forEach(t -> validateIndexTarget(table, kind, t));
 
         String name = null == indexName ? generateIndexName(keyspace, indexTargets) : indexName;
-
-        IndexMetadata.Kind kind = attrs.isCustom ? IndexMetadata.Kind.CUSTOM : IndexMetadata.Kind.COMPOSITES;
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
@@ -150,12 +150,16 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         return ImmutableSet.of();
     }
 
-    private void validateIndexTarget(TableMetadata table, IndexTarget target)
+    private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
     {
         ColumnMetadata column = table.getColumn(target.column);
 
         if (null == column)
             throw ire("Column '%s' doesn't exist", target.column);
+
+        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
+            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
+                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
 
         if (column.type.referencesDuration())
         {
@@ -203,8 +207,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private String generateIndexName(KeyspaceMetadata keyspace, List<IndexTarget> targets)
     {
         String baseName = targets.size() == 1
-                        ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName);
+                          ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
+                          : IndexMetadata.generateDefaultIndexName(tableName);
         return keyspace.findAvailableIndexName(baseName);
     }
 
@@ -253,8 +257,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         public CreateIndexStatement prepare(ClientState state)
         {
             String keyspaceName = tableName.hasKeyspace()
-                                ? tableName.getKeyspace()
-                                : indexName.hasKeyspace() ? indexName.getKeyspace() : state.getKeyspace();
+                                  ? tableName.getKeyspace()
+                                  : indexName.hasKeyspace() ? indexName.getKeyspace() : state.getKeyspace();
 
             if (tableName.hasKeyspace() && !keyspaceName.equals(tableName.getKeyspace()))
                 throw ire("Keyspace name '%s' doesn't match table name '%s'", keyspaceName, tableName);

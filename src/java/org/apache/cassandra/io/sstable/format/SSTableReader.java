@@ -46,9 +46,15 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
@@ -405,7 +411,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
         {
-             sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
         }
         catch (IOException e)
         {
@@ -590,7 +596,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert desc != null && ifile != null && dfile != null && summary != null && bf != null && sstableMetadata != null;
 
         return new SSTableReaderBuilder.ForWriter(desc, metadata, maxDataAge, components, sstableMetadata, openReason, header)
-                .bf(bf).ifile(ifile).dfile(dfile).summary(summary).build();
+               .bf(bf).ifile(ifile).dfile(dfile).summary(summary).build();
     }
 
     /**
@@ -983,7 +989,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         else
         {
             throw new AssertionError("Attempted to clone SSTableReader with the same index summary sampling level and " +
-                    "no adjustments to min/max_index_interval");
+                                     "no adjustments to min/max_index_interval");
         }
 
         // Always save the resampled index with lock to avoid racing with entire-sstable streaming
@@ -1196,8 +1202,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 continue;
 
             int right = Range.isWrapAround(range.left, range.right)
-                    ? summary.size() - 1
-                    : summary.binarySearch(rightPosition);
+                        ? summary.size() - 1
+                        : summary.binarySearch(rightPosition);
             if (right < 0)
             {
                 // range are end inclusive so we use the previous index from what binarySearch give us
@@ -1592,7 +1598,109 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata.repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE;
     }
 
+    public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
+    {
+        indexFileReader.seek(indexPosition);
+        return keyAt(indexFileReader);
+    }
+
     public abstract DecoratedKey keyAt(long indexPosition) throws IOException;
+
+    public abstract DecoratedKey keyAt(FileDataInput reader) throws IOException;
+
+    /**
+     * Retrieves the partition-level deletion time at the given position of the data file, as specified by
+     * {@link SSTableFlushObserver#partitionLevelDeletion(DeletionTime, long)}.
+     *
+     * @param position the start position of the partion-level deletion time in the data file
+     * @return the partion-level deletion time at the specified position
+     */
+    public DeletionTime partitionLevelDeletionAt(long position) throws IOException
+    {
+        try (FileDataInput in = dfile.createReader(position))
+        {
+            if (in.isEOF())
+                return null;
+
+            return DeletionTime.serializer.deserialize(in);
+        }
+    }
+
+    /**
+     * Retrieves the static row at the given position of the data file, as specified by
+     * {@link SSTableFlushObserver#staticRow(Row, long)}.
+     *
+     * @param position the start position of the static row in the data file
+     * @param columnFilter the columns to fetch, {@code null} to select all the columns
+     * @return the static row at the specified position
+     */
+    public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
+    {
+        if (!header.hasStatic())
+            return Rows.EMPTY_STATIC_ROW;
+
+        try (FileDataInput in = dfile.createReader(position))
+        {
+            if (in.isEOF())
+                return null;
+
+            int version = descriptor.version.correspondingMessagingVersion();
+            DeserializationHelper helper = new DeserializationHelper(metadata.get(),
+                                                                     version,
+                                                                     DeserializationHelper.Flag.LOCAL,
+                                                                     columnFilter);
+
+            return UnfilteredSerializer.serializer.deserializeStaticRow(in, header, helper);
+        }
+    }
+
+    /**
+     * Retrieves the clustering prefix of the unfiltered at the given position of the data file, as specified by
+     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
+     *
+     * @param position the start position of the unfiltered in the data file
+     * @return the clustering prefix of the unfiltered at the specified position
+     */
+    public ClusteringPrefix clusteringAt(long position) throws IOException
+    {
+        try (FileDataInput in = dfile.createReader(position))
+        {
+            if (in.isEOF())
+                return null;
+
+            int version = descriptor.version.correspondingMessagingVersion();
+            int flags = in.readUnsignedByte();
+            boolean isRow = UnfilteredSerializer.kind(flags) == Unfiltered.Kind.ROW;
+
+            return isRow
+                   ? Clustering.serializer.deserialize(in, version, header.clusteringTypes())
+                   : ClusteringBoundOrBoundary.serializer.deserialize(in, version, header.clusteringTypes());
+        }
+    }
+
+    /**
+     * Retrieves the unfiltered at the given position of the data file, as specified by
+     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
+     *
+     * @param position the start position of the unfiltered in the data file
+     * @param columnFilter the columns to fetch, {@code null} to select all the columns
+     * @return the unfiltered at the specified position
+     */
+    public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
+    {
+        try (FileDataInput in = dfile.createReader(position))
+        {
+            if (in.isEOF())
+                return null;
+
+            int version = descriptor.version.correspondingMessagingVersion();
+            DeserializationHelper helper = new DeserializationHelper(metadata.get(),
+                                                                     version,
+                                                                     DeserializationHelper.Flag.LOCAL,
+                                                                     columnFilter);
+            return UnfilteredSerializer.serializer.deserialize(in, header, helper, BTreeRow.sortedBuilder());
+        }
+    }
 
     public boolean isPendingRepair()
     {
@@ -1758,8 +1866,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public int getAvgColumnSetPerRow()
     {
         return sstableMetadata.totalRows < 0
-             ? -1
-             : (sstableMetadata.totalRows == 0 ? 0 : (int)(sstableMetadata.totalColumnsSet / sstableMetadata.totalRows));
+               ? -1
+               : (sstableMetadata.totalRows == 0 ? 0 : (int)(sstableMetadata.totalColumnsSet / sstableMetadata.totalRows));
     }
 
     public int getSSTableLevel()

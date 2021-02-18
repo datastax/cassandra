@@ -65,9 +65,9 @@ public class BigTableWriter extends SSTableWriter
     private long lastEarlyOpenLength = 0;
 
     private final SequentialWriterOption writerOption = SequentialWriterOption.newBuilder()
-                                                        .trickleFsync(DatabaseDescriptor.getTrickleFsync())
-                                                        .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
-                                                        .build();
+                                                                              .trickleFsync(DatabaseDescriptor.getTrickleFsync())
+                                                                              .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
+                                                                              .build();
 
     public BigTableWriter(Descriptor descriptor,
                           long keyCount,
@@ -75,12 +75,13 @@ public class BigTableWriter extends SSTableWriter
                           UUID pendingRepair,
                           boolean isTransient,
                           TableMetadataRef metadata,
-                          MetadataCollector metadataCollector, 
+                          MetadataCollector metadataCollector,
                           SerializationHeader header,
                           Collection<SSTableFlushObserver> observers,
-                          LifecycleNewTracker lifecycleNewTracker)
+                          LifecycleNewTracker lifecycleNewTracker,
+                          Set<Component> indexComponents)
     {
-        super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, indexComponents);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         if (compression)
@@ -88,18 +89,18 @@ public class BigTableWriter extends SSTableWriter
             final CompressionParams compressionParams = compressionFor(lifecycleNewTracker.opType());
 
             dataFile = new CompressedSequentialWriter(new File(getFilename()),
-                                             descriptor.filenameFor(Component.COMPRESSION_INFO),
-                                             new File(descriptor.filenameFor(Component.DIGEST)),
-                                             writerOption,
-                                             compressionParams,
-                                             metadataCollector);
+                                                      descriptor.filenameFor(Component.COMPRESSION_INFO),
+                                                      new File(descriptor.filenameFor(Component.DIGEST)),
+                                                      writerOption,
+                                                      compressionParams,
+                                                      metadataCollector);
         }
         else
         {
             dataFile = new ChecksummedSequentialWriter(new File(getFilename()),
-                    new File(descriptor.filenameFor(Component.CRC)),
-                    new File(descriptor.filenameFor(Component.DIGEST)),
-                    writerOption);
+                                                       new File(descriptor.filenameFor(Component.CRC)),
+                                                       new File(descriptor.filenameFor(Component.DIGEST)),
+                                                       writerOption);
         }
         dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor).compressed(compression);
         iwriter = new IndexWriter(keyCount);
@@ -335,10 +336,10 @@ public class BigTableWriter extends SSTableWriter
                                                            components, metadata,
                                                            ifile, dfile,
                                                            indexSummary,
-                                                           iwriter.bf.sharedCopy(), 
-                                                           maxDataAge, 
-                                                           stats, 
-                                                           SSTableReader.OpenReason.EARLY, 
+                                                           iwriter.bf.sharedCopy(),
+                                                           maxDataAge,
+                                                           stats,
+                                                           SSTableReader.OpenReason.EARLY,
                                                            header);
 
         // now it's open, find the ACTUAL last readable key (i.e. for which the data file has also been flushed)
