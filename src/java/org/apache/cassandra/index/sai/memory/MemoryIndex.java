@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,54 +24,57 @@
 
 package org.apache.cassandra.index.sai.memory;
 
+import java.nio.ByteBuffer;
+import java.util.Iterator;
+
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.IndexIdentifier;
-import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Iterator;
-import java.util.function.Function;
-
-public abstract class MemoryIndex implements MemtableOrdering
+public abstract class MemoryIndex
 {
-    protected final StorageAttachedIndex index;
+    protected final ColumnContext columnContext;
 
-    protected MemoryIndex(StorageAttachedIndex index)
+    private ByteBuffer minTerm;
+    private ByteBuffer maxTerm;
+
+    protected MemoryIndex(ColumnContext columnContext)
     {
-        this.index = index;
+        this.columnContext = columnContext;
     }
 
-    public abstract long add(DecoratedKey key, Clustering<?> clustering, ByteBuffer value);
+    public abstract long add(DecoratedKey key, Clustering clustering, ByteBuffer value);
 
-    public abstract long update(DecoratedKey key, Clustering<?> clustering, ByteBuffer oldValue, ByteBuffer newValue);
+    public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
-    public abstract KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange);
+    public void setMinMaxTerm(ByteBuffer term)
+    {
+        assert term != null;
 
-    public abstract boolean isEmpty();
+        minTerm = TypeUtil.min(term, minTerm, columnContext.getValidator());
+        maxTerm = TypeUtil.max(term, maxTerm, columnContext.getValidator());
+    }
 
-    public abstract ByteBuffer getMinTerm();
+    public ByteBuffer getMinTerm()
+    {
+        return minTerm;
+    }
 
-    public abstract ByteBuffer getMaxTerm();
+    public ByteBuffer getMaxTerm()
+    {
+        return maxTerm;
+    }
 
     /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
     public abstract Iterator<Pair<ByteComparable, PrimaryKeys>> iterator();
-
-    public abstract SegmentMetadata.ComponentMetadataMap writeDirect(IndexDescriptor indexDescriptor,
-                                                                     IndexIdentifier indexIdentifier,
-                                                                     Function<PrimaryKey, Integer> postingTransformer) throws IOException;
 }

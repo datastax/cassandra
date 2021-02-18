@@ -158,8 +158,14 @@ public final class VectorType<T> extends AbstractType<List<T>>
 
         if (isNull(input, accessor))
             return null;
-
-        return accessor.toFloatArray(input, dimension);
+        float[] array = new float[dimension];
+        int offset = 0;
+        for (int i = 0; i < dimension; i++)
+        {
+            array[i] = accessor.getFloat(input, offset);
+            offset += Float.BYTES;
+        }
+        return array;
     }
 
     public ByteBuffer decompose(T... values)

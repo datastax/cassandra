@@ -60,6 +60,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
         this.keyspace = keyspace;
         this.consistency = consistency;
 
+
         List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
                                                               ? keyRange.unwrap()
                                                               : getRestrictedRanges(keyRange);

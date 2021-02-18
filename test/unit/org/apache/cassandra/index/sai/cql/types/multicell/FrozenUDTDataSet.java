@@ -67,7 +67,7 @@ public class FrozenUDTDataSet extends DataSet<Object>
     @Override
     public QuerySet querySet()
     {
-        return new QuerySet.FrozenTuple();
+        return new QuerySet.FrozenTuple(this);
     }
 
     @Override

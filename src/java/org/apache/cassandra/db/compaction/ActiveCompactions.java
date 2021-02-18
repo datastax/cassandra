@@ -97,4 +97,12 @@ public class ActiveCompactions implements ActiveCompactionsTracker
         }
         return toReturn;
     }
+
+    /**
+     * @return true if given compaction is still active
+     */
+    public boolean isActive(CompactionInfo.Holder ci)
+    {
+        return compactions.contains(ci);
+    }
 }

@@ -179,7 +179,7 @@ public class Component
         this(type, type.repr);
     }
 
-    private Component(Type type, String name)
+    public Component(Type type, String name)
     {
         assert name != null : "Component name cannot be null";
 
