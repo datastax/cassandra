@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.virtual;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -28,12 +29,14 @@ import org.apache.cassandra.db.virtual.AbstractVirtualTable;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.dht.LocalPartitioner;
-import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.index.sai.disk.SegmentMetadata;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -42,7 +45,7 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class SegmentsSystemView extends AbstractVirtualTable
 {
-    public static final String NAME = "sai_sstable_index_segments";
+    static final String NAME = "sstable_index_segments";
 
     public static final String KEYSPACE_NAME = "keyspace_name";
     public static final String INDEX_NAME = "index_name";
@@ -90,23 +93,41 @@ public class SegmentsSystemView extends AbstractVirtualTable
     {
         SimpleDataSet dataset = new SimpleDataSet(metadata());
 
-        forEachIndex(indexContext -> {
-            for (SSTableIndex sstableIndex : indexContext.getView())
+        forEachIndex(columnContext -> {
+            for (SSTableIndex sstableIndex : columnContext.getView())
             {
-                sstableIndex.populateSegmentView(dataset);
+                SSTableReader sstable = sstableIndex.getSSTable();
+                List<SegmentMetadata> segments = sstableIndex.segments();
+                Descriptor descriptor = sstable.descriptor;
+                Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();
+
+                for (SegmentMetadata metadata : segments)
+                {
+                    dataset.row(sstable.metadata().keyspace, columnContext.getIndexName(), sstable.getFilename(), metadata.segmentRowIdOffset)
+                           .column(TABLE_NAME, descriptor.cfname)
+                           .column(COLUMN_NAME, columnContext.getColumnName())
+                           .column(CELL_COUNT, metadata.numRows)
+                           .column(MIN_SSTABLE_ROW_ID, metadata.minSSTableRowId)
+                           .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
+                           .column(START_TOKEN, tokenFactory.toString(metadata.minKey.getToken()))
+                           .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.getToken()))
+                           .column(MIN_TERM, columnContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString())
+                           .column(MAX_TERM, columnContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString())
+                           .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
+                }
             }
         });
 
         return dataset;
     }
 
-    private void forEachIndex(Consumer<IndexContext> process)
+    private void forEachIndex(Consumer<ColumnContext> process)
     {
-        for (KeyspaceMetadata ks : Schema.instance.getUserKeyspaces())
+        for (String ks : Schema.instance.getUserKeyspaces().names())
         {
-            Keyspace keyspace = Schema.instance.getKeyspaceInstance(ks.name);
+            Keyspace keyspace = Schema.instance.getKeyspaceInstance(ks);
             if (keyspace == null)
-                throw new IllegalStateException("Unknown keyspace " + ks.name + ". This can occur if the keyspace is being dropped.");
+                throw new IllegalArgumentException("Unknown keyspace " + ks);
 
             for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
             {
@@ -114,9 +135,9 @@ public class SegmentsSystemView extends AbstractVirtualTable
 
                 if (group != null)
                 {
-                    for (Index index : group.getIndexes())
+                    for (StorageAttachedIndex index : group)
                     {
-                        process.accept(((StorageAttachedIndex)index).getIndexContext());
+                        process.accept(index.getContext());
                     }
                 }
             }

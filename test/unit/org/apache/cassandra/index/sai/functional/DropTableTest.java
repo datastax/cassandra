@@ -20,6 +20,7 @@
  */
 package org.apache.cassandra.index.sai.functional;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -37,7 +38,6 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.Schema;
 
 import static org.junit.Assert.assertFalse;
@@ -51,7 +51,7 @@ public class DropTableTest extends SAITester
         createTable(CREATE_TABLE_TEMPLATE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForTableIndexesQueryable();
+        waitForIndexQueryable();
 
         int rows = 100;
         for (int j = 0; j < rows; j++)
@@ -66,11 +66,11 @@ public class DropTableTest extends SAITester
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         ArrayList<String> files = new ArrayList<>();
-        for (Component component : sstable.getComponents())
+        for (Component component : sstable.components)
         {
             File file = sstable.descriptor.fileFor(component);
             if (file.exists())
-                files.add(file.path());
+                files.add(file.getPath());
         }
 
         Injection failUnregisterComponents = Injections.newCustom("fail_unregister_components")
@@ -87,7 +87,7 @@ public class DropTableTest extends SAITester
         assertAllFileRemoved(files);
     }
 
-    void assertAllFileExists(List<String> filePaths)
+    void assertAllFileExists(List<String> filePaths) throws Exception
     {
         for (String path : filePaths)
         {
@@ -96,11 +96,12 @@ public class DropTableTest extends SAITester
         }
     }
 
-    void assertAllFileRemoved(List<String> filePaths)
+    void assertAllFileRemoved(List<String> filePaths) throws Exception
     {
         for (String path : filePaths)
         {
             File file = new File(path);
+            System.err.println("## check="+path);
             assertFalse("Expect file being removed, but it still exists: " + path, file.exists());
         }
     }

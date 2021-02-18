@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,33 +25,40 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class Expression
 {
     private static final Logger logger = LoggerFactory.getLogger(Expression.class);
 
-    public enum IndexOperator
+    public enum Op
     {
-        EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE;
+        EQ, MATCH, PREFIX, NOT_EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE;
 
-        public static IndexOperator valueOf(Operator operator)
+        public static Op valueOf(Operator operator)
         {
             switch (operator)
             {
                 case EQ:
                     return EQ;
+
+                case NEQ:
+                    return NOT_EQ;
 
                 case CONTAINS:
                     return CONTAINS_VALUE; // non-frozen map: value contains term;
@@ -58,6 +71,12 @@ public class Expression
                 case LTE:
                 case GTE:
                     return RANGE;
+
+                case LIKE_PREFIX:
+                    return PREFIX;
+
+                case LIKE_MATCHES:
+                    return MATCH;
 
                 default:
                     return null;
@@ -75,36 +94,26 @@ public class Expression
         }
     }
 
-    public final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
+    public final AbstractAnalyzer analyzer;
 
-    public final IndexContext context;
+    public final ColumnContext context;
     public final AbstractType<?> validator;
 
     @VisibleForTesting
-    protected IndexOperator operator;
+    protected Op operation;
 
     public Bound lower, upper;
-    // The upperInclusive and lowerInclusive flags are maintained separately to the inclusive flags
-    // in the upper and lower bounds because the upper and lower bounds have their inclusivity relaxed
-    // if the datatype being filtered is rounded in the index. These flags are used in the post-filtering
-    // process to remove values equal to the bounds.
     public boolean upperInclusive, lowerInclusive;
 
-    public Expression(IndexContext indexContext)
+    final List<ByteBuffer> exclusions = new ArrayList<>();
+
+    public Expression(ColumnContext columnContext)
     {
-        this.context = indexContext;
-        this.analyzerFactory = indexContext.getAnalyzerFactory();
-        this.validator = indexContext.getValidator();
+        this.context = columnContext;
+        this.analyzer = columnContext.getAnalyzer();
+        this.validator = columnContext.getValidator();
     }
 
-    /**
-     * This adds an operation to the current {@link Expression} instance and
-     * returns the current instance.
-     *
-     * @param op the CQL3 operation
-     * @param value the expression value
-     * @return the current expression with the added operation
-     */
     public Expression add(Operator op, ByteBuffer value)
     {
         boolean lowerInclusive, upperInclusive;
@@ -115,12 +124,28 @@ public class Expression
         lowerInclusive = upperInclusive = TypeUtil.supportsRounding(validator);
         switch (op)
         {
+            case LIKE_PREFIX:
+            case LIKE_MATCHES:
             case EQ:
             case CONTAINS:
             case CONTAINS_KEY:
                 lower = new Bound(value, validator, true);
                 upper = lower;
-                operator = IndexOperator.valueOf(op);
+                operation = Op.valueOf(op);
+                break;
+
+            case NEQ:
+                // index expressions are priority sorted
+                // and NOT_EQ is the lowest priority, which means that operation type
+                // is always going to be set before reaching it in case of RANGE or EQ.
+                if (operation == null)
+                {
+                    operation = Op.NOT_EQ;
+                    lower = new Bound(value, validator, true);
+                    upper = lower;
+                }
+                else
+                    exclusions.add(value);
                 break;
 
             case LTE:
@@ -135,7 +160,7 @@ public class Expression
                     upperInclusive = true;
                 }
             case LT:
-                operator = IndexOperator.RANGE;
+                operation = Op.RANGE;
                 if (context.getDefinition().isReversedType())
                     lower = new Bound(value, validator, lowerInclusive);
                 else
@@ -154,22 +179,17 @@ public class Expression
                     lowerInclusive = true;
                 }
             case GT:
-                operator = IndexOperator.RANGE;
+                operation = Op.RANGE;
                 if (context.getDefinition().isReversedType())
-                    upper = new Bound(value, validator, upperInclusive);
+                    upper = new Bound(value, validator,  upperInclusive);
                 else
                     lower = new Bound(value, validator, lowerInclusive);
                 break;
         }
 
-        assert operator != null;
-
         return this;
     }
 
-    /**
-     * Used in post-filtering to determine is an indexed value matches the expression
-     */
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
         if (!TypeUtil.isValid(columnValue, validator))
@@ -184,14 +204,17 @@ public class Expression
         {
             // suffix check
             if (TypeUtil.isLiteral(validator))
-                return validateStringValue(value.raw, lower.value.raw);
+            {
+                if (!validateStringValue(value.raw, lower.value.raw))
+                    return false;
+            }
             else
             {
                 // range or (not-)equals - (mainly) for numeric values
                 int cmp = TypeUtil.comparePostFilter(lower.value, value, validator);
 
-                // in case of EQ lower == upper
-                if (operator == IndexOperator.EQ || operator == IndexOperator.CONTAINS_KEY || operator == IndexOperator.CONTAINS_VALUE)
+                // in case of (NOT_)EQ lower == upper
+                if (operation == Op.EQ || operation == Op.CONTAINS_KEY || operation == Op.CONTAINS_VALUE || operation == Op.NOT_EQ)
                     return cmp == 0;
 
                 if (cmp > 0 || (cmp == 0 && !lowerInclusive))
@@ -203,13 +226,26 @@ public class Expression
         {
             // string (prefix or suffix) check
             if (TypeUtil.isLiteral(validator))
-                return validateStringValue(value.raw, upper.value.raw);
+            {
+                if (!validateStringValue(value.raw, upper.value.raw))
+                    return false;
+            }
             else
             {
                 // range - mainly for numeric values
                 int cmp = TypeUtil.comparePostFilter(upper.value, value, validator);
-                return (cmp > 0 || (cmp == 0 && upperInclusive));
+                if (cmp < 0 || (cmp == 0 && !upperInclusive))
+                    return false;
             }
+        }
+
+        // as a last step let's check exclusions for the given field,
+        // this covers EQ/RANGE with exclusions.
+        for (ByteBuffer term : exclusions)
+        {
+            if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
+                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+                return false;
         }
 
         return true;
@@ -217,41 +253,42 @@ public class Expression
 
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
     {
-        AbstractAnalyzer analyzer = analyzerFactory.create();
         analyzer.reset(columnValue.duplicate());
-        try
+        while (analyzer.hasNext())
         {
-            while (analyzer.hasNext())
+            ByteBuffer term = analyzer.next();
+
+            boolean isMatch = false;
+            switch (operation)
             {
-                final ByteBuffer term = analyzer.next();
+                case EQ:
+                case MATCH:
+                // Operation.isSatisfiedBy handles conclusion on !=,
+                // here we just need to make sure that term matched it
+                case CONTAINS_KEY:
+                case CONTAINS_VALUE:
+                case NOT_EQ:
+                    isMatch = validator.compare(term, requestedValue) == 0;
+                    break;
+                case RANGE:
+                    isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
+                    break;
 
-                boolean isMatch = false;
-                switch (operator)
-                {
-                    case EQ:
-                    case CONTAINS_KEY:
-                    case CONTAINS_VALUE:
-                        isMatch = validator.compare(term, requestedValue) == 0;
-                        break;
-                    case RANGE:
-                        isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
-                        break;
-                }
-
-                if (isMatch)
-                    return true;
+                case PREFIX:
+                    isMatch = ByteBufferUtil.startsWith(term, requestedValue);
+                    break;
             }
-            return false;
+
+            if (isMatch)
+                return true;
         }
-        finally
-        {
-            analyzer.end();
-        }
+
+        return false;
     }
 
-    public IndexOperator getOp()
+    public Op getOp()
     {
-        return operator;
+        return operation;
     }
 
     private boolean hasLower()
@@ -282,28 +319,27 @@ public class Expression
         return cmp < 0 || cmp == 0 && upper.inclusive;
     }
 
-    @Override
     public String toString()
     {
-        return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s)}",
+        return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
                              context.getColumnName(),
-                             operator,
+                             operation,
                              lower == null ? "null" : validator.getString(lower.value.raw),
                              lower != null && lower.inclusive,
                              upper == null ? "null" : validator.getString(upper.value.raw),
-                             upper != null && upper.inclusive);
+                             upper != null && upper.inclusive,
+                             Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
     }
 
-    @Override
     public int hashCode()
     {
         return new HashCodeBuilder().append(context.getColumnName())
-                                    .append(operator)
+                                    .append(operation)
                                     .append(validator)
-                                    .append(lower).append(upper).build();
+                                    .append(lower).append(upper)
+                                    .append(exclusions).build();
     }
 
-    @Override
     public boolean equals(Object other)
     {
         if (!(other instanceof Expression))
@@ -315,14 +351,15 @@ public class Expression
         Expression o = (Expression) other;
 
         return Objects.equals(context.getColumnName(), o.context.getColumnName())
-               && validator.equals(o.validator)
-               && operator == o.operator
-               && Objects.equals(lower, o.lower)
-               && Objects.equals(upper, o.upper);
+                && validator.equals(o.validator)
+                && operation == o.operation
+                && Objects.equals(lower, o.lower)
+                && Objects.equals(upper, o.upper)
+                && exclusions.equals(o.exclusions);
     }
 
     /**
-     * A representation of a column value in its raw and encoded form.
+     * A representation of a column value in it's raw and encoded form.
      */
     public static class Value
     {
@@ -332,7 +369,7 @@ public class Expression
         public Value(ByteBuffer value, AbstractType<?> type)
         {
             this.raw = value;
-            this.encoded = TypeUtil.asIndexBytes(value, type);
+            this.encoded = TypeUtil.encode(value, type);
         }
 
         @Override

@@ -48,10 +48,11 @@ public class StateMetricsTest extends AbstractMetricsTest
 
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
+        waitForIndexQueryable(keyspace, table);
 
-        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
-        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + '.' + table + " WHERE v1 = 0");
+        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 0");
         assertEquals(1, rows.all().size());
         assertEquals(1L, getTableStateMetrics(keyspace, table, "TotalIndexCount"));
 
@@ -72,24 +73,30 @@ public class StateMetricsTest extends AbstractMetricsTest
 
         String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, index + "_v1", keyspace, table, "v1"));
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, index + "_v2", keyspace, table, "v2"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v1", keyspace, table, "v1"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, index+"_v2", keyspace, table, "v2"));
+        waitForIndexQueryable(keyspace, table);
 
-        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
-        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
-        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('2', 2, '2')");
-        execute("INSERT INTO " + keyspace + '.' + table + " (id1, v1, v2) VALUES ('3', 3, '3')");
+        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('2', 2, '2')");
+        execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('3', 3, '3')");
 
-        ResultSet rows = executeNet("SELECT id1, v1, v2 FROM " + keyspace + '.' + table + " WHERE v1 >= 0");
+        flush(keyspace, table);
+
+        ResultSet rows = executeNet("SELECT id1, v1, v2 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
 
         int actualRows = rows.all().size();
         assertEquals(4, actualRows);
 
+        waitForGreaterThanZero(objectNameNoIndex("DiskPercentageOfBaseTable", keyspace, table, TABLE_STATE_METRIC_TYPE));
+        waitForGreaterThanZero(objectNameNoIndex("DiskUsedBytes", keyspace, table, TABLE_STATE_METRIC_TYPE));
         waitForEquals(objectNameNoIndex("TotalIndexCount", keyspace, table, TABLE_STATE_METRIC_TYPE), 2);
+        waitForEquals(objectNameNoIndex("TotalIndexBuildsInProgress", keyspace, table, TABLE_STATE_METRIC_TYPE), 0);
         waitForEquals(objectNameNoIndex("TotalQueryableIndexCount", keyspace, table, TABLE_STATE_METRIC_TYPE), 2);
     }
 
-    private int getTableStateMetrics(String keyspace, String table, String metricsName)
+    private int getTableStateMetrics(String keyspace, String table, String metricsName) throws Exception
     {
         return (int) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TABLE_STATE_METRIC_TYPE));
     }
