@@ -26,11 +26,15 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 public class IndexGroupMetrics extends AbstractMetrics
 {
     public static final String INDEX_GROUP_METRICS_TYPE = "IndexGroupMetrics";
+    public final Gauge openIndexFiles;
+    public final Gauge diskUsedBytes;
+
     public IndexGroupMetrics(TableMetadata table, StorageAttachedIndexGroup group)
     {
-        super(table.keyspace, table.name, INDEX_GROUP_METRICS_TYPE);
+        super(table, INDEX_GROUP_METRICS_TYPE);
 
-        Metrics.register(createMetricName("OpenIndexFiles"), (Gauge<Integer>) group::openIndexFiles);
-        Metrics.register(createMetricName("DiskUsedBytes"), (Gauge<Long>) group::diskUsage);
+        openIndexFiles = Metrics.register(createMetricName("OpenIndexFiles"), group::openIndexFiles);
+
+        diskUsedBytes = Metrics.register(createMetricName("DiskUsedBytes"), group::diskUsage);
     }
 }

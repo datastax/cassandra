@@ -86,7 +86,7 @@ public class Tracker
 {
     private static final Logger logger = LoggerFactory.getLogger(Tracker.class);
 
-    private final List<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
+    private final Collection<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
 
     public final ColumnFamilyStore cfstore;
 
@@ -226,7 +226,7 @@ public class Tracker
         return accumulate;
     }
 
-    public void updateLiveDiskSpaceUsed(long adjustment)
+    public void updateSizeTracking(long adjustment)
     {
         cfstore.metric.liveDiskSpaceUsed.inc(adjustment);
         cfstore.metric.totalDiskSpaceUsed.inc(adjustment);
@@ -578,12 +578,6 @@ public class Tracker
     public void subscribe(INotificationConsumer consumer)
     {
         subscribers.add(consumer);
-    }
-
-    @VisibleForTesting
-    public boolean contains(INotificationConsumer consumer)
-    {
-        return subscribers.contains(consumer);
     }
 
     public void unsubscribe(INotificationConsumer consumer)

@@ -446,34 +446,11 @@ public enum CassandraRelevantProperties
 
     /** Controls the maximum number of index query intersections that will take part in a query */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
-    /** Latest version to be used for SAI index writing */
-    SAI_LATEST_VERSION("cassandra.sai.latest_version", "aa"),
+    SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "5"),
+    SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "1"),
 
-    /** Minimum number of reachable leaves for a given node to be eligible for an auxiliary posting list */
-    SAI_MINIMUM_POSTINGS_LEAVES("cassandra.sai.minimum_postings_leaves", "64"),
-
-    /**
-     * Skip, or the sampling interval, for selecting a balanced tree level that is eligible for an auxiliary posting list.
-     * Sampling starts from 0, but balanced tree root node is at level 1. For skip = 4, eligible levels are 4, 8, 12, etc. (no
-     * level 0, because there is no node at level 0).
-     */
-    SAI_POSTINGS_SKIP("cassandra.sai.postings_skip", "3"),
-
-    /**
-     * Used to determine the block size and block mask for the clustering sorted terms.
-     */
-    SAI_SORTED_TERMS_CLUSTERING_BLOCK_SHIFT("cassandra.sai.sorted_terms_clustering_block_shift", "4"),
-
-    /**
-     * Used to determine the block size and block mask for the partition sorted terms.
-     */
-    SAI_SORTED_TERMS_PARTITION_BLOCK_SHIFT("cassandra.sai.sorted_terms_partition_block_shift", "4"),
-
-    SAI_TEST_BALANCED_TREE_DEBUG_ENABLED("cassandra.sai.test.balanced_tree_debug_enabled", "false"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
-
-    /** Whether to allow the user to specify custom options to the hnsw index */
-    SAI_VECTOR_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.vector.allow_custom_parameters", "false"),
+    SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
 
     /**
      * The maximum number of primary keys that a WHERE clause may materialize before the query planner switches
@@ -485,9 +462,6 @@ public enum CassandraRelevantProperties
      * build a potential result set for search-then-sort query execution.
      */
     SAI_VECTOR_SEARCH_MAX_MATERIALIZE_KEYS("cassandra.sai.vector_search.max_materialized_keys", "16000"),
-
-    /** Controls the maximum top-k limit for vector search */
-    SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
@@ -628,6 +602,10 @@ public enum CassandraRelevantProperties
     /** When enabled, recursive directory deletion will be executed using a unix command `rm -rf` instead of traversing
      * and removing individual files. This is now used only tests, but eventually we will make it true by default.*/
     USE_NIX_RECURSIVE_DELETE("cassandra.use_nix_recursive_delete"),
+
+    /** Whether vector type only allows float vectors. True by default. **/
+    VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
+
     /** Gossiper compute expiration timeout. Default value 3 days. */
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     /** Controls output format for Collection-type settings in system_views.settings table */

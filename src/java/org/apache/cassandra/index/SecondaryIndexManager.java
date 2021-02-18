@@ -50,6 +50,21 @@ import org.apache.cassandra.concurrent.FutureTask;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.MutableDeletionInfo;
+import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -61,7 +76,14 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.RowDiffListener;
+import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index.IndexBuildingSupport;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -83,6 +105,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.*;
+import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.FORCE_DEFAULT_INDEXING_PAGE_SIZE;
@@ -164,7 +187,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * The groups of all the registered indexes
      */
-    private final Map<Index.Group.Key, Index.Group> indexGroups = Maps.newConcurrentMap();
+    private final Map<Object, Index.Group> indexGroups = Maps.newConcurrentMap();
 
     /**
      * The count of pending index builds for each index.
@@ -346,16 +369,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public synchronized void removeIndex(String indexName)
     {
-        Index removedIndex = indexes.remove(indexName);
-
-        if (removedIndex != null)
+        Index index = unregisterIndex(indexName);
+        if (null != index)
         {
-            removedIndex.unregister(this);
-
             markIndexRemoved(indexName);
-            executeBlocking(removedIndex.getInvalidateTask(), null);
+            executeBlocking(index.getInvalidateTask(), null);
         }
     }
+
 
     public Set<IndexMetadata> getDependentIndexes(ColumnMetadata column)
     {
@@ -874,8 +895,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (indexDef.isCustom())
         {
             assert indexDef.options != null;
-            // Get the fully qualified index class name from the index metadata
-            String className = indexDef.getIndexClassName();
+            // Find any aliases to the fully qualified index class name:
+            String className = IndexMetadata.expandAliases(indexDef.options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
             assert !Strings.isNullOrEmpty(className);
 
             try
@@ -1065,20 +1086,16 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 try (WriteContext ctx = keyspace.getWriteHandler().createContextForIndexing())
                 {
                     {
-                        Set<Index.Indexer> indexers = new HashSet<>(indexGroups.size());
-
-                        for (Index.Group g : indexGroups.values())
-                        {
-                            Index.Indexer indexerFor = g.indexerFor(indexes::contains,
-                                                                    key,
-                                                                    partition.columns(),
-                                                                    nowInSec,
-                                                                    ctx,
-                                                                    IndexTransaction.Type.UPDATE,
-                                                                    null);
-                            if (indexerFor != null)
-                                indexers.add(indexerFor);
-                        }
+                        Set<Index.Indexer> indexers = indexGroups.values().stream()
+                                                                 .map(g -> g.indexerFor(indexes::contains,
+                                                                                        key,
+                                                                                        partition.columns(),
+                                                                                        nowInSec,
+                                                                                        ctx,
+                                                                                        IndexTransaction.Type.UPDATE,
+                                                                                        null))
+                                                                 .filter(Objects::nonNull)
+                                                                 .collect(Collectors.toSet());
 
                         // Short-circuit empty partitions if static row is processed or isn't read
                         if (!readStatic && partition.isEmpty() && partition.staticRow().isEmpty())
@@ -1346,8 +1363,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /*
      * IndexRegistry methods
      */
-    @Override
-    public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
+    public void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier)
     {
         String name = index.getIndexMetadata().name;
         indexes.put(name, index);
@@ -1357,26 +1373,41 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         Index.Group group = indexGroups.computeIfAbsent(groupKey, k -> groupSupplier.get());
 
         // add the created index to its group if it is not a singleton group
-        group.addIndex(index);
+        if (!(group instanceof SingletonIndexGroup))
+        {
+            if (index.getBackingTable().isPresent())
+                throw new InvalidRequestException("Indexes belonging to a group of indexes shouldn't have a backing table");
+
+            group.addIndex(index);
+        }
     }
 
-    @Override
-    public void unregisterIndex(Index removed, Index.Group.Key groupKey)
+    private Index unregisterIndex(String name)
     {
-        Index.Group group = indexGroups.get(groupKey);
-        if (group != null && group.containsIndex(removed))
-        {
-            // Remove the index from non-singleton groups...
-            group.removeIndex(removed);
+        Index removed = indexes.remove(name);
+        logger.trace(removed == null ? "Index {} was not registered" : "Removed index {} from registry", name);
 
-            // if the group is a singleton or there are no more indexes left in the group, remove it
-            if (group.isSingleton() || group.getIndexes().isEmpty())
+        if (removed != null)
+        {
+            // Remove the index from any non-singleton groups...
+            for (Index.Group group : listIndexGroups())
             {
-                Index.Group removedGroup = indexGroups.remove(groupKey);
-                if (removedGroup != null)
-                    removedGroup.invalidate();
+                if (!(group instanceof SingletonIndexGroup) && group.containsIndex(removed))
+                {
+                    group.removeIndex(removed);
+
+                    if (group.getIndexes().isEmpty())
+                    {
+                        indexGroups.remove(group);
+                    }
+                }
             }
+
+            // ...and remove singleton groups entirely.
+            indexGroups.remove(removed);
         }
+
+        return removed;
     }
 
     public Index getIndex(IndexMetadata metadata)
@@ -1394,14 +1425,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return ImmutableSet.copyOf(indexGroups.values());
     }
 
-    public Index.Group getIndexGroup(Index.Group.Key key)
+    public Index.Group getIndexGroup(Object key)
     {
         return indexGroups.get(key);
     }
 
     /**
      * Returns the {@link Index.Group} the specified index belongs to, as specified during registering with
-     * {@link #registerIndex(Index, Index.Group.Key, Supplier)}.
+     * {@link #registerIndex(Index, Object, Supplier)}.
      *
      * @param metadata the index metadata
      * @return the group the index belongs to, or {@code null} if the index is not registered or if it hasn't been
@@ -1443,23 +1474,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (!hasIndexes())
             return UpdateTransaction.NO_OP;
 
-        List<Index.Indexer> indexers = new ArrayList<>(indexGroups.size());
+        Index.Indexer[] indexers = listIndexGroups().stream()
+                                                    .map(g -> g.indexerFor(writableIndexSelector(),
+                                                                           update.partitionKey(),
+                                                                           update.columns(),
+                                                                           nowInSec,
+                                                                           ctx,
+                                                                           IndexTransaction.Type.UPDATE,
+                                                                           memtable))
+                                                    .filter(Objects::nonNull)
+                                                    .toArray(Index.Indexer[]::new);
 
-        for (Index.Group g : indexGroups.values())
-        {
-            Index.Indexer indexer = g.indexerFor(writableIndexSelector(),
-                                                 update.partitionKey(),
-                                                 update.columns(),
-                                                 nowInSec,
-                                                 ctx,
-                                                 IndexTransaction.Type.UPDATE,
-                                                 memtable);
-            if (indexer != null)
-                indexers.add(indexer);
-        }
-
-        return indexers.isEmpty() ? UpdateTransaction.NO_OP
-                                  : new WriteTimeTransaction(indexers.toArray(Index.Indexer[]::new));
+        return indexers.length == 0 ? UpdateTransaction.NO_OP : new WriteTimeTransaction(indexers);
     }
 
     private Predicate<Index> writableIndexSelector()
@@ -1557,19 +1583,19 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             // diff listener collates the columns to be added & removed from the indexes
             RowDiffListener diffListener = new RowDiffListener()
             {
-                public void onPrimaryKeyLivenessInfo(int i, Clustering<?> clustering, LivenessInfo merged, LivenessInfo original)
+                public void onPrimaryKeyLivenessInfo(int i, Clustering clustering, LivenessInfo merged, LivenessInfo original)
                 {
                 }
 
-                public void onDeletion(int i, Clustering<?> clustering, Row.Deletion merged, Row.Deletion original)
+                public void onDeletion(int i, Clustering clustering, Row.Deletion merged, Row.Deletion original)
                 {
                 }
 
-                public void onComplexDeletion(int i, Clustering<?> clustering, ColumnMetadata column, DeletionTime merged, DeletionTime original)
+                public void onComplexDeletion(int i, Clustering clustering, ColumnMetadata column, DeletionTime merged, DeletionTime original)
                 {
                 }
 
-                public void onCell(int i, Clustering<?> clustering, Cell<?> merged, Cell<?> original)
+                public void onCell(int i, Clustering clustering, Cell merged, Cell original)
                 {
                     if (merged != null && !merged.equals(original))
                         toInsert.addCell(merged);
@@ -1591,7 +1617,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 indexer.finish();
         }
 
-        private <V1, V2> boolean shouldCleanupOldValue(Cell<V1> oldCell, Cell<V2> newCell)
+        private boolean shouldCleanupOldValue(Cell oldCell, Cell newCell)
         {
             // If either the value or timestamp is different, then we
             // should delete from the index. If not, then we can infer that
@@ -1602,7 +1628,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             // Completely identical cells (including expiring columns with
             // identical ttl & localExpirationTime) will not get this far due
             // to the oldCell.equals(newCell) in StandardUpdater.update
-            return !Cells.valueEqual(oldCell, newCell) || oldCell.timestamp() != newCell.timestamp();
+            return !oldCell.value().equals(newCell.value()) || oldCell.timestamp() != newCell.timestamp();
         }
     }
 
@@ -1654,27 +1680,27 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             final Row.Builder[] builders = new Row.Builder[versions.length];
             RowDiffListener diffListener = new RowDiffListener()
             {
-                public void onPrimaryKeyLivenessInfo(int i, Clustering<?> clustering, LivenessInfo merged, LivenessInfo original)
+                public void onPrimaryKeyLivenessInfo(int i, Clustering clustering, LivenessInfo merged, LivenessInfo original)
                 {
                     if (original != null && (merged == null || !merged.isLive(nowInSec)))
                         getBuilder(i, clustering).addPrimaryKeyLivenessInfo(original);
                 }
 
-                public void onDeletion(int i, Clustering<?> clustering, Row.Deletion merged, Row.Deletion original)
+                public void onDeletion(int i, Clustering clustering, Row.Deletion merged, Row.Deletion original)
                 {
                 }
 
-                public void onComplexDeletion(int i, Clustering<?> clustering, ColumnMetadata column, DeletionTime merged, DeletionTime original)
+                public void onComplexDeletion(int i, Clustering clustering, ColumnMetadata column, DeletionTime merged, DeletionTime original)
                 {
                 }
 
-                public void onCell(int i, Clustering<?> clustering, Cell<?> merged, Cell<?> original)
+                public void onCell(int i, Clustering clustering, Cell merged, Cell original)
                 {
                     if (original != null && (merged == null || !merged.isLive(nowInSec)))
                         getBuilder(i, clustering).addCell(original);
                 }
 
-                private Row.Builder getBuilder(int index, Clustering<?> clustering)
+                private Row.Builder getBuilder(int index, Clustering clustering)
                 {
                     if (builders[index] == null)
                     {
@@ -1848,9 +1874,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public void makeIndexNonQueryable(Index index, Index.Status status)
     {
-        if (status == Index.Status.BUILD_SUCCEEDED)
-            throw new IllegalStateException("Index cannot be marked non-queryable with status " + status);
-
         String name = index.getIndexMetadata().name;
         if (indexes.get(name) == index)
         {
@@ -1862,9 +1885,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public void makeIndexQueryable(Index index, Index.Status status)
     {
-        if (status != Index.Status.BUILD_SUCCEEDED)
-            throw new IllegalStateException("Index cannot be marked queryable with status " + status);
-
         String name = index.getIndexMetadata().name;
         if (indexes.get(name) == index)
         {

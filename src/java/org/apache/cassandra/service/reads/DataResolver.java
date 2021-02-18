@@ -50,6 +50,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -119,27 +120,30 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
             });
         }
 
-        if (usesReplicaFilteringProtection())
-            return resolveWithReplicaFilteringProtection(replicas, repairedDataTracker);
+        if (!needsReplicaFilteringProtection())
+        {
+            ResolveContext context = new ResolveContext(replicas, true);
+            return resolveWithReadRepair(context,
+                                         i -> shortReadProtectedResponse(i, context, runOnShortRead),
+                                         UnaryOperator.identity(),
+                                         repairedDataTracker);
+        }
 
-        ResolveContext context = new ResolveContext(replicas, true);
-        return resolveWithReadRepair(context,
-                                     i -> shortReadProtectedResponse(i, context, runOnShortRead),
-                                     UnaryOperator.identity(),
-                                     repairedDataTracker);
+        return resolveWithReplicaFilteringProtection(replicas, repairedDataTracker);
     }
 
-    private boolean usesReplicaFilteringProtection()
+    private boolean needsReplicaFilteringProtection()
     {
         if (command.rowFilter().isEmpty())
             return false;
 
-        if (command.isTopK())
-            return false;
-
         Index.QueryPlan queryPlan = command.indexQueryPlan();
-        if (queryPlan == null)
+        IndexMetadata indexMetadata = queryPlan == null ? null : queryPlan.getFirst().getIndexMetadata();
+
+        if (indexMetadata == null || !indexMetadata.isCustom())
+        {
             return true;
+        }
 
         return queryPlan.supportsReplicaFilteringProtection(command.rowFilter());
     }
@@ -160,32 +164,16 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                                                                    true,
                                                                    command.selectsFullPartition(),
                                                                    enforceStrictLiveness);
-
-            // In case of top-k query, do not trim reconciled rows here because QueryPlan#postProcessor()
-            // needs to compare all rows. Also avoid enforcing the limit if explicitly requested.
-            if (command.isTopK() || !enforceLimits)
-                this.mergedResultCounter.onlyCount();
         }
 
         private boolean needsReadRepair()
         {
-            // Each replica may return different estimated top-K rows, it doesn't mean data is not replicated.
-            // Even though top-K queries are limited to CL ONE & LOCAL-ONE, they use the ScanAllRangesCommandIterator
-            // that combines the separate replica plans of each data range into a single replica plan. This is an
-            // optimisation but can result in the number of replicas being > 1.
-            if (command.isTopK())
-                return false;
-
             return replicas.size() > 1;
         }
 
         private boolean needShortReadProtection()
         {
-            // SRP doesn't make sense for top-k which needs to re-query replica with larger limit instead of fetching more partitions
-            if (command.isTopK())
-                return false;
-
-            // If we have only one result, there is no read repair to do, and we can't get short reads
+            // If we have only one result, there is no read repair to do and we can't get short reads
             // Also, so-called "short reads" stems from nodes returning only a subset of the results they have for a
             // partition due to the limit, but that subset not being enough post-reconciliation. So if we don't have limit,
             // don't bother protecting against short reads.
