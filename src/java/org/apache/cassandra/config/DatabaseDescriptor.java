@@ -154,8 +154,8 @@ public class DatabaseDescriptor
     public static volatile boolean allowUnlimitedConcurrentValidations = Boolean.getBoolean("cassandra.allow_unlimited_concurrent_validations");
 
     private static Function<CommitLog, AbstractCommitLogSegmentManager> commitLogSegmentMgrProvider = c -> DatabaseDescriptor.isCDCEnabled()
-                                       ? new CommitLogSegmentManagerCDC(c, DatabaseDescriptor.getCommitLogLocation())
-                                       : new CommitLogSegmentManagerStandard(c, DatabaseDescriptor.getCommitLogLocation());
+                                                                                                           ? new CommitLogSegmentManagerCDC(c, DatabaseDescriptor.getCommitLogLocation())
+                                                                                                           : new CommitLogSegmentManagerStandard(c, DatabaseDescriptor.getCommitLogLocation());
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -757,10 +757,10 @@ public class DatabaseDescriptor
 
         if (conf.commitlog_segment_size_in_mb <= 0)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "
-                    + conf.commitlog_segment_size_in_mb, false);
+                                             + conf.commitlog_segment_size_in_mb, false);
         else if (conf.commitlog_segment_size_in_mb >= 2048)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be smaller than 2048, but was "
-                    + conf.commitlog_segment_size_in_mb, false);
+                                             + conf.commitlog_segment_size_in_mb, false);
 
         if (conf.max_mutation_size_in_kb == null)
             conf.max_mutation_size_in_kb = conf.commitlog_segment_size_in_mb * 1024 / 2;
@@ -787,7 +787,7 @@ public class DatabaseDescriptor
             throw new ConfigurationException("max_value_size_in_mb must be positive", false);
         else if (conf.max_value_size_in_mb >= 2048)
             throw new ConfigurationException("max_value_size_in_mb must be smaller than 2048, but was "
-                    + conf.max_value_size_in_mb, false);
+                                             + conf.max_value_size_in_mb, false);
 
         switch (conf.disk_optimization_strategy)
         {
@@ -833,8 +833,8 @@ public class DatabaseDescriptor
         else
         {
             conf.internode_max_message_size_in_bytes =
-                Math.min(conf.internode_application_receive_queue_reserve_endpoint_capacity_in_bytes,
-                         conf.internode_application_send_queue_reserve_endpoint_capacity_in_bytes);
+            Math.min(conf.internode_application_receive_queue_reserve_endpoint_capacity_in_bytes,
+                     conf.internode_application_send_queue_reserve_endpoint_capacity_in_bytes);
         }
 
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
@@ -1038,44 +1038,44 @@ public class DatabaseDescriptor
     {
         if(conf.read_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("read_request_timeout_in_ms", conf.read_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.read_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("read_request_timeout_in_ms", conf.read_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.read_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.range_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("range_request_timeout_in_ms", conf.range_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.range_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("range_request_timeout_in_ms", conf.range_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.range_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("request_timeout_in_ms", conf.request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("request_timeout_in_ms", conf.request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.write_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("write_request_timeout_in_ms", conf.write_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.write_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("write_request_timeout_in_ms", conf.write_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.write_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.cas_contention_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("cas_contention_timeout_in_ms", conf.cas_contention_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.cas_contention_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("cas_contention_timeout_in_ms", conf.cas_contention_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.cas_contention_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.counter_write_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("counter_write_request_timeout_in_ms", conf.counter_write_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.counter_write_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("counter_write_request_timeout_in_ms", conf.counter_write_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.counter_write_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
         if(conf.truncate_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
-           logInfo("truncate_request_timeout_in_ms", conf.truncate_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
-           conf.truncate_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+            logInfo("truncate_request_timeout_in_ms", conf.truncate_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+            conf.truncate_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
     }
 
@@ -1285,8 +1285,8 @@ public class DatabaseDescriptor
     public static int getPermissionsUpdateInterval()
     {
         return conf.permissions_update_interval_in_ms == -1
-             ? conf.permissions_validity_in_ms
-             : conf.permissions_update_interval_in_ms;
+               ? conf.permissions_validity_in_ms
+               : conf.permissions_update_interval_in_ms;
     }
 
     public static void setPermissionsUpdateInterval(int updateInterval)
@@ -1317,8 +1317,8 @@ public class DatabaseDescriptor
     public static int getRolesUpdateInterval()
     {
         return conf.roles_update_interval_in_ms == -1
-             ? conf.roles_validity_in_ms
-             : conf.roles_update_interval_in_ms;
+               ? conf.roles_validity_in_ms
+               : conf.roles_update_interval_in_ms;
     }
 
     public static void setRolesUpdateInterval(int interval)
@@ -1939,11 +1939,11 @@ public class DatabaseDescriptor
         conf.flush_compression = compression;
     }
 
-   /**
-    * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
-    * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
-    * more, depending on how soon the sync policy stops all writing threads.
-    */
+    /**
+     * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
+     * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
+     * more, depending on how soon the sync policy stops all writing threads.
+     */
     public static int getCommitLogMaxCompressionBuffersInPool()
     {
         return conf.commitlog_max_compression_buffers_in_pool;
@@ -2473,7 +2473,7 @@ public class DatabaseDescriptor
     public static File getSerializedCachePath(CacheType cacheType, String version, String extension)
     {
         String name = cacheType.toString()
-                + (version == null ? "" : '-' + version + '.' + extension);
+                      + (version == null ? "" : '-' + version + '.' + extension);
         return new File(conf.saved_caches_directory, name);
     }
 
@@ -3110,7 +3110,7 @@ public class DatabaseDescriptor
         if (value > getConcurrentCompactors())
             logger.warn("max_concurrent_automatic_sstable_upgrades ({}) is larger than concurrent_compactors ({})", value, getConcurrentCompactors());
     }
-    
+
     public static AuditLogOptions getAuditLoggingOptions()
     {
         return conf.audit_logging_options;
@@ -3366,5 +3366,23 @@ public class DatabaseDescriptor
         conf.keyspace_count_warn_threshold = value;
     }
 
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
 
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
+    }
 }
