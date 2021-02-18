@@ -239,7 +239,7 @@ public class UncommittedTableData
             return merged;
         }
 
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             merged = null;
         }

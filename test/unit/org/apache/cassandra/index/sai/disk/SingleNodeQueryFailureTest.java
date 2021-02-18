@@ -24,8 +24,9 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v1.postings.PostingListRangeIterator;
-import org.apache.cassandra.index.sai.disk.v1.segment.LiteralIndexSegmentTermsReader;
+import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.v1.PostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.utils.Throwables;
@@ -41,7 +42,7 @@ public class SingleNodeQueryFailureTest extends SAITester
                                                         "compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
 
     @Before
-    public void setup()
+    public void setup() throws Throwable
     {
         requireNetwork();
         setupTableAndIndexes();
@@ -63,20 +64,38 @@ public class SingleNodeQueryFailureTest extends SAITester
     @Test
     public void testFailedTermsReaderOnSingleIndexQuery() throws Throwable
     {
-        testFailedQuery("terms_reader_single", LiteralIndexSegmentTermsReader.TermQuery.class, "lookupPostingsOffset", true);
+        testFailedQuery("terms_reader_single", TermsReader.TermQuery.class, "lookupTermDictionary", true);
     }
 
     // Multi Index Tests
     @Test
     public void testFailedRangeIteratorOnMultiIndexesQuery() throws Throwable
     {
-        testFailedQuery("range_iterator_multi", PostingListRangeIterator.class, "getNextRowId", false);
+        testFailedQuery("range_iterator", PostingListRangeIterator.class, "getNextSegmentRowId", false);
     }
 
     @Test
     public void testFailedTermsReaderOnMultiIndexesQuery() throws Throwable
     {
-        testFailedQuery("terms_reader_multi", LiteralIndexSegmentTermsReader.TermQuery.class, "lookupPostingsOffset", false);
+        testFailedQuery("terms_reader", TermsReader.TermQuery.class, "lookupTermDictionary", false);
+    }
+
+    @Test
+    public void testFailedBkdReaderOnMultiIndexesQuery() throws Throwable
+    {
+        testFailedQuery("bkd_reader", PostingsReader.class, "<init>", false);
+    }
+
+    @Test
+    public void testFailedKeyFetcherOnMultiIndexesQuery() throws Throwable
+    {
+        testFailedQuery("key_fetcher", SSTableContext.DecoratedKeyFetcher.class, "apply", false);
+    }
+
+    @Test
+    public void testFailedKeyReaderOnMultiIndexesQuery() throws Throwable
+    {
+        testFailedQuery("key_reader", SSTableContext.DecoratedKeyFetcher.class, "createReader", false);
     }
 
     private void setupTableAndIndexes()

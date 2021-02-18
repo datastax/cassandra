@@ -51,11 +51,6 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
-    public default boolean isANN()
-    {
-        return false;
-    }
-
     /**
      * @return <code>true</code> if this restriction is based on equality comparison rather than a range or negation
      */

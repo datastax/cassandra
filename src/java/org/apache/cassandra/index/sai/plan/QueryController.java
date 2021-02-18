@@ -18,107 +18,83 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import javax.annotation.Nullable;
-
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.guardrails.Guardrails;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.VectorQueryContext;
-import org.apache.cassandra.index.sai.disk.IndexSearchResultIterator;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
-import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
-import org.apache.cassandra.index.sai.iterators.KeyRangeOrderingIterator;
-import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.TermIterator;
+import org.apache.cassandra.index.sai.view.View;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.InsertionOrderedNavigableSet;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.Throwables;
-
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
+import org.apache.cassandra.utils.concurrent.Ref;
 
 public class QueryController
 {
-    final QueryContext queryContext;
+    private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
-    private final RowFilter indexFilter;
+    private final Set<Collection<Expression>> resources = new HashSet<>();
+    private final QueryContext queryContext;
+    private final TableQueryMetrics tableQueryMetrics;
+    private final List<RowFilter.Expression> expressions;
+
     private final List<DataRange> ranges;
     private final AbstractBounds<PartitionPosition> mergeRange;
-    private final PrimaryKey.Factory keyFactory;
-    private final PrimaryKey firstPrimaryKey;
-    private final PrimaryKey lastPrimaryKey;
-    private final int orderChunkSize;
-
-    private final NavigableSet<Clustering<?>> nextClusterings;
 
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
-                           RowFilter indexFilter,
-                           QueryContext queryContext)
+                           List<RowFilter.Expression> expressions,
+                           QueryContext queryContext,
+                           TableQueryMetrics tableQueryMetrics)
     {
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
-        this.indexFilter = indexFilter;
+        this.tableQueryMetrics = tableQueryMetrics;
+        this.expressions = expressions;
+
         this.ranges = dataRanges(command);
         DataRange first = ranges.get(0);
         DataRange last = ranges.get(ranges.size() - 1);
         this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
-        this.keyFactory = new PrimaryKey.Factory(cfs.getPartitioner(), cfs.getComparator());
-        this.firstPrimaryKey = keyFactory.create(mergeRange.left.getToken());
-        this.lastPrimaryKey = keyFactory.create(mergeRange.right.getToken());
-        this.orderChunkSize = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
-        this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
-    }
-
-    public PrimaryKey.Factory primaryKeyFactory()
-    {
-        return keyFactory;
-    }
-
-    public PrimaryKey firstPrimaryKeyInRange()
-    {
-        return firstPrimaryKey;
-    }
-
-    public PrimaryKey lastPrimaryKeyInRange()
-    {
-        return lastPrimaryKey;
     }
 
     public TableMetadata metadata()
@@ -126,321 +102,267 @@ public class QueryController
         return command.metadata();
     }
 
-    public RowFilter indexFilter()
+    /**
+     * @return non-user defined expressions used in the read command
+     */
+    List<RowFilter.Expression> getExpressions()
     {
-        return this.indexFilter;
-    }
-    
-    public boolean usesStrictFiltering()
-    {
-        return command.rowFilter().isStrict();
+        return expressions;
     }
 
     /**
      * @return token ranges used in the read command
      */
-    public List<DataRange> dataRanges()
+    List<DataRange> dataRanges()
     {
         return ranges;
     }
 
-    @Nullable
-    public StorageAttachedIndex indexFor(RowFilter.Expression expression)
+    /**
+     * Note: merged range may contain subrange that no longer belongs to the local node after range movement.
+     * It should only be used as an optimization to reduce search space. Use {@link #dataRanges()} instead to filter data.
+     *
+     * @return merged token range
+     */
+    AbstractBounds<PartitionPosition> mergeRange()
+    {
+        return mergeRange;
+    }
+
+    /**
+     * @return indexed {@code ColumnContext} if index is found; otherwise return non-indexed {@code ColumnContext}.
+     */
+    public ColumnContext getContext(RowFilter.Expression expression)
+    {
+        StorageAttachedIndex index = getBestIndexFor(expression);
+
+        return index != null ? index.getContext() : new ColumnContext(cfs.metadata(), expression.column());
+    }
+
+    public StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
         return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
     }
 
-    public boolean hasAnalyzer(RowFilter.Expression expression)
+    public UnfilteredRowIterator getPartition(DecoratedKey key, ReadExecutionController executionController)
     {
-        StorageAttachedIndex index = indexFor(expression);
-        return index != null && index.hasAnalyzer();
-    }
-
-    public UnfilteredRowIterator queryStorage(List<PrimaryKey> keys, ReadExecutionController executionController)
-    {
-        if (keys.isEmpty())
+        if (key == null)
             throw new IllegalArgumentException("At least one primary key is required!");
-
-        SinglePartitionReadCommand partition = SinglePartitionReadCommand.create(cfs.metadata(),
-                                                                                 command.nowInSec(),
-                                                                                 command.columnFilter(),
-                                                                                 RowFilter.none(),
-                                                                                 DataLimits.NONE,
-                                                                                 keys.get(0).partitionKey(),
-                                                                                 makeFilter(keys));
-
-        return partition.queryMemtableAndDisk(cfs, executionController);
-    }
-
-    /**
-     * Build a {@link KeyRangeIterator.Builder} from the given list of {@link Expression}s.
-     * <p>
-     * This is achieved by creating an on-disk view of the query that maps the expressions to
-     * the {@link SSTableIndex}s that will satisfy the expression.
-     * <p>
-     * Each (expression, SSTable indexes) pair is then passed to
-     * {@link IndexSearchResultIterator#build(Expression, Collection, AbstractBounds, QueryContext, boolean, Runnable)}
-     * to search the in-memory index associated with the expression and the SSTable indexes, the results of
-     * which are unioned and returned.
-     * <p>
-     * The results from each call to {@link IndexSearchResultIterator#build(Expression, Collection, AbstractBounds, QueryContext, boolean, Runnable)}
-     * are added to a {@link KeyRangeIntersectionIterator} and returned if strict filtering is allowed.
-     * <p>
-     * If strict filtering is not allowed, indexes are split into two groups according to the repaired status of their 
-     * backing SSTables. Results from searches over the repaired group are added to a 
-     * {@link KeyRangeIntersectionIterator}, which is then added, along with results from searches on the unrepaired
-     * set, to a top-level {@link KeyRangeUnionIterator}, and returned. This is done to ensure that AND queries do not
-     * prematurely filter out matches on un-repaired partial updates. Post-filtering must also take this into
-     * account. (see {@link FilterTree#isSatisfiedBy(DecoratedKey, Row, Row)}) Note that Memtable-attached 
-     * indexes are treated as part of the unrepaired set.
-     */
-    public KeyRangeIterator.Builder getIndexQueryResults(Collection<Expression> expressions)
-    {
-        // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
-        expressions = expressions.stream().filter(e -> e.getIndexOperator() != Expression.IndexOperator.ANN).collect(Collectors.toList());
-
-        QueryViewBuilder.QueryView queryView = new QueryViewBuilder(expressions, mergeRange).build();
-        Runnable onClose = () -> queryView.referencedIndexes.forEach(SSTableIndex::releaseQuietly);
-        KeyRangeIterator.Builder builder = command.rowFilter().isStrict()
-                                           ? KeyRangeIntersectionIterator.builder(expressions.size(), onClose)
-                                           : KeyRangeUnionIterator.builder(expressions.size(), onClose);
 
         try
         {
-            maybeTriggerGuardrails(queryView);
+            SinglePartitionReadCommand partition = SinglePartitionReadCommand.create(cfs.metadata(),
+                                                                                     command.nowInSec(),
+                                                                                     command.columnFilter(),
+                                                                                     RowFilter.none(),
+                                                                                     DataLimits.NONE,
+                                                                                     key,
+                                                                                     command.clusteringIndexFilter(key));
 
-            if (command.rowFilter().isStrict())
+            return partition.queryMemtableAndDisk(cfs, executionController);
+        }
+        finally
+        {
+            queryContext.checkpoint();
+        }
+    }
+
+    /**
+     * Build a {@link RangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).
+     * Building of such builder involves index search, results of which are persisted in the internal resources list
+     * and can be released later via {@link QueryController#releaseIndexes(ListMultimap)}}.
+     *
+     * @param op The operation type to coalesce expressions with.
+     * @param expressions The expressions to build range iterator from (expressions with not results are ignored).
+     *
+     * @return range iterator builder based on given expressions and operation type.
+     */
+    public RangeIterator.Builder getIndexes(Operation.OperationType op, Collection<Expression> expressions)
+    {
+        if (resources.contains(expressions))
+            throw new IllegalArgumentException("Can't process the same expressions multiple times.");
+
+        boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(expressions.size());
+
+        RangeIterator.Builder builder = op == Operation.OperationType.OR
+                                        ? RangeUnionIterator.builder()
+                                        : RangeIntersectionIterator.selectiveBuilder();
+
+        Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
+
+        try
+        {
+            for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
             {
-                // If strict filtering is enabled, evaluate indexes for both repaired and un-repaired SSTables together.
-                // This usually means we are making this local index query in the context of a user query that reads 
-                // from a single replica and thus can safely perform local intersections.
-                for (Pair<Expression, Collection<SSTableIndex>> queryViewPair : queryView.view)
-                    builder.add(IndexSearchResultIterator.build(queryViewPair.left, queryViewPair.right, mergeRange, queryContext, true, () -> {}));
-            }
-            else
-            {
-                KeyRangeIterator.Builder repairedBuilder = KeyRangeIntersectionIterator.builder(expressions.size(), () -> {});
+                @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
+                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer);
 
-                for (Pair<Expression, Collection<SSTableIndex>> queryViewPair : queryView.view)
-                {
-                    // The initial sizes here reflect little more than an effort to avoid resizing for 
-                    // partition-restricted searches w/ LCS:
-                    List<SSTableIndex> repaired = new ArrayList<>(5);
-                    List<SSTableIndex> unrepaired = new ArrayList<>(5);
-
-                    // Split SSTable indexes into repaired and un-reparired:
-                    for (SSTableIndex index : queryViewPair.right)
-                        if (index.getSSTable().isRepaired())
-                            repaired.add(index);
-                        else
-                            unrepaired.add(index);
-
-                    // Always build an iterator for the un-repaired set, given this must include Memtable indexes...  
-                    IndexSearchResultIterator unrepairedIterator =
-                            IndexSearchResultIterator.build(queryViewPair.left, unrepaired, mergeRange, queryContext, true, () -> {});
-
-                    // ...but ignore it if our combined results are empty.
-                    if (unrepairedIterator.getMaxKeys() > 0)
-                    {
-                        builder.add(unrepairedIterator);
-                        queryContext.hasUnrepairedMatches = true;
-                    }
-                    else
-                    {
-                        // We're not going to use this, so release the resources it holds.
-                        unrepairedIterator.close();
-                    }
-
-                    // ...then only add an iterator to the repaired intersection if repaired SSTable indexes exist. 
-                    if (!repaired.isEmpty())
-                        repairedBuilder.add(IndexSearchResultIterator.build(queryViewPair.left, repaired, mergeRange, queryContext, false, () -> {}));
-                }
-
-                if (repairedBuilder.rangeCount() > 0)
-                    builder.add(repairedBuilder.build());
+                builder.add(index);
             }
         }
         catch (Throwable t)
         {
             // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            builder.cleanup();
+            FileUtils.closeQuietly(builder.ranges());
+            view.forEach(e -> e.getValue().forEach(SSTableIndex::release));
             throw t;
         }
+
+        resources.add(expressions);
         return builder;
     }
 
-    private void maybeTriggerGuardrails(QueryViewBuilder.QueryView queryView)
+    private static void releaseQuietly(SSTableIndex index)
     {
-        int referencedIndexes = 0;
-
-        // We want to make sure that no individual column expression touches too many SSTable-attached indexes:
-        for (Pair<Expression, Collection<SSTableIndex>> expressionSSTables : queryView.view)
-            referencedIndexes = Math.max(referencedIndexes, expressionSSTables.right.size());
-
-        if (Guardrails.saiSSTableIndexesPerQuery.failsOn(referencedIndexes, null))
+        try
         {
-            String msg = String.format("Query %s attempted to read from too many indexes (%s) but max allowed is %s; " +
-                                       "query aborted (see sai_sstable_indexes_per_query_fail_threshold)",
-                                       command.toCQLString(),
-                                       referencedIndexes,
-                                       Guardrails.CONFIG_PROVIDER.getOrCreate(null).getSaiSSTableIndexesPerQueryFailThreshold());
-            Tracing.trace(msg);
-            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_FAIL, referencedIndexes);
-            throw new QueryReferencingTooManyIndexesException(msg);
+            index.release();
         }
-        else if (Guardrails.saiSSTableIndexesPerQuery.warnsOn(referencedIndexes, null))
+        catch (Throwable e)
         {
-            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_WARN, referencedIndexes);
+            logger.error(index.getColumnContext().logMessage("Failed to release index on SSTable {}"), index.getSSTable().descriptor, e);
         }
     }
 
+    public void releaseIndexes(ListMultimap<?, Expression> expressions)
+    {
+        if (expressions != null)
+            resources.remove(expressions.values());
+    }
+
     /**
-     * Returns whether this query is not selecting the {@link PrimaryKey}.
-     * The query does not select the key if both of the following statements are false:
-     *  1. The table associated with the query is not using clustering keys
-     *  2. The clustering index filter for the command wants the row.
-     * <p>
-     *  Item 2 is important in paged queries where the {@link org.apache.cassandra.db.filter.ClusteringIndexSliceFilter} for
-     *  subsequent paged queries may not select rows that are returned by the index
-     *  search because that is initially partition based.
+     * Used to release all resources and record metrics when query finishes.
+     */
+    public void finish()
+    {
+        if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
+    }
+
+    /**
+     * Try to reference all SSTableIndexes before querying on disk indexes.
      *
-     * @param key The {@link PrimaryKey} to be tested
-     * @return true if the key is not selected by the query
+     * If we attempt to proceed into {@link TermIterator#build(Expression, Set, AbstractBounds, QueryContext, boolean)}
+     * without first referencing all indexes, a concurrent compaction may decrement one or more of their backing
+     * SSTable {@link Ref} instances. This will allow the {@link SSTableIndex} itself to be released and will fail the query.
      */
-    public boolean doesNotSelect(PrimaryKey key)
+    private Map<Expression, NavigableSet<SSTableIndex>> referenceAndGetView(Operation.OperationType op, Collection<Expression> expressions)
     {
-        return key.kind() == PrimaryKey.Kind.WIDE && !command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
-    }
-
-    // This is an ANN only query
-    public KeyRangeIterator getTopKRows(RowFilter.Expression expression)
-    {
-        assert expression.operator() == Operator.ANN;
-        StorageAttachedIndex index = indexFor(expression);
-        assert index != null;
-        Expression planExpression = Expression.create(index).add(Operator.ANN, expression.getIndexValue().duplicate());
-        // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        KeyRangeIterator memtableResults = index.memtableIndexManager().searchMemtableIndexes(queryContext, planExpression, mergeRange);
-
-        QueryViewBuilder.QueryView queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
-        Runnable onClose = () -> queryView.referencedIndexes.forEach(SSTableIndex::releaseQuietly);
-
+        SortedSet<String> indexNames = new TreeSet<>();
         try
         {
-            List<KeyRangeIterator> sstableIntersections = queryView.view
-                                                                   .stream()
-                                                                   .map(this::createRowIdIterator)
-                                                                   .collect(Collectors.toList());
+            while (true)
+            {
+                List<SSTableIndex> referencedIndexes = new ArrayList<>();
+                boolean failed = false;
 
-            return IndexSearchResultIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext, onClose);
+                Map<Expression, NavigableSet<SSTableIndex>> view = getView(op, expressions);
+
+                for (SSTableIndex index : view.values().stream().flatMap(Collection::stream).collect(Collectors.toList()))
+                {
+                    indexNames.add(index.getColumnContext().getIndexName());
+
+                    if (index.reference())
+                    {
+                        referencedIndexes.add(index);
+                    }
+                    else
+                    {
+                        failed = true;
+                        break;
+                    }
+                }
+
+                if (failed)
+                {
+                    // TODO: This might be a good candidate for a table/index group metric in the future...
+                    referencedIndexes.forEach(QueryController::releaseQuietly);
+                }
+                else
+                {
+                    return view;
+                }
+            }
         }
-        catch (Throwable t)
+        finally
         {
-            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            onClose.run();
-            throw t;
+            Tracing.trace("Querying storage-attached indexes {}", indexNames);
         }
     }
 
-    // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public KeyRangeIterator getTopKRows(KeyRangeIterator source, RowFilter.Expression expression)
+    private Map<Expression, NavigableSet<SSTableIndex>> getView(Operation.OperationType op, Collection<Expression> expressions)
     {
-        return new KeyRangeOrderingIterator(source, orderChunkSize, list -> this.getTopKRows(list, expression));
+        // first let's determine the primary expression if op is AND
+        Pair<Expression, NavigableSet<SSTableIndex>> primary = (op == Operation.OperationType.AND) ? calculatePrimary(expressions) : null;
+
+        Map<Expression, NavigableSet<SSTableIndex>> indexes = new HashMap<>();
+        for (Expression e : expressions)
+        {
+            // NO_EQ and non-index column query should only act as FILTER BY for satisfiedBy(Row) method
+            // because otherwise it likely to go through the whole index.
+            if (!e.context.isIndexed() || e.getOp() == Expression.Op.NOT_EQ)
+            {
+                continue;
+            }
+
+            // primary expression, we'll have to add as is
+            if (primary != null && e.equals(primary.left))
+            {
+                indexes.put(primary.left, primary.right);
+
+                continue;
+            }
+
+            View view = e.context.getView();
+
+            NavigableSet<SSTableIndex> readers = new TreeSet<>(SSTableIndex.COMPARATOR);
+            if (primary != null && primary.right.size() > 0)
+            {
+                for (SSTableIndex index : primary.right)
+                    readers.addAll(view.match(index.minKey(), index.maxKey()));
+            }
+            else
+            {
+                readers.addAll(applyScope(view.match(e)));
+            }
+
+            indexes.put(e, readers);
+        }
+
+        return indexes;
     }
 
-    private KeyRangeIterator getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
+    private Pair<Expression, NavigableSet<SSTableIndex>> calculatePrimary(Collection<Expression> expressions)
     {
-        VectorQueryContext vectorQueryContext = queryContext.vectorContext();
-        // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
-        // eagerly can save some work when going from PK to row id for on disk segments.
-        // Since the result is shared with multiple streams, we use an unmodifiable list.
-        List<PrimaryKey> sourceKeys = rawSourceKeys.stream().filter(vectorQueryContext::shouldInclude).collect(Collectors.toList());
-        StorageAttachedIndex index = indexFor(expression);
-        assert index != null : "Cannot do ANN ordering on an unindexed column";
-        Expression planExpression = Expression.create(index);
-        planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
+        Expression expression = null;
+        NavigableSet<SSTableIndex> primaryIndexes = null;
 
-        // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        KeyRangeIterator memtableResults = index.memtableIndexManager().limitToTopResults(queryContext, sourceKeys, planExpression);
-        QueryViewBuilder.QueryView queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
-        Runnable onClose = () -> queryView.referencedIndexes.forEach(SSTableIndex::releaseQuietly);
-
-        try
+        for (Expression e : expressions)
         {
-            List<KeyRangeIterator> sstableIntersections = queryView.view
-                                                                   .stream()
-                                                                   .flatMap(pair -> pair.right.stream())
-                                                                   .map(idx -> {
-                                                                       try
-                                                                       {
-                                                                           return idx.limitToTopKResults(queryContext, sourceKeys, planExpression);
-                                                                       }
-                                                                       catch (IOException e)
-                                                                       {
-                                                                           throw new UncheckedIOException(e);
-                                                                       }
-                                                                   })
-                                                                   .collect(Collectors.toList());
+            if (!e.context.isIndexed())
+                continue;
 
-            return IndexSearchResultIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext, onClose);
+            View view = e.context.getView();
+
+            NavigableSet<SSTableIndex> indexes = new TreeSet<>(SSTableIndex.COMPARATOR);
+            indexes.addAll(applyScope(view.match(e)));
+
+            if (expression == null || primaryIndexes.size() > indexes.size())
+            {
+                primaryIndexes = indexes;
+                expression = e;
+            }
         }
-        catch (Throwable t)
-        {
-            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            onClose.run();
-            throw t;
-        }
+
+        return expression == null ? null : Pair.create(expression, primaryIndexes);
     }
 
-    /**
-     * Create row id iterator from different indexes' on-disk searcher of the same sstable
-     */
-    private KeyRangeIterator createRowIdIterator(Pair<Expression, Collection<SSTableIndex>> indexExpression)
+    private Set<SSTableIndex> applyScope(Set<SSTableIndex> indexes)
     {
-        List<KeyRangeIterator> subIterators = indexExpression.right
-                           .stream()
-                           .map(index ->
-                                {
-                                    try
-                                    {
-                                        List<KeyRangeIterator> iterators = index.search(indexExpression.left, mergeRange, queryContext);
-                                        // concat the result from multiple segments for the same index
-                                        return KeyRangeConcatIterator.builder(iterators.size()).add(iterators).build();
-                                    }
-                                    catch (Throwable ex)
-                                    {
-                                        throw Throwables.cleaned(ex);
-                                    }
-                                }).collect(Collectors.toList());
+        return Sets.filter(indexes, index -> {
+            SSTableReader sstable = index.getSSTable();
 
-        return KeyRangeUnionIterator.build(subIterators);
-    }
-
-    // Note: This method assumes that the selects method has already been called for the
-    // key to avoid having to (potentially) call selects twice
-    private ClusteringIndexFilter makeFilter(List<PrimaryKey> keys)
-    {
-        PrimaryKey firstKey = keys.get(0);
-
-        assert cfs.metadata().comparator.size() == 0 && !firstKey.kind().hasClustering ||
-               cfs.metadata().comparator.size() > 0 && firstKey.kind().hasClustering :
-               "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
-
-        ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
-
-        // If we have skinny partitions or the key is for a static row then we need to get the partition as
-        // requested by the original query.
-        if (cfs.metadata().comparator.size() == 0 || firstKey.kind() == PrimaryKey.Kind.STATIC)
-        {
-            return clusteringIndexFilter;
-        }
-        else
-        {
-            nextClusterings.clear();
-            for (PrimaryKey key : keys)
-                nextClusterings.add(key.clustering());
-            return new ClusteringIndexNamesFilter(nextClusterings, clusteringIndexFilter.isReversed());
-        }
+            return mergeRange.left.compareTo(sstable.last) <= 0 && (mergeRange.right.isMinimum() || sstable.first.compareTo(mergeRange.right) <= 0);
+        });
     }
 
     /**

@@ -126,48 +126,27 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     public final boolean hasSupportingIndex(IndexRegistry indexRegistry)
     {
         for (Index index : indexRegistry.listIndexes())
-           if (isSupportedBy(index))
-               return true;
-
+            if (isSupportingIndex(index))
+                return true;
         return false;
-    }
-
-    @Override
-    public final Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        for (Index index : indexRegistry.listIndexes())
-            if (isSupportedBy(index))
-                return index;
-        return null;
-    }
-
-    @Override
-    public Index findSupportingIndexFromQueryPlan(Index.QueryPlan indexQueryPlan)
-    {
-        for (Index index : indexQueryPlan.getIndexes())
-            if (isSupportedBy(index))
-                return index;
-        return null;
     }
 
     @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         for (ColumnMetadata column : columnDefs)
-        {
             if (!isSupportedBy(indexGroup, column))
                 return true;
-        }
+
         return false;
     }
 
     private boolean isSupportedBy(Index.Group indexGroup, ColumnMetadata column)
     {
         for (Index index : indexGroup.getIndexes())
-        {
             if (isSupportedBy(index, column))
                 return true;
-        }
+
         return false;
     }
 
@@ -178,13 +157,12 @@ public abstract class MultiColumnRestriction implements SingleRestriction
      * @return <code>true</code> this type of restriction is supported by the specified index,
      * <code>false</code> otherwise.
      */
-    private boolean isSupportedBy(Index index)
+    private boolean isSupportingIndex(Index index)
     {
         for (ColumnMetadata column : columnDefs)
-        {
             if (isSupportedBy(index, column))
                 return true;
-        }
+
         return false;
     }
 
