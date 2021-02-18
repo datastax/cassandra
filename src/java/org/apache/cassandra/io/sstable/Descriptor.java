@@ -110,6 +110,11 @@ public class Descriptor
         return new Descriptor(newType.info.getLatestVersion(), directory, ksname, cfname, generation, newType);
     }
 
+    public File tmpFileFor(Component component)
+    {
+        return new File(tmpFilenameFor(component));
+    }
+
     public String tmpFilenameFor(Component component)
     {
         return filenameFor(component) + TMP_EXT;
@@ -123,6 +128,11 @@ public class Descriptor
         // Use UUID to handle concurrent streamings on the same sstable.
         // TMP_EXT allows temp file to be removed by {@link ColumnFamilyStore#scrubDataDirectories}
         return String.format("%s.%s%s", filenameFor(component), UUIDGen.getTimeUUID(), TMP_EXT);
+    }
+
+    public File fileFor(Component component)
+    {
+        return new File(filenameFor(component));
     }
 
     public String filenameFor(Component component)
@@ -351,10 +361,10 @@ public class Descriptor
             return false;
         Descriptor that = (Descriptor)o;
         return that.directory.equals(this.directory)
-                       && that.generation == this.generation
-                       && that.ksname.equals(this.ksname)
-                       && that.cfname.equals(this.cfname)
-                       && that.formatType == this.formatType;
+               && that.generation == this.generation
+               && that.ksname.equals(this.ksname)
+               && that.cfname.equals(this.cfname)
+               && that.formatType == this.formatType;
     }
 
     @Override
