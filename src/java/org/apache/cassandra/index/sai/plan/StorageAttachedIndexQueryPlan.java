@@ -17,10 +17,11 @@
  */
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
@@ -29,7 +30,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -39,27 +39,25 @@ import org.apache.cassandra.schema.TableMetadata;
 public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 {
     public static final String UNSUPPORTED_NON_STRICT_OPERATOR =
-            "Operator %s is only supported in intersections for reads that do not require replica reconciliation.";
+    "Operator %s is only supported in intersections for reads that do not require replica reconciliation.";
 
     private final ColumnFamilyStore cfs;
     private final TableQueryMetrics queryMetrics;
     private final RowFilter postIndexFilter;
-    private final RowFilter indexFilter;
+    private final List<RowFilter.Expression> expressions;
     private final Set<Index> indexes;
-    private final boolean isTopK;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
                                           RowFilter postIndexFilter,
-                                          RowFilter indexFilter,
+                                          List<RowFilter.Expression> expressions,
                                           ImmutableSet<Index> indexes)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
         this.postIndexFilter = postIndexFilter;
-        this.indexFilter = indexFilter;
+        this.expressions = expressions;
         this.indexes = indexes;
-        this.isTopK = indexes.stream().anyMatch(i -> i instanceof StorageAttachedIndex && ((StorageAttachedIndex) i).termType().isVector());
     }
 
     @Nullable
@@ -69,6 +67,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                        RowFilter filter)
     {
         ImmutableSet.Builder<Index> selectedIndexesBuilder = ImmutableSet.builder();
+        List<RowFilter.Expression> acceptedExpressions = new ArrayList<>();
 
         RowFilter preIndexFilter = filter;
         RowFilter postIndexFilter = filter;
@@ -109,7 +108,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (selectedIndexes.isEmpty())
             return null;
 
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter, selectedIndexes);
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.getExpressions(), selectedIndexes);
     }
 
     @Override
@@ -136,21 +135,8 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,
                                                 command,
-                                                indexFilter,
+                                                expressions,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
-    }
-
-    /**
-     * Called on coordinator after merging replica responses before returning to client
-     */
-    @Override
-    public Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
-    {
-        if (!isTopK())
-            return partitions -> partitions;
-
-        // in case of top-k query, filter out rows that are not actually global top-K
-        return partitions -> (PartitionIterator) new VectorTopKProcessor(command).filter(partitions);
     }
 
     /**
@@ -162,11 +148,5 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     public RowFilter postIndexQueryFilter()
     {
         return postIndexFilter;
-    }
-
-    @Override
-    public boolean isTopK()
-    {
-        return isTopK;
     }
 }

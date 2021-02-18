@@ -25,15 +25,16 @@ import org.junit.Test;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
+import org.apache.cassandra.index.sai.disk.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.SegmentMetadata;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.ClusterUtils;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.SAICodecUtils;
-import org.apache.cassandra.index.sai.disk.v1.segment.SegmentBuilder;
-import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.IndexInput;
 
@@ -153,7 +154,7 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static SegmentMetadata flush(IndexDescriptor indexDescriptor) throws IOException
+        public static SegmentMetadata flush(IndexComponents indexComponents) throws IOException
         {
             throw new IOException(TEST_ERROR_MESSAGE);
         }

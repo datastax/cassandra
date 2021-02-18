@@ -24,12 +24,9 @@ import org.assertj.core.api.Assertions;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.utils.IndexIdentifier;
-import org.apache.cassandra.index.sai.utils.IndexTermType;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.service.StorageService;
@@ -48,8 +45,7 @@ public class FailureTest extends SAITester
     public void shouldMakeIndexNonQueryableOnSSTableContextFailureDuringFlush() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        IndexIdentifier indexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-        IndexTermType indexTermType = createIndexTermType(Int32Type.instance);
+        String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         execute("INSERT INTO %s (id1, v1) VALUES ('1', 1)");
         execute("INSERT INTO %s (id1, v1) VALUES ('2', 2)");
@@ -57,12 +53,12 @@ public class FailureTest extends SAITester
 
         assertEquals(1, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
 
-        verifyIndexFiles(indexTermType, indexIdentifier, 1, 1, 1);
-        verifySSTableIndexes(indexIdentifier, 1, 1);
+        verifyIndexFiles(1, 1, 0, 1);
+        verifySSTableIndexes(v1IndexName, 1, 1);
 
         execute("INSERT INTO %s (id1, v1) VALUES ('3', 3)");
 
-        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_flush", SSTableContext.class, "<init>", RuntimeException.class);
+        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_flush", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
         flush();
@@ -76,8 +72,8 @@ public class FailureTest extends SAITester
         // Now verify that a restart actually repairs the index...
         simulateNodeRestart();
 
-        verifyIndexFiles(indexTermType, indexIdentifier, 2, 2, 2);
-        verifySSTableIndexes(indexIdentifier, 2, 2);
+        verifyIndexFiles(2, 0);
+        verifySSTableIndexes(v1IndexName, 2, 2);
 
         assertEquals(2, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
     }
@@ -86,8 +82,7 @@ public class FailureTest extends SAITester
     public void shouldMakeIndexNonQueryableOnSSTableContextFailureDuringCompaction() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        IndexIdentifier indexIdentifier = createIndexIdentifier(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
-        IndexTermType indexTermType = createIndexTermType(Int32Type.instance);
+        String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         execute("INSERT INTO %s (id1, v1) VALUES ('1', 1)");
         flush();
@@ -97,10 +92,10 @@ public class FailureTest extends SAITester
 
         assertEquals(1, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
 
-        verifyIndexFiles(indexTermType, indexIdentifier, 2, 2, 2);
-        verifySSTableIndexes(indexIdentifier, 2, 2);
+        verifyIndexFiles(2, 2, 0, 2);
+        verifySSTableIndexes(v1IndexName, 2, 2);
 
-        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_compaction", SSTableContext.class, "<init>", RuntimeException.class);
+        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_compaction", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
         compact();
@@ -120,18 +115,18 @@ public class FailureTest extends SAITester
 
         // We need to reference SSTableContext first or the failure injection fails
         // because byteman can't find the class.
-        SSTableContext.class.getName();
+        SSTableContext.openFilesPerSSTable();
 
-        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "<init>", RuntimeException.class);
+        Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
-        IndexIdentifier indexIdentifier = createIndexIdentifier(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2")));
+        String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         // Verify that the initial index build fails...
-        verifyInitialIndexFailed(indexIdentifier.indexName);
+        verifyInitialIndexFailed(v2IndexName);
 
-        verifyNoIndexFiles();
-        verifySSTableIndexes(indexIdentifier, 0);
+        verifyIndexFiles(0, 0, 0, 0);
+        verifySSTableIndexes(v2IndexName, 0);
 
         // ...and then verify that, while the node is still operational, the index is not.
         Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v2 = '1'"))

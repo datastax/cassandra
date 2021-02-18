@@ -5249,11 +5249,6 @@ public class DatabaseDescriptor
         return conf != null ? conf.default_compaction : null;
     }
 
-    public static DataStorageSpec.IntMebibytesBound getSAISegmentWriteBufferSpace()
-    {
-        return conf.sai_options.segment_write_buffer_size;
-    }
-
     public static boolean getPrioritizeSAIOverLegacyIndex()
     {
         return conf.sai_options.prioritize_over_legacy_index;
@@ -5308,5 +5303,25 @@ public class DatabaseDescriptor
     public static void setPaxosRepairRaceWait(boolean paxosRepairRaceWait)
     {
         conf.paxos_repair_race_wait = paxosRepairRaceWait;
+    }
+
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
+
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
     }
 }
