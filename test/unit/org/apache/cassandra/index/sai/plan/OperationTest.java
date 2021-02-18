@@ -19,38 +19,39 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumMap;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -59,89 +60,231 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.index.sai.IndexingSchemaLoader;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_CONFIG;
 import static org.apache.cassandra.db.marshal.Int32Type.instance;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
-public class OperationTest
+public class OperationTest extends IndexingSchemaLoader
 {
     private static final String KS_NAME = "sai";
     private static final String CF_NAME = "test_cf";
     private static final String CLUSTERING_CF_NAME = "clustering_test_cf";
-    private static final String STATIC_CF_NAME = "static_sai_test_cf";
+    private static final String STATIC_CF_NAME = "static_ndi_test_cf";
 
     private static ColumnFamilyStore BACKEND;
     private static ColumnFamilyStore CLUSTERING_BACKEND;
     private static ColumnFamilyStore STATIC_BACKEND;
 
+
     private QueryController controller;
     private QueryController controllerClustering;
     private QueryController controllerStatic;
+
 
     @BeforeClass
     public static void loadSchema() throws ConfigurationException
     {
         CASSANDRA_CONFIG.setString("cassandra-murmur.yaml");
 
-        SchemaLoader.loadSchema();
+        IndexingSchemaLoader.loadSchema();
 
-        SchemaLoader.createKeyspace(KS_NAME,
-                                    KeyspaceParams.simpleTransient(1),
-                                    skinnySAITableMetadata(KS_NAME, CF_NAME),
-                                    clusteringSAITableMetadata(KS_NAME, CLUSTERING_CF_NAME),
-                                    staticSAITableMetadata(KS_NAME, STATIC_CF_NAME));
+        IndexingSchemaLoader.createKeyspace(KS_NAME,
+                                            KeyspaceParams.simpleTransient(1),
+                                            IndexingSchemaLoader.ndiCFMD(KS_NAME, CF_NAME),
+                                            IndexingSchemaLoader.clusteringNDICFMD(KS_NAME, CLUSTERING_CF_NAME),
+                                            IndexingSchemaLoader.staticNDICFMD(KS_NAME, STATIC_CF_NAME));
 
         BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
         CLUSTERING_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(CLUSTERING_CF_NAME);
         STATIC_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(STATIC_CF_NAME);
     }
 
+
     @Before
     public void beforeTest()
     {
         ReadCommand command = PartitionRangeReadCommand.allDataRead(BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controller = new QueryController(BACKEND, command, null, contextWithUnrepairedMatches(command));
+        controller = new QueryController(BACKEND, command, Collections.emptyList(), new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(CLUSTERING_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, null, contextWithUnrepairedMatches(command));
+        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, Collections.emptyList(), new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(STATIC_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerStatic = new QueryController(STATIC_BACKEND, command, null, contextWithUnrepairedMatches(command));
+        controllerStatic = new QueryController(STATIC_BACKEND, command, Collections.emptyList(), new QueryContext(), null);
     }
 
-    private static QueryContext contextWithUnrepairedMatches(ReadCommand command)
+    @After
+    public void afterTest()
     {
-        QueryContext context = new QueryContext(command, DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
-        context.hasUnrepairedMatches = true;
-        return context;
     }
 
     @Test
     public void testAnalyze()
     {
+        final ColumnMetadata firstName = getColumn(UTF8Type.instance.decompose("first_name"));
         final ColumnMetadata age = getColumn(UTF8Type.instance.decompose("age"));
+        final ColumnMetadata comment = getColumn(UTF8Type.instance.decompose("comment"));
+
+        // age != 5 AND age > 1 AND age != 6 AND age <= 10
+        Map<Expression.Op, Expression> expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.AND,
+                                                                                    Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                                              new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
+                                                                                              new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(6)),
+                                                                                              new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10)))));
+
+        Expression expected = new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
+            upper = new Bound(Int32Type.instance.decompose(10), Int32Type.instance, true);
+
+            exclusions.add(Int32Type.instance.decompose(5));
+            exclusions.add(Int32Type.instance.decompose(6));
+        }};
+
+        Assert.assertEquals(1, expressions.size());
+        Assert.assertEquals(expected, expressions.get(Expression.Op.RANGE));
+
+        // age != 5 OR age >= 7
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                                     Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                  new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(7)))));
+        Assert.assertEquals(2, expressions.size());
+
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                            {{
+                                    operation = Op.NOT_EQ;
+                                    lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
+                                    upper = lower;
+                            }}, expressions.get(Expression.Op.NOT_EQ));
+
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                            {{
+                                    operation = Op.RANGE;
+                                    lower = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, true);
+                            }}, expressions.get(Expression.Op.RANGE));
+
+        // age != 5 OR age < 7
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                                     Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                                                  new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
+
+        Assert.assertEquals(2, expressions.size());
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                            {{
+                                    operation = Op.RANGE;
+                                    upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, false);
+                            }}, expressions.get(Expression.Op.RANGE));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                            {{
+                                    operation = Op.NOT_EQ;
+                                    lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
+                                    upper = lower;
+                            }}, expressions.get(Expression.Op.NOT_EQ));
 
         // age > 1 AND age < 7
-        Map<Expression.IndexOperator, Expression> expressions = convert(Operation.buildIndexExpressions(controller,
-                                                                                                        Arrays.asList(new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
-                                                                                                                      new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.AND,
+                                                     Arrays.asList(new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
+                                                                  new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
 
-        assertEquals(1, expressions.size());
+        Assert.assertEquals(1, expressions.size());
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                            {{
+                                    operation = Op.RANGE;
+                                    lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
+                                    upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, false);
+                            }}, expressions.get(Expression.Op.RANGE));
 
-        Expression rangeExpression = expressions.get(Expression.IndexOperator.RANGE);
+        // first_name = 'a' OR first_name != 'b'
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                                     Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
+                                                                  new SimpleExpression(firstName, Operator.NEQ, UTF8Type.instance.decompose("b")))));
 
-        assertExpression(rangeExpression, Expression.IndexOperator.RANGE, Int32Type.instance.decompose(1), false, Int32Type.instance.decompose(7), false);
+        Assert.assertEquals(2, expressions.size());
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+                            {{
+                                    operation = Op.NOT_EQ;
+                                    lower = new Bound(UTF8Type.instance.decompose("b"), UTF8Type.instance, true);
+                                    upper = lower;
+                            }}, expressions.get(Expression.Op.NOT_EQ));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+                            {{
+                                    operation = Op.EQ;
+                                    lower = upper = new Bound(UTF8Type.instance.decompose("a"), UTF8Type.instance, true);
+                            }}, expressions.get(Expression.Op.EQ));
+
+        // comment = 'soft eng' and comment != 'likes do'
+        ListMultimap<ColumnMetadata, Expression> e = Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                                                            Arrays.asList(new SimpleExpression(comment, Operator.LIKE_MATCHES, UTF8Type.instance.decompose("soft eng")),
+                                                                  new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do"))));
+
+        List<Expression> expectedExpressions = new ArrayList<Expression>(2)
+        {{
+                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                {{
+                        operation = Op.MATCH;
+                        lower = new Bound(UTF8Type.instance.decompose("soft eng"), UTF8Type.instance, true);
+                        upper = lower;
+                }});
+
+                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                {{
+                        operation = Op.NOT_EQ;
+                        lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
+                        upper = lower;
+                }});
+        }};
+
+        Assert.assertEquals(expectedExpressions, e.get(comment));
+
+        // first_name = 'j' and comment != 'likes do'
+        e = Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                   Arrays.asList(new SimpleExpression(comment, Operator.NEQ, UTF8Type.instance.decompose("likes do")),
+                                      new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j"))));
+
+        expectedExpressions = new ArrayList<Expression>(2)
+        {{
+                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                {{
+                        operation = Op.NOT_EQ;
+                        lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
+                        upper = lower;
+                }});
+        }};
+
+        Assert.assertEquals(expectedExpressions, e.get(comment));
+
+        // age != 27 first_name = 'j' and age != 25
+        e = Operation.analyzeGroup(controller, Operation.OperationType.OR,
+                                   Arrays.asList(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(27)),
+                                      new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("j")),
+                                      new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(25))));
+
+        expectedExpressions = new ArrayList<Expression>(2)
+        {{
+                add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                {{
+                        operation = Op.NOT_EQ;
+                        lower = new Bound(Int32Type.instance.decompose(27), Int32Type.instance, true);
+                        upper = lower;
+                }});
+
+                add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                {{
+                        operation = Op.NOT_EQ;
+                        lower = new Bound(Int32Type.instance.decompose(25), Int32Type.instance, true);
+                        upper = lower;
+                }});
+        }};
+
+        Assert.assertEquals(expectedExpressions, e.get(age));
     }
 
     @Test
@@ -150,80 +293,154 @@ public class OperationTest
         final ColumnMetadata timestamp = getColumn(UTF8Type.instance.decompose("timestamp"));
         final ColumnMetadata age = getColumn(UTF8Type.instance.decompose("age"));
 
-        Operation.Node node = new Operation.ExpressionNode(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(5)));
-        FilterTree filterTree = node.buildFilter(controller, true);
+        Operation.Builder builder = new Operation.Builder(Operation.OperationType.AND, controller, new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)));
+        Operation op = builder.complete();
 
         DecoratedKey key = buildKey("0");
         Unfiltered row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING);
 
-        assertFalse(filterTree.isSatisfiedBy(key, (Row) row, staticRow));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
         row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()));
 
-        assertTrue(filterTree.isSatisfiedBy(key, (Row) row, staticRow));
+        // and reject incorrect value
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
 
         row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()));
 
-        assertFalse(filterTree.isSatisfiedBy(key, (Row) row, staticRow));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
-        // range with exclusions - age > 1 AND age <= 10
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10))));
-        filterTree = node.buildFilter(controller, true);
+        // range with exclusions - age != 5 AND age > 1 AND age != 6 AND age <= 10
+        builder = new Operation.Builder(Operation.OperationType.AND, controller,
+                                        new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(5)),
+                                        new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(1)),
+                                        new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(6)),
+                                        new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10)));
+        op = builder.complete();
 
-        Set<Integer> exclusions = Sets.newHashSet(0, 1, 11);
+        Set<Integer> exclusions = Sets.newHashSet(0, 1, 5, 6, 11);
         for (int i = 0; i <= 11; i++)
         {
             row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
 
-            boolean result = filterTree.isSatisfiedBy(key, (Row) row, staticRow);
-            assertTrue(exclusions.contains(i) != result);
+            boolean result = op.satisfiedBy(key, row, staticRow);
+            Assert.assertTrue(exclusions.contains(i) != result);
+        }
+
+        // now let's do something more complex - age = 5 OR age = 6
+        builder = new Operation.Builder(Operation.OperationType.OR, controller,
+                                        new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(5)),
+                                        new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(6)));
+
+        op = builder.complete();
+
+        exclusions = Sets.newHashSet(0, 1, 2, 3, 4, 7, 8, 9, 10);
+        for (int i = 0; i <= 10; i++)
+        {
+            row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
+
+            boolean result = op.satisfiedBy(key, row, staticRow);
+            Assert.assertTrue(exclusions.contains(i) != result);
         }
 
         // now let's test aggregated AND commands
-        node = new Operation.AndNode();
+        builder = new Operation.Builder(Operation.OperationType.AND, controller);
 
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(0))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(10))));
+        // logical should be ignored by analyzer, but we still what to make sure that it is
+        //IndexExpression logical = new IndexExpression(ByteBufferUtil.EMPTY_BYTE_BUFFER, IndexOperator.EQ, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        //logical.setLogicalOp(LogicalIndexOperator.AND);
 
-        filterTree = node.buildFilter(controller, true);
+        //builder.add(logical);
+        builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(0)));
+        builder.add(new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(10)));
+        builder.add(new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(7)));
 
+        op = builder.complete();
+
+        exclusions = Sets.newHashSet(7);
         for (int i = 0; i < 10; i++)
         {
             row = buildRow(buildCell(age, instance.decompose(i), System.currentTimeMillis()));
 
-            boolean result = filterTree.isSatisfiedBy(key, (Row) row, staticRow);
-            assertTrue(result);
+            boolean result = op.satisfiedBy(key, row, staticRow);
+            Assert.assertTrue(exclusions.contains(i) != result);
         }
 
         // multiple analyzed expressions in the Operation timestamp >= 10 AND age = 5
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(timestamp, Operator.GTE, LongType.instance.decompose(10L))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(5))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controller);
+        builder.add(new SimpleExpression(timestamp, Operator.GTE, LongType.instance.decompose(10L)));
+        builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(5)));
 
-        FilterTree filterTreeStrict = node.buildFilter(controller, true);
-        FilterTree filterTreeNonStrict = node.buildFilter(controller, false);
+        op = builder.complete();
 
-        long startTime = System.currentTimeMillis();
-        row = buildRow(buildCell(age, instance.decompose(6), startTime),
-                       buildCell(timestamp, LongType.instance.decompose(11L), startTime + 1));
+        row = buildRow(buildCell(age, instance.decompose(6), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(11L), System.currentTimeMillis()));
 
-        assertFalse(filterTreeStrict.isSatisfiedBy(key, (Row) row, staticRow));
-        assertTrue(filterTreeNonStrict.isSatisfiedBy(key, (Row) row, staticRow)); // matches on timestamp >= 10
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
 
-        row = buildRow(buildCell(age, instance.decompose(5), startTime + 2),
-                       buildCell(timestamp, LongType.instance.decompose(22L), startTime + 3));
+        row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(22L), System.currentTimeMillis()));
 
-        assertTrue(filterTreeStrict.isSatisfiedBy(key, (Row) row, staticRow));
-        assertTrue(filterTreeNonStrict.isSatisfiedBy(key, (Row) row, staticRow));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
-        row = buildRow(buildCell(age, instance.decompose(5), startTime + 4),
-                       buildCell(timestamp, LongType.instance.decompose(9L), startTime + 5));
+        row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
 
-        assertFalse(filterTreeStrict.isSatisfiedBy(key, (Row) row, staticRow));
-        assertTrue(filterTreeNonStrict.isSatisfiedBy(key, (Row) row, staticRow)); // matches on age = 5
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
+
+        // operation with internal expressions and right child
+        builder = new Operation.Builder(Operation.OperationType.OR, controller,
+                                        new SimpleExpression(timestamp, Operator.GT, LongType.instance.decompose(10L)));
+        builder.setRight(new Operation.Builder(Operation.OperationType.AND, controller,
+                                               new SimpleExpression(age, Operator.GT, Int32Type.instance.decompose(0)),
+                                               new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(10))));
+        op = builder.complete();
+
+        row = buildRow(buildCell(age, instance.decompose(5), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
+
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
+
+        row = buildRow(buildCell(age, instance.decompose(20), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(11L), System.currentTimeMillis()));
+
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
+
+        row = buildRow(buildCell(age, instance.decompose(0), System.currentTimeMillis()),
+                                  buildCell(timestamp, LongType.instance.decompose(9L), System.currentTimeMillis()));
+
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
+
+        // and for desert let's try out null and deleted rows etc.
+        builder = new Operation.Builder(Operation.OperationType.AND, controller);
+        builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(30)));
+        op = builder.complete();
+
+        Assert.assertFalse(op.satisfiedBy(key, null, staticRow));
+        Assert.assertFalse(op.satisfiedBy(key, row, null));
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
+
+        long now = System.currentTimeMillis();
+
+        row = OperationTest.buildRow(
+        Row.Deletion.regular(DeletionTime.build(now - 10, (int) (now / 1000))),
+        buildCell(age, instance.decompose(6), System.currentTimeMillis()));
+
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
+
+        row = buildRow(deletedCell(age, System.currentTimeMillis(), FBUtilities.nowInSeconds()));
+
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
+
+        try
+        {
+            Assert.assertFalse(op.satisfiedBy(key, buildRow(), staticRow));
+        }
+        catch (IllegalStateException e)
+        {
+            Assert.fail("IllegalStateException should not be thrown when missing column");
+        }
     }
 
     @Test
@@ -232,35 +449,50 @@ public class OperationTest
         final ColumnMetadata firstName = getColumn(UTF8Type.instance.decompose("first_name"));
         final ColumnMetadata height = getColumn(UTF8Type.instance.decompose("height"));
 
-        // first_name = 'a' AND height > 5
-        Map<Expression.IndexOperator, Expression> expressions;
-        expressions = convert(Operation.buildIndexExpressions(controller,
-                                                              Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
-                                                                   new SimpleExpression(height, Operator.GT, Int32Type.instance.decompose(5)))));
+        // first_name = 'a' AND height != 10
+        Map<Expression.Op, Expression> expressions;
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.AND,
+                                                     Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
+                              new SimpleExpression(height, Operator.NEQ, Int32Type.instance.decompose(5)))));
 
-        assertEquals(2, expressions.size());
+        Assert.assertEquals(2, expressions.size());
 
-        expressions = convert(Operation.buildIndexExpressions(controller,
-                                                              Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
-                                                                   new SimpleExpression(height, Operator.GT, Int32Type.instance.decompose(0)),
-                                                                   new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(5)))));
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        {{
+                operation = Op.NOT_EQ;
+                lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
+                upper = lower;
+        }}, expressions.get(Expression.Op.NOT_EQ));
 
-        assertEquals(2, expressions.size());
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.AND,
+                                                     Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
+                              new SimpleExpression(height, Operator.GT, Int32Type.instance.decompose(0)),
+                              new SimpleExpression(height, Operator.NEQ, Int32Type.instance.decompose(5)))));
 
-        Expression rangeExpression = expressions.get(Expression.IndexOperator.RANGE);
+        Assert.assertEquals(2, expressions.size());
 
-        assertExpression(rangeExpression, Expression.IndexOperator.RANGE, Int32Type.instance.decompose(0), false, Int32Type.instance.decompose(5), true);
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        {{
+            operation = Op.RANGE;
+            lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, false);
+            exclusions.add(Int32Type.instance.decompose(5));
+        }}, expressions.get(Expression.Op.RANGE));
 
-        expressions = convert(Operation.buildIndexExpressions(controller,
-                                                              Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
-                                                                            new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(0)),
-                                                                            new SimpleExpression(height, Operator.LT, Int32Type.instance.decompose(10)))));
+        expressions = convert(Operation.analyzeGroup(controller, Operation.OperationType.AND,
+                                                     Arrays.asList(new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a")),
+                              new SimpleExpression(height, Operator.NEQ, Int32Type.instance.decompose(5)),
+                              new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(0)),
+                              new SimpleExpression(height, Operator.LT, Int32Type.instance.decompose(10)))));
 
-        assertEquals(2, expressions.size());
+        Assert.assertEquals(2, expressions.size());
 
-        rangeExpression = expressions.get(Expression.IndexOperator.RANGE);
-
-        assertExpression(rangeExpression, Expression.IndexOperator.RANGE, Int32Type.instance.decompose(0), true, Int32Type.instance.decompose(10), false);
+        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        {{
+                operation = Op.RANGE;
+                lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, true);
+                upper = new Bound(Int32Type.instance.decompose(10), Int32Type.instance, false);
+                exclusions.add(Int32Type.instance.decompose(5));
+        }}, expressions.get(Expression.Op.RANGE));
     }
 
     @Test
@@ -272,65 +504,65 @@ public class OperationTest
         ColumnMetadata score = getColumn(CLUSTERING_BACKEND, UTF8Type.instance.decompose("score"));
 
         DecoratedKey key = buildKey(CLUSTERING_BACKEND, "0");
-        Row row = buildRow(Clustering.make(UTF8Type.instance.fromString("US"), Int32Type.instance.decompose(27)),
+        Unfiltered row = buildRow(Clustering.make(UTF8Type.instance.fromString("US"), Int32Type.instance.decompose(27)),
                                   buildCell(height, instance.decompose(182), System.currentTimeMillis()),
                                   buildCell(score, DoubleType.instance.decompose(1.0d), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING);
 
-        Operation.Node node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(27))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182))));
+        Operation.Builder builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(27)));
+        builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
-        assertTrue(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
 
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(28))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182))));
+        builder.add(new SimpleExpression(age, Operator.EQ, Int32Type.instance.decompose(28)));
+        builder.add(new SimpleExpression(height, Operator.EQ, Int32Type.instance.decompose(182)));
 
-        assertFalse(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(27))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
+        builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(27)));
 
-        assertTrue(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("BY"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(28))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("BY")));
+        builder.add(new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(28)));
 
-        assertFalse(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertFalse(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(27))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
+        builder.add(new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(27)));
+        builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
 
-        assertTrue(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(location, Operator.EQ, UTF8Type.instance.decompose("US")));
+        builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
+        builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
-        assertTrue(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow));
 
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d))));
+        builder = new Operation.Builder(Operation.OperationType.AND, controllerClustering);
+        builder.add(new SimpleExpression(height, Operator.GTE, Int32Type.instance.decompose(182)));
+        builder.add(new SimpleExpression(score, Operator.EQ, DoubleType.instance.decompose(1.0d)));
 
-        assertTrue(node.buildFilter(controllerClustering, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(builder.complete().satisfiedBy(key, row, staticRow));
     }
 
-    private Map<Expression.IndexOperator, Expression> convert(Operation.Expressions expressions)
+    private Map<Expression.Op, Expression> convert(Multimap<ColumnMetadata, Expression> expressions)
     {
-        Map<Expression.IndexOperator, Expression> converted = new EnumMap<>(Expression.IndexOperator.class);
-        for (Expression expression : expressions.all())
+        Map<Expression.Op, Expression> converted = new HashMap<>();
+        for (Expression expression : expressions.values())
         {
-            Expression column = converted.get(expression.getIndexOperator());
+            Expression column = converted.get(expression.getOp());
             assert column == null; // sanity check
-            converted.put(expression.getIndexOperator(), expression);
+            converted.put(expression.getOp(), expression);
         }
 
         return converted;
@@ -343,161 +575,54 @@ public class OperationTest
         final ColumnMetadata value = getColumn(STATIC_BACKEND, UTF8Type.instance.decompose("value"));
 
         DecoratedKey key = buildKey(STATIC_BACKEND, 0);
-        Row row = buildRow(Clustering.make(UTF8Type.instance.fromString("date"), LongType.instance.decompose(20160401L)),
+        Unfiltered row = buildRow(Clustering.make(UTF8Type.instance.fromString("date"), LongType.instance.decompose(20160401L)),
                                   buildCell(value, DoubleType.instance.decompose(24.56), System.currentTimeMillis()));
         Row staticRow = buildRow(Clustering.STATIC_CLUSTERING,
                                  buildCell(sensorType, UTF8Type.instance.decompose("TEMPERATURE"), System.currentTimeMillis()));
 
         // sensor_type ='TEMPERATURE' AND value = 24.56
-        Operation.Node node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))));
+        Operation op = new Operation.Builder(Operation.OperationType.AND, controllerStatic,
+                                             new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
+                                             new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        assertTrue(node.buildFilter(controllerStatic, true).isSatisfiedBy(key, row, staticRow));
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
         // sensor_type ='TEMPERATURE' AND value = 30
-        node = new Operation.AndNode();
-        node.add(new Operation.ExpressionNode(new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE"))));
-        node.add(new Operation.ExpressionNode(new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))));
+        op = new Operation.Builder(Operation.OperationType.AND, controllerStatic,
+                                   new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
+                                   new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
-        assertFalse(node.buildFilter(controllerStatic, true).isSatisfiedBy(key, row, staticRow));
-    }
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
 
-    public static TableMetadata.Builder skinnySAITableMetadata(String keyspace, String table)
-    {
-        TableMetadata.Builder builder =
-        TableMetadata.builder(keyspace, table)
-                     .addPartitionKeyColumn("id", UTF8Type.instance)
-                     .addRegularColumn("first_name", UTF8Type.instance)
-                     .addRegularColumn("last_name", UTF8Type.instance)
-                     .addRegularColumn("age", Int32Type.instance)
-                     .addRegularColumn("height", Int32Type.instance)
-                     .addRegularColumn("timestamp", LongType.instance)
-                     .addRegularColumn("address", UTF8Type.instance)
-                     .addRegularColumn("score", DoubleType.instance);
+        // sensor_type ='PRESSURE' OR value = 24.56
+        op = new Operation.Builder(Operation.OperationType.OR, controllerStatic,
+                                   new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
+                                   new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        Indexes.Builder indexes = Indexes.builder();
-        addIndex(indexes, table, "first_name");
-        addIndex(indexes, table, "last_name");
-        addIndex(indexes, table, "age");
-        addIndex(indexes, table, "timestamp");
-        addIndex(indexes, table, "address");
-        addIndex(indexes, table, "score");
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
-        return builder.indexes(indexes.build());
-    }
+        // sensor_type ='PRESSURE' OR value = 30
+        op = new Operation.Builder(Operation.OperationType.AND, controllerStatic,
+                                   new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("PRESSURE")),
+                                   new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(30.00))).complete();
 
-    public static TableMetadata.Builder clusteringSAITableMetadata(String keyspace, String table)
-    {
-        return clusteringSAITableMetadata(keyspace, table, "location", "age", "height", "score");
-    }
+        Assert.assertFalse(op.satisfiedBy(key, row, staticRow));
 
-    public static TableMetadata.Builder clusteringSAITableMetadata(String keyspace, String table, String...indexedColumns)
-    {
-        Indexes.Builder indexes = Indexes.builder();
-        for (String indexedColumn : indexedColumns)
-        {
-            addIndex(indexes, table, indexedColumn);
-        }
+        // (sensor_type = 'TEMPERATURE' OR sensor_type = 'PRESSURE') AND value = 24.56
+        op = new Operation.Builder(Operation.OperationType.OR, controllerStatic,
+                                   new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("TEMPERATURE")),
+                                   new SimpleExpression(sensorType, Operator.EQ, UTF8Type.instance.decompose("PRESSURE")))
+             .setRight(new Operation.Builder(Operation.OperationType.AND, controllerStatic,
+                                             new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56)))).complete();
 
-        return TableMetadata.builder(keyspace, table)
-                            .addPartitionKeyColumn("name", UTF8Type.instance)
-                            .addClusteringColumn("location", UTF8Type.instance)
-                            .addClusteringColumn("age", Int32Type.instance)
-                            .addRegularColumn("height", Int32Type.instance)
-                            .addRegularColumn("score", DoubleType.instance)
-                            .indexes(indexes.build());
-    }
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
 
-    public static TableMetadata.Builder staticSAITableMetadata(String keyspace, String table)
-    {
-        TableMetadata.Builder builder =
-        TableMetadata.builder(keyspace, table)
-                     .addPartitionKeyColumn("sensor_id", Int32Type.instance)
-                     .addStaticColumn("sensor_type", UTF8Type.instance)
-                     .addClusteringColumn("date", LongType.instance)
-                     .addRegularColumn("value", DoubleType.instance)
-                     .addRegularColumn("variance", Int32Type.instance);
+        // sensor_type = LIKE 'TEMP%'  AND value = 24.56
+        op = new Operation.Builder(Operation.OperationType.AND, controllerStatic,
+                                   new SimpleExpression(sensorType, Operator.LIKE_PREFIX, UTF8Type.instance.decompose("TEMP")),
+                                   new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))).complete();
 
-        Indexes.Builder indexes = Indexes.builder();
-
-        addIndex(indexes, table, "sensor_type");
-        addIndex(indexes, table, "value");
-        addIndex(indexes, table, "variance");
-
-        return builder.indexes(indexes.build());
-    }
-
-    private void assertExpression(Expression expression, Expression.IndexOperator indexOperator, ByteBuffer lower,
-                                  boolean lowerInclusive, ByteBuffer upper, boolean upperInclusive)
-    {
-        assertEquals(indexOperator, expression.getIndexOperator());
-        assertEquals(lower, expression.lower().value.raw);
-        assertEquals(lowerInclusive, expression.lower().inclusive);
-        assertEquals(upper, expression.upper().value.raw);
-        assertEquals(upperInclusive, expression.upper().inclusive);
-    }
-
-    private static void addIndex(Indexes.Builder indexes, String table, String column)
-    {
-        String indexName = table + '_' + column;
-        indexes.add(IndexMetadata.fromSchemaMetadata(indexName, IndexMetadata.Kind.CUSTOM, new HashMap<String, String>()
-        {{
-            put(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StorageAttachedIndex.class.getName());
-            put(IndexTarget.TARGET_OPTION_NAME, column);
-        }}));
-    }
-
-    private static DecoratedKey buildKey(Object... key)
-    {
-        return buildKey(BACKEND, key);
-    }
-
-    private static DecoratedKey buildKey(ColumnFamilyStore cfs, Object... key)
-    {
-        AbstractType<?> type = cfs.metadata().partitionKeyType;
-        ByteBuffer decomposed;
-        if(type instanceof CompositeType)
-        {
-            Preconditions.checkArgument(key.length == type.subTypes().size());
-            decomposed = ((CompositeType) type).decompose(key);
-        }
-        else
-        {
-            Preconditions.checkArgument(key.length == 1);
-            decomposed = ((AbstractType) type).decompose(key[0]);
-        }
-        return Murmur3Partitioner.instance.decorateKey(decomposed);
-    }
-
-    private static Unfiltered buildRow(Cell<?>... cells)
-    {
-        return buildRow(Clustering.EMPTY, cells);
-    }
-
-    private static Row buildRow(Clustering<?> clustering, Cell<?>... cells)
-    {
-        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
-        rowBuilder.newRow(clustering);
-        for (Cell<?> c : cells)
-            rowBuilder.addCell(c);
-
-        return rowBuilder.build();
-    }
-
-    private static Cell<?> buildCell(ColumnMetadata column, ByteBuffer value, long timestamp)
-    {
-        return BufferCell.live(column, timestamp, value);
-    }
-
-    private static ColumnMetadata getColumn(ByteBuffer name)
-    {
-        return getColumn(BACKEND, name);
-    }
-
-    private static ColumnMetadata getColumn(ColumnFamilyStore cfs, ByteBuffer name)
-    {
-        return cfs.metadata().getColumn(name);
+        Assert.assertTrue(op.satisfiedBy(key, row, staticRow));
     }
 
     private static class SimpleExpression extends RowFilter.Expression
@@ -522,27 +647,78 @@ public class OperationTest
         @Override
         protected String toString(boolean cql)
         {
-            AbstractType<?> type = column.type;
-            switch (operator)
-            {
-                case CONTAINS:
-                    assert type instanceof CollectionType;
-                    CollectionType<?> ct = (CollectionType<?>)type;
-                    type = ct.kind == CollectionType.Kind.SET ? ct.nameComparator() : ct.valueComparator();
-                    break;
-                case CONTAINS_KEY:
-                    assert type instanceof MapType;
-                    type = ((MapType<?, ?>)type).nameComparator();
-                    break;
-                case IN:
-                    type = ListType.getInstance(type, false);
-                    break;
-                default:
-                    break;
-            }
-            return cql
-                   ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value) )
-                   : String.format("%s %s %s", column.name.toString(), operator, type.getString(value));
+            return String.format("%s %s %s",
+                    cql ? column.name.toCQLString() : column.name.toString(),
+                    operator,
+                    ByteBufferUtil.bytesToHex(value));
         }
+    }
+
+    private static DecoratedKey buildKey(Object... key) {
+        return buildKey(BACKEND, key);
+    }
+
+    private static DecoratedKey buildKey(ColumnFamilyStore cfs, Object... key) {
+        AbstractType<?> type = cfs.metadata().partitionKeyType;
+        ByteBuffer decomposed;
+        if(type instanceof CompositeType)
+        {
+            Preconditions.checkArgument(key.length == type.subTypes().size());
+            decomposed = ((CompositeType) type).decompose(key);
+        }
+        else
+        {
+            Preconditions.checkArgument(key.length == 1);
+            decomposed = ((AbstractType) type).decompose(key[0]);
+        }
+        return Murmur3Partitioner.instance.decorateKey(decomposed);
+    }
+
+    private static Unfiltered buildRow(Cell... cells)
+    {
+        return buildRow(Clustering.EMPTY, null, cells);
+    }
+
+    private static Row buildRow(Row.Deletion deletion, Cell... cells)
+    {
+        return buildRow(Clustering.EMPTY, deletion, cells);
+    }
+
+    private static Row buildRow(Clustering clustering, Cell... cells)
+    {
+        return buildRow(clustering, null, cells);
+    }
+
+    private static Row buildRow(Clustering clustering, Row.Deletion deletion, Cell... cells)
+    {
+        Row.Builder rowBuilder = BTreeRow.sortedBuilder();
+        rowBuilder.newRow(clustering);
+        for (Cell c : cells)
+            rowBuilder.addCell(c);
+
+        if (deletion != null)
+            rowBuilder.addRowDeletion(deletion);
+
+        return rowBuilder.build();
+    }
+
+    private static Cell buildCell(ColumnMetadata column, ByteBuffer value, long timestamp)
+    {
+        return BufferCell.live(column, timestamp, value);
+    }
+
+    private static Cell deletedCell(ColumnMetadata column, long timestamp, long nowInSeconds)
+    {
+        return BufferCell.tombstone(column, timestamp, nowInSeconds);
+    }
+
+    private static ColumnMetadata getColumn(ByteBuffer name)
+    {
+        return getColumn(BACKEND, name);
+    }
+
+    private static ColumnMetadata getColumn(ColumnFamilyStore cfs, ByteBuffer name)
+    {
+        return cfs.metadata().getColumn(name);
     }
 }

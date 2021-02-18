@@ -173,7 +173,7 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     public final PartitionKeyRestrictions mergeWith(Restriction otherRestriction) throws InvalidRequestException
     {
         if (!otherRestriction.isOnToken())
-            return new TokenFilter(toPartitionKeyRestrictions(otherRestriction), this);
+            return TokenFilter.create(toPartitionKeyRestrictions(otherRestriction), this);
 
         return doMergeWith((TokenRestriction) otherRestriction);
     }
@@ -196,7 +196,9 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         if (restriction instanceof PartitionKeyRestrictions)
             return (PartitionKeyRestrictions) restriction;
 
-        return new PartitionKeySingleRestrictionSet(metadata.partitionKeyAsClusteringComparator()).mergeWith(restriction);
+        return PartitionKeySingleRestrictionSet.builder(metadata.partitionKeyAsClusteringComparator())
+                                               .addRestriction(restriction)
+                                               .build();
     }
 
     public static final class EQRestriction extends TokenRestriction

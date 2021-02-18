@@ -51,7 +51,6 @@ public class DropTableTest extends SAITester
         createTable(CREATE_TABLE_TEMPLATE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForTableIndexesQueryable();
 
         int rows = 100;
         for (int j = 0; j < rows; j++)
@@ -66,7 +65,7 @@ public class DropTableTest extends SAITester
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         ArrayList<String> files = new ArrayList<>();
-        for (Component component : sstable.getComponents())
+        for (Component component : sstable.components)
         {
             File file = sstable.descriptor.fileFor(component);
             if (file.exists())
@@ -87,7 +86,7 @@ public class DropTableTest extends SAITester
         assertAllFileRemoved(files);
     }
 
-    void assertAllFileExists(List<String> filePaths)
+    void assertAllFileExists(List<String> filePaths) throws Exception
     {
         for (String path : filePaths)
         {
@@ -96,11 +95,12 @@ public class DropTableTest extends SAITester
         }
     }
 
-    void assertAllFileRemoved(List<String> filePaths)
+    void assertAllFileRemoved(List<String> filePaths) throws Exception
     {
         for (String path : filePaths)
         {
             File file = new File(path);
+            System.err.println("## check="+path);
             assertFalse("Expect file being removed, but it still exists: " + path, file.exists());
         }
     }

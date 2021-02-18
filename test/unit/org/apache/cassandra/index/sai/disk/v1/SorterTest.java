@@ -21,16 +21,16 @@ import java.util.Arrays;
 
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
+import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.Sorter;
 
-import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertTrue;
 
 public class SorterTest
 {
     @Test
-    public void test()
+    public void test() throws Exception
     {
         final int[] array = new int[100];
         for (int x=0; x < array.length; x++)
@@ -40,7 +40,9 @@ public class SorterTest
 
         int[] sortedArray = Arrays.copyOf(array, array.length);
 
-        SAIRandomizedTester.shuffle(array);
+        NdiRandomizedTest.shuffle(array);
+
+        System.out.println("shuffle array="+ Arrays.toString(array));
 
         final Sorter sorter = new IntroSorter() {
             int pivotDoc;
@@ -66,6 +68,10 @@ public class SorterTest
 
         sorter.sort(0, array.length);
 
-        assertArrayEquals(sortedArray, array);
+        System.out.println("sorted array="+ Arrays.toString(array));
+
+        assertTrue(Arrays.equals(sortedArray, array));
     }
+
+
 }
