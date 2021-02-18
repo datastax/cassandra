@@ -65,7 +65,7 @@ public class ActiveCompactionsTest extends CQLTester
 
         Index idx = getCurrentColumnFamilyStore().indexManager.getIndexByName(idxName);
         Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
-        SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables);
+        SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, false);
 
         MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
         CompactionManager.instance.submitIndexBuild(builder, mockActiveCompactions).get();
