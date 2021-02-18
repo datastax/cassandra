@@ -18,8 +18,8 @@
 package org.apache.cassandra.io.tries;
 
 import org.apache.cassandra.io.util.Rebufferer;
-import org.apache.cassandra.utils.ByteComparable;
-import org.apache.cassandra.utils.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Thread-unsafe value iterator for on-disk tries. Uses the assumptions of Walker.
@@ -53,16 +53,16 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         }
     }
 
-    protected ValueIterator(Rebufferer source, long root, Rebufferer.ReaderConstraint rc)
+    protected ValueIterator(Rebufferer source, long root)
     {
-        super(source, root, rc);
+        super(source, root);
         limit = null;
         initializeNoLeftBound(root, 256);
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix, Rebufferer.ReaderConstraint rc)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
     {
-        super(source, root, rc);
+        super(source, root);
         limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
 
         if (start != null)

@@ -499,7 +499,7 @@ implements IncrementalTrieWriter<Value>
             tail.cutoff = dest.paddedPosition();
             tail.count = count;
             tail.root = writePartialRecursive(stack.getFirst(), buf, tail.cutoff);
-            tail.tail = buf.trimmedBuffer();
+            tail.tail = buf.asNewBuffer();
             return tail;
         }
     }
@@ -624,7 +624,7 @@ implements IncrementalTrieWriter<Value>
         return pos;
     }
 
-    static class Node<Value> extends BaseNode<Value, Node<Value>>
+    static class Node<Value> extends org.apache.cassandra.io.tries.IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>
     {
         /**
          * Currently calculated size of the branch below this node, not including the node itself.

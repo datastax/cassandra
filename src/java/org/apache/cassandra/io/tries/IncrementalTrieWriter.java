@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Common interface for incremental trie writers. Incremental writers take sorted input to construct a trie file while

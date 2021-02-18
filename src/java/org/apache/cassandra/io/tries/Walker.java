@@ -22,9 +22,9 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
-import org.apache.cassandra.utils.ByteComparable;
-import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Thread-unsafe trie walking helper. This is analogous to RandomAccessReader for tries -- takes an on-disk trie
@@ -48,22 +48,19 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     protected long greaterBranch;
     protected long lesserBranch;
 
-    protected final Rebufferer.ReaderConstraint rc;
-
     // Version of the byte comparable conversion to use -- trie-based indices use the 6.0 conversion
-    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.DSE6;
+    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
 
     /**
      * Creates a walker. Rebufferer must be aligned and with a buffer size that is at least 4k.
      */
-    public Walker(Rebufferer source, long root, Rebufferer.ReaderConstraint rc)
+    public Walker(Rebufferer source, long root)
     {
         this.source = source;
         this.root = root;
-        this.rc = rc;
         try
         {
-            bh = source.rebuffer(PageAware.pageStart(root), rc); // can throw NotInCacheException
+            bh = source.rebuffer(PageAware.pageStart(root)); // can throw NotInCacheException
             buf = bh.buffer();
         }
         catch (Throwable t)
@@ -85,7 +82,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
         if (offset < 0 || offset >= buf.limit())
         {
             BufferHolder currentBh = bh;
-            bh = source.rebuffer(PageAware.pageStart(position), rc);
+            bh = source.rebuffer(PageAware.pageStart(position));
             currentBh.release();
             buf = bh.buffer();
             offset = position - bh.offset();
