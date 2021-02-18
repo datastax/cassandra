@@ -3421,4 +3421,24 @@ public class DatabaseDescriptor
             conf.force_new_prepared_statement_behaviour = value;
         }
     }
+
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
+
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
+    }
 }
