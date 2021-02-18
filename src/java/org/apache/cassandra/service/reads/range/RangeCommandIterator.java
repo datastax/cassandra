@@ -61,6 +61,7 @@ public class RangeCommandIterator extends AbstractIterator<RowIterator> implemen
 {
     private static final Logger logger = LoggerFactory.getLogger(RangeCommandIterator.class);
 
+    @VisibleForTesting
     public static final ClientRangeRequestMetrics rangeMetrics = new ClientRangeRequestMetrics("RangeSlice");
 
     final CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans;

@@ -27,9 +27,11 @@ import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
@@ -97,18 +99,19 @@ public class SSTableIndexesSystemView extends AbstractVirtualTable
                 {
                     Token.TokenFactory tokenFactory = cfs.metadata().partitioner.getTokenFactory();
 
-                    group.getIndexes().forEach(i -> {
-                        StorageAttachedIndex index = (StorageAttachedIndex)i;
+                    for (Index index : group.getIndexes())
+                    {
+                        ColumnContext indexContext = ((StorageAttachedIndex)index).getContext();
 
-                        for (SSTableIndex sstableIndex : index.view())
+                        for (SSTableIndex sstableIndex : indexContext.getView())
                         {
                             SSTableReader sstable = sstableIndex.getSSTable();
                             Descriptor descriptor = sstable.descriptor;
                             AbstractBounds<Token> bounds = sstable.getBounds();
 
-                            dataset.row(ks, index.identifier().indexName, sstable.getFilename())
+                            dataset.row(ks, indexContext.getIndexName(), sstable.getFilename())
                                    .column(TABLE_NAME, descriptor.cfname)
-                                   .column(COLUMN_NAME, index.termType().columnName())
+                                   .column(COLUMN_NAME, indexContext.getColumnName())
                                    .column(FORMAT_VERSION, sstableIndex.getVersion().toString())
                                    .column(CELL_COUNT, sstableIndex.getRowCount())
                                    .column(MIN_ROW_ID, sstableIndex.minSSTableRowId())
@@ -118,7 +121,7 @@ public class SSTableIndexesSystemView extends AbstractVirtualTable
                                    .column(PER_TABLE_DISK_SIZE, sstableIndex.getSSTableContext().diskUsage())
                                    .column(PER_COLUMN_DISK_SIZE, sstableIndex.sizeOfPerColumnComponents());
                         }
-                    });
+                    }
                 }
             }
         }

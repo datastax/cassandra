@@ -26,8 +26,10 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -415,6 +417,16 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     public RowFilter withoutExpressions()
     {
         return withNewExpressions(Collections.emptyList());
+    }
+
+    public RowFilter restrict(Predicate<Expression> filter)
+    {
+        return fromExpressions(expressions.stream().filter(filter).collect(Collectors.toList()));
+    }
+
+    private RowFilter fromExpressions(List<Expression> expressions)
+    {
+        return expressions.isEmpty() ? none() : withNewExpressions(expressions);
     }
 
     protected RowFilter withNewExpressions(List<Expression> expressions)
@@ -975,7 +987,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      * A custom index expression for use with 2i implementations which support custom syntax and which are not
      * necessarily linked to a single column in the base table.
      */
-    public static final class CustomExpression extends Expression
+    public static class CustomExpression extends Expression
     {
         private final IndexMetadata targetIndex;
         private final TableMetadata table;

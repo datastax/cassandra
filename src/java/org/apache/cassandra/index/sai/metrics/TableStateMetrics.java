@@ -28,19 +28,25 @@ public class TableStateMetrics extends AbstractMetrics
 {
     public static final String TABLE_STATE_METRIC_TYPE = "TableStateMetrics";
 
+    private final Gauge diskUsageBytes;
+    private final Gauge diskUsagePercentageOfBaseTable;
+    private final Gauge totalIndexCount;
+    private final Gauge totalIndexBuildsInProgress;
+    private final Gauge totalQueryableIndexCount;
+
     public TableStateMetrics(TableMetadata table, StorageAttachedIndexGroup group)
     {
-        super(table.keyspace, table.name, TABLE_STATE_METRIC_TYPE);
-        Metrics.register(createMetricName("DiskUsedBytes"), (Gauge<Long>) group::totalDiskUsage);
-        Metrics.register(createMetricName("DiskPercentageOfBaseTable"), (Gauge<Double>) new RatioGauge() {
+        super(table, TABLE_STATE_METRIC_TYPE);
+        totalQueryableIndexCount = Metrics.register(createMetricName("TotalQueryableIndexCount"), group::totalQueryableIndexCount);
+        totalIndexCount = Metrics.register(createMetricName("TotalIndexCount"), group::totalIndexCount);
+        totalIndexBuildsInProgress = Metrics.register(createMetricName("TotalIndexBuildsInProgress"), group::totalIndexBuildsInProgress);
+        diskUsageBytes = Metrics.register(createMetricName("DiskUsedBytes"), group::totalDiskUsage);
+        diskUsagePercentageOfBaseTable = Metrics.register(createMetricName("DiskPercentageOfBaseTable"), new RatioGauge() {
             @Override
             protected Ratio getRatio()
             {
                 return Ratio.of(group.totalDiskUsage(), group.table().metric.liveDiskSpaceUsed.getCount());
             }
         });
-        Metrics.register(createMetricName("TotalIndexCount"), (Gauge<Integer>) group::totalIndexCount);
-        Metrics.register(createMetricName("TotalQueryableIndexCount"), (Gauge<Integer>) group::totalQueryableIndexCount);
-        Metrics.register(createMetricName("TotalIndexBuildsInProgress"), (Gauge<Integer>) group::totalIndexBuildsInProgress);
     }
 }

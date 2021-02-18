@@ -31,6 +31,10 @@ import org.apache.cassandra.index.IndexRegistry;
  */
 public interface Restriction
 {
+    /**
+     * Check if the restriction is on a partition key
+     * @return <code>true</code> if the restriction is on a partition key, <code>false</code>
+     */
     public default boolean isOnToken()
     {
         return false;
