@@ -63,6 +63,18 @@ public class SingletonIndexGroup implements Index.Group
     }
 
     @Override
+    public void addIndex(Index index)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void removeIndex(Index index)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean containsIndex(Index index)
     {
         return index.equals(delegate);
@@ -77,8 +89,9 @@ public class SingletonIndexGroup implements Index.Group
                                     IndexTransaction.Type transactionType,
                                     Memtable memtable)
     {
-        return indexSelector.test(delegate) ? delegate.indexerFor(key, columns, nowInSec, ctx, transactionType, memtable)
-                                            : null;
+        return indexSelector.test(delegate)
+               ? delegate.indexerFor(key, columns, nowInSec, ctx, transactionType, memtable)
+               : null;
     }
 
     @Override

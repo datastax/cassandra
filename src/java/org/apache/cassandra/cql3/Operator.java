@@ -258,23 +258,6 @@ public enum Operator
         {
             throw new UnsupportedOperationException();
         }
-    },
-    ANN(15)
-    {
-        @Override
-        public String toString()
-        {
-            return "ANN";
-        }
-
-        @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            // The ANN operator is only supported by the vector index so, normally, should never be called directly.
-            // In networked queries (non-local) the coordinator will end up calling the row filter directly. So, this
-            // needs to return true so that the returned values are allowed through to the VectorTopKProcessor
-            return true;
-        }
     };
 
     /**
@@ -332,6 +315,15 @@ public enum Operator
     public int serializedSize()
     {
         return 4;
+    }
+
+    /**
+     * Checks if this operator is a like operator.
+     * @return {@code true} if this operator is a like operator, {@code false} otherwise.
+     */
+    public boolean isLike()
+    {
+        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
     }
 
     /**

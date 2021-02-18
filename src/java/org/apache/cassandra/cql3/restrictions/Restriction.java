@@ -31,6 +31,10 @@ import org.apache.cassandra.index.IndexRegistry;
  */
 public interface Restriction
 {
+    /**
+     * Check if the restriction is on a partition key
+     * @return <code>true</code> if the restriction is on a partition key, <code>false</code>
+     */
     public default boolean isOnToken()
     {
         return false;
@@ -68,21 +72,6 @@ public interface Restriction
      * @return <code>true</code> if the restriction is on indexed columns, <code>false</code>
      */
     boolean hasSupportingIndex(IndexRegistry indexRegistry);
-
-    /**
-     * Find first supporting index for current restriction
-     *
-     * @param indexRegistry the index registry
-     * @return <code>index</code> if the restriction is on indexed columns, <code>null</code>
-     */
-    Index findSupportingIndex(IndexRegistry indexRegistry);
-
-    /**
-     * Find the first supporting index for the current restriction from an {@link Index.QueryPlan}.
-     * @param indexQueryPlan the index query plan
-     * @return <code>index</code> if the restriction is on indexed columns, <code>null</code>
-     */
-    Index findSupportingIndexFromQueryPlan(Index.QueryPlan indexQueryPlan);
 
     /**
      * Returns whether this restriction would need filtering if the specified index group were used.

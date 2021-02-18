@@ -57,6 +57,45 @@ public class ClusteringKeyIndexTest extends SAITester
         runQueries();
     }
 
+    @Test
+    public void queryFromSingleSSTable() throws Throwable
+    {
+        insertData1();
+        insertData2();
+        flush();
+        runQueries();
+    }
+
+    @Test
+    public void queryFromMultipleSSTables() throws Throwable
+    {
+        insertData1();
+        flush();
+        insertData2();
+        flush();
+        runQueries();
+    }
+
+    @Test
+    public void queryFromMemtableAndSSTables() throws Throwable
+    {
+        insertData1();
+        flush();
+        insertData2();
+        runQueries();
+    }
+
+    @Test
+    public void queryFromCompactedSSTable() throws Throwable
+    {
+        insertData1();
+        flush();
+        insertData2();
+        flush();
+        compact();
+        runQueries();
+    }
+
     private Object[] expectedRow(int index)
     {
         return row(index, Integer.toString(index), index);

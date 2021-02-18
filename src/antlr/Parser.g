@@ -268,7 +268,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
     @init {
         Term.Raw limit = null;
         Term.Raw perPartitionLimit = null;
-        List<Ordering.Raw> orderings = new ArrayList<>();
+        Map<ColumnIdentifier, Boolean> orderings = new LinkedHashMap<>();
         List<Selectable.Raw> groups = new ArrayList<>();
         boolean allowFiltering = false;
         boolean isJson = false;
@@ -459,17 +459,11 @@ customIndexExpression [WhereClause.Builder clause]
     : 'expr(' idxName[name] ',' t=term ')' { clause.add(new CustomIndexExpression(name, t));}
     ;
 
-orderByClause[List<Ordering.Raw> orderings]
+orderByClause[Map<ColumnIdentifier, Boolean> orderings]
     @init{
-        Ordering.Direction direction = Ordering.Direction.ASC;
+        boolean reversed = false;
     }
-    : c=cident (K_ANN K_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
-    {
-        Ordering.Raw.Expression expr = (t == null)
-            ? new Ordering.Raw.SingleColumn(c)
-            : new Ordering.Raw.Ann(c, t);
-        orderings.add(new Ordering.Raw(expr, direction));
-    }
+    : c=cident (K_ASC | K_DESC { reversed = true; })? { orderings.put(c, reversed); }
     ;
 
 groupByClause[List<Selectable.Raw> groups]
@@ -2020,6 +2014,5 @@ basic_unreserved_keyword returns [String str]
         | K_UNMASK
         | K_SELECT_MASKED
         | K_VECTOR
-        | K_ANN
         ) { $str = $k.text; }
     ;

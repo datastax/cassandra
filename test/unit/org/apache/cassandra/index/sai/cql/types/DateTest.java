@@ -17,15 +17,30 @@
  */
 package org.apache.cassandra.index.sai.cql.types;
 
+
 import java.util.Collection;
 
+import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+@RunWith(Parameterized.class)
 public class DateTest extends IndexingTypeSupport
 {
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {
         return generateParameters(new DataSet.DateDataSet());
+    }
+
+    public DateTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
+        super(dataset, widePartitions, scenario);
+    }
+
+    @Test
+    public void test() throws Throwable
+    {
+        runIndexQueryScenarios();
     }
 }

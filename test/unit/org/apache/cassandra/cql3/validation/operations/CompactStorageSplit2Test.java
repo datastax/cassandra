@@ -155,7 +155,6 @@ public class CompactStorageSplit2Test extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7) ALLOW FILTERING"),
                        row(2, 1, 6));
 
-
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c > 4");
 

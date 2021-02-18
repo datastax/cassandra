@@ -72,11 +72,11 @@ public class MixedIndexImplementationsTest extends SAITester
         assertRowsIgnoringOrder(execute(ossSelect, 0), new Object[][]{{0, 0, 0}, {1, 0, 1}});
         assertRowsIgnoringOrder(execute(ossSelect, 1), new Object[][]{{2, 1, 0}, {3, 1, 1}});
 
-        String saiSelect = "SELECT * FROM %s WHERE v1 = ? AND v2 = ? ALLOW FILTERING";
-        assertRowsIgnoringOrder(execute(saiSelect, 0, 0), new Object[]{0, 0, 0});
-        assertRowsIgnoringOrder(execute(saiSelect, 0, 1), new Object[]{1, 0, 1});
-        assertRowsIgnoringOrder(execute(saiSelect, 1, 0), new Object[]{2, 1, 0});
-        assertRowsIgnoringOrder(execute(saiSelect, 1, 1), new Object[]{3, 1, 1});
+        String ndiSelect = "SELECT * FROM %s WHERE v1 = ? AND v2 = ? ALLOW FILTERING";
+        assertRowsIgnoringOrder(execute(ndiSelect, 0, 0), new Object[]{0, 0, 0});
+        assertRowsIgnoringOrder(execute(ndiSelect, 0, 1), new Object[]{1, 0, 1});
+        assertRowsIgnoringOrder(execute(ndiSelect, 1, 0), new Object[]{2, 1, 0});
+        assertRowsIgnoringOrder(execute(ndiSelect, 1, 1), new Object[]{3, 1, 1});
     }
 
     @Test

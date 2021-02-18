@@ -34,8 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.IndexIdentifier;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IVerifier;
@@ -104,26 +103,21 @@ public class SSTableImporter
 
                             if (options.failOnMissingIndex)
                             {
-                                Index.Group saiIndexGroup = cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.GROUP_KEY);
+                                Index.Group saiIndexGroup = cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.class);
                                 if (saiIndexGroup != null)
                                 {
-                                    IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor,
-                                                                                             cfs.getPartitioner(),
-                                                                                             cfs.metadata().comparator);
-
                                     String keyspace = cfs.getKeyspaceName();
                                     String table = cfs.getTableName();
 
-                                    if (!indexDescriptor.isPerSSTableIndexBuildComplete())
+                                    if (!IndexComponents.isGroupIndexComplete(descriptor))
                                         throw new IllegalStateException(String.format("Missing SAI index to import for SSTable %s on %s.%s",
-                                                                                      indexDescriptor.sstableDescriptor.toString(),
+                                                                                      descriptor.toString(),
                                                                                       keyspace,
                                                                                       table));
 
                                     for (Index index : saiIndexGroup.getIndexes())
                                     {
-                                        IndexIdentifier indexIdentifier = new IndexIdentifier(keyspace, table, index.getIndexMetadata().name);
-                                        if (!indexDescriptor.isPerColumnIndexBuildComplete(indexIdentifier))
+                                        if (!IndexComponents.isColumnIndexComplete(descriptor, index.getIndexMetadata().name))
                                             throw new IllegalStateException(String.format("Missing SAI index to import for index %s on %s.%s",
                                                                                           index.getIndexMetadata().name,
                                                                                           keyspace,
