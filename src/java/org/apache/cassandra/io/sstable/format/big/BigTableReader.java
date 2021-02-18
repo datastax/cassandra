@@ -415,19 +415,24 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
     @Override
     public DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException
     {
-        DecoratedKey key;
         try (FileDataInput in = ifile.createReader(keyPositionFromSecondaryIndex))
         {
-            if (in.isEOF())
-                return null;
-
-            key = decorateKey(ByteBufferUtil.readWithShortLength(in));
-
-            // hint read path about key location if caching is enabled
-            // this saves index summary lookup and index file iteration which whould be pretty costly
-            // especially in presence of promoted column indexes
-            cacheKey(key, rowIndexEntrySerializer.deserialize(in));
+            return keyAt(in);
         }
+    }
+
+    @Override
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException
+    {
+        if (reader.isEOF()) return null;
+
+        DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
+
+        // hint read path about key location if caching is enabled
+        // this saves index summary lookup and index file iteration which whould be pretty costly
+        // especially in presence of promoted column indexes
+        if (isKeyCacheEnabled())
+            cacheKey(key, rowIndexEntrySerializer.deserialize(reader));
 
         return key;
     }

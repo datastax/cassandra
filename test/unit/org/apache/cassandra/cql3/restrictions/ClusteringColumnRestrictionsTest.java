@@ -54,7 +54,7 @@ public class ClusteringColumnRestrictionsTest
     {
         TableMetadata tableMetadata = newTableMetadata(Sort.ASC);
 
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false).build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -76,7 +76,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer clustering_0 = ByteBufferUtil.bytes(1);
         Restriction eq = newSingleEq(tableMetadata, 0, clustering_0);
 
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, eq);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(eq)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -98,7 +100,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer clustering_0 = ByteBufferUtil.bytes(1);
         Restriction eq = newSingleEq(tableMetadata, 0, clustering_0);
 
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, eq);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(eq)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -122,7 +126,10 @@ public class ClusteringColumnRestrictionsTest
         TableMetadata tableMetadata = newTableMetadata(Sort.ASC, Sort.ASC);
 
         Restriction in = newSingleIN(tableMetadata, 0, value1, value2, value3);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, in);
+
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(in)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -149,7 +156,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
 
         Restriction slice = newSingleSlice(tableMetadata, 0, Bound.START, false, value1);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -160,7 +169,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -171,7 +182,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newSingleSlice(tableMetadata, 0, Bound.END, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -182,7 +195,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value1);
 
         slice = newSingleSlice(tableMetadata, 0, Bound.END, false, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -194,7 +209,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, false, value1);
         Restriction slice2 = newSingleSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -206,7 +224,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, true, value1);
         slice2 = newSingleSlice(tableMetadata, 0, Bound.END, true, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -229,7 +250,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
 
         Restriction slice = newSingleSlice(tableMetadata, 0, Bound.START, false, value1);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -240,7 +263,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), false, value1);
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -251,7 +276,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value1);
 
         slice = newSingleSlice(tableMetadata, 0, Bound.END, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -262,7 +289,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newSingleSlice(tableMetadata, 0, Bound.END, false, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -274,7 +303,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, false, value1);
         Restriction slice2 = newSingleSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -286,7 +318,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 0, Bound.START, true, value1);
         slice2 = newSingleSlice(tableMetadata, 0, Bound.END, true, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -310,7 +345,10 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value3 = ByteBufferUtil.bytes(3);
         Restriction eq = newSingleEq(tableMetadata, 0, value1);
         Restriction in = newSingleIN(tableMetadata, 1, value1, value2, value3);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, eq, in);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(eq)
+                                                                                .addRestriction(in)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -340,7 +378,10 @@ public class ClusteringColumnRestrictionsTest
         Restriction eq = newSingleEq(tableMetadata, 0, value3);
 
         Restriction slice = newSingleSlice(tableMetadata, 1, Bound.START, false, value1);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, eq, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(eq)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -351,7 +392,10 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value3);
 
         slice = newSingleSlice(tableMetadata, 1, Bound.START, true, value1);
-        restrictions = restrictions(tableMetadata, eq, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(eq)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -362,7 +406,10 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value3);
 
         slice = newSingleSlice(tableMetadata, 1, Bound.END, true, value1);
-        restrictions =  restrictions(tableMetadata, eq, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(eq)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -373,7 +420,10 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value3, value1);
 
         slice = newSingleSlice(tableMetadata, 1, Bound.END, false, value1);
-        restrictions =  restrictions(tableMetadata, eq, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(eq)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -385,7 +435,11 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 1, Bound.START, false, value1);
         Restriction slice2 = newSingleSlice(tableMetadata, 1, Bound.END, false, value2);
-        restrictions =  restrictions(tableMetadata, eq, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(eq)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -397,7 +451,11 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newSingleSlice(tableMetadata, 1, Bound.START, true, value1);
         slice2 = newSingleSlice(tableMetadata, 1, Bound.END, true, value2);
-        restrictions =  restrictions(tableMetadata, eq, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(eq)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -419,7 +477,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value1 = ByteBufferUtil.bytes(1);
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
         Restriction eq = newMultiEq(tableMetadata, 0, value1, value2);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, eq);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(eq)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -442,7 +502,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
         ByteBuffer value3 = ByteBufferUtil.bytes(3);
         Restriction in = newMultiIN(tableMetadata, 0, asList(value1, value2), asList(value2, value3));
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, in);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(in)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -468,7 +530,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
 
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -479,7 +543,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -490,7 +556,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -501,7 +569,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value1);
 
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -513,7 +583,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -525,7 +598,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -549,7 +625,9 @@ public class ClusteringColumnRestrictionsTest
         ByteBuffer value2 = ByteBufferUtil.bytes(2);
 
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -560,7 +638,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), false, value1);
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -571,7 +651,9 @@ public class ClusteringColumnRestrictionsTest
         assertEndBound(get(bounds, 0), true, value1);
 
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -582,7 +664,9 @@ public class ClusteringColumnRestrictionsTest
         assertEmptyEnd(get(bounds, 0));
 
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -594,7 +678,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -606,7 +693,10 @@ public class ClusteringColumnRestrictionsTest
 
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -630,7 +720,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) > (1, 2)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -642,7 +734,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -654,7 +748,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) <= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -666,7 +762,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) < (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -679,7 +777,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) > (1, 2) AND (clustering_0) < (2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -692,7 +793,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) >= (1, 2) AND (clustering_0, clustering1) <= (2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -716,7 +820,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) > (1, 2)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -728,7 +834,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -740,7 +848,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) <= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -752,8 +862,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) < (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
-
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
         assertStartBound(get(bounds, 0), false, value1, value2);
@@ -766,7 +877,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) > (1, 2) AND (clustering_0) < (2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -779,7 +893,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) >= (1, 2) AND (clustering_0, clustering1) <= (2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -804,7 +921,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) > (1, 2)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -818,7 +937,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -832,7 +953,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) <= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -846,7 +969,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) < (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -861,7 +986,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) > (1, 2) AND (clustering_0) < (2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -876,7 +1004,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0) > (1) AND (clustering_0, clustering1) < (2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -891,7 +1022,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) >= (1, 2) AND (clustering_0, clustering1) <= (2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -920,7 +1054,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) > (1, 2)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -934,7 +1070,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -948,7 +1086,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) <= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -962,7 +1102,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) < (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -977,7 +1119,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) > (1, 2) AND (clustering_0) < (2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -992,7 +1137,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1) >= (1, 2) AND (clustering_0, clustering1) <= (2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -1023,7 +1171,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) > (1, 2, 3, 4)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2, value3, value4);
-        ClusteringColumnRestrictions restrictions =  restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1038,7 +1188,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2, clustering_3) > (2, 3, 4)
         Restriction eq = newSingleEq(tableMetadata, 0, value1);
         slice = newMultiSlice(tableMetadata, 1, Bound.START, false, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice, eq);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(eq)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1053,7 +1206,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 IN (1, 2) AND (clustering_1, clustering_2, clustering_3) > (2, 3, 4)
         Restriction in = newSingleIN(tableMetadata, 0, value1, value2);
         slice = newMultiSlice(tableMetadata, 1, Bound.START, false, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice, in);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(in)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(4, bounds.size());
@@ -1071,7 +1227,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1083,7 +1241,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) >= (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1097,7 +1257,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) <= (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1111,7 +1273,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) < (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1126,7 +1290,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1, clustering_2, clustering_3) > (1, 2, 3, 4) AND (clustering_0, clustering_1) < (2, 3)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2, value3, value4);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2, value3);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1141,7 +1308,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1, clustering_2, clustering_3) >= (1, 2, 3, 4) AND (clustering_0, clustering1, clustering_2, clustering_3) <= (4, 3, 2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2, value3, value4);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value4, value3, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -1172,7 +1342,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) > (1, 2, 3, 4)
         Restriction slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2, value3, value4);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, slice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(slice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(4, bounds.size());
@@ -1192,7 +1364,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2, clustering_3) > (2, 3, 4)
         Restriction eq = newSingleEq(tableMetadata, 0, value1);
         slice = newMultiSlice(tableMetadata, 1, Bound.START, false, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice, eq);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(eq)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(3, bounds.size());
@@ -1208,7 +1383,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1) >= (1, 2)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1222,7 +1399,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) >= (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(4, bounds.size());
@@ -1240,7 +1419,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) <= (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, true, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(4, bounds.size());
@@ -1258,7 +1439,9 @@ public class ClusteringColumnRestrictionsTest
 
         // (clustering_0, clustering1, clustering_2, clustering_3) < (1, 2, 3, 4)
         slice = newMultiSlice(tableMetadata, 0, Bound.END, false, value1, value2, value3, value4);
-        restrictions = restrictions(tableMetadata, slice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(4, bounds.size());
@@ -1277,7 +1460,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1, clustering_2, clustering_3) > (1, 2, 3, 4) AND (clustering_0, clustering_1) < (2, 3)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, false, value1, value2, value3, value4);
         Restriction slice2 = newMultiSlice(tableMetadata, 0, Bound.END, false, value2, value3);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(5, bounds.size());
@@ -1298,7 +1484,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering1, clustering_2, clustering_3) >= (1, 2, 3, 4) AND (clustering_0, clustering1, clustering_2, clustering_3) <= (4, 3, 2, 1)
         slice = newMultiSlice(tableMetadata, 0, Bound.START, true, value1, value2, value3, value4);
         slice2 = newMultiSlice(tableMetadata, 0, Bound.END, true, value4, value3, value2, value1);
-        restrictions = restrictions(tableMetadata, slice, slice2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(slice)
+                                                   .addRestriction(slice2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(7, bounds.size());
@@ -1337,7 +1526,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2) = (2, 3)
         Restriction singleEq = newSingleEq(tableMetadata, 0, value1);
         Restriction multiEq = newMultiEq(tableMetadata, 1, value2, value3);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, singleEq, multiEq);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(singleEq)
+                                                                                .addRestriction(multiEq)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1351,7 +1543,11 @@ public class ClusteringColumnRestrictionsTest
         singleEq = newSingleEq(tableMetadata, 0, value1);
         Restriction singleEq2 = newSingleEq(tableMetadata, 1, value2);
         multiEq = newMultiEq(tableMetadata, 2, value3, value4);
-        restrictions = restrictions(tableMetadata, singleEq, singleEq2, multiEq);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(singleEq2)
+                                                   .addRestriction(multiEq)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1364,7 +1560,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering_1) = (1, 2) AND clustering_2 = 3
         singleEq = newSingleEq(tableMetadata, 2, value3);
         multiEq = newMultiEq(tableMetadata, 0, value1, value2);
-        restrictions = restrictions(tableMetadata, singleEq, multiEq);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(multiEq)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1378,7 +1577,11 @@ public class ClusteringColumnRestrictionsTest
         singleEq = newSingleEq(tableMetadata, 0, value1);
         singleEq2 = newSingleEq(tableMetadata, 3, value4);
         multiEq = newMultiEq(tableMetadata, 1, value2, value3);
-        restrictions = restrictions(tableMetadata, singleEq, multiEq, singleEq2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(multiEq)
+                                                   .addRestriction(singleEq2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1406,7 +1609,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2) IN ((2, 3), (4, 5))
         Restriction singleEq = newSingleEq(tableMetadata, 0, value1);
         Restriction multiIN = newMultiIN(tableMetadata, 1, asList(value2, value3), asList(value4, value5));
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, singleEq, multiIN);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(singleEq)
+                                                                                .addRestriction(multiIN)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1421,7 +1627,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2) IN ((2, 3))
         singleEq = newSingleEq(tableMetadata, 0, value1);
         multiIN = newMultiIN(tableMetadata, 1, asList(value2, value3));
-        restrictions = restrictions(tableMetadata, multiIN, singleEq);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(multiIN)
+                                                   .addRestriction(singleEq)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1435,7 +1644,11 @@ public class ClusteringColumnRestrictionsTest
         singleEq = newSingleEq(tableMetadata, 0, value1);
         Restriction singleEq2 = newSingleEq(tableMetadata, 1, value5);
         multiIN = newMultiIN(tableMetadata, 2, asList(value2, value3), asList(value4, value5));
-        restrictions = restrictions(tableMetadata, singleEq, multiIN, singleEq2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(multiIN)
+                                                   .addRestriction(singleEq2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1466,7 +1679,10 @@ public class ClusteringColumnRestrictionsTest
         // clustering_0 = 1 AND (clustering_1, clustering_2) > (2, 3)
         Restriction singleEq = newSingleEq(tableMetadata, 0, value1);
         Restriction multiSlice = newMultiSlice(tableMetadata, 1, Bound.START, false, value2, value3);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, singleEq, multiSlice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(singleEq)
+                                                                                .addRestriction(multiSlice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1480,7 +1696,11 @@ public class ClusteringColumnRestrictionsTest
         singleEq = newSingleEq(tableMetadata, 0, value1);
         multiSlice = newMultiSlice(tableMetadata, 1, Bound.START, false, value2, value3);
         Restriction multiSlice2 = newMultiSlice(tableMetadata, 1, Bound.END, false, value4);
-        restrictions = restrictions(tableMetadata, multiSlice2, singleEq, multiSlice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(multiSlice2)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(multiSlice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1494,7 +1714,11 @@ public class ClusteringColumnRestrictionsTest
         singleEq = newSingleEq(tableMetadata, 0, value1);
         multiSlice = newMultiSlice(tableMetadata, 1, Bound.START, true, value2, value3);
         multiSlice2 = newMultiSlice(tableMetadata, 1, Bound.END, true, value4, value5);
-        restrictions = restrictions(tableMetadata, multiSlice2, singleEq, multiSlice);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(multiSlice2)
+                                                   .addRestriction(singleEq)
+                                                   .addRestriction(multiSlice)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1521,7 +1745,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering_1) = (1, 2) AND clustering_2 > 3
         Restriction multiEq = newMultiEq(tableMetadata, 0, value1, value2);
         Restriction singleSlice = newSingleSlice(tableMetadata, 2, Bound.START, false, value3);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, multiEq, singleSlice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(multiEq)
+                                                                                .addRestriction(singleSlice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1546,7 +1773,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering_1) = (1, 2) AND (clustering_2, clustering_3) > (3, 4)
         Restriction multiEq = newMultiEq(tableMetadata, 0, value1, value2);
         Restriction multiSlice = newMultiSlice(tableMetadata, 2, Bound.START, false, value3, value4);
-        ClusteringColumnRestrictions restrictions = restrictions(tableMetadata, multiEq, multiSlice);
+        ClusteringColumnRestrictions restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                                                .addRestriction(multiEq)
+                                                                                .addRestriction(multiSlice)
+                                                                                .build();
 
         SortedSet<ClusteringBound<?>> bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());
@@ -1559,7 +1789,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering_1) = (1, 2) AND (clustering_2, clustering_3) IN ((3, 4), (4, 5))
         multiEq = newMultiEq(tableMetadata, 0, value1, value2);
         Restriction multiIN = newMultiIN(tableMetadata, 2, asList(value3, value4), asList(value4, value5));
-        restrictions = restrictions(tableMetadata, multiEq, multiIN);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(multiEq)
+                                                   .addRestriction(multiIN)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(2, bounds.size());
@@ -1574,7 +1807,10 @@ public class ClusteringColumnRestrictionsTest
         // (clustering_0, clustering_1) = (1, 2) AND (clustering_2, clustering_3) = (3, 4)
         multiEq = newMultiEq(tableMetadata, 0, value1, value2);
         Restriction multiEq2 = newMultiEq(tableMetadata, 2, value3, value4);
-        restrictions = restrictions(tableMetadata, multiEq, multiEq2);
+        restrictions = ClusteringColumnRestrictions.builder(tableMetadata, false)
+                                                   .addRestriction(multiEq)
+                                                   .addRestriction(multiEq2)
+                                                   .build();
 
         bounds = restrictions.boundsAsClustering(Bound.START, QueryOptions.DEFAULT);
         assertEquals(1, bounds.size());

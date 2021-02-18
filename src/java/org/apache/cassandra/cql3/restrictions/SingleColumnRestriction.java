@@ -250,7 +250,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    QueryOptions options)
         {
             List<ByteBuffer> values = getValues(options);
-            ByteBuffer buffer = ListSerializer.pack(values, values.size());
+            for (ByteBuffer v : values)
+            {
+                checkNotNull(v, "Invalid null value for column %s", columnDef.name);
+                checkBindValueSet(v, "Invalid unset value for column %s", columnDef.name);
+            }
+            ByteBuffer buffer = ListSerializer.pack(values, values.size(), ProtocolVersion.V3);
             filter.add(columnDef, Operator.IN, buffer);
         }
 

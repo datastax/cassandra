@@ -55,7 +55,7 @@ public class KeyspaceTest extends CQLTester
     // Test needs synchronous table drop to avoid flushes causing flaky failures of testLimitSSTables
 
     @Override
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return super.createTable(KEYSPACE_PER_TEST, query);
     }

@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.apache.commons.io.IOUtils;
 
@@ -187,6 +188,9 @@ public class Injections
          * Adds a new action to the injection. Adding a new action cause creation of a new rule because a single rule
          * can only have a single action. Do not confuse an action with a statement - an action is bundle of bindings,
          * condition under which it can be invoked and a sequence of statements.
+         *
+         * If you just need to add a statement to the existing action, see {@link #withLastActionBuilder(Consumer)} and
+         * {@link #lastActionBuilder()}.
          */
         public B add(ActionBuilder builder)
         {
@@ -205,6 +209,28 @@ public class Injections
         public B add(ActionBuilder.Builder builder)
         {
             return add(builder.toActionBuilder());
+        }
+
+        /**
+         * Allows to modify the last defined action. You can add new bindings, conditions and statements. If you need
+         * to create a new action, please see {@link #add(ActionBuilder)}.
+         */
+        public ActionBuilder lastActionBuilder()
+        {
+            Preconditions.checkState(!actionBuilders.isEmpty());
+            ActionBuilder ab = actionBuilders.getLast();
+            return ab;
+        }
+
+        /**
+         * @see #lastActionBuilder()
+         */
+        public B withLastActionBuilder(Consumer<ActionBuilder> builder)
+        {
+            Preconditions.checkState(!actionBuilders.isEmpty());
+            ActionBuilder ab = actionBuilders.getLast();
+            builder.accept(ab);
+            return (B) this;
         }
     }
 
@@ -418,6 +444,94 @@ public class Injections
             public Barrier build()
             {
                 return new Barrier(id, name, parties, cyclic, doCountDown, doAwait, getRules());
+            }
+        }
+    }
+
+    /**
+     * Creates {@link Times} injection.
+     *
+     * @param name name of the internal counter
+     * @param defaultTimes the number of times the action should be executed
+     */
+    public static Times.TimesBuilder newTimes(String name, int defaultTimes)
+    {
+        return new Times.TimesBuilder(name, defaultTimes);
+    }
+
+    /**
+     * Creates an injection which allows to invoke a defined action for a defined number of times.
+     */
+    public static class Times extends Injection
+    {
+        private static Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+        private final AtomicLong internalCounter;
+        private final int defaultTimes;
+
+        private Times(String id, String name, int defaultTimes, Rule[] rules)
+        {
+            super(id, rules);
+            this.internalCounter = counters.computeIfAbsent(name, n -> new AtomicLong(defaultTimes));
+            this.defaultTimes = defaultTimes;
+            reset();
+        }
+
+        /**
+         * Get the remaining number of times the action will be attempted to be executed.
+         */
+        public long get()
+        {
+            return internalCounter.get();
+        }
+
+        /**
+         * Reset the internal counter to the original value.
+         */
+        public void reset()
+        {
+            reset(defaultTimes);
+        }
+
+        /**
+         * Reset the internal counter to the given value.
+         */
+        public void reset(int n)
+        {
+            internalCounter.set(n);
+        }
+
+        @CallMe
+        public static boolean decrementAndCheck(String name)
+        {
+            AtomicLong counter = counters.get(name);
+            long value = counter.decrementAndGet();
+            return value >= 0;
+        }
+
+        public static class TimesBuilder extends CrossProductInjectionBuilder<Times, TimesBuilder>
+        {
+            private final String name;
+            private final int defaultTimes;
+
+            private TimesBuilder(String name, int defaultTimes)
+            {
+                super(String.format("times/%s/%s", name, UUID.randomUUID().toString()));
+                this.name = name;
+                this.defaultTimes = defaultTimes;
+            }
+
+            @Override
+            public TimesBuilder add(ActionBuilder builder)
+            {
+                super.add(builder);
+                builder.conditions().when(method(Times.class, CallMe.class).args(quote(name)));
+                return this;
+            }
+
+            @Override
+            public Times build()
+            {
+                return new Times(id, name, defaultTimes, getRules());
             }
         }
     }
