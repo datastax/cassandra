@@ -1025,14 +1025,13 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                         VariableSpecifications boundNames,
                                                         Operations operations,
                                                         WhereClause where,
-                                                        Conditions conditions,
-                                                        List<Ordering> orderings)
+                                                        Conditions conditions)
         {
             if (where.containsCustomExpressions())
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return new StatementRestrictions(state, type, metadata, where, boundNames, orderings, applyOnlyToStaticColumns, false, false);
+            return new StatementRestrictions(state, type, metadata, where, boundNames, applyOnlyToStaticColumns, false, false);
         }
 
         public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()

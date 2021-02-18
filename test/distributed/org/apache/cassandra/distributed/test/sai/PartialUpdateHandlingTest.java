@@ -42,13 +42,13 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.plan.Expression;
 
+import static org.apache.cassandra.index.sai.plan.Expression.Op.EQ;
+import static org.apache.cassandra.index.sai.plan.Expression.Op.RANGE;
 import static org.junit.Assert.assertEquals;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
-import static org.apache.cassandra.index.sai.plan.Expression.IndexOperator.EQ;
-import static org.apache.cassandra.index.sai.plan.Expression.IndexOperator.RANGE;
 
 /**
  * SAI queries, like all filtering queries, must correctly resolve divergent views of row data across replicas. In
@@ -113,7 +113,7 @@ public class PartialUpdateHandlingTest extends TestBaseImpl
         final StatementType partialUpdateType;
         final int partitionKey;
         final boolean flushPartials;
-        final Expression.IndexOperator validationMode;
+        final Expression.Op validationMode;
 
         Specification(boolean restrictPartitionKey,
                       String[] columns,
@@ -121,7 +121,7 @@ public class PartialUpdateHandlingTest extends TestBaseImpl
                       StatementType partialUpdateType,
                       int partitionKey,
                       boolean flushPartials,
-                      Expression.IndexOperator validationMode)
+                      Expression.Op validationMode)
         {
             this.restrictPartitionKey = restrictPartitionKey;
             this.columns = columns;

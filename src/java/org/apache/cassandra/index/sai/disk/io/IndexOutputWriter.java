@@ -18,34 +18,23 @@
 package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
-import javax.annotation.concurrent.NotThreadSafe;
+import java.lang.invoke.MethodHandles;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.lucene.store.IndexOutput;
 
-/**
- * This is a wrapper over a Cassandra {@link SequentialWriter} that provides a Lucene {@link IndexOutput}
- * interface for the Lucene index writers.
- */
-@NotThreadSafe
 public class IndexOutputWriter extends IndexOutput
 {
-    private static final Logger logger = LoggerFactory.getLogger(IndexOutputWriter.class);
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    /**
-     * the byte order of `out`'s native writeX operations doesn't matter,
-     * because we only use `write(byte[])` and `writeByte` methods. IndexOutput calls these
-     * (via DataOutput) with methods that enforce LittleEndian-ness.
-    */
     private final SequentialWriter out;
     private boolean closed;
 
-    public IndexOutputWriter(SequentialWriter out)
+    IndexOutputWriter(SequentialWriter out)
     {
         super(out.getPath(), out.getPath());
         this.out = out;
@@ -56,15 +45,15 @@ public class IndexOutputWriter extends IndexOutput
         this.out.skipBytes(length);
     }
 
-    public File getFile()
+    public String getPath()
     {
-        return new File(out.getPath());
+        return out.getPath();
     }
 
     @Override
-    public long getChecksum() throws IOException
+    public long getChecksum()
     {
-        return ((IndexFileUtils.ChecksummingWriter)out).getChecksum();
+        return ((IndexComponents.ChecksumWriter)out).getChecksum();
     }
 
     @Override
@@ -86,7 +75,7 @@ public class IndexOutputWriter extends IndexOutput
     }
 
     @Override
-    public void close()
+    public void close() throws IOException
     {
         // IndexOutput#close contract allows any output to be closed multiple times,
         // and Lucene does it in few places. SequentialWriter can be closed once.
@@ -106,21 +95,15 @@ public class IndexOutputWriter extends IndexOutput
     @Override
     public String toString()
     {
-        String checksum;
-        try {
-            checksum = String.valueOf(getChecksum());
-        } catch (IOException e) {
-            checksum = "unknown due to I/O error: " + e;
-        }
         return MoreObjects.toStringHelper(this)
                           .add("path", out.getPath())
                           .add("bytesWritten", getFilePointer())
-                          .add("crc", checksum)
+                          .add("crc", getChecksum())
                           .toString();
     }
 
     /**
-     * Returns {@link SequentialWriter} associated with this writer. Convenient when interacting with Cassandra codebase to
+     * Returns {@link SequentialWriter} associated with this writer. Convenient when interacting with DSE-DB codebase to
      * write files to disk. Note that all bytes written to the returned writer will still contribute to the checksum.
      *
      * @return {@link SequentialWriter} associated with this writer

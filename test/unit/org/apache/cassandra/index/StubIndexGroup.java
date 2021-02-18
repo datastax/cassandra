@@ -68,12 +68,6 @@ public class StubIndexGroup implements Index.Group
     }
 
     @Override
-    public boolean isSingleton()
-    {
-        return false;
-    }
-
-    @Override
     public Index.Indexer indexerFor(Predicate<Index> indexSelector,
                                     DecoratedKey key,
                                     RegularAndStaticColumns columns,
