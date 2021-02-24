@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Creates an on-disk index for a given column.
@@ -30,7 +31,7 @@ public interface ColumnIndexWriter
     /**
      * Adds a row to this index.
      */
-    void addRow(DecoratedKey rowKey, long ssTableRowId, Row row) throws IOException;
+    void addRow(PrimaryKey rowKey, Row row) throws IOException;
 
     /**
      * Builds on-disk index data structures from accumulated data, moves them all to the filesystem, and fsync created files.

@@ -33,13 +33,12 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
 /**
- * Modified from {@link org.apache.cassandra.index.sasi.utils.RangeIntersectionIterator} to support:
- * 1. no generic type to reduce allocation
- * 2. support selective intersection to reduce disk io
- * 3. make sure iterators are closed when intersection ends because of lazy key fetching
+ * A simple intersection iterator that makes no real attempts at optimising the iteration apart from
+ * initially sorting the ranges. This implementation also supports an intersection limit which limits
+ * the number of ranges that will be included in the intersection. This currently defaults to 2.
  */
 @SuppressWarnings("resource")
-public class RangeIntersectionIterator
+public class RangeIntersectionIterator extends RangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -52,9 +51,78 @@ public class RangeIntersectionIterator
         logger.info(String.format("Storage attached index intersection clause limit is %d", INTERSECTION_CLAUSE_LIMIT));
     }
 
-    public static boolean shouldDefer(int numberOfExpressions)
+    private final List<RangeIterator> ranges;
+    private final List<RangeIterator> toRelease;
+    private final List<RangeIterator> processedRanges;
+
+    private RangeIntersectionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
-        return (INTERSECTION_CLAUSE_LIMIT <= 0) || (numberOfExpressions <= INTERSECTION_CLAUSE_LIMIT);
+        super(statistics);
+        this.ranges = ranges;
+        this.toRelease = new ArrayList<>(ranges);
+        this.processedRanges = new ArrayList<>(ranges.size());
+    }
+
+    protected PrimaryKey computeNext()
+    {
+        processedRanges.clear();
+        RangeIterator head = null;
+        PrimaryKey candidate = null;
+        while (!ranges.isEmpty())
+        {
+            RangeIterator range = ranges.remove(0);
+            if (!range.hasNext())
+                return endOfData();
+            if (range.getCurrent().compareTo(getMinimum()) < 0)
+            {
+                range.skipTo(getMinimum());
+            }
+            if (candidate == null)
+            {
+                candidate = range.hasNext() ? range.next() : null;
+                if (candidate == null || candidate.compareTo(getMaximum()) > 0)
+                    return endOfData();
+                head = range;
+            }
+            else
+            {
+                if (!isOverlapping(head, range) || (range.skipTo(candidate) == null))
+                {
+                    return endOfData();
+                }
+                int cmp = candidate.compareTo(range.getCurrent());
+                if (cmp == 0)
+                {
+                    range.hasNext();
+                    processedRanges.add(range);
+                }
+                else if (cmp < 0)
+                {
+                    candidate = range.next();
+                    ranges.add(head);
+                    ranges.addAll(processedRanges);
+                    processedRanges.clear();
+                    head = range;
+                }
+                else
+                    return endOfData();
+            }
+        }
+        ranges.add(head);
+        ranges.addAll(processedRanges);
+        return candidate;
+    }
+
+    protected void performSkipTo(PrimaryKey nextToken)
+    {
+        for (RangeIterator range : ranges)
+            if (range.hasNext())
+                range.skipTo(nextToken);
+    }
+
+    public void close() throws IOException
+    {
+        toRelease.forEach(FileUtils::closeQuietly);
     }
 
     public static Builder builder()
@@ -75,11 +143,11 @@ public class RangeIntersectionIterator
     public static class Builder extends RangeIterator.Builder
     {
         private final int limit;
+        protected List<RangeIterator> rangeIterators = new ArrayList<>();
 
         public Builder()
         {
-            super(IteratorType.INTERSECTION);
-            this.limit = Integer.MAX_VALUE;
+            this(Integer.MAX_VALUE);
         }
 
         public Builder(int limit)
@@ -88,37 +156,61 @@ public class RangeIntersectionIterator
             this.limit = limit;
         }
 
+        public RangeIterator.Builder add(RangeIterator range)
+        {
+            if (range == null)
+                return this;
+
+            if (range.getCount() > 0)
+                rangeIterators.add(range);
+            else
+                FileUtils.closeQuietly(range);
+            statistics.update(range);
+
+            return this;
+        }
+
+        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        {
+            if (ranges == null || ranges.isEmpty())
+                return this;
+
+            ranges.forEach(this::add);
+            return this;
+        }
+
+        public int rangeCount()
+        {
+            return rangeIterators.size();
+        }
+
         protected RangeIterator buildIterator()
         {
+            rangeIterators.sort(Comparator.comparingLong(RangeIterator::getCount));
+            int initialSize = rangeIterators.size();
             // all ranges will be included
-            if (limit >= ranges.size() || limit <= 0)
-                return buildIterator(statistics, ranges);
+            if (limit >= rangeIterators.size() || limit <= 0)
+                return buildIterator(statistics, rangeIterators);
 
             // Apply most selective iterators during intersection, because larger number of iterators will result lots of disk seek.
-            List<RangeIterator> selectiveIterator = new ArrayList<>(ranges);
-            selectiveIterator.sort(Comparator.comparingLong(RangeIterator::getCount));
-
             Statistics selectiveStatistics = new Statistics(IteratorType.INTERSECTION);
-            for (int i = selectiveIterator.size() - 1; i >= 0 && i >= limit; i--)
-                FileUtils.closeQuietly(selectiveIterator.remove(i));
+            for (int i = rangeIterators.size() - 1; i >= 0 && i >= limit; i--)
+                FileUtils.closeQuietly(rangeIterators.remove(i));
 
-            for (RangeIterator iterator : selectiveIterator)
+            for (RangeIterator iterator : rangeIterators)
                 selectiveStatistics.update(iterator);
 
             if (Tracing.isTracing())
                 Tracing.trace("Selecting {} {} of {} out of {} indexes",
-                              selectiveIterator.size(),
-                              selectiveIterator.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
-                              selectiveIterator.stream().map(RangeIterator::getCount).map(Object::toString).collect(Collectors.joining(", ")),
-                              ranges.size());
+                              rangeIterators.size(),
+                              rangeIterators.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
+                              rangeIterators.stream().map(RangeIterator::getCount).map(Object::toString).collect(Collectors.joining(", ")),
+                              initialSize);
 
-            PriorityQueue<RangeIterator> selectiveRanges = new PriorityQueue<>(limit, Comparator.comparing(RangeIterator::getCurrent));
-            selectiveRanges.addAll(selectiveIterator);
-
-            return buildIterator(selectiveStatistics, selectiveRanges);
+            return buildIterator(selectiveStatistics, rangeIterators);
         }
 
-        private static RangeIterator buildIterator(Statistics statistics, PriorityQueue<RangeIterator> ranges)
+        private static RangeIterator buildIterator(Statistics statistics, List<RangeIterator> ranges)
         {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
@@ -130,129 +222,10 @@ public class RangeIntersectionIterator
             }
 
             if (ranges.size() == 1)
-                return ranges.poll();
+                return ranges.get(0);
 
-            return new BounceIntersectionIterator(statistics, ranges);
+            return new RangeIntersectionIterator(statistics, ranges);
         }
     }
 
-    /**
-     * Iterator which performs intersection of multiple ranges by using bouncing (merge-join) technique to identify
-     * common elements in the given ranges. Aforementioned "bounce" works as follows: range queue is poll'ed for the
-     * range with the smallest current token (main loop), that token is used to {@link RangeIterator#skipTo(Long)}
-     * other ranges, if token produced by {@link RangeIterator#skipTo(Long)} is equal to current "candidate" token,
-     * both get merged together and the same operation is repeated for next range from the queue, if returned token
-     * is not equal than candidate, candidate's range gets put back into the queue and the main loop gets repeated until
-     * next intersection token is found or at least one iterator runs out of tokens.
-     *
-     * This technique is every efficient to jump over gaps in the ranges.
-     */
-    private static class BounceIntersectionIterator extends RangeIterator
-    {
-        private final PriorityQueue<RangeIterator> ranges;
-        private final Token.TokenMerger merger;
-        private final List<RangeIterator> toRelease;
-        private final List<RangeIterator> processedRanges;
-
-        private BounceIntersectionIterator(Builder.Statistics statistics, PriorityQueue<RangeIterator> ranges)
-        {
-            super(statistics);
-            this.ranges = ranges;
-            this.toRelease = new ArrayList<>(ranges);
-            this.merger = new Token.ReusableTokenMerger(ranges.size());
-            this.processedRanges = new ArrayList<>(ranges.size());
-        }
-
-        protected Token computeNext()
-        {
-            RangeIterator head = ranges.poll();
-
-            if (head == null)
-                return endOfData();
-
-            // jump right to the beginning of the intersection or return next element
-            if (head.getCurrent().compareTo(getMinimum()) < 0)
-                head.skipTo(getMinimum());
-
-            Token candidate = head.hasNext() ? head.next() : null;
-
-            if (candidate == null || candidate.get() > getMaximum())
-                return endOfData();
-
-            merger.reset();
-            merger.add(candidate);
-
-            processedRanges.clear();
-
-            boolean intersectsAll = true;
-            while (!ranges.isEmpty())
-            {
-                RangeIterator range = ranges.poll();
-
-                // found a range which doesn't overlap with one (or possibly more) other range(s)
-                // or the range is exhausted
-                if (!isOverlapping(head, range) || (range.skipTo(candidate.get()) == null))
-                {
-                    intersectsAll = false;
-                    break;
-                }
-
-                int cmp = Long.compare(candidate.get(), range.getCurrent());
-
-                if (cmp == 0)
-                {
-                    merger.add(range.next());
-                    // advance skipped range to the next element if any
-                    range.hasNext();
-                    processedRanges.add(range);
-                }
-                else if (cmp < 0)
-                {
-                    // the candidate is less than the current value in the next range
-                    // so make the next range the candidate and start again
-                    candidate = range.next();
-                    merger.reset();
-                    merger.add(candidate);
-                    ranges.add(head);
-                    ranges.addAll(processedRanges);
-                    processedRanges.clear();
-                    head = range;
-                }
-                else
-                {
-                    intersectsAll = false;
-                    break;
-                }
-            }
-
-            if (intersectsAll)
-            {
-                ranges.add(head);
-                ranges.addAll(processedRanges);
-                return merger.merge();
-            }
-
-            return endOfData();
-        }
-
-        protected void performSkipTo(Long nextToken)
-        {
-            List<RangeIterator> skipped = new ArrayList<>();
-
-            while (!ranges.isEmpty())
-            {
-                RangeIterator range = ranges.poll();
-                range.skipTo(nextToken);
-                skipped.add(range);
-            }
-
-            for (RangeIterator range : skipped)
-                ranges.add(range);
-        }
-
-        public void close() throws IOException
-        {
-            toRelease.forEach(FileUtils::closeQuietly);
-        }
-    }
 }

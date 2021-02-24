@@ -24,7 +24,10 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
@@ -86,7 +89,7 @@ public class TermsIteratorMerger implements TermsIterator
 
             postingLists.add(postings.peekable());
         }
-        return new MonitoringPostingList(MergePostingList.merge(postingLists));
+        return new MonitoringPostingList(MergePostingList.merge(postingLists, () -> postingLists.forEach(postingList -> FileUtils.closeQuietly(postingList))));
     }
 
     @Override
@@ -127,9 +130,15 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(PrimaryKey primaryKey) throws IOException
         {
-            return monitored.advance(targetRowID);
+            return monitored.advance(primaryKey);
+        }
+
+        @Override
+        public PrimaryKey mapRowId(long rowId)
+        {
+            return monitored.mapRowId(rowId);
         }
 
         @Override

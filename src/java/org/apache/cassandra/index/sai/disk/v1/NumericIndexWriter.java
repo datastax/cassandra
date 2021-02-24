@@ -60,6 +60,11 @@ public class NumericIndexWriter implements Closeable
      * @param maxSegmentRowId maximum possible segment row ID, used to create `maxDoc` for kd-tree
      * @param numRows must be greater than number of added rowIds, only used for validation.
      */
+    public NumericIndexWriter(IndexComponents indexComponents, int bytesPerDim, long maxSegmentRowId, long numRows, boolean segmented) throws IOException
+    {
+        this(indexComponents, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, null, segmented);
+    }
+
     public NumericIndexWriter(IndexComponents indexComponents, int bytesPerDim, long maxSegmentRowId, long numRows, IndexWriterConfig config, boolean segmented) throws IOException
     {
         this(indexComponents, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, config, segmented);
@@ -67,13 +72,13 @@ public class NumericIndexWriter implements Closeable
 
     public NumericIndexWriter(IndexComponents indexComponents, int maxPointsInLeafNode, int bytesPerDim, long maxSegmentRowId, long numRows, IndexWriterConfig config, boolean segmented) throws IOException
     {
-        checkArgument(maxSegmentRowId >= 0,
-                      "[%s] maxRowId must be non-negative value, but got %s",
-                      config.getIndexName(), maxSegmentRowId);
-
-        checkArgument(numRows >= 0,
-                      "[$s] numRows must be non-negative value, but got %s",
-                      config.getIndexName(), numRows);
+//        checkArgument(maxSegmentRowId >= 0,
+//                      "[%s] maxRowId must be non-negative value, but got %s",
+//                      config.getIndexName(), maxSegmentRowId);
+//
+//        checkArgument(numRows >= 0,
+//                      "[$s] numRows must be non-negative value, but got %s",
+//                      config.getIndexName(), numRows);
 
         this.indexComponents = indexComponents;
         this.bytesPerDim = bytesPerDim;
@@ -125,6 +130,38 @@ public class NumericIndexWriter implements Closeable
         }
     }
 
+    public static class LeafCounter implements BKDWriter.OneDimensionBKDWriterCallback
+    {
+        public int count;
+
+        @Override
+        public void writeLeafDocs(int leafNum, BKDWriter.RowIDAndIndex[] leafDocs, int offset, int count)
+        {
+            count++;
+        }
+    }
+
+    public PartitionKeysMeta writeIndex(IndexOutput output, MutableOneDimPointValues values) throws IOException
+    {
+        LeafCounter leafCounter = new LeafCounter();
+
+        // The SSTable kd-tree component file is opened in append mode, so our offset is the current file pointer.
+        final long bkdOffset = output.getFilePointer();
+
+        final long bkdPosition = writer.writeField(output, values, leafCounter);
+
+        final long bkdLength = output.getFilePointer() - bkdOffset;
+
+        return new PartitionKeysMeta(writer.maxPointsInLeafNode,
+                                     writer.pointCount,
+                                     writer.bytesPerDim,
+                                     writer.numDims,
+                                     leafCounter.count,
+                                     bkdPosition,
+                                     bkdOffset,
+                                     bkdLength);
+    }
+
     /**
      * Writes a k-d tree and posting lists from a {@link MutablePointValues}.
      *
@@ -163,23 +200,26 @@ public class NumericIndexWriter implements Closeable
             components.put(IndexComponents.NDIType.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
         }
 
-        try (TraversingBKDReader reader = new TraversingBKDReader(indexComponents, indexComponents.createFileHandle(indexComponents.kdTree, segmented), bkdPosition);
-             IndexOutput postingsOutput = indexComponents.createOutput(indexComponents.kdTreePostingLists, true, segmented))
+        if (config != null)
         {
-            final long postingsOffset = postingsOutput.getFilePointer();
+            try (TraversingBKDReader reader = new TraversingBKDReader(indexComponents, indexComponents.createFileHandle(indexComponents.kdTree, segmented), bkdPosition);
+                 IndexOutput postingsOutput = indexComponents.createOutput(indexComponents.kdTreePostingLists, true, segmented))
+            {
+                final long postingsOffset = postingsOutput.getFilePointer();
 
-            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexComponents);
-            reader.traverse(postingsWriter);
+                final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexComponents);
+                reader.traverse(postingsWriter);
 
-            // The kd-tree postings writer already writes its own header & footer.
-            final long postingsPosition = postingsWriter.finish(postingsOutput);
+                // The kd-tree postings writer already writes its own header & footer.
+                final long postingsPosition = postingsWriter.finish(postingsOutput);
 
-            Map<String, String> attributes = new LinkedHashMap<>();
-            attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));
-            attributes.put("num_non_leaf_postings", Integer.toString(postingsWriter.numNonLeafPostings));
+                Map<String, String> attributes = new LinkedHashMap<>();
+                attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));
+                attributes.put("num_non_leaf_postings", Integer.toString(postingsWriter.numNonLeafPostings));
 
-            long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
-            components.put(IndexComponents.NDIType.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
+                long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
+                components.put(IndexComponents.NDIType.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
+            }
         }
 
         return components;

@@ -34,6 +34,8 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
@@ -63,11 +65,16 @@ public class TermsReader implements Closeable
     private final FileHandle termDictionaryFile;
     private final FileHandle postingsFile;
     private final long termDictionaryRoot;
+    private final PrimaryKeyMap primaryKeyMap;
 
-    public TermsReader(IndexComponents components, FileHandle termsData, FileHandle postingLists,
+    public TermsReader(IndexComponents components,
+                       PrimaryKeyMap primaryKeyMap,
+                       FileHandle termsData,
+                       FileHandle postingLists,
                        long root, long termsFooterPointer) throws IOException
     {
         this.indexComponents = components;
+        this.primaryKeyMap = primaryKeyMap;
         termDictionaryFile = termsData;
         postingsFile = postingLists;
         termDictionaryRoot = root;
@@ -127,8 +134,7 @@ public class TermsReader implements Closeable
     @VisibleForTesting
     public class TermQuery
     {
-        private final IndexInput postingsInput;
-        private final IndexInput postingsSummaryInput;
+        private final SharedIndexInput postingsInput;
         private final QueryEventListener.TrieIndexEventListener listener;
         private final long lookupStartTime;
         private final QueryContext context;
@@ -138,8 +144,7 @@ public class TermsReader implements Closeable
         TermQuery(ByteComparable term, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
-            postingsInput = indexComponents.openInput(postingsFile);
-            postingsSummaryInput = indexComponents.openInput(postingsFile);
+            postingsInput = new SharedIndexInput(indexComponents.openInput(postingsFile));
             this.term = term;
             lookupStartTime = System.nanoTime();
             this.context = context;
@@ -152,8 +157,7 @@ public class TermsReader implements Closeable
                 long postingOffset = lookupTermDictionary(term);
                 if (postingOffset == PostingList.OFFSET_NOT_FOUND)
                 {
-                    FileUtils.closeQuietly(postingsInput);
-                    FileUtils.closeQuietly(postingsSummaryInput);
+                    postingsInput.close();
                     return null;
                 }
 
@@ -176,7 +180,6 @@ public class TermsReader implements Closeable
         private void closeOnException()
         {
             FileUtils.closeQuietly(postingsInput);
-            FileUtils.closeQuietly(postingsSummaryInput);
         }
 
         public long lookupTermDictionary(ByteComparable term)
@@ -196,9 +199,9 @@ public class TermsReader implements Closeable
 
         public PostingsReader getPostingReader(long offset) throws IOException
         {
-            PostingsReader.BlocksSummary header = new PostingsReader.BlocksSummary(postingsSummaryInput, offset);
+            PostingsReader.BlocksSummary header = new PostingsReader.BlocksSummary(postingsInput, offset);
 
-            return new PostingsReader(postingsInput, header, listener.postingListEventListener());
+            return new PostingsReader(postingsInput, header, listener.postingListEventListener(), primaryKeyMap);
         }
     }
 
@@ -228,8 +231,20 @@ public class TermsReader implements Closeable
         public PostingList postings() throws IOException
         {
             assert entry != null;
-            final IndexInput input = indexComponents.openInput(postingsFile);
-            return new OffsetPostingList(segmentOffset, new PostingsReader(input, new PostingsReader.BlocksSummary(input, entry.right), listener.postingListEventListener()));
+            final SharedIndexInput input = new SharedIndexInput(indexComponents.openInput(postingsFile));
+
+            try
+            {
+                return new OffsetPostingList(segmentOffset,
+                                             new PostingsReader(input.sharedCopy(),
+                                                                new PostingsReader.BlocksSummary(input.sharedCopy(), entry.right),
+                                                                listener.postingListEventListener(),
+                                                                primaryKeyMap));
+            }
+            finally
+            {
+                FileUtils.closeQuietly(input);
+            }
         }
 
         @Override
@@ -295,12 +310,24 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(PrimaryKey primaryKey) throws IOException
         {
-            long next = wrapped.advance(targetRowID);
+            long next = wrapped.advance(primaryKey);
             if (next == PostingList.END_OF_STREAM)
                 return next;
             return next + offset;
+        }
+
+        @Override
+        public PrimaryKey mapRowId(long rowId)
+        {
+            return wrapped.mapRowId(rowId);
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            wrapped.close();
         }
     }
 }

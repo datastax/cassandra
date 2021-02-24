@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.lucene.store.IndexInput;
 
 public class PostingsTest extends NdiRandomizedTest
@@ -52,43 +53,44 @@ public class PostingsTest extends NdiRandomizedTest
             writer.complete();
         }
 
-        IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
-        SAICodecUtils.validate(input);
-        input.seek(postingPointer);
+        SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists));
+        SAICodecUtils.validate(sharedInput);
+        sharedInput.seek(postingPointer);
 
-        final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, input);
+        final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, sharedInput);
         assertEquals(1, summary.offsets.length());
 
         CountingPostingListEventListener listener = new CountingPostingListEventListener();
-        PostingsReader reader = new PostingsReader(input, postingPointer, listener);
-
-        expectedPostingList.reset();
-        assertEquals(expectedPostingList.getOrdinal(), reader.getOrdinal());
-        assertEquals(expectedPostingList.size(), reader.size());
-
-        long actualRowID;
-        while ((actualRowID = reader.nextPosting()) != PostingList.END_OF_STREAM)
+        try (PostingsReader reader = new PostingsReader(sharedInput, postingPointer, listener))
         {
-            assertEquals(expectedPostingList.nextPosting(), actualRowID);
+            expectedPostingList.reset();
             assertEquals(expectedPostingList.getOrdinal(), reader.getOrdinal());
+            assertEquals(expectedPostingList.size(), reader.size());
+
+            long actualRowID;
+            while ((actualRowID = reader.nextPosting()) != PostingList.END_OF_STREAM)
+            {
+                assertEquals(expectedPostingList.nextPosting(), actualRowID);
+                assertEquals(expectedPostingList.getOrdinal(), reader.getOrdinal());
+            }
+            assertEquals(PostingList.END_OF_STREAM, expectedPostingList.nextPosting());
+            assertEquals(0, listener.advances);
+            assertEquals(reader.size(), listener.decodes);
         }
-        assertEquals(PostingList.END_OF_STREAM, expectedPostingList.nextPosting());
-        assertEquals(0, listener.advances);
-        reader.close();
-        assertEquals(reader.size(), listener.decodes);
 
-        input = indexComponents.openBlockingInput(indexComponents.postingLists);
+        sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists));
         listener = new CountingPostingListEventListener();
-        reader = new PostingsReader(input, postingPointer, listener);
+        try (PostingsReader reader = new PostingsReader(sharedInput, postingPointer, listener))
+        {
+            assertEquals(50, reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(45)));
 
-        assertEquals(50, reader.advance(45));
+            assertEquals(60, reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(60)));
+            assertEquals(PostingList.END_OF_STREAM, reader.nextPosting());
+            assertEquals(2, listener.advances);
+            reader.close();
 
-        assertEquals(60, reader.advance(60));
-        assertEquals(PostingList.END_OF_STREAM, reader.nextPosting());
-        assertEquals(2, listener.advances);
-        reader.close();
-
-        assertEquals(reader.size(), listener.decodes); // nothing more was decoded
+            assertEquals(reader.size(), listener.decodes); // nothing more was decoded
+        }
     }
 
     @Test
@@ -120,14 +122,14 @@ public class PostingsTest extends NdiRandomizedTest
 
         for (int i = 0; i < numPostingLists; ++i)
         {
-            IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
-            input.seek(postingPointers[i]);
+            SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists));
+            sharedInput.seek(postingPointers[i]);
             final ArrayPostingList expectedPostingList = expected[i];
-            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, input);
+            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, sharedInput);
             assertTrue(summary.offsets.length() > 1);
 
             final CountingPostingListEventListener listener = new CountingPostingListEventListener();
-            try (PostingsReader reader = new PostingsReader(input, postingPointers[i], listener))
+            try (PostingsReader reader = new PostingsReader(sharedInput, postingPointers[i], listener))
             {
                 expectedPostingList.reset();
                 assertEquals(expectedPostingList.getOrdinal(), reader.getOrdinal());
@@ -138,8 +140,8 @@ public class PostingsTest extends NdiRandomizedTest
             }
 
             // test skipping to the last block
-            input = indexComponents.openBlockingInput(indexComponents.postingLists);
-            try (PostingsReader reader = new PostingsReader(input, postingPointers[i], listener))
+            sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists));
+            try (PostingsReader reader = new PostingsReader(sharedInput, postingPointers[i], listener))
             {
                 long tokenToAdvance = -1;
                 expectedPostingList.reset();
@@ -149,8 +151,8 @@ public class PostingsTest extends NdiRandomizedTest
                 }
 
                 expectedPostingList.reset();
-                assertEquals(expectedPostingList.advance(tokenToAdvance),
-                             reader.advance(tokenToAdvance));
+                assertEquals(expectedPostingList.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(tokenToAdvance)),
+                             reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(tokenToAdvance)));
 
                 assertPostingListEquals(expectedPostingList, reader);
                 assertEquals(1, listener.advances);
@@ -174,12 +176,12 @@ public class PostingsTest extends NdiRandomizedTest
             writer.complete();
         }
 
-        try (IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists))
+        try (SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists)))
         {
-            SAICodecUtils.validate(input);
-            input.seek(fp);
+            SAICodecUtils.validate(sharedInput);
+            sharedInput.seek(fp);
 
-            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expected, input);
+            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expected, sharedInput);
             assertEquals((int) Math.ceil((double) maxSegmentRowID / blockSize), summary.offsets.length());
 
             for (int i = 0; i < summary.maxValues.length(); i++)
@@ -216,12 +218,12 @@ public class PostingsTest extends NdiRandomizedTest
             writer.complete();
         }
 
-        try (IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists))
+        try (SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists)))
         {
-            SAICodecUtils.validate(input);
-            input.seek(fp);
+            SAICodecUtils.validate(sharedInput);
+            sharedInput.seek(fp);
 
-            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expected, input);
+            final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expected, sharedInput);
             assertEquals((int) Math.ceil((double) numPostings / blockSize), summary.offsets.length());
 
             for (int i = 0; i < summary.maxValues.length(); i++)
@@ -280,8 +282,8 @@ public class PostingsTest extends NdiRandomizedTest
 
         for (int target : targetIDs)
         {
-            final long actualRowId = reader.advance(target);
-            final long expectedRowId = expected.advance(target);
+            final long actualRowId = reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
+            final long expectedRowId = expected.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
 
             assertEquals(expectedRowId, actualRowId);
 
@@ -298,14 +300,14 @@ public class PostingsTest extends NdiRandomizedTest
 
     private PostingsReader openReader(IndexComponents indexComponents, long fp, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
-        input.seek(fp);
-        return new PostingsReader(input, fp, listener);
+        SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.postingLists));
+        sharedInput.seek(fp);
+        return new PostingsReader(sharedInput, fp, listener);
     }
 
-    private PostingsReader.BlocksSummary assertBlockSummary(int blockSize, PostingList expected, IndexInput input) throws IOException
+    private PostingsReader.BlocksSummary assertBlockSummary(int blockSize, PostingList expected, SharedIndexInput sharedInput) throws IOException
     {
-        final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(input, input.getFilePointer());
+        final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput, sharedInput.getFilePointer());
         assertEquals(blockSize, summary.blockSize);
         assertEquals(expected.size(), summary.numPostings);
         assertTrue(summary.offsets.length() > 0);

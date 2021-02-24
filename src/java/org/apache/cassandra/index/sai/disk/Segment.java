@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -32,6 +33,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -50,9 +52,7 @@ public class Segment implements Closeable
     private final Token.KeyBound maxKeyBound;
 
     // per sstable
-    final LongArray.Factory segmentRowIdToTokenFactory;
-    final LongArray.Factory segmentRowIdToOffsetFactory;
-    final SSTableContext.KeyFetcher keyFetcher;
+    public final PrimaryKeyMap primaryKeyMap;
     // per-index
     public final SSTableIndex.PerIndexFiles indexFiles;
     // per-segment
@@ -63,14 +63,12 @@ public class Segment implements Closeable
 
     public Segment(ColumnContext columnContext, SSTableContext sstableContext, SSTableIndex.PerIndexFiles indexFiles, SegmentMetadata metadata) throws IOException
     {
-        this.minKey = metadata.minKey.getToken();
+        this.minKey = metadata.minKey.partitionKey().getToken();
         this.minKeyBound = minKey.minKeyBound();
-        this.maxKey = metadata.maxKey.getToken();
+        this.maxKey = metadata.maxKey.partitionKey().getToken();
         this.maxKeyBound = maxKey.maxKeyBound();
 
-        this.segmentRowIdToTokenFactory = sstableContext.tokenReaderFactory.withOffset(metadata.segmentRowIdOffset);
-        this.segmentRowIdToOffsetFactory = sstableContext.offsetReaderFactory.withOffset(metadata.segmentRowIdOffset);
-        this.keyFetcher = sstableContext.keyFetcher;
+        this.primaryKeyMap = sstableContext.primaryKeyMap;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
         this.columnType = columnContext.getValidator();
@@ -79,12 +77,9 @@ public class Segment implements Closeable
     }
 
     @VisibleForTesting
-    public Segment(LongArray.Factory tokenFactory, LongArray.Factory offsetFactory, SSTableContext.KeyFetcher keyFetcher,
-                   SSTableIndex.PerIndexFiles indexFiles, SegmentMetadata metadata, AbstractType<?> columnType)
+    public Segment(PrimaryKeyMap primaryKeyMap, SSTableIndex.PerIndexFiles indexFiles, SegmentMetadata metadata, AbstractType<?> columnType)
     {
-        this.segmentRowIdToTokenFactory = tokenFactory;
-        this.segmentRowIdToOffsetFactory = offsetFactory;
-        this.keyFetcher = keyFetcher;
+        this.primaryKeyMap = primaryKeyMap;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
         this.columnType = columnType;
@@ -98,9 +93,7 @@ public class Segment implements Closeable
     @VisibleForTesting
     public Segment(Token minKey, Token maxKey)
     {
-        this.segmentRowIdToTokenFactory = null;
-        this.segmentRowIdToOffsetFactory = null;
-        this.keyFetcher = null;
+        this.primaryKeyMap = null;
         this.indexFiles = null;
         this.metadata = null;
         this.minKey = minKey;
@@ -143,12 +136,11 @@ public class Segment implements Closeable
      *
      * @param expression to filter on disk index
      * @param context to track per sstable cache and per query metrics
-     * @param defer create the iterator in a deferred state
      * @return range iterator that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, SSTableQueryContext context)
     {
-        return index.search(expression, context, defer);
+        return index.search(expression, context);
     }
 
     public AbstractType<?> getColumnType()

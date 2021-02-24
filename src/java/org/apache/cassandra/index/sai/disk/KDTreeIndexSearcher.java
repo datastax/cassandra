@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.List;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -57,7 +58,8 @@ public class KDTreeIndexSearcher extends IndexSearcher
                                   indexFiles.kdtree().sharedCopy(),
                                   bkdPosition,
                                   indexFiles.kdtreePostingLists().sharedCopy(),
-                                  postingsPosition);
+                                  postingsPosition,
+                                  segment.primaryKeyMap.copyOf());
         perColumnEventListener = listener;
 
     }
@@ -70,7 +72,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     @Override
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression exp, SSTableQueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
@@ -80,9 +82,9 @@ public class KDTreeIndexSearcher extends IndexSearcher
             final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
             QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
 
-            PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> bkdReader.intersect(query, listener, context.queryContext))
-                                            : bkdReader.intersect(query, listener, context.queryContext);
-            return toIterator(postingList, context, defer);
+            List<PostingList.PeekablePostingList> postingList = bkdReader.intersect(query, listener, context.queryContext);
+
+            return toIterators(postingList, context);
         }
         else
         {

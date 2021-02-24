@@ -19,15 +19,13 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.IntArrayList;
-import org.apache.cassandra.db.DecoratedKey;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.ColumnContext;
@@ -37,6 +35,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
@@ -74,7 +73,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
     }
 
     @Override
-    public void addRow(DecoratedKey rowKey, long ssTableRowId, Row row)
+    public void addRow(PrimaryKey rowKey, Row row)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary
         // keys and row IDs in the flushing SSTable. This writer, therefore, does nothing in
@@ -104,10 +103,10 @@ public class MemtableIndexWriter implements ColumnIndexWriter
                 return;
             }
 
-            final DecoratedKey minKey = rowMapping.minKey;
-            final DecoratedKey maxKey = rowMapping.maxKey;
+            final PrimaryKey minKey = rowMapping.minKey;
+            final PrimaryKey maxKey = rowMapping.maxKey;
 
-            final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtable);
+            final Iterator<Pair<ByteComparable, LongArrayList>> iterator = rowMapping.merge(memtable);
 
             try (MemtableTermsIterator terms = new MemtableTermsIterator(memtable.getMinTerm(), memtable.getMaxTerm(), iterator))
             {
@@ -136,7 +135,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
         }
     }
 
-    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
+    private long flush(PrimaryKey minKey, PrimaryKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
     {
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -178,7 +177,8 @@ public class MemtableIndexWriter implements ColumnIndexWriter
 
         try (MetadataWriter writer = new MetadataWriter(indexComponents.createOutput(indexComponents.meta)))
         {
-            SegmentMetadata.write(writer, Collections.singletonList(metadata), null);
+            //TODO Need a compressor here
+            SegmentMetadata.write(writer, metadata, null);
         }
 
         return numRows;

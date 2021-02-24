@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.index.sai.disk.v1.PostingsReader;
 import org.apache.cassandra.index.sai.utils.LongArray;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -47,10 +48,8 @@ public class PostingsReaderBenchmark extends AbstractOnDiskBenchmark
     @Param({ "1", "10", "100", "1000"})
     public int skippingDistance;
 
-    protected LongArray rowIdToToken;
     protected PostingsReader reader;
-    private int[] rowIds;
-    protected long[] tokenValues;
+    protected PrimaryKey[] primaryKeys;
 
     @Override
     public int numRows()
@@ -67,54 +66,31 @@ public class PostingsReaderBenchmark extends AbstractOnDiskBenchmark
     @Override
     public void beforeInvocation() throws Throwable
     {
-        // rowIdToToken.findTokenRowID keeps track of last position, so it must be per-benchmark-method-invocation.
-        rowIdToToken = openRowIdToTokenReader();
         reader = openPostingsReader();
 
-        tokenValues = new long[NUM_INVOCATIONS];
-        rowIds = new int[NUM_INVOCATIONS];
-        for (int i = 0; i < tokenValues.length; i++)
+        primaryKeys = new PrimaryKey[NUM_INVOCATIONS];
+        for (int i = 0; i < primaryKeys.length; i++)
         {
-            rowIds[i] = toPosting(i * skippingDistance);
-            tokenValues[i] = toToken(i * skippingDistance);
+            int rowId = toPosting(i * skippingDistance);
+            primaryKeys[i] = primaryKeyMap.primaryKeyFromRowId(rowId);
         }
     }
 
     @Override
     public void afterInvocation() throws Throwable
     {
-        rowIdToToken.close();
         reader.close();
     }
 
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
-    @BenchmarkMode({ Mode.Throughput, Mode.AverageTime })
-    public void skipAndRequestNext(Blackhole bh) throws Throwable
-    {
-        int rowId = -1;
-        for (int i = 0; i < tokenValues.length;)
-        {
-            long token = tokenValues[i];
-            if (rowId < 0)
-                rowId = (int) rowIdToToken.findTokenRowID(token);
-            bh.consume(reader.advance(rowId));
-            rowId = -1;
-
-            i++;
-        }
-    }
-
-    @Benchmark
-    @OperationsPerInvocation(NUM_INVOCATIONS)
-    @BenchmarkMode({ Mode.Throughput, Mode.AverageTime })
+    @BenchmarkMode(Mode.AverageTime)
     public void advance(Blackhole bh) throws Throwable
     {
-        for (int i = 0; i < tokenValues.length;)
+        for (int i = 0; i < primaryKeys.length;)
         {
-            int rowId = rowIds[i];
-            bh.consume(reader.advance(rowId));
-
+            PrimaryKey key = primaryKeys[i];
+            bh.consume(reader.advance(key));
             i++;
         }
     }

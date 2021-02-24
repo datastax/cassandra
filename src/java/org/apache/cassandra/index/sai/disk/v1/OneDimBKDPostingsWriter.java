@@ -100,6 +100,18 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         }
     }
 
+    public static class NodeEntry
+    {
+        public final long numPoints;
+        public final long postingsFilePointer;
+
+        public NodeEntry(long numPoints, long postingsFilePointer)
+        {
+            this.numPoints = numPoints;
+            this.postingsFilePointer = postingsFilePointer;
+        }
+    }
+
     @SuppressWarnings("resource")
     public long finish(IndexOutput out) throws IOException
     {
@@ -118,10 +130,10 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
                                                   .sum();
 
         final List<Integer> internalNodeIDs =
-                nodeToChildLeaves.keySet()
-                                 .stream()
-                                 .filter(i -> nodeToChildLeaves.get(i).size() >= config.getBkdPostingsMinLeaves())
-                                 .collect(Collectors.toList());
+        nodeToChildLeaves.keySet()
+                         .stream()
+                         .filter(i -> nodeToChildLeaves.get(i).size() >= config.getBkdPostingsMinLeaves())
+                         .collect(Collectors.toList());
 
         final Collection<Integer> leafNodeIDs = leafOffsetToNodeID.values();
 
@@ -130,7 +142,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
         final long startFP = out.getFilePointer();
         final Stopwatch flushTime = Stopwatch.createStarted();
-        final TreeMap<Integer, Long> nodeIDToPostingsFilePointer = new TreeMap<>();
+        final TreeMap<Integer, NodeEntry> nodeIDToPostingsFilePointer = new TreeMap<>();
         for (int nodeID : Iterables.concat(internalNodeIDs, leafNodeIDs))
         {
             Collection<Integer> leaves = nodeToChildLeaves.get(nodeID);
@@ -150,11 +162,17 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
                 postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)).peekable());
 
             final PostingList mergedPostingList = MergePostingList.merge(postingLists);
+
+            final long numPoints = mergedPostingList.size();
+
             final long postingFilePosition = postingsWriter.write(mergedPostingList);
             // During compaction we could end up with an empty postings due to deletions.
             // The writer will return a fp of -1 if no postings were written.
             if (postingFilePosition >= 0)
-                nodeIDToPostingsFilePointer.put(nodeID, postingFilePosition);
+            {
+                NodeEntry nodeEntry = new NodeEntry(numPoints, postingFilePosition);
+                nodeIDToPostingsFilePointer.put(nodeID, nodeEntry);
+            }
         }
         flushTime.stop();
         logger.debug(components.logMessage("Flushed {} of posting lists for kd-tree nodes in {} ms."),
@@ -173,14 +191,15 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
         return level > 1 && level % config.getBkdPostingsSkip() == 0;
     }
 
-    private void writeMap(Map<Integer, Long> map, IndexOutput out) throws IOException
+    private void writeMap(Map<Integer, NodeEntry> map, IndexOutput out) throws IOException
     {
         out.writeVInt(map.size());
 
-        for (Map.Entry<Integer, Long> e : map.entrySet())
+        for (Map.Entry<Integer, NodeEntry> e : map.entrySet())
         {
             out.writeVInt(e.getKey());
-            out.writeVLong(e.getValue());
+            out.writeVLong(e.getValue().postingsFilePointer);
+            out.writeVLong(e.getValue().numPoints);
         }
     }
 }

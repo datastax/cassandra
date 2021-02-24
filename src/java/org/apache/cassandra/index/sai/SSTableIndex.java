@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai;
 
 import java.io.Closeable;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -42,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -67,14 +69,10 @@ public class SSTableIndex
     private final SSTableReader sstable;
     private final IndexComponents components;
 
-    private final ImmutableList<Segment> segments;
+    private final Segment segment;
     private PerIndexFiles indexFiles;
 
-    private final List<SegmentMetadata> metadatas;
-    private final DecoratedKey minKey, maxKey; // in token order
-    private final ByteBuffer minTerm, maxTerm;
-    private final long minSSTableRowId, maxSSTableRowId;
-    private final long numRows;
+    private final SegmentMetadata metadata;
 
     private final AtomicInteger references = new AtomicInteger(1);
     private final AtomicBoolean obsolete = new AtomicBoolean(false);
@@ -93,30 +91,13 @@ public class SSTableIndex
         {
             this.indexFiles = new PerIndexFiles(components, columnContext.isLiteral());
 
-            ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
-
             final MetadataSource source = MetadataSource.loadColumnMetadata(components);
             version = source.getVersion();
-            metadatas = SegmentMetadata.load(source, null);
 
-            for (SegmentMetadata metadata : metadatas)
-            {
-                segmentsBuilder.add(new Segment(columnContext, sstableContext, indexFiles, metadata));
-            }
+            //TODO Need a compressor here
+            metadata = SegmentMetadata.load(source, columnContext.keyFactory(), null);
+            segment = new Segment(columnContext, this.sstableContext, indexFiles, metadata);
 
-            segments = segmentsBuilder.build();
-            assert !segments.isEmpty();
-
-            this.minKey = metadatas.get(0).minKey;
-            this.maxKey = metadatas.get(metadatas.size() - 1).maxKey;
-
-            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(validator)).orElse(null);
-            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(validator)).orElse(null);
-
-            this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
-
-            this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
-            this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
         }
         catch (Throwable t)
         {
@@ -138,7 +119,7 @@ public class SSTableIndex
 
     public long indexFileCacheSize()
     {
-        return segments.stream().mapToLong(Segment::indexFileCacheSize).sum();
+        return segment.indexFileCacheSize();
     }
 
     /**
@@ -146,7 +127,7 @@ public class SSTableIndex
      */
     public long getRowCount()
     {
-        return numRows;
+        return metadata.numRows;
     }
 
     /**
@@ -162,7 +143,7 @@ public class SSTableIndex
      */
     public long minSSTableRowId()
     {
-        return minSSTableRowId;
+        return metadata.minSSTableRowId;
     }
 
     /**
@@ -170,52 +151,37 @@ public class SSTableIndex
      */
     public long maxSSTableRowId()
     {
-        return maxSSTableRowId;
+        return metadata.maxSSTableRowId;
     }
 
     public ByteBuffer minTerm()
     {
-        return minTerm;
+        return metadata.minTerm;
     }
 
     public ByteBuffer maxTerm()
     {
-        return maxTerm;
+        return metadata.maxTerm;
     }
 
-    public DecoratedKey minKey()
+    public PrimaryKey minKey()
     {
-        return minKey;
+        return metadata.minKey;
     }
 
-    public DecoratedKey maxKey()
+    public PrimaryKey maxKey()
     {
-        return maxKey;
+        return metadata.maxKey;
     }
 
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context, boolean defer)
+    public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context)
     {
-        RangeConcatIterator.Builder builder = RangeConcatIterator.builder();
-
-        for (Segment segment : segments)
-        {
-            if (segment.intersects(keyRange))
-            {
-                builder.add(segment.search(expression, context, defer));
-            }
-        }
-
-        return builder.build();
+        return segment.intersects(keyRange) ? segment.search(expression, context) : Collections.EMPTY_LIST;
     }
 
-    public int getSegmentSize()
+    public SegmentMetadata segment()
     {
-        return segments.size();
-    }
-
-    public List<SegmentMetadata> segments()
-    {
-        return metadatas;
+        return metadata;
     }
 
     public Version getVersion()
@@ -323,7 +289,7 @@ public class SSTableIndex
         if (n == 0)
         {
             FileUtils.closeQuietly(indexFiles);
-            FileUtils.closeQuietly(segments);
+            FileUtils.closeQuietly(segment);
             sstableContext.close();
 
             /*
