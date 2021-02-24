@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.disk.v1.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -73,7 +74,7 @@ public abstract class SegmentBuilder
     int rowCount = 0;
     int maxSegmentRowId = -1;
     // in token order
-    private DecoratedKey minKey, maxKey;
+    private PrimaryKey minKey, maxKey;
     // in termComparator order
     private ByteBuffer minTerm, maxTerm;
 
@@ -180,12 +181,12 @@ public abstract class SegmentBuilder
         return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
-    public long add(ByteBuffer term, DecoratedKey key, long sstableRowId)
+    public long add(ByteBuffer term, PrimaryKey key)
     {
         assert !flushed : "Cannot add to flushed segment.";
-        assert sstableRowId >= maxSSTableRowId;
-        minSSTableRowId = minSSTableRowId < 0 ? sstableRowId : minSSTableRowId;
-        maxSSTableRowId = sstableRowId;
+        assert key.sstableRowId() >= maxSSTableRowId;
+        minSSTableRowId = minSSTableRowId < 0 ? key.sstableRowId() : minSSTableRowId;
+        maxSSTableRowId = key.sstableRowId();
 
         assert maxKey == null || maxKey.compareTo(key) <= 0;
         minKey = minKey == null ? key : minKey;
@@ -197,13 +198,13 @@ public abstract class SegmentBuilder
         if (rowCount == 0)
         {
             // use first global rowId in the segment as segment rowId offset
-            segmentRowIdOffset = sstableRowId;
+            segmentRowIdOffset = key.sstableRowId();
         }
 
         rowCount++;
 
         // segmentRowIdOffset should encode sstableRowId into Integer
-        int segmentRowId = castToSegmentRowId(sstableRowId, segmentRowIdOffset);
+        int segmentRowId = castToSegmentRowId(key.sstableRowId(), segmentRowIdOffset);
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
         long bytesAllocated = addInternal(term, segmentRowId);

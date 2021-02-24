@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
@@ -32,6 +31,7 @@ import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -44,7 +44,7 @@ public interface SegmentMerger extends Closeable
 
     boolean isEmpty();
 
-    SegmentMetadata merge(ColumnContext context, IndexComponents components, DecoratedKey minKey, DecoratedKey maxKey, long maxSSTableRowId) throws IOException;
+    SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException;
 
     static SegmentMerger newSegmentMerger(boolean literal)
     {
@@ -69,7 +69,7 @@ public interface SegmentMerger extends Closeable
         }
 
         @Override
-        public SegmentMetadata merge(ColumnContext context, IndexComponents components, DecoratedKey minKey, DecoratedKey maxKey, long maxSSTableRowId) throws IOException
+        public SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException
         {
             try (final TermsIteratorMerger merger = new TermsIteratorMerger(segmentTermsIterators.toArray(new TermsIterator[0]), context.getValidator()))
             {
@@ -110,6 +110,7 @@ public interface SegmentMerger extends Closeable
             final long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
             final TermsReader termsReader = new TermsReader(indexFiles.components(),
+                                                            null,
                                                             indexFiles.termsData().sharedCopy(),
                                                             indexFiles.postingLists().sharedCopy(),
                                                             root,
@@ -142,7 +143,7 @@ public interface SegmentMerger extends Closeable
         }
 
         @Override
-        public SegmentMetadata merge(ColumnContext context, IndexComponents components, DecoratedKey minKey, DecoratedKey maxKey, long maxSSTableRowId) throws IOException
+        public SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException
         {
             final MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, context.getValidator());
 
@@ -185,7 +186,8 @@ public interface SegmentMerger extends Closeable
                                                       indexFiles.kdtree().sharedCopy(),
                                                       bkdPosition,
                                                       indexFiles.kdtreePostingLists().sharedCopy(),
-                                                      postingsPosition);
+                                                      postingsPosition,
+                                                      null);
             readers.add(bkdReader);
             return bkdReader.iteratorState(rowid -> rowid + segment.segmentRowIdOffset);
         }

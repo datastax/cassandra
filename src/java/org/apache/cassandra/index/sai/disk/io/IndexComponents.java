@@ -40,6 +40,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.PartitionKeysMeta;
 import org.apache.cassandra.index.sai.disk.v1.PostingsWriter;
 import org.apache.cassandra.index.sai.disk.v1.TrieTermsDictionaryWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -70,7 +71,6 @@ public class IndexComponents
 
     public static final String TYPE_PREFIX = "SAI";
     private static final String PER_SSTABLE_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s.db";
-//    public static final String LEGACY_PER_COLUMN_FILE_NAME_FORMAT = "%s_" + PER_SSTABLE_FILE_NAME_FORMAT;
     public static final String PER_COLUMN_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s_%s.db";
 
     public static class IndexComponent extends Component
@@ -113,16 +113,11 @@ public class IndexComponents
 
         // per-sstable components
         /**
-         * Partition key token value for rows including row tombstone and static row. (access key is rowId)
+         * SSTableRowId to PrimaryKey map
          */
-        TOKEN_VALUES("TokenValues"),
+        PRIMARY_KEYS("PrimaryKeys"),
         /**
-         * Partition key offset in sstable data file for rows including row tombstone and static row. (access key is
-         * rowId)
-         */
-        OFFSETS_VALUES("OffsetsValues"),
-        /**
-         * Stores {@link NumericValuesMeta} for {@link NDIType#TOKEN_VALUES} and {@link NDIType#OFFSETS_VALUES}.
+         * Stores {@link PartitionKeysMeta} for {@link NDIType#PRIMARY_KEYS}
          */
         GROUP_META("GroupMeta"),
         /**
@@ -216,9 +211,7 @@ public class IndexComponents
 
     private static final NDIType[] ALL_PER_COLUMN_COMPONENTS = ObjectArrays.concat(NUMERIC_PER_COLUMN_COMPONENTS, STRING_COMPONENTS, NDIType.class);
 
-    public static final IndexComponent TOKEN_VALUES = NDIType.TOKEN_VALUES.newComponent();
-
-    public static final IndexComponent OFFSETS_VALUES = NDIType.OFFSETS_VALUES.newComponent();
+    public static final IndexComponent PRIMARY_KEYS = NDIType.PRIMARY_KEYS.newComponent();
 
     public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent();
 
@@ -228,7 +221,7 @@ public class IndexComponents
     /**
      * Files that are shared by all storage-attached indexes for each SSTable
      */
-    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, TOKEN_VALUES, OFFSETS_VALUES, GROUP_META);
+    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, GROUP_META);
 
     public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, columnCompletionMarker;
 
@@ -600,29 +593,25 @@ public class IndexComponents
 
     private void validatePerColumnComponents(boolean isLiteral, boolean checksum) throws IOException
     {
-        MetadataSource source = MetadataSource.loadColumnMetadata(this);
-        List<SegmentMetadata> segments = SegmentMetadata.load(source, null);
-
-        for (IndexComponent component : perColumnComponents(indexName, isLiteral))
-        {
-            if (!component.ndiType.completionMarker())
-            {
-                if (component.ndiType.perSegment())
-                {
-                    for (int i = 0; i < segments.size(); i++)
-                    {
-                        SegmentMetadata metadata = segments.get(i);
-                        boolean isLastSegment = i == segments.size() - 1;
-
-                        validateSegment(component, metadata, isLastSegment, checksum, false);
-                    }
-                }
-                else
-                {
-                    validateComponent(component, checksum);
-                }
-            }
-        }
+        //TODO Need to revisit component validation
+//        MetadataSource source = MetadataSource.loadColumnMetadata(this);
+//        //TODO Need a compressor
+//        SegmentMetadata segment = SegmentMetadata.load(source, null);
+//
+//        for (IndexComponent component : perColumnComponents(indexName, isLiteral))
+//        {
+//            if (!component.ndiType.completionMarker())
+//            {
+//                if (component.ndiType.perSegment())
+//                {
+//                    validateSegment(component, segment, true, checksum, false);
+//                }
+//                else
+//                {
+//                    validateComponent(component, checksum);
+//                }
+//            }
+//        }
     }
 
     private void validateSegment(IndexComponent component, SegmentMetadata metadata, boolean isLastSegment, boolean checksum, boolean isEncrypted) throws IOException

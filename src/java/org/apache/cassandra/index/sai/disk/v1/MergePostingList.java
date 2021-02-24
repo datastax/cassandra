@@ -26,6 +26,7 @@ import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -63,7 +64,7 @@ public class MergePostingList implements PostingList
 
     public static PostingList merge(PriorityQueue<PeekablePostingList> postings)
     {
-        return merge(postings, () -> FileUtils.close(postings));
+        return merge(postings, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     @SuppressWarnings("resource")
@@ -96,20 +97,26 @@ public class MergePostingList implements PostingList
 
     @SuppressWarnings("resource")
     @Override
-    public long advance(long targetRowID) throws IOException
+    public long advance(PrimaryKey key) throws IOException
     {
         temp.clear();
 
         while (!postingLists.isEmpty())
         {
             PeekablePostingList peekable = postingLists.poll();
-            peekable.advanceWithoutConsuming(targetRowID);
+            peekable.advanceWithoutConsuming(key);
             if (peekable.peek() != PostingList.END_OF_STREAM)
                 temp.add(peekable);
         }
         postingLists.addAll(temp);
 
         return nextPosting();
+    }
+
+    @Override
+    public PrimaryKey mapRowId(long rowId)
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

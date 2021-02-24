@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -41,7 +42,6 @@ import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
@@ -93,10 +93,7 @@ public class SegmentMergerTest extends SAITester
         // All we are interested in is that before the segment compaction there were more than 1 segment created
         assertTrue(SEGMENT_BUILD_COUNTER.get() > 1);
 
-        List<SegmentMetadata> segments = getSegments(indexName, 1);
-
-        // Post-build the index only has 1 segment
-        assertEquals(1, segments.size());
+        getSegment(indexName, 1);
 
         Map<String, List<Integer>> actual = new HashMap<>();
 
@@ -152,10 +149,7 @@ public class SegmentMergerTest extends SAITester
         // All we are interested in is that before the segment compaction there were more than 1 segment created
         assertTrue(SEGMENT_BUILD_COUNTER.get() > 1);
 
-        List<SegmentMetadata> segments = getSegments(indexName, 1);
-
-        // Post-build the index only has 1 segment
-        assertEquals(1, segments.size());
+        getSegment(indexName, 1);
 
         Map<Integer, List<Integer>> actual = new HashMap<>();
 
@@ -177,7 +171,7 @@ public class SegmentMergerTest extends SAITester
         expected.keySet().forEach(term -> assertThat("Postings comparison failed for term = " + term, expected.get(term), is(actual.get(term))));
     }
 
-    private List<SegmentMetadata> getSegments(String indexName, int generation) throws Throwable
+    private SegmentMetadata getSegment(String indexName, int generation) throws Throwable
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
@@ -189,6 +183,6 @@ public class SegmentMergerTest extends SAITester
         assertTrue(IndexComponents.isColumnIndexComplete(descriptor, context.getIndexName()));
         IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, table.params.compression);
         final MetadataSource source = MetadataSource.loadColumnMetadata(components);
-        return SegmentMetadata.load(source, null);
+        return SegmentMetadata.load(source, PrimaryKey.factory(table), null);
     }
 }

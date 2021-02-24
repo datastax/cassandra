@@ -70,18 +70,6 @@ public class SingleNodeQueryFailureTest extends SAITester
         testFailedMultiIndexesQuery("bkd_reader", PostingsReader.class, "<init>");
     }
 
-    @Test
-    public void testFailedKeyFetcherOnMultiIndexesQuery() throws Throwable
-    {
-        testFailedMultiIndexesQuery("key_fetcher", SSTableContext.DecoratedKeyFetcher.class, "apply");
-    }
-
-    @Test
-    public void testFailedKeyReaderOnMultiIndexesQuery() throws Throwable
-    {
-        testFailedMultiIndexesQuery("key_reader", SSTableContext.DecoratedKeyFetcher.class, "createReader");
-    }
-
     private void testFailedMultiIndexesQuery(String name, Class<?> targetClass, String targetMethod) throws Throwable
     {
         String table = "test_mixed_index_query_" + name;

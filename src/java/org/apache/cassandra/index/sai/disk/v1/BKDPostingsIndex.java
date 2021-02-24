@@ -18,6 +18,10 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 import com.carrotsearch.hppc.IntLongHashMap;
 import com.carrotsearch.hppc.IntLongMap;
@@ -36,7 +40,7 @@ import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
 class BKDPostingsIndex
 {
     private final int size;
-    public final IntLongMap index = new IntLongHashMap();
+    public final Map<Integer, OneDimBKDPostingsWriter.NodeEntry> index = new HashMap();
 
     BKDPostingsIndex(FileHandle postingsFileHandle, long filePosition) throws IOException
     {
@@ -52,10 +56,23 @@ class BKDPostingsIndex
             {
                 final int node = input.readVInt();
                 final long filePointer = input.readVLong();
+                final long numPoints = input.readVLong();
 
-                index.put(node, filePointer);
+                index.put(node, new OneDimBKDPostingsWriter.NodeEntry(numPoints, filePointer));
             }
         }
+    }
+
+    public SortedMap<Long,Integer> toFilePointers()
+    {
+        final TreeMap<Long,Integer> map = new TreeMap<>();
+        for (Map.Entry<Integer, OneDimBKDPostingsWriter.NodeEntry> entry : index.entrySet())
+        {
+            final int nodeID = entry.getKey();
+            final long filePointer = entry.getValue().postingsFilePointer;
+            map.put(filePointer, nodeID);
+        }
+        return map;
     }
 
     public long memoryUsage()
@@ -84,7 +101,7 @@ class BKDPostingsIndex
     long getPostingsFilePointer(int nodeID)
     {
         checkArgument(exists(nodeID));
-        return index.get(nodeID);
+        return index.get(nodeID).postingsFilePointer;
     }
 
     int size()

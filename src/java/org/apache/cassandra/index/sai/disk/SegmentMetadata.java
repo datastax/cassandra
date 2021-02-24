@@ -32,14 +32,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
@@ -74,8 +78,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     /**
      * Ordered by their token position in current segment
      */
-    public final DecoratedKey minKey;
-    public final DecoratedKey maxKey;
+    public final PrimaryKey minKey;
+    public final PrimaryKey maxKey;
 
     /**
      * Minimum and maximum indexed column value ordered by its {@link org.apache.cassandra.db.marshal.AbstractType}.
@@ -93,8 +97,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                     long numRows,
                     long minSSTableRowId,
                     long maxSSTableRowId,
-                    DecoratedKey minKey,
-                    DecoratedKey maxKey,
+                    PrimaryKey minKey,
+                    PrimaryKey maxKey,
                     ByteBuffer minTerm,
                     ByteBuffer maxTerm,
                     ComponentMetadataMap componentMetadatas)
@@ -118,15 +122,15 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
-    private SegmentMetadata(IndexInput input, ICompressor compressor) throws IOException
+    private SegmentMetadata(IndexInput input, PrimaryKey.PrimaryKeyFactory keyFactory, ICompressor compressor) throws IOException
     {
         this.segmentRowIdOffset = input.readLong();
 
         numRows = input.readLong();
         minSSTableRowId = input.readLong();
         maxSSTableRowId = input.readLong();
-        minKey = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
-        maxKey = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
+        minKey = keyFactory.createKey(readBytes(input));
+        maxKey = keyFactory.createKey(readBytes(input));
 
         if (compressor != null)
         {
@@ -134,66 +138,55 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
             assert cryptoIn.length() > 0;
 
-            minTerm = readBytes(cryptoIn);
-            maxTerm = readBytes(cryptoIn);
+            minTerm = ByteBuffer.wrap(readBytes(cryptoIn));
+            maxTerm = ByteBuffer.wrap(readBytes(cryptoIn));
         }
         else
         {
-            minTerm = readBytes(input);
-            maxTerm = readBytes(input);
+            minTerm = ByteBuffer.wrap(readBytes(input));
+            maxTerm = ByteBuffer.wrap(readBytes(input));
         }
         componentMetadatas = new ComponentMetadataMap(input);
     }
 
-    public static List<SegmentMetadata> load(MetadataSource source, ICompressor compressor) throws IOException
+    public static SegmentMetadata load(MetadataSource source,
+                                       PrimaryKey.PrimaryKeyFactory keyFactory,
+                                       ICompressor compressor) throws IOException
     {
         IndexInput input = source.get(NAME);
 
-        int segmentCount = input.readVInt();
-
-        List<SegmentMetadata> segmentMetadata = new ArrayList<>(segmentCount);
-
-        for (int i = 0; i < segmentCount; i++)
-        {
-            segmentMetadata.add(new SegmentMetadata(input, compressor));
-        }
-
-        return segmentMetadata;
+        return new SegmentMetadata(input, keyFactory, compressor);
     }
 
     /**
      * Writes disk metadata for the given segment list.
      */
-    public static void write(MetadataWriter writer, List<SegmentMetadata> segments, ICompressor compressor) throws IOException
+    public static void write(MetadataWriter writer, SegmentMetadata metadata, ICompressor compressor) throws IOException
     {
         try (IndexOutput output = writer.builder(NAME))
         {
-            output.writeVInt(segments.size());
+            output.writeLong(metadata.segmentRowIdOffset);
+            output.writeLong(metadata.numRows);
+            output.writeLong(metadata.minSSTableRowId);
+            output.writeLong(metadata.maxSSTableRowId);
+            writeBytes(ByteSourceInverse.readBytes(metadata.minKey.asComparableBytes(ByteComparable.Version.OSS41)), output);
+            writeBytes(ByteSourceInverse.readBytes(metadata.maxKey.asComparableBytes(ByteComparable.Version.OSS41)), output);
 
-            for (SegmentMetadata metadata : segments)
+            if (compressor != null)
             {
-                output.writeLong(metadata.segmentRowIdOffset);
-                output.writeLong(metadata.numRows);
-                output.writeLong(metadata.minSSTableRowId);
-                output.writeLong(metadata.maxSSTableRowId);
+                RAMIndexOutput out = new RAMIndexOutput("");
+                writeBytes(ByteBufferUtil.getArray(metadata.minTerm), out);
+                writeBytes(ByteBufferUtil.getArray(metadata.maxTerm), out);
 
-                if (compressor != null)
-                {
-                    Stream.of(metadata.minKey.getKey(), metadata.maxKey.getKey()).forEach(bb -> writeBytes(bb, output));
-
-                    RAMIndexOutput out = new RAMIndexOutput("");
-                    writeBytes(metadata.minTerm, out);
-                    writeBytes(metadata.maxTerm, out);
-
-                    CryptoUtils.compress(new BytesRef(out.getBytes(), 0, (int)out.getFilePointer()), output, compressor);
-                }
-                else
-                {
-                    Stream.of(metadata.minKey.getKey(), metadata.maxKey.getKey(), metadata.minTerm, metadata.maxTerm).forEach(bb -> writeBytes(bb, output));
-                }
-
-                metadata.componentMetadatas.write(output);
+                CryptoUtils.compress(new BytesRef(out.getBytes(), 0, (int)out.getFilePointer()), output, compressor);
             }
+            else
+            {
+                writeBytes(ByteBufferUtil.getArray(metadata.minTerm), output);
+                writeBytes(ByteBufferUtil.getArray(metadata.maxTerm), output);
+            }
+
+            metadata.componentMetadatas.write(output);
         }
     }
 
@@ -215,19 +208,18 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                '}';
     }
 
-    private static ByteBuffer readBytes(IndexInput input) throws IOException
+    private static byte[] readBytes(IndexInput input) throws IOException
     {
         int len = input.readVInt();
         byte[] bytes = new byte[len];
         input.readBytes(bytes, 0, len);
-        return ByteBuffer.wrap(bytes);
+        return bytes;
     }
 
-    private static void writeBytes(ByteBuffer buf, IndexOutput out)
+    private static void writeBytes(byte[] bytes, IndexOutput out)
     {
         try
         {
-            byte[] bytes = ByteBufferUtil.getArray(buf);
             out.writeVInt(bytes.length);
             out.writeBytes(bytes, 0, bytes.length);
         }

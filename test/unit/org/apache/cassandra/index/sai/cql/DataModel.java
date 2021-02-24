@@ -160,6 +160,8 @@ public interface DataModel
 
     ResultSet executeIndexed(SAITester tester, String query, Object... values) throws Throwable;
 
+    UntypedResultSet executeLocalIndexed(SAITester tester, String query, Object... values) throws Throwable;
+
     ResultSet executeIndexed(SAITester tester, String query, int fetchSize, Object... values) throws Throwable;
 
     ResultSet executeNonIndexed(SAITester tester, String query, Object... values) throws Throwable;

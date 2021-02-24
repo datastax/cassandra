@@ -73,7 +73,8 @@ public abstract class IndexQuerySupport extends SAITester
                                                                  new BaseQuerySet(10, Integer.MAX_VALUE),
                                                                  new BaseQuerySet(24, 10),
                                                                  new BaseQuerySet(24, 100),
-                                                                 new BaseQuerySet(24, Integer.MAX_VALUE));
+                                                                 new BaseQuerySet(24, Integer.MAX_VALUE)
+    );
 
     static List<BaseQuerySet> COMPOSITE_PARTITION_QUERY_SETS = ImmutableList.of(new CompositePartitionQuerySet(10, 5),
                                                                                 new CompositePartitionQuerySet(10, 10),

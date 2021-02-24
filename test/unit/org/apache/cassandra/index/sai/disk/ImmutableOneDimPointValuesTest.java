@@ -25,6 +25,7 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
@@ -44,7 +45,7 @@ public class ImmutableOneDimPointValuesTest
         final int minTerm = 0, maxTerm = 10;
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                .fromTermEnum(termEnum, Int32Type.instance);
+                                                       .fromTermEnum(termEnum, Int32Type.instance);
 
         pointValues.intersect(assertingVisitor(minTerm));
     }
@@ -55,7 +56,7 @@ public class ImmutableOneDimPointValuesTest
         final int minTerm = 3, maxTerm = 13;
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                .fromTermEnum(termEnum, Int32Type.instance);
+                                                       .fromTermEnum(termEnum, Int32Type.instance);
 
         expectedException.expect(IllegalStateException.class);
         pointValues.swap(0, 1);
@@ -107,19 +108,19 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             private int currentTerm = from;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, LongArrayList> computeNext()
             {
                 if (currentTerm <= to)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                IntArrayList postings = new IntArrayList();
+                LongArrayList postings = new LongArrayList();
                 postings.add(0, 1, 2);
                 return Pair.create(ByteComparable.fixedLength(term), postings);
             }

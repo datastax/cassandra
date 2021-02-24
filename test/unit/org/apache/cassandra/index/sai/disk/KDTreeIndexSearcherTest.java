@@ -36,10 +36,10 @@ import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.ShortType;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 
 public class KDTreeIndexSearcherTest extends NdiRandomizedTest
 {
@@ -149,7 +149,7 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
             {{
                 operation = Op.NOT_EQ;
                 lower = upper = new Bound(ShortType.instance.decompose((short) 0), Int32Type.instance, true);
-            }}, SSTableQueryContext.forTest(), false);
+            }}, SSTableQueryContext.forTest());
 
             fail("Expect IllegalArgumentException thrown, but didn't");
         }
@@ -163,23 +163,23 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
                                                   final NumberType<T> rawType, final NumberType<?> encodedType,
                                                   final Function<Short, T> rawValueProducer) throws Exception
     {
-        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
+        try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
         {{
             operation = Op.EQ;
             lower = upper = new Bound(rawType.decompose(rawValueProducer.apply(EQ_TEST_LOWER_BOUND_INCLUSIVE)), encodedType, true);
-        }}, SSTableQueryContext.forTest(), false))
+        }}, SSTableQueryContext.forTest())))
         {
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            assertEquals(0L, results.next().getLong());
+            assertEquals(0L, results.next().partitionKey().getToken().getLongValue());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
+        try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
         {{
             operation = Op.EQ;
             lower = upper = new Bound(rawType.decompose(rawValueProducer.apply(EQ_TEST_UPPER_BOUND_EXCLUSIVE)), encodedType, true);
-        }}, SSTableQueryContext.forTest(), false))
+        }}, SSTableQueryContext.forTest())))
         {
             assertFalse(results.hasNext());
             indexSearcher.close();
@@ -199,38 +199,43 @@ public class KDTreeIndexSearcherTest extends NdiRandomizedTest
                                                      final NumberType<T> rawType, final NumberType<?> encodedType,
                                                      final Function<Short, T> rawValueProducer, List<Long> expectedTokenList) throws Exception
     {
-        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
+        try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
         {{
             operation = Op.RANGE;
 
             lower = new Bound(rawType.decompose(rawValueProducer.apply((short)2)), encodedType, false);
             upper = new Bound(rawType.decompose(rawValueProducer.apply((short)7)), encodedType, true);
-        }}, SSTableQueryContext.forTest(), false))
+        }}, SSTableQueryContext.forTest())))
         {
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, Token::get));
+            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, key -> key.partitionKey().getToken().getLongValue()));
             assertEquals(expectedTokenList, actualTokenList);
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
+        try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
         {{
             operation = Op.RANGE;
             lower = new Bound(rawType.decompose(rawValueProducer.apply(RANGE_TEST_UPPER_BOUND_EXCLUSIVE)), encodedType, true);
-        }}, SSTableQueryContext.forTest(), false))
+        }}, SSTableQueryContext.forTest())))
         {
             assertFalse(results.hasNext());
         }
 
-        try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
+        try (RangeIterator results = makeIterator(indexSearcher.search(new Expression(SAITester.createColumnContext("meh", rawType))
         {{
             operation = Op.RANGE;
             upper = new Bound(rawType.decompose(rawValueProducer.apply(RANGE_TEST_LOWER_BOUND_INCLUSIVE)), encodedType, false);
-        }}, SSTableQueryContext.forTest(), false))
+        }}, SSTableQueryContext.forTest())))
         {
             assertFalse(results.hasNext());
             indexSearcher.close();
         }
+    }
+
+    private RangeIterator makeIterator(List<RangeIterator> ranges)
+    {
+        return RangeUnionIterator.build(ranges);
     }
 }

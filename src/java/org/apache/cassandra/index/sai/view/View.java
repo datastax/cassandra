@@ -37,6 +37,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
@@ -48,7 +49,7 @@ public class View implements Iterable<SSTableIndex>
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
-    private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
+    private final IntervalTree<PrimaryKey, SSTableIndex, Interval<PrimaryKey, SSTableIndex>> keyIntervalTree;
 
     public View(ColumnContext context, Collection<SSTableIndex> indexes) {
         this.view = new HashMap<>();
@@ -58,13 +59,13 @@ public class View implements Iterable<SSTableIndex>
 
         TermTree.Builder termTreeBuilder = new RangeTermTree.Builder(validator);
 
-        List<Interval<Key, SSTableIndex>> keyIntervals = new ArrayList<>();
+        List<Interval<PrimaryKey, SSTableIndex>> keyIntervals = new ArrayList<>();
         for (SSTableIndex sstableIndex : indexes)
         {
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
             termTreeBuilder.add(sstableIndex);
-            keyIntervals.add(Interval.create(new Key(sstableIndex.minKey()),
-                                             new Key(sstableIndex.maxKey()),
+            keyIntervals.add(Interval.create(sstableIndex.minKey(),
+                                             sstableIndex.maxKey(),
                                              sstableIndex));
         }
 
@@ -77,9 +78,9 @@ public class View implements Iterable<SSTableIndex>
         return termTree.search(expression);
     }
 
-    public List<SSTableIndex> match(DecoratedKey minKey, DecoratedKey maxKey)
+    public List<SSTableIndex> match(PrimaryKey minKey, PrimaryKey maxKey)
     {
-        return keyIntervalTree.search(Interval.create(new Key(minKey), new Key(maxKey), null));
+        return keyIntervalTree.search(Interval.create(minKey, maxKey, null));
     }
 
     public Iterator<SSTableIndex> iterator()
@@ -100,25 +101,6 @@ public class View implements Iterable<SSTableIndex>
     public int size()
     {
         return view.size();
-    }
-
-    /**
-     * This is required since IntervalTree doesn't support custom Comparator
-     * implementations and relied on items to be comparable which "raw" keys are not.
-     */
-    private static class Key implements Comparable<Key>
-    {
-        private final DecoratedKey key;
-
-        public Key(DecoratedKey key)
-        {
-            this.key = key;
-        }
-
-        public int compareTo(Key o)
-        {
-            return key.compareTo(o.key);
-        }
     }
 
     @Override

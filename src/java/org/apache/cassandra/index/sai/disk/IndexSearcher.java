@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -29,10 +32,12 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.LongArray;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -44,21 +49,17 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
  */
 public abstract class IndexSearcher implements Closeable
 {
-    private final LongArray.Factory rowIdToTokenFactory;
-    private final LongArray.Factory rowIdToOffsetFactory;
-    private final SSTableContext.KeyFetcher keyFetcher;
+    private final PrimaryKeyMap primaryKeyMap;
     final SSTableIndex.PerIndexFiles indexFiles;
 
     final SegmentMetadata metadata;
 
     final IndexComponents indexComponents;
 
-    IndexSearcher(Segment segment)
+    IndexSearcher(Segment segment) throws IOException
     {
         this.indexComponents = segment.indexFiles.components();
-        this.rowIdToTokenFactory = segment.segmentRowIdToTokenFactory;
-        this.rowIdToOffsetFactory = segment.segmentRowIdToOffsetFactory;
-        this.keyFetcher = segment.keyFetcher;
+        this.primaryKeyMap = segment.primaryKeyMap;
         this.indexFiles = segment.indexFiles;
         this.metadata = segment.metadata;
     }
@@ -97,128 +98,55 @@ public abstract class IndexSearcher implements Closeable
      *
      * @param expression to filter on disk index
      * @param queryContext to track per sstable cache and per query metrics
-     * @param defer create the iterator in a deferred state
      *
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, SSTableQueryContext queryContext, boolean defer);
+    public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext);
 
-    RangeIterator toIterator(PostingList postingList, SSTableQueryContext queryContext, boolean defer)
+    List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext)
     {
-        if (postingList == null)
-            return RangeIterator.empty();
+        if (postingLists == null || postingLists.isEmpty())
+            return Collections.EMPTY_LIST;
 
-        SearcherContext searcherContext = defer ? new DeferredSearcherContext(queryContext, postingList.peekable())
-                                                : new DirectSearcherContext(queryContext, postingList.peekable());
+        List<RangeIterator> iterators = new ArrayList<>();
 
-        if (searcherContext.noOverlap)
-            return RangeIterator.empty();
+        for (PostingList.PeekablePostingList postingList : postingLists)
+        {
+            SearcherContext searcherContext = new SearcherContext(queryContext, postingList);
+            if (!searcherContext.noOverlap)
+                iterators.add(new PostingListRangeIterator(searcherContext, indexComponents));
+        }
 
-        RangeIterator iterator = new PostingListRangeIterator(searcherContext, keyFetcher, indexComponents);
-
-        return iterator;
+        return iterators;
     }
 
-    public abstract class SearcherContext
+    public class SearcherContext
     {
-        long minToken;
-        long maxToken;
+        PrimaryKey minimumKey;
+        PrimaryKey maximumKey;
         long maxPartitionOffset;
         boolean noOverlap;
-        final LongArray segmentRowIdToToken;
-        final LongArray segmentRowIdToOffset;
         final SSTableQueryContext context;
         final PostingList.PeekablePostingList postingList;
+        final PrimaryKeyMap primaryKeyMap;
 
         SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
         {
             this.context = context;
             this.postingList = postingList;
+            this.primaryKeyMap = IndexSearcher.this.primaryKeyMap.copyOf();
 
-            // startingIndex of 0 means `findTokenRowId` should search all tokens in the segment.
-            this.segmentRowIdToToken = new LongArray.DeferredLongArray(() -> rowIdToTokenFactory.openTokenReader(0, context));
-            this.segmentRowIdToOffset = new LongArray.DeferredLongArray(() -> rowIdToOffsetFactory.open());
-
-            minToken = calculateMinimumToken();
+            minimumKey = this.primaryKeyMap.primaryKeyFromRowId(postingList.peek());
 
             // use segment's metadata for the range iterator, may not be accurate, but should not matter to performance.
-            maxToken = metadata.maxKey.isMinimum()
-                       ? toLongToken(DatabaseDescriptor.getPartitioner().getMaximumToken())
-                       : toLongToken(metadata.maxKey);
+            maximumKey = metadata.maxKey;
 
             maxPartitionOffset = Long.MAX_VALUE;
         }
 
-        long minToken()
-        {
-            return minToken;
-        }
-
-        long maxToken()
-        {
-            return maxToken;
-        }
-
-        abstract long calculateMinimumToken();
-
-        abstract long count();
-
-    }
-
-    public class DirectSearcherContext extends SearcherContext
-    {
-        DirectSearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
-        {
-            super(context, postingList);
-        }
-
-        @Override
-        long calculateMinimumToken()
-        {
-            // Use the first row id's token as min
-            return this.segmentRowIdToToken.get(postingList.peek());
-        }
-
-        @Override
         long count()
         {
             return postingList.size();
         }
-    }
-
-    public class DeferredSearcherContext extends SearcherContext
-    {
-        DeferredSearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
-        {
-            super(context, postingList);
-        }
-
-        @Override
-        long calculateMinimumToken()
-        {
-            // Use the segments min key min
-            return toLongToken(metadata.minKey);
-        }
-
-        @Override
-        long count()
-        {
-            return metadata.numRows;
-        }
-    }
-
-    private static long toLongToken(DecoratedKey key)
-    {
-        return toLongToken(key.getToken());
-    }
-
-    private static long toLongToken(ByteBuffer key)
-    {
-        return toLongToken(DatabaseDescriptor.getPartitioner().getToken(key));
-    }
-
-    private static long toLongToken(Token token)
-    {
-        return (long) token.getTokenValue();
     }
 }

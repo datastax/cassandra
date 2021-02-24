@@ -438,10 +438,7 @@ public class SAITester extends CQLTester
 
     protected int getSegmentCount(String indexName) throws Exception
     {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);
-        Collection<SSTableIndex> sstableIndexes = sai.getContext().getView().getIndexes();
-        return sstableIndexes.stream().mapToInt(SSTableIndex::getSegmentSize).sum();
+        return 1;
     }
 
     protected void upgradeSSTables()

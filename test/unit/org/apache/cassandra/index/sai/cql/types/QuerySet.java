@@ -219,6 +219,8 @@ public abstract class QuerySet extends CQLTester
                 Map map = (Map)allRows[index][2];
                 Object value1 = map.values().toArray()[getRandom().nextIntBetween(0, map.values().size() - 1)];
                 Object value2 = map.keySet().toArray()[getRandom().nextIntBetween(0, map.values().size() - 1)];
+                Object[][] expected = getExpectedRows(value1, value2, allRows);
+                System.out.println("Looking for " + expected.length + " rows containing values " + value1 + " and " + value2);
                 assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value CONTAINS ? AND value CONTAINS ?",
                         value1, value2), getExpectedRows(value1, value2, allRows));
             }

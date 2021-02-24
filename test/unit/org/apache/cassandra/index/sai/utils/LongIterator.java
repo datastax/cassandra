@@ -26,16 +26,17 @@ import java.util.TreeSet;
 import java.util.function.LongFunction;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.index.sai.memory.InMemoryToken;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class LongIterator extends RangeIterator
 {
-    private final List<LongToken> tokens;
+    private final List<PrimaryKey> keys;
     private int currentIdx = 0;
 
     /**
@@ -51,11 +52,11 @@ public class LongIterator extends RangeIterator
 
     public LongIterator(long[] tokens, LongFunction<Long> toOffset)
     {
-        super(tokens.length == 0 ? null : tokens[0], tokens.length == 0 ? null: tokens[tokens.length - 1], tokens.length);
+        super(tokens.length == 0 ? null : fromToken(tokens[0]), tokens.length == 0 ? null : fromToken(tokens[tokens.length - 1]), tokens.length);
 
-        this.tokens = new ArrayList<>(tokens.length);
+        this.keys = new ArrayList<>(tokens.length);
         for (long token : tokens)
-            this.tokens.add(new LongToken(token, toOffset.apply(token)));
+            this.keys.add(fromTokenAndRowId(token, toOffset.apply(token)));
     }
 
     public LongIterator throwsException()
@@ -65,25 +66,25 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected Token computeNext()
+    protected PrimaryKey computeNext()
     {
         // throws exception if it's last element or chosen 1 out of n
-        if (shouldThrow && (currentIdx >= tokens.size() - 1 || random.nextInt(tokens.size()) == 0))
+        if (shouldThrow && (currentIdx >= keys.size() - 1 || random.nextInt(keys.size()) == 0))
             throw new RuntimeException("injected exception");
 
-        if (currentIdx >= tokens.size())
+        if (currentIdx >= keys.size())
             return endOfData();
 
-        return tokens.get(currentIdx++);
+        return keys.get(currentIdx++);
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextToken)
     {
-        for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < tokens.size(); i++)
+        for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < keys.size(); i++)
         {
-            LongToken token = tokens.get(i);
-            if (token.get() >= nextToken)
+            PrimaryKey token = keys.get(i);
+            if (token.compareTo(nextToken) >= 0)
             {
                 currentIdx = i;
                 break;
@@ -95,41 +96,24 @@ public class LongIterator extends RangeIterator
     public void close()
     {}
 
-    public static class LongToken extends Token
+    public static PrimaryKey fromToken(long token)
     {
-        public final Set<Long> offsets = new TreeSet<>();
+        return PrimaryKey.factory().createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)));
+    }
 
-        LongToken(long token, long offset)
-        {
-            super(token);
-            offsets.add(offset);
-        }
-
-        @Override
-        public Iterator<DecoratedKey> keys()
-        {
-            return new AbstractIterator<DecoratedKey>()
-            {
-                Iterator<Long> iterator = offsets.iterator();
-
-                @Override
-                protected DecoratedKey computeNext()
-                {
-                    if (!iterator.hasNext())
-                        return endOfData();
-
-                    long offset = iterator.next();
-                    return new BufferDecoratedKey(new Murmur3Partitioner.LongToken(offset), ByteBufferUtil.bytes(offset));
-                }
-            };
-        }
+    public static PrimaryKey fromTokenAndRowId(long token, long rowId)
+    {
+        return PrimaryKey.factory()
+                         .createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)),
+                                    Clustering.EMPTY,
+                                    rowId);
     }
 
     public static List<Long> convert(RangeIterator tokens)
     {
         List<Long> results = new ArrayList<>();
         while (tokens.hasNext())
-            results.add(tokens.next().get());
+            results.add(tokens.next().partitionKey().getToken().getLongValue());
 
         return results;
     }
@@ -143,23 +127,13 @@ public class LongIterator extends RangeIterator
         }};
     }
 
-    static List<Long> convertOffsets(RangeIterator tokens)
+    static List<Long> convertOffsets(RangeIterator keys)
     {
         List<Long> results = new ArrayList<>();
-        while (tokens.hasNext())
+        while (keys.hasNext())
         {
-            Token token = tokens.next();
-            if (token instanceof LongToken)
-            {
-                LongToken longToken = (LongToken) token;
-                results.addAll(longToken.offsets);
-            }
-            else
-            {
-                // extract the fake key and token from LongToken#keys
-                InMemoryToken inMemoryToken = (InMemoryToken) token;
-                inMemoryToken.keys().forEachRemaining(key -> results.add(key.getToken().getLongValue()));
-            }
+            PrimaryKey key = keys.next();
+            results.add(key.sstableRowId());
         }
 
         return results;

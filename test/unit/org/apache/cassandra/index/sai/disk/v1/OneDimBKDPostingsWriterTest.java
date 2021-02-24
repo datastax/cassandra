@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
-import org.apache.lucene.store.IndexInput;
+import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
@@ -134,12 +134,12 @@ public class OneDimBKDPostingsWriterTest extends NdiRandomizedTest
 
     private void assertPostingReaderEquals(IndexComponents indexComponents, BKDPostingsIndex postingsIndex, int nodeID, int[] postings) throws IOException
     {
-        assertPostingReaderEquals(indexComponents.openBlockingInput(indexComponents.kdTreePostingLists),
+        assertPostingReaderEquals(new SharedIndexInput(indexComponents.openBlockingInput(indexComponents.kdTreePostingLists)),
                                   postingsIndex.getPostingsFilePointer(nodeID),
                                   new ArrayPostingList(postings));
     }
 
-    private void assertPostingReaderEquals(IndexInput input, long offset, PostingList expected) throws IOException
+    private void assertPostingReaderEquals(SharedIndexInput input, long offset, PostingList expected) throws IOException
     {
         try (PostingsReader reader = new PostingsReader(input, offset, NO_OP_POSTINGS_LISTENER))
         {

@@ -40,6 +40,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     private static final byte[] EMPTY = new byte[0];
 
     private final byte[] scratch;
+    private final byte[] tempScratch;
     private final MergeQueue queue;
 
     public long minRowID = Long.MAX_VALUE;
@@ -50,6 +51,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     {
         queue = new MergeQueue(iterators.size());
         this.scratch = new byte[TypeUtil.fixedSizeOf(termComparator)];
+        this.tempScratch = new byte[TypeUtil.fixedSizeOf(termComparator)];
         for (BKDReader.IteratorState iterator : iterators)
         {
             if (iterator.hasNext())
@@ -59,11 +61,11 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
         }
     }
 
-    @VisibleForTesting
     public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim) throws IOException
     {
         queue = new MergeQueue(iterators.size());
         this.scratch = new byte[bytesPerDim];
+        this.tempScratch = new byte[bytesPerDim];
         for (BKDReader.IteratorState iterator : iterators)
         {
             if (iterator.hasNext())
@@ -102,7 +104,16 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
                 maxRowID = Math.max(maxRowID, rowID);
                 numRows++;
 
-                visitor.visit(rowID, reader.scratch);
+                // The scratch sizes may be different for literal datatypes.
+                // In which case we need to copy them to the tempScratch buffer
+                // which is the correct size.
+                if (reader.scratch.length != tempScratch.length)
+                {
+                    System.arraycopy(reader.scratch, 0, tempScratch, 0, reader.scratch.length);
+                    visitor.visit(rowID, tempScratch);
+                }
+                else
+                    visitor.visit(rowID, reader.scratch);
 
                 if (reader.hasNext())
                 {

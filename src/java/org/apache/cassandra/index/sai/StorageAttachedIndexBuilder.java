@@ -157,7 +157,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
             final CompressionParams compressionParams = CryptoUtils.getCompressionParams(sstable);
 
-            indexWriter = new StorageAttachedIndexWriter(sstable.descriptor, indexes, txn, perColumnOnly, compressionParams);
+            indexWriter = new StorageAttachedIndexWriter(sstable.descriptor, indexes, txn, perColumnOnly, sstable.metadata());
 
             long previousKeyPosition = 0;
             indexWriter.begin();
