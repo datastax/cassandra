@@ -207,7 +207,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     {
         try
         {
-            return new StorageAttachedIndexWriter(descriptor, indices, tracker, tableMetadata.params.compression);
+            return new StorageAttachedIndexWriter(descriptor, indices, tracker, tableMetadata);
         }
         catch (Throwable t)
         {

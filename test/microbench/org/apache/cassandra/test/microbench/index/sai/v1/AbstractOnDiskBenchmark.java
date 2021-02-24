@@ -18,29 +18,40 @@
 
 package org.apache.cassandra.test.microbench.index.sai.v1;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.Random;
-import java.util.stream.IntStream;
-
+import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.disk.SSTableComponentsWriter;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v1.BlockPackedReader;
-import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
-import org.apache.cassandra.index.sai.disk.v1.PostingsReader;
-import org.apache.cassandra.index.sai.disk.v1.PostingsWriter;
+import org.apache.cassandra.index.sai.disk.v1.*;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.LongArray;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.TearDown;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Random;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 public abstract class AbstractOnDiskBenchmark
 {
@@ -48,12 +59,15 @@ public abstract class AbstractOnDiskBenchmark
 
     private Descriptor descriptor;
 
+    TableMetadata metadata;
     IndexComponents groupComponents;
-    private FileHandle token;
+    private FileHandle primaryKeys;
+    PrimaryKeyMap primaryKeyMap;
 
     private IndexComponents indexComponents;
     private FileHandle postings;
     private long summaryPosition;
+
 
     /**
      * @return num of rows to be stored in per-sstable components
@@ -80,29 +94,28 @@ public abstract class AbstractOnDiskBenchmark
         return id;
     }
 
-    protected long toToken(long id)
-    {
-        return id * 16_013L + random.nextInt(16_000);
-    }
-
-    protected long toOffset(long id)
-    {
-        return id * 16_013L + random.nextInt(16_000);
-    }
-
     @Setup(Level.Trial)
-    public void perTrialSetup() throws IOException
+    public void perTrialSetup() throws IOException, MemtableTrie.SpaceExhaustedException
     {
         DatabaseDescriptor.daemonInitialization(); // required to use ChunkCache
         assert ChunkCache.instance != null;
 
-        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), "ks", this.getClass().getSimpleName(), 1);
+        String keyspaceName = "ks";
+        String tableName = this.getClass().getSimpleName();
+        metadata = TableMetadata
+                .builder(keyspaceName, tableName)
+                .partitioner(Murmur3Partitioner.instance)
+                .addPartitionKeyColumn("pk", UTF8Type.instance)
+                .addRegularColumn("col", IntegerType.instance)
+                .build();
+
+        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), metadata.keyspace, metadata.name, 1);
         groupComponents = IndexComponents.perSSTable(descriptor, null);
         indexComponents = IndexComponents.create("col", descriptor, null);
 
-        // write per-sstable components: token and offset
-        writeSSTableComponents(numRows());
-        token = groupComponents.createFileHandle(IndexComponents.TOKEN_VALUES);
+        writePrimaryKeysComponent(numRows());
+        primaryKeys = groupComponents.createFileHandle(IndexComponents.PRIMARY_KEYS);
+        primaryKeyMap = new PrimaryKeyMap.DefaultPrimaryKeyMap(groupComponents, metadata);
 
         // write postings
         summaryPosition = writePostings(numPostings());
@@ -110,9 +123,10 @@ public abstract class AbstractOnDiskBenchmark
     }
 
     @TearDown(Level.Trial)
-    public void perTrialTearDown()
+    public void perTrialTearDown() throws IOException
     {
-        token.close();
+        primaryKeyMap.close();
+        primaryKeys.close();
         postings.close();
         FileUtils.deleteRecursive(descriptor.directory);
     }
@@ -147,23 +161,35 @@ public abstract class AbstractOnDiskBenchmark
     {
         IndexInput input = indexComponents.openInput(postings);
         IndexInput summaryInput = indexComponents.openInput(postings);
-
         PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(summaryInput, summaryPosition);
-        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
+        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP, primaryKeyMap);
     }
 
-    private void writeSSTableComponents(int rows) throws IOException
+    /**
+     * Generates a number of unique, random primary keys and writes them to the PRIMARY_KEYS component of the sstable
+     */
+    private void writePrimaryKeysComponent(int rowCount) throws IOException, MemtableTrie.SpaceExhaustedException
     {
-        SSTableComponentsWriter writer = new SSTableComponentsWriter(descriptor, null);
-        for (int i = 0; i < rows; i++)
-            writer.recordCurrentTokenOffset(toToken(i), toOffset(i));
+        Random rng = ThreadLocalRandom.current();
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        PrimaryKey.PrimaryKeyFactory factory = PrimaryKey.factory(metadata);
+        SortedSet<DecoratedKey> primaryKeys = new TreeSet<>();
+        while (primaryKeys.size() < rowCount)
+        {
+            String keyStr = RandomStrings.randomAsciiOfLength(rng, 8);
+            DecoratedKey dk = partitioner.decorateKey(UTF8Type.instance.decompose(keyStr));
+            primaryKeys.add(dk);
+        }
 
+        SSTableComponentsWriter writer = new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, null);
+        long rowId = 0;
+        for (DecoratedKey dk: primaryKeys)
+        {
+            PrimaryKey pk = factory.createKey(dk, Clustering.EMPTY, rowId);
+            writer.nextRow(pk);
+            rowId++;
+        }
         writer.complete();
     }
 
-    protected final LongArray openRowIdToTokenReader() throws IOException
-    {
-        MetadataSource source = MetadataSource.loadGroupMetadata(groupComponents);
-        return new BlockPackedReader(token, IndexComponents.TOKEN_VALUES, groupComponents, source).open();
-    }
 }

@@ -22,12 +22,13 @@ import java.io.IOException;
 import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.Throwables;
 
 /**
  * Interface for advancing on and consuming a posting list.
  */
-//TODO Need to check int and long usage throughout this post DSP-19608
 @NotThreadSafe
 public interface PostingList extends Closeable
 {
@@ -38,7 +39,7 @@ public interface PostingList extends Closeable
     default void close() throws IOException {}
 
     /**
-     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(long)}.
+     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(PrimaryKey)}.
      *
      * @return next segment row ID
      */
@@ -54,11 +55,13 @@ public interface PostingList extends Closeable
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param targetRowID target row ID to advance to
+     * @param nextPrimaryKey target primary key to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    long advance(long targetRowID) throws IOException;
+    long advance(PrimaryKey nextPrimaryKey) throws IOException;
+
+    PrimaryKey mapRowId(long rowId);
 
     /**
      * @return peekable wrapper of current posting list
@@ -66,55 +69,6 @@ public interface PostingList extends Closeable
     default PeekablePostingList peekable()
     {
         return new PeekablePostingList(this);
-    }
-
-    class DeferredPostingList implements PostingList
-    {
-        private Supplier<PostingList> supplier;
-        private PostingList postingList;
-        private boolean opened = false;
-
-        public DeferredPostingList(Supplier<PostingList> supplier)
-        {
-            this.supplier = supplier;
-        }
-
-        @Override
-        public long nextPosting() throws IOException
-        {
-            open();
-            return postingList == null ? END_OF_STREAM : postingList.nextPosting();
-        }
-
-        @Override
-        public long size()
-        {
-            open();
-            return postingList == null ? 0 : postingList.size();
-        }
-
-        @Override
-        public long advance(long targetRowID) throws IOException
-        {
-            open();
-            return postingList == null ? END_OF_STREAM : postingList.advance(targetRowID);
-        }
-
-        @Override
-        public void close() throws IOException
-        {
-            if (opened && (postingList != null))
-                postingList.close();
-        }
-
-        private void open()
-        {
-            if (!opened)
-            {
-                postingList = supplier.get();
-                opened = true;
-            }
-        }
     }
 
     public static class PeekablePostingList implements PostingList
@@ -145,16 +99,16 @@ public interface PostingList extends Closeable
             }
         }
 
-        public long advanceWithoutConsuming(long targetRowID) throws IOException
+        public long advanceWithoutConsuming(PrimaryKey primaryKey) throws IOException
         {
             if (peek() == END_OF_STREAM)
                 return END_OF_STREAM;
 
-            if (peek() >= targetRowID)
+            if (wrapped.mapRowId(peek()).compareTo(primaryKey) >= 0)
                 return peek();
 
             peeked = true;
-            next = wrapped.advance(targetRowID);
+            next = wrapped.advance(primaryKey);
             return next;
         }
 
@@ -176,16 +130,23 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long advance(long targetRowID) throws IOException
+        public long advance(PrimaryKey primaryKey) throws IOException
         {
-            if (peeked && next >= targetRowID)
+            if (peeked && wrapped.mapRowId(next).compareTo(primaryKey) >= 0)
             {
                 peeked = false;
                 return next;
             }
 
             peeked = false;
-            return wrapped.advance(targetRowID);
+
+            return wrapped.advance(primaryKey);
+        }
+
+        @Override
+        public PrimaryKey mapRowId(long rowId)
+        {
+            return wrapped.mapRowId(rowId);
         }
 
         @Override

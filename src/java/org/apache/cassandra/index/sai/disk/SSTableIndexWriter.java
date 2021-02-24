@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
@@ -89,30 +90,31 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     }
 
     @Override
-    public void addRow(DecoratedKey rowKey, long sstableRowId, Row row) throws IOException
+    public void addRow(PrimaryKey key, Row row) throws IOException
     {
         if (maybeAbort())
             return;
 
         if (columnContext.isNonFrozenCollection())
         {
+
             Iterator<ByteBuffer> valueIterator = columnContext.getValuesOf(row, nowInSec);
             if (valueIterator != null)
             {
                 while (valueIterator.hasNext())
                 {
                     ByteBuffer value = valueIterator.next();
-                    addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
+                    addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), key, columnContext.getValidator());
                 }
             }
         }
         else
         {
-            ByteBuffer value = columnContext.getValueOf(rowKey, row, nowInSec);
+            ByteBuffer value = columnContext.getValueOf(key.partitionKey(), row, nowInSec);
             if (value != null)
-                addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
+                addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), key, columnContext.getValidator());
         }
-        maxSSTableRowId = sstableRowId;
+        maxSSTableRowId = key.sstableRowId();
     }
 
     /**
@@ -132,13 +134,13 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         return true;
     }
 
-    private void addTerm(ByteBuffer term, DecoratedKey key, long sstableRowId, AbstractType<?> type) throws IOException
+    private void addTerm(ByteBuffer term, PrimaryKey key, AbstractType<?> type) throws IOException
     {
         if (term.remaining() >= maxTermSize)
         {
             noSpamLogger.warn(columnContext.logMessage(TERM_OVERSIZE_MESSAGE),
                               columnContext.getColumnName(),
-                              columnContext.keyValidator().getString(key.getKey()),
+                              columnContext.keyValidator().getString(key.partitionKey().getKey()),
                               FBUtilities.prettyPrintMemory(term.remaining()),
                               FBUtilities.prettyPrintMemory(maxTermSize));
             return;
@@ -148,7 +150,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         {
             currentBuilder = newSegmentBuilder();
         }
-        else if (shouldFlush(sstableRowId))
+        else if (shouldFlush(key.sstableRowId()))
         {
             flushSegment();
             currentBuilder = newSegmentBuilder();
@@ -158,7 +160,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
 
         if (!TypeUtil.isLiteral(type))
         {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
+            limiter.increment(currentBuilder.add(term, key));
         }
         else
         {
@@ -166,7 +168,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
             while (analyzer.hasNext())
             {
                 ByteBuffer token = analyzer.next();
-                limiter.increment(currentBuilder.add(token, key, sstableRowId));
+                limiter.increment(currentBuilder.add(token, key));
             }
         }
     }
@@ -266,9 +268,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
                              descriptor, FBUtilities.prettyPrintMemory(bytesAllocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
             }
 
-            compactSegments();
-
-            writeSegmentsMetadata();
+            writeSegmentsMetadata(compactSegments());
             indexComponents.createColumnCompletionMarker();
         }
         finally
@@ -303,13 +303,13 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         indexComponents.deleteColumnIndex();
     }
 
-    private void compactSegments() throws IOException
+    private SegmentMetadata compactSegments() throws IOException
     {
         if (segments.isEmpty())
-            return;
+            return null;
 
-        DecoratedKey minKey = segments.get(0).minKey;
-        DecoratedKey maxKey = segments.get(segments.size() - 1).maxKey;
+        PrimaryKey minKey = segments.get(0).minKey;
+        PrimaryKey maxKey = segments.get(segments.size() - 1).maxKey;
 
         try (SegmentMerger segmentMerger = SegmentMerger.newSegmentMerger(columnContext.isLiteral());
              SSTableIndex.PerIndexFiles perIndexFiles = new SSTableIndex.PerIndexFiles(indexComponents, columnContext.isLiteral(), true))
@@ -318,8 +318,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
             {
                 segmentMerger.addSegment(columnContext, segment, perIndexFiles);
             }
-            segments.clear();
-            segments.add(segmentMerger.merge(columnContext, indexComponents, minKey, maxKey, maxSSTableRowId));
+            return segmentMerger.merge(columnContext, indexComponents, minKey, maxKey, maxSSTableRowId);
         }
         finally
         {
@@ -327,14 +326,14 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         }
     }
 
-    private void writeSegmentsMetadata() throws IOException
+    private void writeSegmentsMetadata(SegmentMetadata segmentMetadata) throws IOException
     {
-        if (segments.isEmpty())
+        if (segmentMetadata == null)
             return;
 
         try (final MetadataWriter writer = new MetadataWriter(indexComponents.createOutput(indexComponents.meta)))
         {
-            SegmentMetadata.write(writer, segments, null);
+            SegmentMetadata.write(writer, segmentMetadata, null);
         }
         catch (IOException e)
         {

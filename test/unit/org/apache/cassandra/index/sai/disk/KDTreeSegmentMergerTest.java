@@ -18,9 +18,11 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 
 import org.junit.After;
 import org.junit.Before;
@@ -34,9 +36,11 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.BKDTreeRamBuffer;
+import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
@@ -201,11 +205,11 @@ public class KDTreeSegmentMergerTest extends SAITester
 
             FileHandle kdtree = components.createFileHandle(components.kdTree);
             FileHandle kdtreePostings = components.createFileHandle(components.kdTreePostingLists);
-            BKDReader reader = new BKDReader(components, kdtree, bkdPosition, kdtreePostings, postingsPosition);
+            BKDReader reader = new BKDReader(components, kdtree, bkdPosition, kdtreePostings, postingsPosition, null);
 
             for (int term : expected.keySet())
             {
-                PostingList postingList = reader.intersect(buildQuery(term, term), NO_OP_BKD_LISTENER, new QueryContext());
+                PostingList postingList = intersect(reader.intersect(buildQuery(term, term), NO_OP_BKD_LISTENER, new QueryContext()));
 
                 while (true)
                 {
@@ -222,8 +226,21 @@ public class KDTreeSegmentMergerTest extends SAITester
                     }
                     postings.add(rowId);
                 }
+
+                postingList.close();
             }
         }
+    }
+
+    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
+    {
+        if (postings == null || postings.isEmpty())
+            return null;
+
+        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        queue.addAll(postings);
+
+        return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int generation) throws Throwable
@@ -238,7 +255,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         FileHandle kdtree = components.createFileHandle(components.kdTree);
         FileHandle kdtreePostings = components.createFileHandle(components.kdTreePostingLists);
-        return new BKDReader(components, kdtree, bkdPosition, kdtreePostings, postingsPosition);
+        return new BKDReader(components, kdtree, bkdPosition, kdtreePostings, postingsPosition, null);
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
