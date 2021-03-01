@@ -30,7 +30,7 @@ CLASSPATH="$CASSANDRA_CONF"
 # compiled classes. NOTE: This isn't needed by the startup script,
 # it's just used here in constructing the classpath.
 if [ -d $CASSANDRA_HOME/build ] ; then
-    jars_cnt="`ls -1 $CASSANDRA_HOME/build/apache-cassandra*.jar | grep -v 'javadoc.jar' | grep -v 'sources.jar' | wc -l | xargs echo`"
+    jars_cnt="`ls -1 $CASSANDRA_HOME/build/dse-db*.jar | grep -v 'javadoc.jar' | grep -v 'sources.jar' | wc -l | xargs echo`"
     if [ "$jars_cnt" -gt 1 ]; then
         dir="`cd $CASSANDRA_HOME/build; pwd`"
         echo "There are JAR artifacts for multiple versions in the $dir directory. Please clean the project with 'ant realclean' and build it again." 1>&2
@@ -38,8 +38,8 @@ if [ -d $CASSANDRA_HOME/build ] ; then
     fi
 
     if [ "$jars_cnt" = "1" ]; then
-        cassandra_bin="`ls -1 $CASSANDRA_HOME/build/apache-cassandra*.jar | grep -v javadoc | grep -v sources`"
-        CLASSPATH="$CLASSPATH:$cassandra_bin"
+        dse_db_bin="`ls -1 $CASSANDRA_HOME/build/dse-db*.jar | grep -v javadoc | grep -v sources`"
+        CLASSPATH="$CLASSPATH:$dse_db_bin"
     fi
 fi
 
@@ -126,7 +126,7 @@ JAVA_VERSION=17
 if [ "$short" = "11" ]  ; then
      JAVA_VERSION=11
 elif [ "$JVM_VERSION" \< "17" ] ; then
-    echo "Cassandra 5.0 requires Java 11 or Java 17."
+    echo "DSE DB 5.0 requires Java 11 or Java 17."
     exit 1;
 fi
 
