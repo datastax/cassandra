@@ -17,8 +17,8 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <artifactId>cassandra-parent</artifactId>
-    <groupId>org.apache.cassandra</groupId>
+    <artifactId>dse-db-parent</artifactId>
+    <groupId>com.datastax.dse</groupId>
     <version>@version@</version>
     <relativePath>@final.name@-parent.pom</relativePath>
   </parent>
