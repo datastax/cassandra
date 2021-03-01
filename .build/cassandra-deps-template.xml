@@ -17,12 +17,12 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>org.apache.cassandra</groupId>
-    <artifactId>cassandra-parent</artifactId>
+    <groupId>com.datastax.dse</groupId>
+    <artifactId>dse-db-parent</artifactId>
     <version>@version@</version>
     <relativePath>@final.name@-parent.pom</relativePath>
   </parent>
-  <artifactId>cassandra-all</artifactId>
+  <artifactId>dse-db-all</artifactId>
   <version>@version@</version>
   <name>Apache Cassandra</name>
   <description>The Apache Cassandra Project develops a highly scalable second-generation distributed database, bringing together Dynamo's fully distributed design and Bigtable's ColumnFamily-based data model.</description>
@@ -35,9 +35,9 @@
     </license>
   </licenses>
   <scm>
-    <connection>scm:https://gitbox.apache.org/repos/asf/cassandra.git</connection>
-    <developerConnection>scm:https://gitbox.apache.org/repos/asf/cassandra.git</developerConnection>
-    <url>https://gitbox.apache.org/repos/asf?p=cassandra.git;a=tree</url>
+    <connection>scm:git:ssh://git@github.com:datastax/cassandra.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com:datastax/cassandra.git</developerConnection>
+    <url>scm:git:ssh://git@github.com:datastax/cassandra.git</url>
   </scm>
   <dependencies>
     <dependency>
