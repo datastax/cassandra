@@ -203,11 +203,9 @@ public class WalkerTest extends AbstractTrieTestBase
         return TrieNode.at(buffer, pos).payloadFlags(buffer, pos);
     }
 
-    private void checkReturns(String testCase, LongSupplier supplier, LongToIntFunction mapper, int... expected)
-    {
+    private void checkReturns(String testCase, LongSupplier supplier, LongToIntFunction mapper, int... expected) {
         IntArrayList list = new IntArrayList();
-        while (true)
-        {
+        while (true) {
             long pos = supplier.getAsLong();
             if (pos == Walker.NONE)
                 break;
@@ -310,4 +308,5 @@ public class WalkerTest extends AbstractTrieTestBase
         s = StringUtils.leftPad(s, size, '0');
         return source(s);
     }
+
 }
