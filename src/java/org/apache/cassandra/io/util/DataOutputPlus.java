@@ -168,6 +168,7 @@ public interface DataOutputPlus extends DataOutput
     /**
      * Pad this with zeroes until the next page boundary. If the destination position
      * is already at a page boundary, do not do anything.
+     * @throws IOException
      */
     default void padToPageBoundary() throws IOException
     {

@@ -141,7 +141,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file)
     {
-       this(file, SequentialWriterOption.DEFAULT);
+        this(file, SequentialWriterOption.DEFAULT);
     }
 
     /**
@@ -267,6 +267,8 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     {
         return current();
     }
+
+    // Page management using on-disk pages
 
     @Override
     public int maxBytesInPage()
