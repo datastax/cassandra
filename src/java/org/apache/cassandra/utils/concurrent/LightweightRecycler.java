@@ -48,6 +48,7 @@ public interface LightweightRecycler<T> extends LightweightRecyclerPoolHolder<T>
     }
 
     /**
+     * @param supplier
      * @return a reusable instance, or allocate one via the provided supplier
      */
     default T reuseOrAllocate(Supplier<T> supplier)
