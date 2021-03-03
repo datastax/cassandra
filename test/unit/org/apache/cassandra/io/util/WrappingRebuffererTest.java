@@ -19,11 +19,8 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.CompletableFuture;
 
 import org.junit.Test;
-
-import org.apache.cassandra.concurrent.TPCUtils;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -35,7 +32,7 @@ public class WrappingRebuffererTest
     public void testRecycleSameHolder()
     {
         TestRebufferer mock = new TestRebufferer();
-        try(WrappingRebufferer rebufferer = new WrappingRebufferer(mock))
+        try (WrappingRebufferer rebufferer = new WrappingRebufferer(mock))
         {
             Rebufferer.BufferHolder ret = rebufferer.rebuffer(0);
             assertNotNull(ret);
@@ -79,7 +76,7 @@ public class WrappingRebuffererTest
     }
 
 
-    class TestRebufferer implements Rebufferer, Rebufferer.BufferHolder
+    private static class TestRebufferer implements Rebufferer, Rebufferer.BufferHolder
     {
         final ByteBuffer buffer;
         boolean released;
@@ -92,14 +89,16 @@ public class WrappingRebuffererTest
             this.offset = 0;
         }
 
-        public AsynchronousChannelProxy asyncChannel()
+        @Override
+        public ChannelProxy channel()
         {
             return null;
         }
 
-        public ChannelProxy blockingChannel()
+        @Override
+        public ByteBuffer buffer()
         {
-            return null;
+            return buffer;
         }
 
         public long fileLength()
@@ -107,35 +106,15 @@ public class WrappingRebuffererTest
             return buffer.remaining();
         }
 
-        public boolean isPastEOF(long position)
-        {
-            return position > fileLength();
-        }
-
         public double getCrcCheckChance()
         {
             return 0;
         }
 
-        public BufferHolder rebuffer(long position, ReaderConstraint constraint)
+        public BufferHolder rebuffer(long position)
         {
             offset = position;
             return this;
-        }
-
-        public CompletableFuture<BufferHolder> rebufferAsync(long position)
-        {
-            return TPCUtils.completedFuture(rebuffer(position));
-        }
-
-        public int rebufferSize()
-        {
-            return buffer.capacity();
-        }
-
-        public ByteBuffer unsafeBuffer()
-        {
-            return buffer;
         }
 
         public long offset()

@@ -36,11 +36,11 @@ public class TailOverridingRebufferer extends WrappingRebufferer
     }
 
     @Override
-    public Rebufferer.BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    public Rebufferer.BufferHolder rebuffer(long position)
     {
         if (position < cutoff)
         {
-            WrappingBufferHolder ret = (WrappingBufferHolder)super.rebuffer(position, constraint);
+            WrappingBufferHolder ret = (WrappingBufferHolder) super.rebuffer(position);
             if (ret.offset() + ret.limit() > cutoff)
                 ret.limit((int) (cutoff - ret.offset()));
             return ret;
@@ -49,14 +49,6 @@ public class TailOverridingRebufferer extends WrappingRebufferer
         {
             return newBufferHolder().initialize(null, tail.duplicate(), cutoff);
         }
-    }
-
-    @Override
-    public long adjustExternal(long position) {
-        if (position < cutoff)
-            return super.adjustExternal(position);
-        else
-            return position;
     }
 
     @Override

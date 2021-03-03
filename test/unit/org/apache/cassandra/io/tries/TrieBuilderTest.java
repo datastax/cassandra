@@ -20,18 +20,15 @@ package org.apache.cassandra.io.tries;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.CompletableFuture;
 
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.TPCUtils;
-import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TailOverridingRebufferer;
-import org.apache.cassandra.utils.ByteComparable;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
 
@@ -100,7 +97,7 @@ public class TrieBuilderTest
         dump = false;
 
         // Check that partial representation has the right content.
-        Rebufferer source = new ByteBufRebufferer(buf.trimmedBuffer());
+        Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
         source = new TailOverridingRebufferer(source, tail.cutoff(), tail.tail());
         verifyContent(count, source, tail.root(), reset);
 
@@ -114,7 +111,7 @@ public class TrieBuilderTest
         // format, but we didn't bother to recalculate its size.
         dump = false;
 
-        source = new ByteBufRebufferer(buf.trimmedBuffer());
+        source = new ByteBufRebufferer(buf.asNewBuffer());
         verifyContent(count, source, root, reset, reset2);
     }
 
@@ -184,7 +181,7 @@ public class TrieBuilderTest
     {
         public Iterator(Rebufferer source, long root)
         {
-            super(source, root, Rebufferer.ReaderConstraint.NONE);
+            super(source, root);
         }
     }
 
@@ -198,15 +195,15 @@ public class TrieBuilderTest
         }
 
         @Override
-        public AsynchronousChannelProxy asyncChannel()
+        public ChannelProxy channel()
         {
             return null;
         }
 
         @Override
-        public ChannelProxy blockingChannel()
+        public ByteBuffer buffer()
         {
-            return null;
+            return buffer;
         }
 
         @Override
@@ -222,45 +219,15 @@ public class TrieBuilderTest
         }
 
         @Override
-        public BufferHolder rebuffer(long position, ReaderConstraint rc)
+        public BufferHolder rebuffer(long position)
         {
             return this;
-        }
-
-        @Override
-        public CompletableFuture<BufferHolder> rebufferAsync(long position)
-        {
-            return TPCUtils.completedFuture(rebuffer(position));
-        }
-
-        @Override
-        public int rebufferSize()
-        {
-            return buffer.capacity();
-        }
-
-        @Override
-        public ByteBuffer unsafeBuffer()
-        {
-            return buffer;
         }
 
         @Override
         public long offset()
         {
             return 0;
-        }
-
-        @Override
-        public long adjustExternal(long position)
-        {
-            return position;
-        }
-
-        @Override
-        public long adjustInternal(long position)
-        {
-            return position;
         }
 
         @Override
