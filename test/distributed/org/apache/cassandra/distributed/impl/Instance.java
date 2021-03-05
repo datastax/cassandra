@@ -59,7 +59,6 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Memtable;
-import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator40;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -85,6 +84,7 @@ import org.apache.cassandra.distributed.shared.Metrics;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.hints.DTestSerializer;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
@@ -468,7 +468,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
                 StorageService.instance.populateTokenMetadata();
 
-                Verb.REQUEST_RSP.unsafeSetSerializer(() -> ReadResponse.serializer);
+                Verb.HINT_REQ.unsafeSetSerializer(DTestSerializer::new);
 
                 if (config.has(NETWORK))
                 {

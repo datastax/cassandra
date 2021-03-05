@@ -27,7 +27,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -477,6 +476,11 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
         return instances.get(node - 1).coordinator();
     }
 
+    public Stream<ICoordinator> coordinators()
+    {
+        return stream().map(IInstance::coordinator);
+    }
+
     /**
      * WARNING: we index from 1 here, for consistency with inet address!
      */
@@ -620,7 +624,11 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
     private void schemaChange(String query, boolean ignoreStoppedInstances)
     {
         I instance = ignoreStoppedInstances ? getFirstRunningInstance() : get(1);
+        schemaChange(query, ignoreStoppedInstances, instance);
+    }
 
+    public void schemaChange(String query, boolean ignoreStoppedInstances, I instance)
+    {
         instance.sync(() -> {
             try (SchemaChangeMonitor monitor = new SchemaChangeMonitor())
             {

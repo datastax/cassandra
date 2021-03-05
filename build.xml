@@ -582,7 +582,7 @@
           <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.2.3"/>
           <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.2.3"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.9.10"/>
-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.9.10.4"/>
+          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.9.10.8"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.9.10"/>
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
@@ -645,6 +645,7 @@
 	  </dependency>
           <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" />
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2" />
+          <!-- UPDATE AND UNCOMMENT ON THE DRIVER RELEASE, BEFORE 4.0 RELEASE
           <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="3.10.0" classifier="shaded">
             <exclusion groupId="io.netty" artifactId="netty-buffer"/>
             <exclusion groupId="io.netty" artifactId="netty-codec"/>
@@ -652,6 +653,7 @@
             <exclusion groupId="io.netty" artifactId="netty-transport"/>
             <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
+          -->
           <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="${ecj.version}" />
           <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="${ohc.version}">
             <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
@@ -749,7 +751,9 @@
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster"/>
         <dependency groupId="com.google.code.findbugs" artifactId="jsr305"/>
         <dependency groupId="org.antlr" artifactId="antlr"/>
+        <!-- UPDATE AND UNCOMMENT ON THE DRIVER RELEASE, BEFORE 4.0 RELEASE
         <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded"/>
+        -->
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8"/>
@@ -780,7 +784,9 @@
         <dependency groupId="junit" artifactId="junit"/>
         <dependency groupId="org.mockito" artifactId="mockito-core" />
         <dependency groupId="org.reflections" artifactId="reflections" />
+        <!-- UPDATE AND UNCOMMENT ON THE DRIVER RELEASE, BEFORE 4.0 RELEASE
         <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded"/>
+        -->
         <dependency groupId="io.netty" artifactId="netty-bom"  type="pom" />
         <dependency groupId="io.netty" artifactId="netty-all"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
@@ -857,14 +863,15 @@
         <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" optional="true"/>
 
         <!-- don't need the Java Driver to run, but if you use the hadoop stuff or UDFs -->
-        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded" optional="true">
-          <exclusion groupId="io.netty" artifactId="netty-buffer"/>
-          <exclusion groupId="io.netty" artifactId="netty-codec"/>
-          <exclusion groupId="io.netty" artifactId="netty-handler"/>
-          <exclusion groupId="io.netty" artifactId="netty-transport"/>
-        </dependency>
-
-        <!-- don't need jna to run, but nice to have -->
+        <!-- UPDATE AND UNCOMMENT ON THE DRIVER RELEASE, BEFORE 4.0 RELEASE
+          <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded" optional="true">
+            <exclusion groupId="io.netty" artifactId="netty-buffer"/>
+            <exclusion groupId="io.netty" artifactId="netty-codec"/>
+            <exclusion groupId="io.netty" artifactId="netty-handler"/>
+            <exclusion groupId="io.netty" artifactId="netty-transport"/>
+          </dependency>
+        -->
+          <!-- don't need jna to run, but nice to have -->
         <dependency groupId="net.java.dev.jna" artifactId="jna"/>
 
         <!-- don't need jamm unless running a server in which case it needs to be a -javagent to be used anyway -->
@@ -1081,6 +1088,14 @@
     <target name="stress-test" depends="stress-build-test, build-test" description="Runs stress tests">
         <testmacro inputdir="${stress.test.src}"
                        timeout="${test.timeout}">
+        </testmacro>
+    </target>
+
+    <target name="stress-test-some" depends="stress-build-test, build-test" description="Runs stress tests">
+        <testmacro inputdir="${stress.test.src}"
+                       timeout="${test.timeout}">
+          <test unless:blank="${test.methods}" name="${test.name}" methods="${test.methods}" outfile="build/test/output/TEST-${test.name}-${test.methods}"/>
+          <test if:blank="${test.methods}" name="${test.name}" outfile="build/test/output/TEST-${test.name}"/>
         </testmacro>
     </target>
 

@@ -78,7 +78,10 @@ public class CompactStorageUpgradeTest extends UpgradeTestBase
             {
                 Iterator<Object[]> iter = cluster.coordinator(coord).executeWithPaging("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1", ConsistencyLevel.ALL, 2);
                 for (int j = 1; j < 10; j++)
-                    Assert.assertArrayEquals(new Object[] { 1, j, j }, iter.next());
+                {
+                    Assert.assertTrue(iter.hasNext());
+                    Assert.assertArrayEquals(new Object[]{ 1, j, j }, iter.next());
+                }
                 Assert.assertFalse(iter.hasNext());
             }
         }).run();
@@ -147,9 +150,6 @@ public class CompactStorageUpgradeTest extends UpgradeTestBase
             cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + ".tbl (pk, ck) VALUES (1,1)", ConsistencyLevel.ALL);
         })
         .runAfterClusterUpgrade((cluster) -> {
-            cluster.forEach((inst) -> {
-                System.out.println("inst.getReleaseVersionString() = " + inst.getReleaseVersionString());
-            });
             cluster.schemaChange("ALTER TABLE " + KEYSPACE + ".tbl DROP COMPACT STORAGE");
             assertRows(cluster.coordinator(1).execute("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1",
                                                       ConsistencyLevel.ALL),

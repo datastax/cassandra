@@ -136,7 +136,7 @@ public class SSTableImporter
                     Descriptor newDescriptor = cfs.getUniqueDescriptorFor(entry.getKey(), targetDir);
                     maybeMutateMetadata(entry.getKey(), options);
                     movedSSTables.add(new MovedSSTable(newDescriptor, entry.getKey(), entry.getValue()));
-                    SSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue());
+                    SSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
                     newSSTablesPerDirectory.add(sstable);
                 }
                 catch (Throwable t)
@@ -146,7 +146,14 @@ public class SSTableImporter
                     {
                         logger.error("Failed importing sstables in directory {}", dir, t);
                         failedDirectories.add(dir);
-                        moveSSTablesBack(movedSSTables);
+                        if (options.copyData)
+                        {
+                            removeCopiedSSTables(movedSSTables);
+                        }
+                        else
+                        {
+                            moveSSTablesBack(movedSSTables);
+                        }
                         movedSSTables.clear();
                         newSSTablesPerDirectory.clear();
                         break;
@@ -289,6 +296,25 @@ public class SSTableImporter
     }
 
     /**
+     * Similarly for moving case, we need to delete all SSTables which were copied already but the
+     * copying as a whole has failed so we do not leave any traces behind such failed import.
+     *
+     * @param movedSSTables tables we have moved already (by copying) which need to be removed
+     */
+    private void removeCopiedSSTables(Set<MovedSSTable> movedSSTables)
+    {
+        logger.debug("Removing copied SSTables which were left in data directories after failed SSTable import.");
+        for (MovedSSTable movedSSTable : movedSSTables)
+        {
+            if (new File(movedSSTable.newDescriptor.filenameFor(Component.DATA)).exists())
+            {
+                // no logging here as for moveSSTablesBack case above as logging is done in delete method
+                SSTableWriter.delete(movedSSTable.newDescriptor, movedSSTable.components);
+            }
+        }
+    }
+
+    /**
      * Iterates over all keys in the sstable index and invalidates the row cache
      */
     @VisibleForTesting
@@ -369,8 +395,9 @@ public class SSTableImporter
         private final boolean verifyTokens;
         private final boolean invalidateCaches;
         private final boolean extendedVerify;
+        private final boolean copyData;
 
-        public Options(Set<String> srcPaths, boolean resetLevel, boolean clearRepaired, boolean verifySSTables, boolean verifyTokens, boolean invalidateCaches, boolean extendedVerify)
+        public Options(Set<String> srcPaths, boolean resetLevel, boolean clearRepaired, boolean verifySSTables, boolean verifyTokens, boolean invalidateCaches, boolean extendedVerify, boolean copyData)
         {
             this.srcPaths = srcPaths;
             this.resetLevel = resetLevel;
@@ -379,6 +406,7 @@ public class SSTableImporter
             this.verifyTokens = verifyTokens;
             this.invalidateCaches = invalidateCaches;
             this.extendedVerify = extendedVerify;
+            this.copyData = copyData;
         }
 
         public static Builder options(String srcDir)
@@ -407,6 +435,7 @@ public class SSTableImporter
                    ", verifyTokens=" + verifyTokens +
                    ", invalidateCaches=" + invalidateCaches +
                    ", extendedVerify=" + extendedVerify +
+                   ", copyData= " + copyData +
                    '}';
         }
 
@@ -419,6 +448,7 @@ public class SSTableImporter
             private boolean verifyTokens = false;
             private boolean invalidateCaches = false;
             private boolean extendedVerify = false;
+            private boolean copyData = false;
 
             private Builder(Set<String> srcPath)
             {
@@ -462,9 +492,15 @@ public class SSTableImporter
                 return this;
             }
 
+            public Builder copyData(boolean value)
+            {
+                copyData = value;
+                return this;
+            }
+
             public Options build()
             {
-                return new Options(srcPaths, resetLevel, clearRepaired, verifySSTables, verifyTokens, invalidateCaches, extendedVerify);
+                return new Options(srcPaths, resetLevel, clearRepaired, verifySSTables, verifyTokens, invalidateCaches, extendedVerify, copyData);
             }
         }
     }
