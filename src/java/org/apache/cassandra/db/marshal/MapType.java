@@ -28,9 +28,11 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteComparable.Version;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.Pair;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
@@ -219,6 +221,35 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
+    public ByteSource asComparableBytes(ByteBuffer b, Version version)
+    {
+        return asComparableBytesMap(getKeysType(), getValuesType(), b, version);
+    }
+
+    static ByteSource asComparableBytesMap(AbstractType<?> keysComparator, AbstractType<?> valuesComparator, ByteBuffer b, Version version)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        b = b.duplicate();
+        ProtocolVersion protocolVersion = ProtocolVersion.V3;
+        int offset = 0;
+        int size = CollectionSerializer.readCollectionSize(b, ByteBufferAccessor.instance, protocolVersion);
+        offset += CollectionSerializer.sizeOfCollectionSize(size, protocolVersion);
+        ByteSource[] srcs = new ByteSource[size * 2];
+        for (int i = 0; i < size; ++i)
+        {
+            ByteBuffer k = CollectionSerializer.readValue(b, ByteBufferAccessor.instance, offset, protocolVersion);
+            offset += CollectionSerializer.sizeOfValue(k, ByteBufferAccessor.instance, protocolVersion);
+            srcs[i * 2 + 0] = keysComparator.asComparableBytes(k, version);
+            ByteBuffer v = CollectionSerializer.readValue(b, ByteBufferAccessor.instance, offset, protocolVersion);
+            offset += CollectionSerializer.sizeOfValue(v, ByteBufferAccessor.instance, protocolVersion);
+            srcs[i * 2 + 1] = valuesComparator.asComparableBytes(v, version);
+        }
+        return ByteSource.withTerminator(version == Version.LEGACY ? 0x00 : ByteSource.TERMINATOR, srcs);
+    }
+
+    @Override
     public MapSerializer<K, V> getSerializer()
     {
         return serializer;
@@ -286,7 +317,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         ByteBuffer value = buffer.duplicate();
         StringBuilder sb = new StringBuilder("{");
-        int size = CollectionSerializer.readCollectionSize(value, protocolVersion);
+        int size = CollectionSerializer.readCollectionSize(value, ByteBufferAccessor.instance, protocolVersion);
         int offset = CollectionSerializer.sizeOfCollectionSize(size, protocolVersion);
         for (int i = 0; i < size; i++)
         {
