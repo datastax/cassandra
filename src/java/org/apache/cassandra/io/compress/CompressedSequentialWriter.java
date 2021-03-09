@@ -335,11 +335,13 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     // Page management using chunk boundaries
 
+    @Override
     public int maxBytesInPage()
     {
         return buffer.capacity();
     }
 
+    @Override
     public void padToPageBoundary() throws IOException
     {
         if (buffer.position() == 0)
@@ -354,11 +356,13 @@ public class CompressedSequentialWriter extends SequentialWriter
         lastFlushOffset += padLength;
     }
 
+    @Override
     public int bytesLeftInPage()
     {
         return buffer.remaining();
     }
 
+    @Override
     public long paddedPosition()
     {
         return position() + (buffer.position() == 0 ? 0 : buffer.remaining());

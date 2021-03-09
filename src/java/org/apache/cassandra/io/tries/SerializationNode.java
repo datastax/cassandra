@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.io.tries;
 
-public interface SerializationNode<Value>
+public interface SerializationNode<V>
 {
     /**
      * The number of children of the node.
@@ -27,7 +27,7 @@ public interface SerializationNode<Value>
     /**
      * The payload of the node if the node has any associated, otherwise null.
      */
-    Value payload();
+    V payload();
 
     /**
      * The transition character for the child at position i. Must be an integer between 0 and 255.

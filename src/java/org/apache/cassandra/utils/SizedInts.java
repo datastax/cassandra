@@ -97,12 +97,12 @@ public class SizedInts
         if (bytes == 8)
             return read(src, startPos, bytes);
         else
-        return read(src, startPos, bytes) & ((1L << bytes * 8) - 1);
+            return read(src, startPos, bytes) & ((1L << (bytes << 3)) - 1);
     }
 
     public static void write(DataOutput dest, long value, int size) throws IOException
     {
         for (int i = size - 1; i >= 0; --i)
-            dest.writeByte((int) (value >> (i * 8)));
+            dest.writeByte((int) (value >> (i << 3)));
     }
 }

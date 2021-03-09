@@ -29,7 +29,7 @@ public final class PageAware
     /**
      * Calculate the end of the page identified by the given position.
      * Equivalent to floor(dstPos / PAGE_SIZE + 1) * PAGE_SIZE.
-     *
+     * <p>
      * When the argument is equal to the page boundary, returns the next page boundary. E.g. pageLimit(0) == PAGE_SIZE.
      */
     public static long pageLimit(long dstPos)
@@ -49,7 +49,7 @@ public final class PageAware
     /**
      * Calculate the earliest page boundary for the given position.
      * Equivalent to ceil(dstPos / PAGE_SIZE) * PAGE_SIZE.
-     *
+     * <p>
      * When the argument is equal to a page boundary, returns the argument.
      */
     public static long padded(long dstPos)
@@ -74,7 +74,6 @@ public final class PageAware
      * and so forth.
      *
      * @param dstPos the position
-     *
      * @return the page number, indexed at zero
      */
     public static int pageNum(long dstPos)

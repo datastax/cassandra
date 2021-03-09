@@ -24,6 +24,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class WrappingRebuffererTest
@@ -42,7 +43,7 @@ public class WrappingRebuffererTest
             ret.release();
             assertTrue(mock.released);
 
-            assertTrue(ret == rebufferer.rebuffer(0)); // same buffer holder was recycled
+            assertSame(ret, rebufferer.rebuffer(0)); // same buffer holder was recycled
         }
     }
 
@@ -70,8 +71,8 @@ public class WrappingRebuffererTest
             ret2.release();
             assertTrue(mock.released);
 
-            assertTrue(ret2 == rebufferer.rebuffer(0)); // first buffer holder was recycled
-            assertTrue(ret1 == rebufferer.rebuffer(1)); // second buffer holder was recycled
+            assertSame(ret2, rebufferer.rebuffer(0)); // first buffer holder was recycled
+            assertSame(ret1, rebufferer.rebuffer(1)); // second buffer holder was recycled
         }
     }
 

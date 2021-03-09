@@ -31,23 +31,23 @@ import org.apache.cassandra.utils.concurrent.ThreadLocals;
 /**
  * Helper base class for incremental trie builders.
  */
-public abstract class IncrementalTrieWriterBase<Value, Dest, Node extends IncrementalTrieWriterBase.BaseNode<Value, Node>>
-implements IncrementalTrieWriter<Value>
+public abstract class IncrementalTrieWriterBase<V, D, N extends IncrementalTrieWriterBase.BaseNode<V, N>>
+implements IncrementalTrieWriter<V>
 {
-    protected final Deque<Node> stack = new ArrayDeque<>();
-    protected final TrieSerializer<Value, ? super Dest> serializer;
-    protected final Dest dest;
+    protected final Deque<N> stack = new ArrayDeque<>();
+    protected final TrieSerializer<V, ? super D> serializer;
+    protected final D dest;
     protected ByteComparable prev = null;
     long count = 0;
 
-    public IncrementalTrieWriterBase(TrieSerializer<Value, ? super Dest> serializer, Dest dest, Node root)
+    protected IncrementalTrieWriterBase(TrieSerializer<V, ? super D> serializer, D dest, N root)
     {
         this.serializer = serializer;
         this.dest = dest;
         this.stack.addLast(root);
     }
 
-    protected void reset(Node root)
+    protected void reset(N root)
     {
         this.prev = null;
         this.count = 0;
@@ -65,7 +65,7 @@ implements IncrementalTrieWriter<Value>
     }
 
     @Override
-    public void add(ByteComparable next, Value value) throws IOException
+    public void add(ByteComparable next, V value) throws IOException
     {
         ++count;
         int stackpos = 0;
@@ -90,30 +90,31 @@ implements IncrementalTrieWriter<Value>
         while (stack.size() > stackpos + 1)
             completeLast();
 
-        Node node = stack.getLast();
+        N node = stack.getLast();
         while (n != ByteSource.END_OF_STREAM)
         {
-            stack.addLast(node = node.addChild((byte) n));
+            node = node.addChild((byte) n);
+            stack.addLast(node);
             ++stackpos;
             n = sn.next();
         }
 
-        Value existingPayload = node.setPayload(value);
+        V existingPayload = node.setPayload(value);
         assert existingPayload == null;
     }
 
     public long complete() throws IOException
     {
-        Node root = stack.getFirst();
+        N root = stack.getFirst();
         if (root.filePos != -1)
             return root.filePos;
 
         return performCompletion().filePos;
     }
 
-    Node performCompletion() throws IOException
+    N performCompletion() throws IOException
     {
-        Node root = null;
+        N root = null;
         while (!stack.isEmpty())
             root = completeLast();
         stack.addLast(root);
@@ -125,14 +126,14 @@ implements IncrementalTrieWriter<Value>
         return count;
     }
 
-    protected Node completeLast() throws IOException
+    protected N completeLast() throws IOException
     {
-        Node node = stack.removeLast();
+        N node = stack.removeLast();
         complete(node);
         return node;
     }
 
-    abstract void complete(Node value) throws IOException;
+    abstract void complete(N value) throws IOException;
     abstract public PartialTail makePartialRoot() throws IOException;
 
     static class PTail implements PartialTail
@@ -167,49 +168,53 @@ implements IncrementalTrieWriter<Value>
         }
     }
 
-    static abstract class BaseNode<Value, Node extends BaseNode<Value, Node>> implements SerializationNode<Value>
+    static abstract class BaseNode<V, N extends BaseNode<V, N>> implements SerializationNode<V>
     {
         private static final int CHILDREN_LIST_RECYCLER_LIMIT = 1024;
+        @SuppressWarnings("rawtypes")
         private static final LightweightRecycler<ArrayList> CHILDREN_LIST_RECYCLER = ThreadLocals.createLightweightRecycler(CHILDREN_LIST_RECYCLER_LIMIT);
+        @SuppressWarnings("rawtypes")
         private static final ArrayList EMPTY_LIST = new ArrayList<>(0);
 
-        private static <Node> ArrayList<Node> allocateChildrenList()
+        @SuppressWarnings({ "unchecked", "rawtypes" })
+        private static <NODE> ArrayList<NODE> allocateChildrenList()
         {
             return CHILDREN_LIST_RECYCLER.reuseOrAllocate(() -> new ArrayList(4));
         }
 
-        private static <Node> void recycleChildrenList(ArrayList<Node> children)
+        private static <NODE> void recycleChildrenList(ArrayList<NODE> children)
         {
             CHILDREN_LIST_RECYCLER.tryRecycle(children);
         }
 
-        Value payload;
-        ArrayList<Node> children;
+        V payload;
+        ArrayList<N> children;
         final int transition;
         long filePos = -1;
 
+        @SuppressWarnings("unchecked")
         BaseNode(int transition)
         {
             children = EMPTY_LIST;
             this.transition = transition;
         }
 
-        public Value payload()
+        public V payload()
         {
             return payload;
         }
 
-        public Value setPayload(Value newPayload)
+        public V setPayload(V newPayload)
         {
-            Value p = payload;
+            V p = payload;
             payload = newPayload;
             return p;
         }
 
-        public Node addChild(byte b)
+        public N addChild(byte b)
         {
             assert children.isEmpty() || (children.get(children.size() - 1).transition & 0xFF) < (b & 0xFF);
-            Node node = newNode(b);
+            N node = newNode(b);
             if (children == EMPTY_LIST)
                 children = allocateChildrenList();
 
@@ -246,6 +251,6 @@ implements IncrementalTrieWriter<Value>
             return String.format("%02x", transition);
         }
 
-        abstract Node newNode(byte transition);
+        abstract N newNode(byte transition);
     }
 }

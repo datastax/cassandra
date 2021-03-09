@@ -28,12 +28,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * buffering only limited amount of data.
  * The writing itself is done by some node serializer passed on construction time.
  */
-public interface IncrementalTrieWriter<Value> extends AutoCloseable
+public interface IncrementalTrieWriter<V> extends AutoCloseable
 {
     /**
      * Add an entry to the trie with the associated value.
      */
-    void add(ByteComparable next, Value value) throws IOException;
+    void add(ByteComparable next, V value) throws IOException;
 
     /**
      * Return the number of added entries.
@@ -72,8 +72,7 @@ public interface IncrementalTrieWriter<Value> extends AutoCloseable
     /**
      * Construct a suitable trie writer.
      */
-    static <Value>
-    IncrementalTrieWriter<Value> open(TrieSerializer<Value, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
+    static <V> IncrementalTrieWriter<V> open(TrieSerializer<V, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
     {
         return new IncrementalTrieWriterPageAware<>(trieSerializer, dest);
     }

@@ -19,7 +19,6 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.util.Deque;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import javax.annotation.Nullable;
 
@@ -112,6 +111,7 @@ public class WrappingRebufferer implements Rebufferer
             return buffer;
         }
 
+        @Override
         public long offset()
         {
             return offset;
@@ -128,6 +128,7 @@ public class WrappingRebufferer implements Rebufferer
             this.buffer.limit(limit);
         }
 
+        @Override
         public void release()
         {
             assert buffer != null : "released twice";

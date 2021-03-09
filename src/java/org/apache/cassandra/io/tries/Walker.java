@@ -29,10 +29,10 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /**
  * Thread-unsafe trie walking helper. This is analogous to RandomAccessReader for tries -- takes an on-disk trie
  * accessible via a supplied Rebufferer and lets user seek to nodes and work with them.
- *
+ * <p>
  * Assumes data was written using page-aware builder and thus no node crosses a page and thus a buffer boundary.
  */
-public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
+public class Walker<V extends Walker<V>> implements AutoCloseable
 {
     private final Rebufferer source;
     protected final long root;
@@ -60,7 +60,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
         this.root = root;
         try
         {
-            bh = source.rebuffer(PageAware.pageStart(root)); // can throw NotInCacheException
+            bh = source.rebuffer(PageAware.pageStart(root));
             buf = bh.buffer();
         }
         catch (Throwable t)
@@ -78,19 +78,19 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
 
     protected final void go(long position)
     {
-        long offset = position - bh.offset();
-        if (offset < 0 || offset >= buf.limit())
+        long curOffset = position - bh.offset();
+        if (curOffset < 0 || curOffset >= buf.limit())
         {
             BufferHolder currentBh = bh;
             bh = source.rebuffer(PageAware.pageStart(position));
             currentBh.release();
             buf = bh.buffer();
-            offset = position - bh.offset();
-            assert offset >= 0 && offset < buf.limit() : String.format("Invalid offset: %d, buf: %s, bh: %s", offset, buf, bh);
+            curOffset = position - bh.offset();
+            assert curOffset >= 0 && curOffset < buf.limit() : String.format("Invalid offset: %d, buf: %s, bh: %s", curOffset, buf, bh);
         }
-        this.offset = (int) offset;
+        this.offset = (int) curOffset;
         this.position = position;
-        nodeType = TrieNode.at(buf, (int) offset);
+        nodeType = TrieNode.at(buf, (int) curOffset);
     }
 
     protected final int payloadFlags()
@@ -168,13 +168,14 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
         }
     }
 
-    public interface Extractor<ResType, Concrete>
+    public interface Extractor<R, V>
     {
-        ResType extract(Concrete walker, int payloadPosition, int payloadFlags);
+        R extract(V walker, int payloadPosition, int payloadFlags);
     }
 
     /**
      * Follows the given key while there are transitions in the trie for it.
+     *
      * @return the last byte of the key
      */
     public int follow(ByteComparable key)
@@ -197,6 +198,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
      * Follows the trie for a given key, remembering the closest greater branch.
      * On return the walker is positioned at the longest prefix that matches the input (with or without payload), and
      * min(greaterBranch) is the immediate greater neighbour.
+     *
      * @return the last byte of the key
      */
     public int followWithGreater(ByteComparable key)
@@ -259,9 +261,9 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
      * visited (instead of saving the node's position), which requires an extractor to be passed as parameter.
      */
     @SuppressWarnings("unchecked")
-    public <ResType> ResType prefix(ByteComparable key, Extractor<ResType, Concrete> extractor)
+    public <R> R prefix(ByteComparable key, Extractor<R, V> extractor)
     {
-        ResType payload = null;
+        R payload = null;
 
         ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
         go(root);
@@ -276,7 +278,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
-                    payload = extractor.extract((Concrete) this, payloadPosition(), payloadBits);
+                    payload = extractor.extract((V) this, payloadPosition(), payloadBits);
                 if (childIndex < 0)
                     return payload;
             }
@@ -288,16 +290,16 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     /**
      * Follows the trie for a given key, taking a prefix (in the sense above) and searching for neighboring values.
      * On return min(greaterBranch) and max(lesserBranch) are the immediate non-prefix neighbours for the sought value.
-     *
+     * <p>
      * Note: in a separator trie the closest smaller neighbour can be another prefix of the given key. This method
      * does not take that into account. E.g. if trie contains "abba", "as" and "ask", looking for "asking" will find
      * "ask" as the match, but max(lesserBranch) will point to "abba" instead of the correct "as". This problem can
-     * only occur if there is a valid prefix match. 
+     * only occur if there is a valid prefix match.
      */
     @SuppressWarnings("unchecked")
-    public <ResType> ResType prefixAndNeighbours(ByteComparable key, Extractor<ResType, Concrete> extractor)
+    public <R> R prefixAndNeighbours(ByteComparable key, Extractor<R, V> extractor)
     {
-        ResType payload = null;
+        R payload = null;
         greaterBranch = -1;
         lesserBranch = -1;
 
@@ -313,7 +315,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
-                    payload = extractor.extract((Concrete) this, payloadPosition(), payloadBits);
+                    payload = extractor.extract((V) this, payloadPosition(), payloadBits);
             }
             else
             {
@@ -358,7 +360,7 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     {
         go(node);
         int bits = payloadFlags();
-        out.format(" %s@%x %s\n", nodeType.toString(), node, bits == 0 ? "" : payloadReader.payloadAsString(buf, payloadPosition(), bits));
+        out.format(" %s@%x %s%n", nodeType.toString(), node, bits == 0 ? "" : payloadReader.payloadAsString(buf, payloadPosition(), bits));
         int range = transitionRange();
         for (int i = 0; i < range; ++i)
         {
@@ -375,6 +377,6 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     public String toString()
     {
         return String.format("[Trie Walker - NodeType: %s, source: %s, buffer: %s, buffer file offset: %d, Node buffer offset: %d, Node file position: %d]",
-                             nodeType, source, buf, bh.offset(), offset ,position);
+                             nodeType, source, buf, bh.offset(), offset, position);
     }
 }

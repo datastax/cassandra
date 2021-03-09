@@ -24,7 +24,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /**
  * Thread-unsafe value iterator for on-disk tries. Uses the assumptions of Walker.
  */
-public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Walker<Concrete>
+public class ValueIterator<C extends ValueIterator<C>> extends Walker<C>
 {
     private final ByteSource limit;
     private IterationPosition stack;
@@ -89,13 +89,17 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
 
                 // For a separator trie the latest payload met along the prefix is a potential match for start
                 if (admitPrefix)
+                {
                     if (childIndex == 0 || childIndex == -1)
                     {
                         if (payloadFlags() != 0)
                             payloadedNode = position;
                     }
                     else
+                    {
                         payloadedNode = -1;
+                    }
+                }
 
                 limitByte = 256;
                 if (atLimit)
