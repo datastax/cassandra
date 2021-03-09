@@ -94,6 +94,9 @@ public class SizedInts
 
     public static long readUnsigned(ByteBuffer src, int startPos, int bytes)
     {
+        if (bytes == 8)
+            return read(src, startPos, bytes);
+        else
         return read(src, startPos, bytes) & ((1L << bytes * 8) - 1);
     }
 

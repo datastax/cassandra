@@ -58,8 +58,8 @@ public class TailOverridingRebufferer extends WrappingRebufferer
     }
 
     @Override
-    public String paramsToString()
+    public String toString()
     {
-        return String.format("+%d@%d", tail.limit(), cutoff);
+        return String.format("%s[+%d@%d]:%s", getClass().getSimpleName(), tail.limit(), cutoff, source.toString());
     }
 }

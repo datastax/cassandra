@@ -178,10 +178,7 @@ implements IncrementalTrieWriter<Value>
     {
         assert node.filePos == -1;
 
-        NavigableSet<Node<Value>> children = new TreeSet<>(BRANCH_SIZE_COMPARATOR);
-        for (Node<Value> child : node.children)
-            if (child.filePos == -1)
-                children.add(child);
+        NavigableSet<Node<Value>> children = node.getChildrenWithUnsetPosition();
 
         int bytesLeft = dest.bytesLeftInPage();
         Node<Value> cmp = new Node<>(256); // goes after all equal-sized unplaced nodes (whose transition character is 0-255)
@@ -197,6 +194,7 @@ implements IncrementalTrieWriter<Value>
                 child = children.pollLast();       // just biggest
             }
 
+            assert child != null;
             if (child.hasOutOfPageChildren || child.hasOutOfPageInBranch)
             {
                 // We didn't know what size this branch will actually need to be, node's children may be far.
@@ -697,6 +695,16 @@ implements IncrementalTrieWriter<Value>
             }
 
             return Math.min(minPlaced, minUnplaced);
+        }
+
+        NavigableSet<Node<Value>> getChildrenWithUnsetPosition()
+        {
+            NavigableSet<Node<Value>> result = new TreeSet<>(BRANCH_SIZE_COMPARATOR);
+            for (Node<Value> child : children)
+                if (child.filePos == -1)
+                    result.add(child);
+
+            return result;
         }
 
         void finalizeWithPosition(long position)

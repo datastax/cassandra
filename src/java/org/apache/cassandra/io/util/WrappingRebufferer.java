@@ -80,15 +80,11 @@ public class WrappingRebufferer implements Rebufferer
         source.closeReader();
     }
 
-    protected String paramsToString()
-    {
-        return "";
-    }
 
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + '[' + paramsToString() + "]:" + source.toString();
+        return String.format("%s[]:%s", getClass().getSimpleName(), source.toString());
     }
 
     protected final class WrappingBufferHolder implements BufferHolder
@@ -121,10 +117,6 @@ public class WrappingRebufferer implements Rebufferer
             return offset;
         }
 
-        public void offset(long offet)
-        {
-            this.offset = offet;
-        }
 
         public int limit()
         {

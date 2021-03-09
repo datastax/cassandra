@@ -219,9 +219,10 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     }
 
     /**
-     * Follows the trie for a given key, remembering the closest greater branch.
+     * Follows the trie for a given key, remembering the closest lesser branch.
      * On return the walker is positioned at the longest prefix that matches the input (with or without payload), and
-     * min(greaterBranch) is the immediate greater neighbour.
+     * max(lesserBranch) is the immediate lesser neighbour.
+     *
      * @return the last byte of the key
      */
     public int followWithLesser(ByteComparable key)
@@ -239,7 +240,11 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
                 lesserBranch = lesserTransition(searchIndex);
 
             if (searchIndex < 0)
+            {
+                if (searchIndex < -1)
+                    lesserBranch = transition(-searchIndex - 2);
                 return b;
+            }
 
             go(transition(searchIndex));
         }

@@ -511,7 +511,10 @@ public abstract class TrieNode
 
         public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            return -readBytes(src, position + 2 + transitionRange(src, position) + bytesPerPointer * searchIndex);
+            assert searchIndex >= 0;
+            int range = transitionRange(src, position);
+            assert searchIndex < range;
+            return -readBytes(src, position + 2 + range + bytesPerPointer * searchIndex);
         }
 
         public long greaterTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
