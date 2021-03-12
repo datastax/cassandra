@@ -18,14 +18,24 @@
 
 package org.apache.cassandra.io.tries;
 
+import java.io.DataOutput;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.util.Arrays;
+import java.util.Collection;
 
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.TailOverridingRebufferer;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
@@ -33,8 +43,20 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 
+@SuppressWarnings("unchecked")
+@RunWith(Parameterized.class)
 public class WalkerTest extends AbstractTrieTestBase
 {
+    @Parameterized.Parameter(0)
+    public Class<? extends IncrementalTrieWriter<?>> writerClass;
+
+    @Parameterized.Parameters(name = "{index}: trie writer class={0}")
+    public static Collection<Object[]> data()
+    {
+        return Arrays.asList(new Object[]{ IncrementalTrieWriterSimple.class },
+                             new Object[]{ IncrementalTrieWriterPageAware.class });
+    }
+
     @Test
     public void testWithoutBounds() throws IOException
     {
@@ -145,9 +167,9 @@ public class WalkerTest extends AbstractTrieTestBase
         IncrementalTrieWriter.PartialTail ptail = builder.makePartialRoot();
         long rootPos = builder.complete();
         Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
-        InternalIterator it = new InternalIterator(source, rootPos, source("151"), source("515"), true);
+        Rebufferer partialSource = new TailOverridingRebufferer(new ByteBufRebufferer(buf.asNewBuffer()), ptail.cutoff(), ptail.tail());
 
-        Rebufferer partialSource = new ByteBufRebufferer(ptail.tail());
+        InternalIterator it = new InternalIterator(source, rootPos, source("151"), source("515"), true);
         InternalIterator tailIt = new InternalIterator(partialSource, ptail.root(), source("151"), source("515"), true);
 
         while (true)
@@ -157,8 +179,11 @@ public class WalkerTest extends AbstractTrieTestBase
             if (i1 == -1 || i2 == -1)
                 break;
 
-            int f1 = TrieNode.at(buf.asNewBuffer(), (int) i1).payloadFlags(buf.asNewBuffer(), (int) i1);
-            int f2 = TrieNode.at(ptail.tail(), (int) i2).payloadFlags(ptail.tail(), (int) i2);
+            Rebufferer.BufferHolder bh1 = source.rebuffer(i1);
+            Rebufferer.BufferHolder bh2 = partialSource.rebuffer(i2);
+
+            int f1 = TrieNode.at(bh1.buffer(), (int) (i1 - bh1.offset())).payloadFlags(bh1.buffer(), (int) (i1 - bh1.offset()));
+            int f2 = TrieNode.at(bh2.buffer(), (int) (i2 - bh2.offset())).payloadFlags(bh2.buffer(), (int) (i2 - bh2.offset()));
             assertEquals(f1, f2);
         }
     }
@@ -167,7 +192,7 @@ public class WalkerTest extends AbstractTrieTestBase
     public void testBigTrie() throws IOException
     {
         DataOutputBuffer buf = new AbstractTrieTestBase.DataOutputBufferPaged();
-        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf);
+        IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, buf);
         payloadSize = 0;
         makeBigTrie(builder);
         builder.reset();
@@ -192,7 +217,7 @@ public class WalkerTest extends AbstractTrieTestBase
 
     private IncrementalTrieWriter<Integer> makeTrie(DataOutputBuffer out) throws IOException
     {
-        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, out);
+        IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, out);
         dump = true;
         builder.add(source("115"), 1);
         builder.add(source("151"), 2);
@@ -218,5 +243,19 @@ public class WalkerTest extends AbstractTrieTestBase
         s = StringUtils.rightPad(s, 8 + shift, '0');
         s = StringUtils.leftPad(s, size, '0');
         return source(s);
+    }
+
+    private IncrementalTrieWriter<Integer> newTrieWriter(TrieSerializer<Integer, DataOutput> serializer, DataOutputPlus out)
+    {
+        try
+        {
+            Constructor<? extends IncrementalTrieWriter<?>> c = writerClass.getDeclaredConstructor(TrieSerializer.class, DataOutputPlus.class);
+            c.setAccessible(true);
+            return (IncrementalTrieWriter<Integer>) c.newInstance(serializer, out);
+        }
+        catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e)
+        {
+            throw Throwables.cleaned(e);
+        }
     }
 }
