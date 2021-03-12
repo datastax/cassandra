@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * Assumes data was written using page-aware builder and thus no node crosses a page and thus a buffer boundary.
  */
-public class Walker<V extends Walker<V>> implements AutoCloseable
+public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
 {
     private final Rebufferer source;
     protected final long root;
@@ -63,10 +63,11 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
             bh = source.rebuffer(PageAware.pageStart(root));
             buf = bh.buffer();
         }
-        catch (Throwable t)
+        catch (RuntimeException ex)
         {
+            if (bh != null) bh.release();
             source.closeReader();
-            throw t;
+            throw ex;
         }
     }
 
@@ -168,15 +169,15 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
         }
     }
 
-    public interface Extractor<R, V>
+    public interface Extractor<RESULT, VALUE>
     {
-        R extract(V walker, int payloadPosition, int payloadFlags);
+        RESULT extract(VALUE walker, int payloadPosition, int payloadFlags);
     }
 
     /**
      * Follows the given key while there are transitions in the trie for it.
      *
-     * @return the last byte of the key
+     * @return the first unmatched byte of the key, may be {@link ByteSource#END_OF_STREAM}
      */
     public int follow(ByteComparable key)
     {
@@ -199,7 +200,7 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
      * On return the walker is positioned at the longest prefix that matches the input (with or without payload), and
      * min(greaterBranch) is the immediate greater neighbour.
      *
-     * @return the last byte of the key
+     * @return the first unmatched byte of the key, may be {@link ByteSource#END_OF_STREAM}
      */
     public int followWithGreater(ByteComparable key)
     {
@@ -225,7 +226,7 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
      * On return the walker is positioned at the longest prefix that matches the input (with or without payload), and
      * max(lesserBranch) is the immediate lesser neighbour.
      *
-     * @return the last byte of the key
+     * @return the first unmatched byte of the key, may be {@link ByteSource#END_OF_STREAM}
      */
     public int followWithLesser(ByteComparable key)
     {
@@ -238,15 +239,11 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
             int b = stream.next();
             int searchIndex = search(b);
 
-            if (searchIndex > 0)
+            if (searchIndex > 0 || searchIndex < -1)
                 lesserBranch = lesserTransition(searchIndex);
 
             if (searchIndex < 0)
-            {
-                if (searchIndex < -1)
-                    lesserBranch = transition(-searchIndex - 2);
                 return b;
-            }
 
             go(transition(searchIndex));
         }
@@ -261,9 +258,9 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
      * visited (instead of saving the node's position), which requires an extractor to be passed as parameter.
      */
     @SuppressWarnings("unchecked")
-    public <R> R prefix(ByteComparable key, Extractor<R, V> extractor)
+    public <RESULT> RESULT prefix(ByteComparable key, Extractor<RESULT, VALUE> extractor)
     {
-        R payload = null;
+        RESULT payload = null;
 
         ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
         go(root);
@@ -278,7 +275,7 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
-                    payload = extractor.extract((V) this, payloadPosition(), payloadBits);
+                    payload = extractor.extract((VALUE) this, payloadPosition(), payloadBits);
                 if (childIndex < 0)
                     return payload;
             }
@@ -297,9 +294,9 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
      * only occur if there is a valid prefix match.
      */
     @SuppressWarnings("unchecked")
-    public <R> R prefixAndNeighbours(ByteComparable key, Extractor<R, V> extractor)
+    public <RESULT> RESULT prefixAndNeighbours(ByteComparable key, Extractor<RESULT, VALUE> extractor)
     {
-        R payload = null;
+        RESULT payload = null;
         greaterBranch = -1;
         lesserBranch = -1;
 
@@ -315,7 +312,7 @@ public class Walker<V extends Walker<V>> implements AutoCloseable
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
-                    payload = extractor.extract((V) this, payloadPosition(), payloadBits);
+                    payload = extractor.extract((VALUE) this, payloadPosition(), payloadBits);
             }
             else
             {

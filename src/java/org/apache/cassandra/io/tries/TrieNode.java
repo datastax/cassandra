@@ -28,9 +28,7 @@ import org.apache.cassandra.utils.SizedInts;
  * they are on disk without any serialization, and to enable the creation of such files.
  *
  * The serialization methods take as argument a generic {@code SerializationNode} and provide a method {@code typeFor}
- * for choosing a suitable type to represent it, which can then be used to calculate size and write the node. When
- * caller is certain all children of the node can fit within the same page, the {@code inpageTypeFor} method can be used
- * instead to achieve better packing.
+ * for choosing a suitable type to represent it, which can then be used to calculate size and write the node.
  *
  * To read a file containing trie nodes, one would use {@code at} to identify the node type and then the various
  * read methods to retrieve the data. They all take a buffer (usually memory-mapped) containing the data, and a position
@@ -47,9 +45,9 @@ import org.apache.cassandra.utils.SizedInts;
  *   -- sparse, which provides a list of transition bytes with corresponding targets
  *   -- dense, where the transitions span a range of values and having the list (and the search in it) can be avoided
  *
- * For each of the transition-carrying types we also have "in-page" versions where transition targets are the 12 lowest
- * bits of the position within the same page. To save one further byte, the single in-page version cannot carry a
- * payload.
+ * For each of the transition-carrying types we also have "in-page" versions where transition targets are the 4, 8 or 12
+ * lowest bits of the position within the same page. To save one further byte, the single in-page versions using 4 or 12
+ * bits cannot carry a payload.
  *
  * This class is effectively an enumeration; abstract class permits instances to extends each other and reuse code.
  */
@@ -80,29 +78,39 @@ public abstract class TrieNode
      */
     abstract public int search(ByteBuffer src, int position, int transitionByte);       // returns as binarySearch
     /**
-     * Returns the byte value for this child index, or Integer.MAX_VALUE if there are no transitions with this index or
-     * higher. Argument must be >= 0.
-     */
-    abstract public int transitionByte(ByteBuffer src, int position, int childIndex);
-    /**
      * Returns the upper childIndex limit. Calling transition with values 0 .. transitionRange - 1 is valid.
      */
     abstract public int transitionRange(ByteBuffer src, int position);
     /**
+     * Returns the byte value for this child index, or Integer.MAX_VALUE if there are no transitions with this index or
+     * higher to permit listing the children without needing to call transitionRange.
+     *
+     * @param childIndex must be >= 0, though it is allowed to pass a value greater than {@code transitionRange - 1}
+     */
+    abstract public int transitionByte(ByteBuffer src, int position, int childIndex);
+    /**
      * Returns the delta between the position of this node and the position of the target of the specified transition.
      * This is always a negative number. Dense nodes use 0 to specify "no transition".
+     *
+     * @param childIndex must be >= 0 and < {@link #transitionRange(ByteBuffer, int)} - note that this is not validated
+     *                   and behaviour of this method is undefined for values outside of that range
      */
-    abstract long transitionDelta(ByteBuffer src, int position, int searchIndex);
+    abstract long transitionDelta(ByteBuffer src, int position, int childIndex);
     /**
      * Returns position of node to transition to for the given search index. Argument must be positive. May return -1
      * if a transition with that index does not exist (DENSE nodes).
      * Position is the offset of the node within the ByteBuffer. positionLong is its global placement, which is the
      * base for any offset calculations.
+     *
+     * @param positionLong although it seems to be obvious, this argument must be "real", that is, each child must have
+     *                     the calculated absolute position >= 0, otherwise the behaviour of this method is undefined
+     * @param childIndex must be >= 0 and < {@link #transitionRange(ByteBuffer, int)} - note that this is not validated
+     *                   and behaviour of this method is undefined for values outside of that range
      */
-    public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+    public long transition(ByteBuffer src, int position, long positionLong, int childIndex)
     {
         // note: incorrect for dense nodes
-        return positionLong + transitionDelta(src, position, searchIndex);
+        return positionLong + transitionDelta(src, position, childIndex);
     }
     /**
      * Returns the highest transition for this node, or -1 if none exist (PAYLOAD_ONLY nodes).
@@ -197,13 +205,13 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
             return 0;
         }
 
         @Override
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transition(ByteBuffer src, int position, long positionLong, int childIndex)
         {
             return -1;
         }
@@ -280,7 +288,7 @@ public abstract class TrieNode
             return transitionByte < c ? -1 : -2;
         }
 
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
             return -readBytes(src, position + 2);
         }
@@ -359,7 +367,7 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
             return -(src.get(position) & 0xF);
         }
@@ -424,7 +432,7 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
             return -(src.getShort(position) & 0xFFF);
         }
@@ -515,12 +523,12 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
-            assert searchIndex >= 0;
+            assert childIndex >= 0;
             int range = transitionRange(src, position);
-            assert searchIndex < range;
-            return -readBytes(src, position + 2 + range + bytesPerPointer * searchIndex);
+            assert childIndex < range;
+            return -readBytes(src, position + 2 + range + bytesPerPointer * childIndex);
         }
 
         @Override
@@ -593,9 +601,9 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
-            return -read12Bits(src, position + 2 + transitionRange(src, position), searchIndex);
+            return -read12Bits(src, position + 2 + transitionRange(src, position), childIndex);
         }
 
         @Override
@@ -686,15 +694,15 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
-            return -readBytes(src, position + 3 + searchIndex * bytesPerPointer);
+            return -readBytes(src, position + 3 + childIndex * bytesPerPointer);
         }
 
         @Override
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transition(ByteBuffer src, int position, long positionLong, int childIndex)
         {
-            long v = transitionDelta(src, position, searchIndex);
+            long v = transitionDelta(src, position, childIndex);
             return v != NULL_VALUE ? v + positionLong : -1;
         }
 
@@ -795,9 +803,9 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
-            return -read12Bits(src, position + 3, searchIndex);
+            return -read12Bits(src, position + 3, childIndex);
         }
 
         @Override

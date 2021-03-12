@@ -24,7 +24,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /**
  * Thread-unsafe value iterator for on-disk tries. Uses the assumptions of Walker.
  */
-public class ValueIterator<C extends ValueIterator<C>> extends Walker<C>
+public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Walker<CONCRETE>
 {
     private final ByteSource limit;
     private IterationPosition stack;

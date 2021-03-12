@@ -35,19 +35,19 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  * <p>
  * Note: This class is currently unused and stands only as form of documentation for {@link IncrementalTrieWriterPageAware}.
  */
-public class IncrementalTrieWriterSimple<Value>
-        extends IncrementalTrieWriterBase<Value, DataOutput, IncrementalTrieWriterSimple.Node<Value>>
-        implements IncrementalTrieWriter<Value>
+public class IncrementalTrieWriterSimple<VALUE>
+        extends IncrementalTrieWriterBase<VALUE, DataOutput, IncrementalTrieWriterSimple.Node<VALUE>>
+        implements IncrementalTrieWriter<VALUE>
 {
     private long position = 0;
 
-    public IncrementalTrieWriterSimple(TrieSerializer<Value, ? super DataOutput> trieSerializer, DataOutputPlus dest)
+    public IncrementalTrieWriterSimple(TrieSerializer<VALUE, ? super DataOutput> trieSerializer, DataOutputPlus dest)
     {
         super(trieSerializer, dest, new Node<>((byte) 0));
     }
 
     @Override
-    protected void complete(Node<Value> node) throws IOException
+    protected void complete(Node<VALUE> node) throws IOException
     {
         long nodePos = position;
         position += write(node, dest, position);
@@ -76,7 +76,7 @@ public class IncrementalTrieWriterSimple<Value>
             tail.cutoff = position;
             tail.count = count;
             long nodePos = position;
-            for (Node<Value> node : (Iterable<Node<Value>>) stack::descendingIterator)
+            for (Node<VALUE> node : (Iterable<Node<VALUE>>) stack::descendingIterator)
             {
                 node.filePos = nodePos;
                 nodePos += write(node, buf, nodePos);
@@ -88,7 +88,7 @@ public class IncrementalTrieWriterSimple<Value>
         }
     }
 
-    private long write(Node<Value> node, DataOutput dest, long nodePosition) throws IOException
+    private long write(Node<VALUE> node, DataOutput dest, long nodePosition) throws IOException
     {
         long size = serializer.sizeofNode(node, nodePosition);
         serializer.write(dest, node, nodePosition);

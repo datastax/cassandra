@@ -19,10 +19,10 @@ package org.apache.cassandra.io.tries;
 
 import java.io.IOException;
 
-public interface TrieSerializer<V, D>
+public interface TrieSerializer<VALUE, DEST>
 {
-    int sizeofNode(SerializationNode<V> node, long nodePosition);
+    int sizeofNode(SerializationNode<VALUE> node, long nodePosition);
 
     // Only called after all children's serializedPositions have been set.
-    void write(D dest, SerializationNode<V> node, long nodePosition) throws IOException;
+    void write(DEST dest, SerializationNode<VALUE> node, long nodePosition) throws IOException;
 }

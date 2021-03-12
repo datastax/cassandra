@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 
 /**
  * Special rebufferer that replaces the tail of the file (from the specified cutoff point) with the given buffer.
- * Thread-unsafe, to be instantiated for each reader. Reuses itself as the buffer returned.
  */
 public class TailOverridingRebufferer extends WrappingRebufferer
 {
