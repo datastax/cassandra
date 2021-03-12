@@ -82,8 +82,13 @@ public class IncrementalTrieWriterSimple<VALUE>
                 nodePos += write(node, buf, nodePos);
                 // Hacky but works: temporarily write node's position. Will be overwritten when we finalize node.
             }
+
             tail.tail = buf.asNewBuffer();
             tail.root = stack.getFirst().filePos;
+
+            for (Node<VALUE> node : (Iterable<Node<VALUE>>) stack::descendingIterator)
+                node.filePos = -1;
+
             return tail;
         }
     }
