@@ -25,19 +25,19 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 
 /**
  * Incremental builder of on-disk tries. Takes sorted input.
- *
+ * <p>
  * Incremental building is done by maintaining a stack of nodes in progress which follows the path to reach the last
  * added entry. When a new entry is needed, comparison with the previous can tell us how much of the parents stack
  * remains the same. The rest of the stack is complete as no new entry can affect them due to the input sorting.
  * The completed nodes can be written to disk and discarded, keeping only a pointer to their location in the file
  * (this pointer will be discarded too when the parent node is completed). This ensures that a very limited amount of
  * data is kept in memory at all times.
- *
+ * <p>
  * Note: This class is currently unused and stands only as form of documentation for {@link IncrementalTrieWriterPageAware}.
  */
 public class IncrementalTrieWriterSimple<Value>
-extends IncrementalTrieWriterBase<Value, DataOutput, IncrementalTrieWriterSimple.Node<Value>>
-implements IncrementalTrieWriter<Value>
+        extends IncrementalTrieWriterBase<Value, DataOutput, IncrementalTrieWriterSimple.Node<Value>>
+        implements IncrementalTrieWriter<Value>
 {
     private long position = 0;
 
@@ -82,7 +82,7 @@ implements IncrementalTrieWriter<Value>
                 nodePos += write(node, buf, nodePos);
                 // Hacky but works: temporarily write node's position. Will be overwritten when we finalize node.
             }
-            tail.tail = buf.trimmedBuffer();
+            tail.tail = buf.asNewBuffer();
             tail.root = stack.getFirst().filePos;
             return tail;
         }
