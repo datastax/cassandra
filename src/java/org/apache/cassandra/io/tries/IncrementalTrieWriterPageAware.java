@@ -310,67 +310,18 @@ implements IncrementalTrieWriter<VALUE>
         }
     }
 
-    class RecalcTotalSizeRecursion extends Recursion<Node<VALUE>>
-    {
-        final long nodePosition;
-        int sz;
-
-        RecalcTotalSizeRecursion(Node<VALUE> node, Recursion<Node<VALUE>> parent, long nodePosition)
-        {
-            super(node, node.children.iterator(), parent);
-            sz = 0;
-            this.nodePosition = nodePosition;
-        }
-
-        @Override
-        Recursion<Node<VALUE>> makeChild(Node<VALUE> child)
-        {
-            if (child.hasOutOfPageInBranch)
-                return new RecalcTotalSizeRecursion(child, this, nodePosition + sz);
-            else
-                return null;
-        }
-
-        @Override
-        void complete()
-        {
-            node.branchSize = sz;
-        }
-
-        @Override
-        void completeChild(Node<VALUE> child)
-        {
-            // This will be called for nodes that were recursively processed as well as the ones that weren't.
-
-            // The sizing below will use the branch size calculated above. Since that can change on out-of-page in branch,
-            // we need to recalculate the size if either flag is set.
-            if (child.hasOutOfPageChildren || child.hasOutOfPageInBranch)
-            {
-                long childPosition = this.nodePosition + sz;
-                child.nodeSize = serializer.sizeofNode(child, childPosition + child.branchSize);
-            }
-
-            sz += child.branchSize + child.nodeSize;
-        }
-    }
-
     private int recalcTotalSizeRecursive(Node<VALUE> node, long nodePosition) throws IOException
     {
         return recalcTotalSizeRecursiveOnStack(node, nodePosition, 0);
     }
 
-    private int recalcTotalSizeRecursiveOnStack(Node<VALUE> node, long nodePosition, int depth) throws IOException
+    protected int recalcTotalSizeRecursiveOnStack(Node<VALUE> node, long nodePosition, int depth) throws IOException
     {
         if (node.hasOutOfPageInBranch)
         {
             int sz = 0;
             for (Node<VALUE> child : node.children)
-            {
-                if (depth < 64)
-                    sz += recalcTotalSizeRecursiveOnStack(child, nodePosition + sz, depth + 1);
-                else
-                    sz += recalcTotalSizeRecursiveOnHeap(child, nodePosition + sz);
-            }
+                sz += recalcTotalSizeRecursiveOnStack(child, nodePosition + sz, depth + 1);
             node.branchSize = sz;
         }
 
@@ -382,69 +333,17 @@ implements IncrementalTrieWriter<VALUE>
         return node.branchSize + node.nodeSize;
     }
 
-    private int recalcTotalSizeRecursiveOnHeap(Node<VALUE> node, long nodePosition) throws IOException
-    {
-        if (node.hasOutOfPageInBranch)
-            new RecalcTotalSizeRecursion(node, null, nodePosition).process();
-
-        if (node.hasOutOfPageChildren || node.hasOutOfPageInBranch)
-            node.nodeSize = serializer.sizeofNode(node, nodePosition + node.branchSize);
-
-        return node.branchSize + node.nodeSize;
-    }
-
-    class WriteRecursion extends Recursion<Node<VALUE>>
-    {
-        long nodePosition;
-
-        WriteRecursion(Node<VALUE> node, Recursion<Node<VALUE>> parent)
-        {
-            super(node, node.children.iterator(), parent);
-            nodePosition = dest.position();
-        }
-
-        @Override
-        Recursion<Node<VALUE>> makeChild(Node<VALUE> child)
-        {
-            if (child.filePos == -1)
-                return new WriteRecursion(child, this);
-            else
-                return null;
-        }
-
-        @Override
-        void complete() throws IOException
-        {
-            nodePosition = nodePosition + node.branchSize;
-            assert dest.position() == nodePosition
-                    : "Expected node position to be " + nodePosition + " but got " + dest.position() + " after writing children.\n" + dumpNode(node, dest.position());
-
-            serializer.write(dest, node, nodePosition);
-
-            assert dest.position() == nodePosition + node.nodeSize
-                    || dest.paddedPosition() == dest.position() // For PartitionIndexTest.testPointerGrowth where position may jump on page boundaries.
-                    : "Expected node position to be " + (nodePosition + node.nodeSize) + " but got " + dest.position() + " after writing node, nodeSize " + node.nodeSize + ".\n" + dumpNode(node, nodePosition);
-
-            node.filePos = nodePosition;
-        }
-    }
-
     private long writeRecursive(Node<VALUE> node) throws IOException
     {
         return writeRecursiveOnStack(node, 0);
     }
 
-    private long writeRecursiveOnStack(Node<VALUE> node, int depth) throws IOException
+    protected long writeRecursiveOnStack(Node<VALUE> node, int depth) throws IOException
     {
         long nodePosition = dest.position();
         for (Node<VALUE> child : node.children)
             if (child.filePos == -1)
-            {
-                if (depth < 64)
-                    child.filePos = writeRecursiveOnStack(child, depth + 1);
-                else
-                    child.filePos = writeRecursiveOnHeap(child);
-            }
+                child.filePos = writeRecursiveOnStack(child, depth + 1);
 
         nodePosition += node.branchSize;
         assert dest.position() == nodePosition
@@ -458,12 +357,7 @@ implements IncrementalTrieWriter<VALUE>
         return nodePosition;
     }
 
-    private long writeRecursiveOnHeap(Node<VALUE> node) throws IOException
-    {
-        return new WriteRecursion(node, null).process().node.filePos;
-    }
-
-    private String dumpNode(Node<VALUE> node, long nodePosition)
+    protected String dumpNode(Node<VALUE> node, long nodePosition)
     {
         StringBuilder res = new StringBuilder(String.format("At %,d(%x) type %s child count %s nodeSize %,d branchSize %,d %s%s%n",
                                                             nodePosition, nodePosition,
@@ -506,78 +400,12 @@ implements IncrementalTrieWriter<VALUE>
         }
     }
 
-    class WritePartialRecursion extends Recursion<Node<VALUE>>
-    {
-        final DataOutputPlus dest;
-        final long baseOffset;
-        final long startPosition;
-        final List<Node<VALUE>> childrenToClear;
-
-        WritePartialRecursion(Node<VALUE> node, WritePartialRecursion parent)
-        {
-            super(node, node.children.iterator(), parent);
-            this.dest = parent.dest;
-            this.baseOffset = parent.baseOffset;
-            this.startPosition = dest.position() + baseOffset;
-            childrenToClear = new ArrayList<>();
-        }
-
-        WritePartialRecursion(Node<VALUE> node, DataOutputPlus dest, long baseOffset)
-        {
-            super(node, node.children.iterator(), null);
-            this.dest = dest;
-            this.baseOffset = baseOffset;
-            this.startPosition = dest.position() + baseOffset;
-            childrenToClear = new ArrayList<>();
-        }
-
-        @Override
-        Recursion<Node<VALUE>> makeChild(Node<VALUE> child)
-        {
-            if (child.filePos == -1)
-            {
-                childrenToClear.add(child);
-                return new WritePartialRecursion(child, this);
-            }
-            else
-                return null;
-        }
-
-        @Override
-        void complete() throws IOException
-        {
-            long nodePosition = dest.position() + baseOffset;
-
-            if (node.hasOutOfPageInBranch)
-            {
-                // Update the branch size with the size of what we have just written. This may be used by the node's
-                // maxPositionDelta and it's a better approximation for later fitting calculations.
-                node.branchSize = (int) (nodePosition - startPosition);
-            }
-
-            serializer.write(dest, node, nodePosition);
-
-            if (node.hasOutOfPageChildren || node.hasOutOfPageInBranch)
-            {
-                // Update the node size with what we have just seen. It's a better approximation for later fitting
-                // calculations.
-                long endPosition = dest.position() + baseOffset;
-                node.nodeSize = (int) (endPosition - nodePosition);
-            }
-
-            for (Node<VALUE> child : childrenToClear)
-                child.filePos = -1;
-
-            node.filePos = nodePosition;
-        }
-    }
-
     private long writePartialRecursive(Node<VALUE> node, DataOutputPlus dest, long baseOffset) throws IOException
     {
         return writePartialRecursiveOnStack(node, dest, baseOffset, 0);
     }
 
-    private long writePartialRecursiveOnStack(Node<VALUE> node, DataOutputPlus dest, long baseOffset, int depth) throws IOException
+    protected long writePartialRecursiveOnStack(Node<VALUE> node, DataOutputPlus dest, long baseOffset, int depth) throws IOException
     {
         long startPosition = dest.position() + baseOffset;
 
@@ -587,10 +415,7 @@ implements IncrementalTrieWriter<VALUE>
             if (child.filePos == -1)
             {
                 childrenToClear.add(child);
-                if (depth < 64)
                     child.filePos = writePartialRecursiveOnStack(child, dest, baseOffset, depth + 1);
-                else
-                    child.filePos = writePartialRecursiveOnHeap(child, dest, baseOffset);
             }
         }
 
@@ -616,14 +441,6 @@ implements IncrementalTrieWriter<VALUE>
         for (Node<VALUE> child : childrenToClear)
             child.filePos = -1;
         return nodePosition;
-    }
-
-    private long writePartialRecursiveOnHeap(Node<VALUE> node, DataOutputPlus dest, long baseOffset) throws IOException
-    {
-        new WritePartialRecursion(node, dest, baseOffset).process();
-        long pos = node.filePos;
-        node.filePos = -1;
-        return pos;
     }
 
     static class Node<Value> extends IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>

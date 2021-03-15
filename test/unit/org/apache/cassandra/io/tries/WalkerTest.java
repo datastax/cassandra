@@ -48,13 +48,14 @@ import static org.junit.Assert.assertNull;
 public class WalkerTest extends AbstractTrieTestBase
 {
     @Parameterized.Parameter(0)
-    public Class<? extends IncrementalTrieWriter<?>> writerClass;
+    public Class<? extends IncrementalTrieWriter> writerClass;
 
     @Parameterized.Parameters(name = "{index}: trie writer class={0}")
     public static Collection<Object[]> data()
     {
         return Arrays.asList(new Object[]{ IncrementalTrieWriterSimple.class },
-                             new Object[]{ IncrementalTrieWriterPageAware.class });
+                             new Object[]{ IncrementalTrieWriterPageAware.class },
+                             new Object[]{ IncrementalDeepTrieWriterPageAware.class });
     }
 
     @Test
@@ -247,15 +248,21 @@ public class WalkerTest extends AbstractTrieTestBase
 
     private IncrementalTrieWriter<Integer> newTrieWriter(TrieSerializer<Integer, DataOutput> serializer, DataOutputPlus out)
     {
-        try
+        if (writerClass == IncrementalTrieWriterSimple.class)
         {
-            Constructor<? extends IncrementalTrieWriter<?>> c = writerClass.getDeclaredConstructor(TrieSerializer.class, DataOutputPlus.class);
-            c.setAccessible(true);
-            return (IncrementalTrieWriter<Integer>) c.newInstance(serializer, out);
+            return new IncrementalTrieWriterSimple<>(serializer, out);
         }
-        catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e)
+        else if (writerClass == IncrementalTrieWriterPageAware.class)
         {
-            throw Throwables.cleaned(e);
+            return new IncrementalTrieWriterPageAware<>(serializer, out);
+        }
+        else if (writerClass == IncrementalDeepTrieWriterPageAware.class)
+        {
+            return new IncrementalDeepTrieWriterPageAware<>(serializer, out, 4);
+        }
+        else
+        {
+            throw new AssertionError("Unknown writer class " + writerClass.getName());
         }
     }
 }
