@@ -22,8 +22,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
-import org.apache.cassandra.io.util.TailOverridingRebufferer;
-import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -36,7 +34,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
 {
     private final Rebufferer source;
-    private final boolean isPageAwareSupported;
     protected final long root;
 
     // State relating to current node.
@@ -59,11 +56,10 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     public Walker(Rebufferer source, long root)
     {
         this.source = source;
-        this.isPageAwareSupported = !(source instanceof TailOverridingRebufferer);
         this.root = root;
         try
         {
-            bh = source.rebuffer(pageStart(root));
+            bh = source.rebuffer(root);
             buf = bh.buffer();
         }
         catch (RuntimeException ex)
@@ -86,7 +82,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         if (curOffset < 0 || curOffset >= buf.limit())
         {
             BufferHolder currentBh = bh;
-            bh = source.rebuffer(pageStart(position));
+            bh = source.rebuffer(position);
             currentBh.release();
             buf = bh.buffer();
             curOffset = position - bh.offset();
@@ -365,15 +361,10 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
             long child = transition(i);
             if (child == -1)
                 continue;
-            out.format("%s%02x %s>", indent, transitionByte(i), pageStart(position) == pageStart(child) ? "--" : "==");
+            out.format("%s%02x %s>", indent, transitionByte(i), position == child ? "--" : "==");
             dumpTrie(out, payloadReader, child, indent + "  ");
             go(node);
         }
-    }
-
-    private long pageStart(long position)
-    {
-        return isPageAwareSupported ? PageAware.pageStart(position) : position;
     }
 
     @Override

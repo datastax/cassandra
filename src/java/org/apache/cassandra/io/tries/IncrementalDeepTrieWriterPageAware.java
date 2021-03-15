@@ -24,6 +24,12 @@ import java.util.List;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
 
+/**
+ * This class is a variant of {@link IncrementalTrieWriterPageAware} which is able to build even very deep
+ * trees. While the parent class uses recursion for clarity, it may end up with stack overflow for trees with
+ * very long keys, this implementation can switch processing from stack to heap at a certain depth (provided
+ * as a constructor param).
+ */
 public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWriterPageAware<VALUE>
 {
     private final int maxRecursionDepth;
@@ -40,7 +46,12 @@ public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWr
     }
 
     @Override
-    protected int recalcTotalSizeRecursiveOnStack(Node<VALUE> node, long nodePosition, int depth) throws IOException
+    protected int recalcTotalSize(Node<VALUE> node, long nodePosition) throws IOException
+    {
+        return recalcTotalSizeRecursiveOnStack(node, nodePosition, 0);
+    }
+
+    private int recalcTotalSizeRecursiveOnStack(Node<VALUE> node, long nodePosition, int depth) throws IOException
     {
         if (node.hasOutOfPageInBranch)
         {
@@ -64,7 +75,12 @@ public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWr
     }
 
     @Override
-    protected long writeRecursiveOnStack(Node<VALUE> node, int depth) throws IOException
+    protected long write(Node<VALUE> node) throws IOException
+    {
+        return writeRecursiveOnStack(node, 0);
+    }
+
+    private long writeRecursiveOnStack(Node<VALUE> node, int depth) throws IOException
     {
         long nodePosition = dest.position();
         for (Node<VALUE> child : node.children)
@@ -89,7 +105,12 @@ public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWr
     }
 
     @Override
-    protected long writePartialRecursiveOnStack(Node<VALUE> node, DataOutputPlus dest, long baseOffset, int depth) throws IOException
+    protected long writePartial(Node<VALUE> node, DataOutputPlus dest, long baseOffset) throws IOException
+    {
+        return writePartialRecursiveOnStack(node, dest, baseOffset, 0);
+    }
+
+    private long writePartialRecursiveOnStack(Node<VALUE> node, DataOutputPlus dest, long baseOffset, int depth) throws IOException
     {
         long startPosition = dest.position() + baseOffset;
 

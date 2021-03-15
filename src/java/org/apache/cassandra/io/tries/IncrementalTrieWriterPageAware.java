@@ -112,7 +112,7 @@ implements IncrementalTrieWriter<VALUE>
     {
         Node<VALUE> root = super.performCompletion();
 
-        int actualSize = recalcTotalSizeRecursive(root, dest.position());
+        int actualSize = recalcTotalSize(root, dest.position());
         int bytesLeft = dest.bytesLeftInPage();
         if (actualSize > bytesLeft)
         {
@@ -121,7 +121,7 @@ implements IncrementalTrieWriter<VALUE>
                 dest.padToPageBoundary();
                 bytesLeft = maxBytesPerPage;
                 // position changed, recalculate again
-                actualSize = recalcTotalSizeRecursive(root, dest.position());
+                actualSize = recalcTotalSize(root, dest.position());
             }
 
             if (actualSize > bytesLeft)
@@ -134,13 +134,13 @@ implements IncrementalTrieWriter<VALUE>
                 {
                     dest.padToPageBoundary();
                     // Recalculate again as pointer size may have changed, triggering assertion in writeRecursive.
-                    recalcTotalSizeRecursive(root, dest.position());
+                    recalcTotalSize(root, dest.position());
                 }
             }
         }
 
 
-        root.finalizeWithPosition(writeRecursive(root));
+        root.finalizeWithPosition(write(root));
         return root;
     }
 
@@ -201,7 +201,7 @@ implements IncrementalTrieWriter<VALUE>
             {
                 // We didn't know what size this branch will actually need to be, node's children may be far.
                 // We now know where we would place it, so let's reevaluate size.
-                int actualSize = recalcTotalSizeRecursive(child, dest.position());
+                int actualSize = recalcTotalSize(child, dest.position());
                 if (actualSize > bytesLeft)
                 {
                     if (bytesLeft == maxBytesPerPage)
@@ -225,7 +225,7 @@ implements IncrementalTrieWriter<VALUE>
                 }
             }
 
-            child.finalizeWithPosition(writeRecursive(child));
+            child.finalizeWithPosition(write(child));
             bytesLeft = dest.bytesLeftInPage();
         }
 
@@ -310,18 +310,13 @@ implements IncrementalTrieWriter<VALUE>
         }
     }
 
-    private int recalcTotalSizeRecursive(Node<VALUE> node, long nodePosition) throws IOException
-    {
-        return recalcTotalSizeRecursiveOnStack(node, nodePosition, 0);
-    }
-
-    protected int recalcTotalSizeRecursiveOnStack(Node<VALUE> node, long nodePosition, int depth) throws IOException
+    protected int recalcTotalSize(Node<VALUE> node, long nodePosition) throws IOException
     {
         if (node.hasOutOfPageInBranch)
         {
             int sz = 0;
             for (Node<VALUE> child : node.children)
-                sz += recalcTotalSizeRecursiveOnStack(child, nodePosition + sz, depth + 1);
+                sz += recalcTotalSize(child, nodePosition + sz);
             node.branchSize = sz;
         }
 
@@ -333,17 +328,12 @@ implements IncrementalTrieWriter<VALUE>
         return node.branchSize + node.nodeSize;
     }
 
-    private long writeRecursive(Node<VALUE> node) throws IOException
-    {
-        return writeRecursiveOnStack(node, 0);
-    }
-
-    protected long writeRecursiveOnStack(Node<VALUE> node, int depth) throws IOException
+    protected long write(Node<VALUE> node) throws IOException
     {
         long nodePosition = dest.position();
         for (Node<VALUE> child : node.children)
             if (child.filePos == -1)
-                child.filePos = writeRecursiveOnStack(child, depth + 1);
+                child.filePos = write(child);
 
         nodePosition += node.branchSize;
         assert dest.position() == nodePosition
@@ -394,18 +384,13 @@ implements IncrementalTrieWriter<VALUE>
             // Nothing will point to it, though, so that's fine.
             tail.cutoff = dest.paddedPosition();
             tail.count = count;
-            tail.root = writePartialRecursive(stack.getFirst(), buf, tail.cutoff);
+            tail.root = writePartial(stack.getFirst(), buf, tail.cutoff);
             tail.tail = buf.asNewBuffer();
             return tail;
         }
     }
 
-    private long writePartialRecursive(Node<VALUE> node, DataOutputPlus dest, long baseOffset) throws IOException
-    {
-        return writePartialRecursiveOnStack(node, dest, baseOffset, 0);
-    }
-
-    protected long writePartialRecursiveOnStack(Node<VALUE> node, DataOutputPlus dest, long baseOffset, int depth) throws IOException
+    protected long writePartial(Node<VALUE> node, DataOutputPlus dest, long baseOffset) throws IOException
     {
         long startPosition = dest.position() + baseOffset;
 
@@ -415,7 +400,7 @@ implements IncrementalTrieWriter<VALUE>
             if (child.filePos == -1)
             {
                 childrenToClear.add(child);
-                    child.filePos = writePartialRecursiveOnStack(child, dest, baseOffset, depth + 1);
+                    child.filePos = writePartial(child, dest, baseOffset);
             }
         }
 

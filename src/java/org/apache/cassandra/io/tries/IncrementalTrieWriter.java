@@ -74,6 +74,6 @@ public interface IncrementalTrieWriter<VALUE> extends AutoCloseable
      */
     static <VALUE> IncrementalTrieWriter<VALUE> open(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
     {
-        return new IncrementalTrieWriterPageAware<>(trieSerializer, dest);
+        return new IncrementalDeepTrieWriterPageAware<>(trieSerializer, dest);
     }
 }
