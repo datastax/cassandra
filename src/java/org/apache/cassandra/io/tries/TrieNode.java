@@ -125,10 +125,10 @@ public abstract class TrieNode
      */
     abstract public long greaterTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue);
     /**
-     * Returns a transition that is lower than the index returned by {@code search}. Should not be called for
-     * searchIndex == 0 / -1, otherwise such transition always exists.
+     * Returns a transition that is lower than the index returned by {@code search}. Returns {@code defaultValue} for
+     * {@code searchIndex} equals 0 or 1 as lesser transition for those indexes does not exist.
      */
-    abstract public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex);
+    abstract public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue);
 
     // Construction (serialization) methods
 
@@ -229,9 +229,9 @@ public abstract class TrieNode
         }
 
         @Override
-        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
         {
-            return -1;
+            return defaultValue;
         }
 
         @Override
@@ -306,9 +306,9 @@ public abstract class TrieNode
         }
 
         @Override
-        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
         {
-            return transition(src, position, positionLong, 0);
+            return searchIndex == 0 || searchIndex == -1 ? defaultValue : transition(src, position, positionLong, 0);
         }
 
         @Override
@@ -543,8 +543,10 @@ public abstract class TrieNode
             return transition(src, position, positionLong, searchIndex);
         }
 
-        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
         {
+            if (searchIndex == 0 || searchIndex == -1)
+                return defaultValue;
             if (searchIndex < 0)
                 searchIndex = -2 - searchIndex;
             else
@@ -724,8 +726,11 @@ public abstract class TrieNode
         }
 
         @Override
-        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long lesserTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
         {
+            if (searchIndex == 0 || searchIndex == -1)
+                return defaultValue;
+
             if (searchIndex < 0)
                 searchIndex = -2 - searchIndex;
             else
@@ -737,7 +742,7 @@ public abstract class TrieNode
                     return t;
             }
             assert false : "transition must always exist at 0 and we should not be called for less of that";
-            return -1;
+            return defaultValue;
         }
 
         @Override

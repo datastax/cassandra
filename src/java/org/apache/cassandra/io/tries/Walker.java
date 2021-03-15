@@ -127,9 +127,9 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         return nodeType.greaterTransition(buf, offset, position, searchIndex, defaultValue);
     }
 
-    protected final long lesserTransition(int searchIndex)
+    protected final long lesserTransition(int searchIndex, long defaultValue)
     {
-        return nodeType.lesserTransition(buf, offset, position, searchIndex);
+        return nodeType.lesserTransition(buf, offset, position, searchIndex, defaultValue);
     }
 
     protected final int transitionByte(int childIndex)
@@ -242,8 +242,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
             int b = stream.next();
             int searchIndex = search(b);
 
-            if (searchIndex > 0 || searchIndex < -1)
-                lesserBranch = lesserTransition(searchIndex);
+            lesserBranch = lesserTransition(searchIndex, lesserBranch);
 
             if (searchIndex < 0)
                 return b;
@@ -309,22 +308,21 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         {
             int b = stream.next();
             int searchIndex = search(b);
+            payload = null;
 
             greaterBranch = greaterTransition(searchIndex, greaterBranch);
+            lesserBranch = lesserTransition(searchIndex, lesserBranch);
+
             if (searchIndex == -1 || searchIndex == 0)
             {
                 int payloadBits = payloadFlags();
                 if (payloadBits > 0)
                     payload = extractor.extract((VALUE) this, payloadPosition(), payloadBits);
             }
-            else
-            {
-                lesserBranch = lesserTransition(searchIndex);
-                payload = null;
-            }
 
             if (searchIndex < 0)
                 return payload;
+
             go(transition(searchIndex));
         }
     }
