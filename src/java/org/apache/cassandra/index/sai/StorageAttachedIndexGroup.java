@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -67,7 +66,7 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * Orchestrates building of storage-attached indices, and manages lifecycle of resources shared between them.
  */
-public class StorageAttachedIndexGroup implements Index.Group, INotificationConsumer, Iterable<StorageAttachedIndex>
+public class StorageAttachedIndexGroup implements Index.Group, INotificationConsumer
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexGroup.class);
 
@@ -151,13 +150,6 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public boolean containsIndex(Index index)
     {
         return index instanceof StorageAttachedIndex && indices.contains(index);
-    }
-
-    @SuppressWarnings("NullableProblems")
-    @Override
-    public Iterator<StorageAttachedIndex> iterator()
-    {
-        return indices.iterator();
     }
 
     @Override
