@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 
 import com.google.common.base.Objects;
 import org.junit.Test;
@@ -36,6 +38,10 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexStatusManager;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -46,6 +52,7 @@ import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQueryable;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class IndexAvailabilityTest extends TestBaseImpl
 {
@@ -144,7 +151,123 @@ public class IndexAvailabilityTest extends TestBaseImpl
         }
     }
 
-    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName)
+    @Test
+    public void testNonQueryableNodeN2Rf2() throws Exception
+    {
+        shouldSkipNonQueryableNode(2, Collections.singletonList(1), Arrays.asList(1, 2));
+    }
+
+    @Test
+    public void testSkipNonQueryableNodeN3Rf3() throws Exception
+    {
+        shouldSkipNonQueryableNode(3, Collections.singletonList(1), Arrays.asList(1, 2), Arrays.asList(1, 2, 3));
+    }
+
+    @Test
+    public void testSkipNonQueryableNodeN1Rf1() throws Exception
+    {
+        shouldSkipNonQueryableNode(1, Collections.singletonList(1));
+    }
+
+    private void shouldSkipNonQueryableNode(int nodes, List<Integer>... nonQueryableNodesList) throws Exception
+    {
+        try (Cluster cluster = init(Cluster.build(nodes)
+                                           .withConfig(config -> config.with(GOSSIP)
+                                                                       .with(NETWORK))
+                                           .start()))
+        {
+            String table = "non_queryable_node_test_" + System.currentTimeMillis();
+            cluster.schemaChange(String.format(CREATE_TABLE, KEYSPACE, table));
+            cluster.schemaChange(String.format(CREATE_INDEX, "", KEYSPACE, table, "v1"));
+            cluster.schemaChange(String.format(CREATE_INDEX, "", KEYSPACE, table, "v2"));
+            waitForIndexQueryable(cluster, KEYSPACE);
+
+            // create 100 rows in 1 sstable
+            int rows = 100;
+            for (int i = 0; i < rows; i++)
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, v1, v2) VALUES ('%d', 0, '0');", KEYSPACE, table, i), ConsistencyLevel.QUORUM);
+            cluster.forEach(node -> node.flush(KEYSPACE));
+
+            String numericQuery = String.format("SELECT pk FROM %s.%s WHERE v1=0", KEYSPACE, table);
+            String stringQuery = String.format("SELECT pk FROM %s.%s WHERE v2='0'", KEYSPACE, table);
+            String multiIndexQuery = String.format("SELECT pk FROM %s.%s WHERE v1=0 AND v2='0'", KEYSPACE, table);
+
+            // get index name base on node id to have different non-queryable index on different nodes.
+            Function<Integer, String> nodeIdToColumn = nodeId -> "v" + (nodeId % 2 + 1);
+            IntFunction<String> nodeIdToIndex = nodeId -> IndexMetadata.generateDefaultIndexName(table, ColumnIdentifier.getInterned(nodeIdToColumn.apply(nodeId), false));
+
+            for (List<Integer> nonQueryableNodes : nonQueryableNodesList)
+            {
+                int numericLiveReplicas = (int) (nodes - nonQueryableNodes.stream().map(nodeIdToColumn).filter(c -> c.equals("v1")).count());
+                int stringLiveReplicas = (int) (nodes - nonQueryableNodes.stream().map(nodeIdToColumn).filter(c -> c.equals("v2")).count());
+                int liveReplicas = nodes - nonQueryableNodes.size();
+
+                // mark index non-queryable at once and wait for ack from remote peers
+                for (int local : nonQueryableNodes)
+                    markIndexNonQueryable(cluster.get(local), KEYSPACE, table, nodeIdToIndex.apply(local));
+
+                for (int local : nonQueryableNodes)
+                    for (int remote = 1; remote <= cluster.size(); remote++)
+                        waitForIndexingStatus(cluster.get(remote), KEYSPACE, nodeIdToIndex.apply(local), cluster.get(local), Index.Status.BUILD_FAILED);
+
+                // test different query types
+                executeOnAllCoordinatorsAllConsistencies(cluster, numericQuery, numericLiveReplicas, rows);
+                executeOnAllCoordinatorsAllConsistencies(cluster, stringQuery, stringLiveReplicas, rows);
+                executeOnAllCoordinatorsAllConsistencies(cluster, multiIndexQuery, liveReplicas, rows);
+
+                // rebuild local index at once and wait for remote ack
+                for (int local : nonQueryableNodes)
+                {
+                    String index = nodeIdToIndex.apply(local);
+                    cluster.get(local).runOnInstance(() -> ColumnFamilyStore.rebuildSecondaryIndex(KEYSPACE, table, index));
+                }
+
+                for (int local : nonQueryableNodes)
+                    for (int remote = 1; remote <= cluster.size(); remote++)
+                        waitForIndexingStatus(cluster.get(remote), KEYSPACE, nodeIdToIndex.apply(local), cluster.get(local), Index.Status.BUILD_SUCCEEDED);
+
+                // With cl=all, query should pass
+                executeOnAllCoordinators(cluster, numericQuery, ConsistencyLevel.ALL, rows);
+                executeOnAllCoordinators(cluster, stringQuery, ConsistencyLevel.ALL, rows);
+                executeOnAllCoordinators(cluster, multiIndexQuery, ConsistencyLevel.ALL, rows);
+            }
+        }
+    }
+
+    private void executeOnAllCoordinatorsAllConsistencies(Cluster cluster, String statement, int liveReplicas, int num) throws Exception
+    {
+        int allReplicas = cluster.size();
+
+        // test different consistency levels
+        executeOnAllCoordinators(cluster, statement, ConsistencyLevel.ONE, liveReplicas >= 1 ? num : -1);
+        if (allReplicas >= 2)
+            executeOnAllCoordinators(cluster, statement, ConsistencyLevel.TWO, liveReplicas >= 2 ? num : -1);
+        executeOnAllCoordinators(cluster, statement, ConsistencyLevel.ALL, liveReplicas >= allReplicas ? num : -1);
+    }
+
+    private void executeOnAllCoordinators(Cluster cluster, String query, ConsistencyLevel level, int expected) throws Exception
+    {
+        // test different coordinator
+        for (int nodeId = 1; nodeId <= cluster.size(); nodeId++)
+        {
+            final int node = nodeId;
+            if (expected >= 0)
+                assertEquals(expected, cluster.coordinator(nodeId).execute(query, level).length);
+            else
+            {
+                try
+                {
+                    cluster.coordinator(node).execute(query, level);
+                }
+                catch (Throwable e)
+                {
+                    assertTrue(e.getClass().getSimpleName().equals("ReadFailureException"));
+                }
+            }
+        }
+    }
+
+    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_FAILED);
 
