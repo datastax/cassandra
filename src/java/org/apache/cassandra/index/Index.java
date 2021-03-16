@@ -21,6 +21,7 @@
 package org.apache.cassandra.index;
 
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
@@ -429,6 +430,23 @@ public interface Index
     public AbstractType<?> customExpressionValueType();
 
     /**
+     * If the index supports custom search expressions using the
+     * {@code SELECT * FROM table WHERE expr(index_name, expression)} syntax, this method should return a new
+     * {@link RowFilter.CustomExpression} for the specified expression value. Index implementations may provide their
+     * own implementations using method {@link RowFilter.CustomExpression#isSatisfiedBy(TableMetadata, DecoratedKey, Row)}
+     * to filter reconciled rows in the coordinator. Otherwise, the default implementation will accept all rows.
+     * See DB-2185 and DSP-16537 for further details.
+     *
+     * @param metadata the indexed table metadata
+     * @param value the custom expression value
+     * @return a custom index expression for the specified value
+     */
+    default RowFilter.CustomExpression customExpressionFor(TableMetadata metadata, ByteBuffer value)
+    {
+        return new RowFilter.CustomExpression(metadata, getIndexMetadata(), value);
+    }
+
+    /**
      * Transform an initial RowFilter into the filter that will still need to applied
      * to a set of Rows after the index has performed it's initial scan.
      * Used in ReadCommand#executeLocal to reduce the amount of filtering performed on the
@@ -628,6 +646,23 @@ public interface Index
      */
     default void validate(ReadCommand command) throws InvalidRequestException
     {
+    }
+
+    /**
+     * Tells whether this index supports replica fitering protection or not.
+     *
+     * Replica filtering protection might need to run the query row filter in the coordinator to detect stale results.
+     * An index implementation will be compatible with this protection mechanism if it returns the same results for the
+     * row filter as CQL will return with {@code ALLOW FILTERING} and without using the index. This means that index
+     * implementations using custom query syntax or applying transformations to the indexed data won't support it.
+     * See CASSANDRA-8272 for further details.
+     *
+     * @param rowFilter rowFilter of query to decide if it supports replica filtering protection or not
+     * @return true if this index supports replica filtering protection, false otherwise
+     */
+    default boolean supportsReplicaFilteringProtection(RowFilter rowFilter)
+    {
+        return true;
     }
 
     /**
