@@ -16,79 +16,82 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.cql;
+package org.apache.cassandra.distributed.test.sai;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import com.datastax.driver.core.SimpleStatement;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.index.sai.cql.DataModel;
 
-public class SingleNodeExecutor implements DataModel.Executor
+public class MultiNodeExecutor implements DataModel.Executor
 {
-    private final SAITester tester;
-    private final Injections.Counter counter;
+    private final Cluster cluster;
 
-    public SingleNodeExecutor(SAITester tester, Injections.Counter counter)
+    public MultiNodeExecutor(Cluster cluster)
     {
-        this.tester = tester;
-        this.counter = counter;
+        this.cluster = cluster;
     }
 
     @Override
     public void createTable(String statement)
     {
-        tester.createTable(statement);
+        cluster.schemaChange(statement);
     }
 
     @Override
     public void flush(String keyspace, String table)
     {
-        tester.flush(keyspace, table);
+        cluster.forEach(node -> node.flush(keyspace));
     }
 
     @Override
     public void compact(String keyspace, String table)
     {
-        tester.compact(keyspace, table);
+        cluster.forEach(node -> node.forceCompact(keyspace, table));
     }
 
     @Override
     public void disableCompaction(String keyspace, String table)
     {
-        tester.disableCompaction(keyspace, table);
+        cluster.forEach((node) -> node.runOnInstance(() -> Keyspace.open(keyspace).getColumnFamilyStore(table).disableAutoCompaction()));
     }
 
     @Override
     public void waitForIndexQueryable(String keyspace, String table)
     {
-        tester.waitForTableIndexesQueryable(keyspace, table);
+        SAIUtil.waitForIndexQueryable(cluster, keyspace);
     }
 
     @Override
     public void executeLocal(String query, Object... values) throws Throwable
     {
-        tester.executeFormattedQuery(query, values);
+        cluster.coordinator(1).execute(query, ConsistencyLevel.QUORUM);
     }
 
     @Override
-    public List<Object> executeRemote(String query, int fetchSize, Object... values)
+    public List<Object> executeRemote(String query, int fetchSize, Object... values) throws Throwable
     {
-        SimpleStatement statement = new SimpleStatement(query, values);
-        statement.setFetchSize(fetchSize);
-        return tester.sessionNet().execute(statement).all().stream().map(r -> r.getObject(0)).collect(Collectors.toList());
+        Iterator<Object> iterator = cluster.coordinator(1).executeWithPagingWithResult(query, ConsistencyLevel.QUORUM, fetchSize, values).map(row -> row.get(0));
+
+        List<Object> result = new ArrayList<>();
+        iterator.forEachRemaining(result::add);
+
+        return result;
     }
 
     @Override
     public void counterReset()
     {
-        counter.reset();
+        AbstractQueryTester.Counter.reset();
     }
 
     @Override
     public long getCounter()
     {
-        return counter.get();
+        return AbstractQueryTester.Counter.get();
     }
 }
