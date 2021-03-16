@@ -130,7 +130,7 @@ public class VersionedValue implements Comparable<VersionedValue>
         {
             this.partitioner = partitioner;
         }
-        
+
         public VersionedValue cloneWithHigherVersion(VersionedValue value)
         {
             return new VersionedValue(value.value);
@@ -240,6 +240,11 @@ public class VersionedValue implements Comparable<VersionedValue>
         public VersionedValue shutdown(boolean value)
         {
             return new VersionedValue(VersionedValue.SHUTDOWN + VersionedValue.DELIMITER + value);
+        }
+
+        public VersionedValue indexStatus(String status)
+        {
+            return new VersionedValue(status);
         }
 
         public VersionedValue datacenter(String dcId)

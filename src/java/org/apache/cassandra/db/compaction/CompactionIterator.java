@@ -23,6 +23,7 @@ import java.util.function.LongPredicate;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Ordering;
 
+import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -106,8 +107,8 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         this.activeCompactions.beginCompaction(this); // note that CompactionTask also calls this, but CT only creates CompactionIterator with a NOOP ActiveCompactions
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
-                                           ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
-                                           : UnfilteredPartitionIterators.merge(scanners, listener());
+                                             ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
+                                             : UnfilteredPartitionIterators.merge(scanners, listener());
         merged = Transformation.apply(merged, new GarbageSkipper(controller));
         merged = Transformation.apply(merged, new Purger(controller, nowInSec));
         merged = DuplicateRowChecker.duringCompaction(merged, type);
@@ -169,7 +170,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
                 CompactionIterator.this.updateCounterFor(merged);
 
-                if (type != OperationType.COMPACTION || !controller.cfs.indexManager.hasIndexes())
+                if (type != OperationType.COMPACTION || !controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION))
                     return null;
 
                 Columns statics = Columns.NONE;
@@ -197,10 +198,10 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
                 // A new OpOrder.Group is opened in an ARM block wrapping the commits
                 // TODO: this should probably be done asynchronously and batched.
                 final CompactionTransaction indexTransaction =
-                    controller.cfs.indexManager.newCompactionTransaction(partitionKey,
-                                                                         regularAndStaticColumns,
-                                                                         versions.size(),
-                                                                         nowInSec);
+                controller.cfs.indexManager.newCompactionTransaction(partitionKey,
+                                                                     regularAndStaticColumns,
+                                                                     versions.size(),
+                                                                     nowInSec);
 
                 return new UnfilteredRowIterators.MergeListener()
                 {
@@ -370,8 +371,8 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
             // Only preserve partition level deletion if not shadowed. (Note: Shadowing deletion must not be copied.)
             this.partitionLevelDeletion = dataSource.partitionLevelDeletion().supersedes(tombSource.partitionLevelDeletion()) ?
-                    dataSource.partitionLevelDeletion() :
-                    DeletionTime.LIVE;
+                                          dataSource.partitionLevelDeletion() :
+                                          DeletionTime.LIVE;
 
             Row dataStaticRow = garbageFilterRow(dataSource.staticRow(), tombSource.staticRow());
             this.staticRow = dataStaticRow != null ? dataStaticRow : Rows.EMPTY_STATIC_ROW;
@@ -493,10 +494,10 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
                 else
                     return new RangeTombstoneBoundMarker(marker.closeBound(false), marker.closeDeletionTime(false));
             else
-                if (!supersededAfter)
-                    return new RangeTombstoneBoundMarker(marker.openBound(false), marker.openDeletionTime(false));
-                else
-                    return null;
+            if (!supersededAfter)
+                return new RangeTombstoneBoundMarker(marker.openBound(false), marker.openDeletionTime(false));
+            else
+                return null;
         }
 
         @Override

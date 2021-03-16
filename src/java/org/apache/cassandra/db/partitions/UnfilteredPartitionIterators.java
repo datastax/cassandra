@@ -57,10 +57,10 @@ public abstract class UnfilteredPartitionIterators
         // If the query has no results, we'll get an empty iterator, but we still
         // want a RowIterator out of this method, so we return an empty one.
         UnfilteredRowIterator toReturn = iter.hasNext()
-                              ? iter.next()
-                              : EmptyIterators.unfilteredRow(command.metadata(),
-                                                             command.partitionKey(),
-                                                             command.clusteringIndexFilter().isReversed());
+                                         ? iter.next()
+                                         : EmptyIterators.unfilteredRow(command.metadata(),
+                                                                        command.partitionKey(),
+                                                                        command.clusteringIndexFilter().isReversed());
 
         // Note that in general, we should wrap the result so that it's close method actually
         // close the whole UnfilteredPartitionIterator.
@@ -129,8 +129,8 @@ public abstract class UnfilteredPartitionIterators
             protected UnfilteredRowIterator getReduced()
             {
                 UnfilteredRowIterators.MergeListener rowListener = listener == null
-                                                                 ? null
-                                                                 : listener.getRowMergeListener(partitionKey, toMerge);
+                                                                   ? null
+                                                                   : listener.getRowMergeListener(partitionKey, toMerge);
 
                 // Make a single empty iterator object to merge, we don't need toMerge.size() copiess
                 UnfilteredRowIterator empty = null;
@@ -149,7 +149,7 @@ public abstract class UnfilteredPartitionIterators
                 return UnfilteredRowIterators.merge(toMerge, rowListener);
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 toMerge.clear();
                 for (int i = 0; i < iterators.size(); i++)
@@ -215,7 +215,7 @@ public abstract class UnfilteredPartitionIterators
                 };
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 toMerge.clear();
             }

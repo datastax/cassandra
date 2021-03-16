@@ -47,9 +47,13 @@ import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import org.junit.*;
+import org.junit.rules.TestWatcher;
+import org.junit.runner.Description;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.randomizedtesting.generators.RandomInts;
+import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
@@ -57,6 +61,7 @@ import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -87,6 +92,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JMXServerUtils;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static junit.framework.Assert.assertNotNull;
 
@@ -113,6 +119,8 @@ public abstract class CQLTester
     protected static String jmxHost;
     protected static int jmxPort;
     protected static MBeanServerConnection jmxConnection;
+
+    private static Randomization random;
 
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
@@ -233,7 +241,7 @@ public abstract class CQLTester
         jmxServer = JMXServerUtils.createJMXServer(jmxPort, true);
         jmxServer.start();
     }
-    
+
     public static void createMBeanServerConnection() throws Exception
     {
         assert jmxServer != null : "jmxServer not started";
@@ -251,6 +259,16 @@ public abstract class CQLTester
         return new JMXServiceURL(String.format("service:jmx:rmi:///jndi/rmi://%s:%d/jmxrmi", jmxHost, jmxPort));
     }
 
+    public static Randomization getRandom()
+    {
+        if (random == null)
+            random = new Randomization();
+        return random;
+    }
+
+    @Rule
+    public FailureWatcher failureRule = new FailureWatcher();
+
     @BeforeClass
     public static void setUpClass()
     {
@@ -266,9 +284,9 @@ public abstract class CQLTester
     public static void tearDownClass()
     {
         for (Session sess : sessions.values())
-                sess.close();
+            sess.close();
         for (Cluster cl : clusters.values())
-                cl.close();
+            cl.close();
 
         if (server != null)
             server.stop();
@@ -495,10 +513,12 @@ public abstract class CQLTester
 
     public ColumnFamilyStore getCurrentColumnFamilyStore(String keyspace)
     {
-        String currentTable = currentTable();
-        return currentTable == null
-             ? null
-             : Keyspace.open(keyspace).getColumnFamilyStore(currentTable);
+        return getColumnFamilyStore(keyspace, currentTable());
+    }
+
+    public ColumnFamilyStore getColumnFamilyStore(String keyspace, String table)
+    {
+        return Keyspace.open(keyspace).getColumnFamilyStore(table);
     }
 
     public void flush(boolean forceFlush)
@@ -514,23 +534,38 @@ public abstract class CQLTester
 
     public void flush(String keyspace)
     {
-        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        flush(keyspace, currentTable());
+    }
+
+    public void flush(String keyspace, String table)
+    {
+        ColumnFamilyStore store = getColumnFamilyStore(keyspace, table);
         if (store != null)
             store.forceBlockingFlush();
     }
 
     public void disableCompaction(String keyspace)
     {
-        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        disableCompaction(keyspace, currentTable());
+    }
+
+    public void disableCompaction(String keyspace, String table)
+    {
+        ColumnFamilyStore store = getColumnFamilyStore(keyspace, table);
         if (store != null)
             store.disableAutoCompaction();
     }
 
     public void compact()
     {
-         ColumnFamilyStore store = getCurrentColumnFamilyStore();
-         if (store != null)
-             store.forceMajorCompaction();
+        compact(KEYSPACE, currentTable());
+    }
+
+    public void compact(String keyspace, String table)
+    {
+        ColumnFamilyStore store = getColumnFamilyStore(keyspace, table);
+        if (store != null)
+            store.forceMajorCompaction();
     }
 
     public void disableCompaction()
@@ -704,14 +739,14 @@ public abstract class CQLTester
         logger.info(fullQuery);
         schemaChange(fullQuery);
     }
- 
+
     protected void alterKeyspaceMayThrow(String query) throws Throwable
     {
         String fullQuery = String.format(query, currentKeyspace());
         logger.info(fullQuery);
         QueryProcessor.executeOnceInternal(fullQuery);
     }
-    
+
     protected String createKeyspaceName()
     {
         String currentKeyspace = String.format("keyspace_%02d", seqNumber.getAndIncrement());
@@ -719,7 +754,7 @@ public abstract class CQLTester
         return currentKeyspace;
     }
 
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return createTable(KEYSPACE, query);
     }
@@ -808,8 +843,8 @@ public abstract class CQLTester
         String column = matcher.group(9);
 
         String baseName = Strings.isNullOrEmpty(column)
-                        ? IndexMetadata.generateDefaultIndexName(table)
-                        : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
+                          ? IndexMetadata.generateDefaultIndexName(table)
+                          : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
 
         KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
         return ks.findAvailableIndexName(baseName);
@@ -891,6 +926,23 @@ public abstract class CQLTester
         schemaChange(fullQuery);
     }
 
+    /**
+     *  Because the tracing executor is single threaded, submitting an empty event should ensure
+     *  that all tracing events mutations have been applied.
+     */
+    protected void waitForTracingEvents()
+    {
+        try
+        {
+            Stage.TRACING.executor().submit(() -> {}).get();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to wait for tracing events: {}", t);
+        }
+    }
+
     protected static void assertSchemaChange(String query,
                                              Event.SchemaChange.Change expectedChange,
                                              Event.SchemaChange.Target expectedTarget,
@@ -959,7 +1011,7 @@ public abstract class CQLTester
         return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 
-    protected Session sessionNet()
+    public Session sessionNet()
     {
         return sessionNet(getDefaultVersion());
     }
@@ -993,12 +1045,12 @@ public abstract class CQLTester
         return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
-    protected UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
     {
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    protected UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
     {
         UntypedResultSet rs;
         if (usePrepared)
@@ -1071,8 +1123,8 @@ public abstract class CQLTester
             {
                 DataType type = meta.getType(j);
                 com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                                                .getCodecRegistry()
-                                                                                                .codecFor(type);
+                                                                           .getCodecRegistry()
+                                                                           .codecFor(type);
                 ByteBuffer expectedByteValue = codec.serialize(expected[j], com.datastax.driver.core.ProtocolVersion.fromInt(protocolVersion.asInt()));
                 int expectedBytes = expectedByteValue == null ? -1 : expectedByteValue.remaining();
                 ByteBuffer actualValue = actual.getBytesUnsafe(meta.getName(j));
@@ -1472,7 +1524,7 @@ public abstract class CQLTester
     private static void assertMessageContains(String text, Exception e)
     {
         Assert.assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
-                e.getMessage().contains(text));
+                          e.getMessage().contains(text));
     }
 
     @FunctionalInterface
@@ -1930,6 +1982,102 @@ public abstract class CQLTester
         public String toString()
         {
             return "UserTypeValue" + toCQLString();
+        }
+    }
+
+    public static class Randomization
+    {
+        private long seed;
+        private Random random;
+
+        Randomization()
+        {
+            if (random == null)
+            {
+                seed = Long.getLong("cassandra.test.random.seed", System.nanoTime());
+                random = new Random(seed);
+            }
+        }
+
+        public void printSeedOnFailure()
+        {
+            System.err.println("Randomized test failed. To rerun test use -Dcassandra.test.random.seed=" + seed);
+        }
+
+        public int nextInt()
+        {
+            return random.nextInt();
+        }
+
+        public int nextIntBetween(int minValue, int maxValue)
+        {
+            return RandomInts.randomIntBetween(random, minValue, maxValue);
+        }
+
+        public long nextLong()
+        {
+            return random.nextLong();
+        }
+
+        public short nextShort()
+        {
+            return (short)random.nextInt(Short.MAX_VALUE + 1);
+        }
+
+        public byte nextByte()
+        {
+            return (byte)random.nextInt(Byte.MAX_VALUE + 1);
+        }
+
+        public BigInteger nextBigInteger(int minNumBits, int maxNumBits)
+        {
+            return new BigInteger(RandomInts.randomIntBetween(random, minNumBits, maxNumBits), random);
+        }
+
+        public BigDecimal nextBigDecimal(int minUnscaledValue, int maxUnscaledValue, int minScale, int maxScale)
+        {
+            return BigDecimal.valueOf(RandomInts.randomIntBetween(random, minUnscaledValue, maxUnscaledValue),
+                                      RandomInts.randomIntBetween(random, minScale, maxScale));
+        }
+
+        public float nextFloat()
+        {
+            return random.nextFloat();
+        }
+
+        public double nextDouble()
+        {
+            return random.nextDouble();
+        }
+
+        public String nextAsciiString(int minLength, int maxLength)
+        {
+            return RandomStrings.randomAsciiOfLengthBetween(random, minLength, maxLength);
+        }
+
+        public String nextTextString(int minLength, int maxLength)
+        {
+            return RandomStrings.randomRealisticUnicodeOfLengthBetween(random, minLength, maxLength);
+        }
+
+        public boolean nextBoolean()
+        {
+            return random.nextBoolean();
+        }
+
+        public void nextBytes(byte[] bytes)
+        {
+            random.nextBytes(bytes);
+        }
+    }
+
+    public static class FailureWatcher extends TestWatcher
+    {
+        @Override
+        protected void failed(Throwable e, Description description)
+        {
+            if (random != null)
+                random.printSeedOnFailure();
         }
     }
 }

@@ -38,7 +38,7 @@ public enum ApplicationState
     INTERNAL_ADDRESS_AND_PORT, //Replacement for INTERNAL_IP with up to two ports
     NATIVE_ADDRESS_AND_PORT, //Replacement for RPC_ADDRESS
     STATUS_WITH_PORT, //Replacement for STATUS
-    X3,
+    INDEX_STATUS,
     X4,
     X5,
     X6,

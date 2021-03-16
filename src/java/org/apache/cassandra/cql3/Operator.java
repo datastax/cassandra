@@ -298,12 +298,12 @@ public enum Operator
      */
     public static Operator readFrom(DataInput input) throws IOException
     {
-          int b = input.readInt();
-          for (Operator operator : values())
-              if (operator.b == b)
-                  return operator;
+        int b = input.readInt();
+        for (Operator operator : values())
+            if (operator.b == b)
+                return operator;
 
-          throw new IOException(String.format("Cannot resolve Relation.Type from binary representation: %s", b));
+        throw new IOException(String.format("Cannot resolve Relation.Type from binary representation: %s", b));
     }
 
     /**
@@ -314,6 +314,15 @@ public enum Operator
     public int serializedSize()
     {
         return 4;
+    }
+
+    /**
+     * Checks if this operator is a like operator.
+     * @return {@code true} if this operator is a like operator, {@code false} otherwise.
+     */
+    public boolean isLike()
+    {
+        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
     }
 
     /**
@@ -328,7 +337,7 @@ public enum Operator
     @Override
     public String toString()
     {
-         return this.name();
+        return this.name();
     }
 
     /**

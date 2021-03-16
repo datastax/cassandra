@@ -342,7 +342,7 @@ public class Keyspace
         this.schema = schema;
         metadata = schema.getKeyspaceMetadata(keyspaceName);
         assert metadata != null : "Unknown keyspace " + keyspaceName;
-        
+
         if (metadata.isVirtual())
             throw new IllegalStateException("Cannot initialize Keyspace with virtual metadata " + keyspaceName);
         createReplicationStrategy(metadata);
@@ -626,7 +626,6 @@ public class Keyspace
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
-        int nowInSec = FBUtilities.nowInSeconds();
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
@@ -655,10 +654,7 @@ public class Keyspace
                     }
                 }
 
-                UpdateTransaction indexTransaction = updateIndexes
-                                                     ? cfs.indexManager.newUpdateTransaction(upd, ctx, nowInSec)
-                                                     : UpdateTransaction.NO_OP;
-                cfs.getWriteHandler().write(upd, ctx, indexTransaction);
+                cfs.getWriteHandler().write(upd, ctx, updateIndexes);
 
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());

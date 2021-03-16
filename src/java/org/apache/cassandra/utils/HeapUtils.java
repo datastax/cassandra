@@ -58,8 +58,8 @@ public final class HeapUtils
             String jcmdCommand = jcmdPath == null ? "jcmd" : jcmdPath;
 
             String[] histoCommands = new String[] {jcmdCommand,
-                    processId.toString(),
-                    "GC.class_histogram"};
+                                                   processId.toString(),
+                                                   "GC.class_histogram"};
 
             logProcessOutput(Runtime.getRuntime().exec(histoCommands));
         }
@@ -115,7 +115,7 @@ public final class HeapUtils
      * Retrieves the process ID or <code>null</code> if the process ID cannot be retrieved.
      * @return the process ID or <code>null</code> if the process ID cannot be retrieved.
      */
-    private static Long getProcessId()
+    public static Long getProcessId()
     {
         long pid = NativeLibrary.getProcessID();
         if (pid >= 0)

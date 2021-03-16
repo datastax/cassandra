@@ -46,13 +46,13 @@ public class GcCompactionTest extends CQLTester
     // Test needs synchronous table drop to avoid flushes causing flaky failures
 
     @Override
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return super.createTable(KEYSPACE_PER_TEST, query);
     }
 
     @Override
-    protected UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }
@@ -78,7 +78,7 @@ public class GcCompactionTest extends CQLTester
                           "  extra text," +
                           "  PRIMARY KEY((key, column), data)" +
                           ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'row'  };"
-                          );
+        );
 
     }
 
@@ -92,7 +92,7 @@ public class GcCompactionTest extends CQLTester
                           "  extra text," +
                           "  PRIMARY KEY(key, column)" +
                           ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'row'  };"
-                          );
+        );
 
     }
 
@@ -108,7 +108,7 @@ public class GcCompactionTest extends CQLTester
                           "  extra text," +
                           "  PRIMARY KEY(key, column, data)" +
                           ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'row'  };"
-                          );
+        );
     }
 
     private void runCompactionTest(String tableDef) throws Throwable
@@ -199,7 +199,7 @@ public class GcCompactionTest extends CQLTester
         Thread.sleep(1000);
 
         CompactionManager.AllSSTableOpStatus status =
-                CompactionManager.instance.performGarbageCollection(getCurrentColumnFamilyStore(), CompactionParams.TombstoneOption.ROW, 1);
+        CompactionManager.instance.performGarbageCollection(getCurrentColumnFamilyStore(), CompactionParams.TombstoneOption.ROW, 1);
         assertEquals(CompactionManager.AllSSTableOpStatus.SUCCESSFUL, status);
 
         SSTableReader[] tables = cfs.getLiveSSTables().toArray(new SSTableReader[0]);
@@ -223,13 +223,13 @@ public class GcCompactionTest extends CQLTester
     public void testGcCompactionCells() throws Throwable
     {
         createTable("CREATE TABLE %s(" +
-                          "  key int," +
-                          "  column int," +
-                          "  data int," +
-                          "  extra text," +
-                          "  PRIMARY KEY(key)" +
-                          ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
-                          );
+                    "  key int," +
+                    "  column int," +
+                    "  data int," +
+                    "  extra text," +
+                    "  PRIMARY KEY(key)" +
+                    ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
+        );
 
         for (int i = 0; i < KEY_COUNT; ++i)
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
@@ -263,13 +263,13 @@ public class GcCompactionTest extends CQLTester
     public void testGcCompactionStatic() throws Throwable
     {
         createTable("CREATE TABLE %s(" +
-                          "  key int," +
-                          "  column int," +
-                          "  data int static," +
-                          "  extra text," +
-                          "  PRIMARY KEY(key, column)" +
-                          ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
-                          );
+                    "  key int," +
+                    "  column int," +
+                    "  data int static," +
+                    "  extra text," +
+                    "  PRIMARY KEY(key, column)" +
+                    ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
+        );
 
         for (int i = 0; i < KEY_COUNT; ++i)
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
@@ -305,12 +305,12 @@ public class GcCompactionTest extends CQLTester
     public void testGcCompactionComplexColumn() throws Throwable
     {
         createTable("CREATE TABLE %s(" +
-                          "  key int," +
-                          "  data map<int, int>," +
-                          "  extra text," +
-                          "  PRIMARY KEY(key)" +
-                          ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
-                          );
+                    "  key int," +
+                    "  data map<int, int>," +
+                    "  extra text," +
+                    "  PRIMARY KEY(key)" +
+                    ") WITH compaction = { 'class' :  'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones' : 'cell'  };"
+        );
 
         for (int i = 0; i < KEY_COUNT; ++i)
             for (int j = 0; j < CLUSTERING_COUNT; ++j)

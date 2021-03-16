@@ -39,8 +39,8 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
         if (sources.size() == 1)
         {
             return reducer.trivialReduceIsTrivial()
-                 ? new TrivialOneToOne<>(sources, reducer)
-                 : new OneToOne<>(sources, reducer);
+                   ? new TrivialOneToOne<>(sources, reducer)
+                   : new OneToOne<>(sources, reducer);
         }
         return new ManyToOne<>(sources, comparator, reducer);
     }
@@ -106,7 +106,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
      * The iterator is further complicated by the need to avoid advancing the input iterators until an output is
      * actually requested. To achieve this {@code consume} walks the heap to find equal items without advancing the
      * iterators, and {@code advance} moves them and restores the heap structure before any items can be consumed.
-     * 
+     *
      * To avoid having to do additional comparisons in consume to identify the equal items, we keep track of equality
      * between children and their parents in the heap. More precisely, the lines in the diagram above define the
      * following relationship:
@@ -442,7 +442,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          * Called at the beginning of each new key, before any reduce is called.
          * To be overridden by implementing classes.
          */
-        protected void onKeyChange() {}
+        public void onKeyChange() {}
 
         /**
          * May be overridden by implementations that require cleaning up after use
@@ -486,6 +486,39 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
             if (!source.hasNext())
                 return endOfData();
             return (Out) source.next();
+        }
+    }
+
+    public static <In> Reducer<In, In> getIdentity()
+    {
+        return new IdentityReducer<>();
+    }
+
+    private static class IdentityReducer<In> extends Reducer<In, In>
+    {
+        private In reduced;
+
+        @Override
+        public void reduce(int idx, In current)
+        {
+            this.reduced = current;
+        }
+
+        @Override
+        public In getReduced()
+        {
+            return reduced;
+        }
+
+        @Override
+        public void onKeyChange() {
+            this.reduced = null;
+        }
+
+        @Override
+        public boolean trivialReduceIsTrivial()
+        {
+            return true;
         }
     }
 }

@@ -76,7 +76,7 @@ public class NativeAllocator extends MemtableAllocator
         @Override
         public void newRow(Clustering<?> clustering)
         {
-            if (clustering != Clustering.STATIC_CLUSTERING)
+            if (clustering != Clustering.EMPTY && clustering != Clustering.STATIC_CLUSTERING)
                 clustering = new NativeClustering(allocator, writeOp, clustering);
             super.newRow(clustering);
         }
@@ -249,7 +249,7 @@ public class NativeAllocator extends MemtableAllocator
         public String toString()
         {
             return "Region@" + System.identityHashCode(this) +
-                    "waste=" + Math.max(0, capacity - nextFreeOffset.get());
+                   "waste=" + Math.max(0, capacity - nextFreeOffset.get());
         }
     }
 

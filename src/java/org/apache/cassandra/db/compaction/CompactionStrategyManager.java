@@ -286,7 +286,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      * pause compaction while we cancel all ongoing compactions
      *
      * Separate call from enable/disable to not have to save the enabled-state externally
-      */
+     */
     public void pause()
     {
         writeLock.lock();
@@ -1064,7 +1064,7 @@ public class CompactionStrategyManager implements INotificationConsumer
                                                        boolean isTransient,
                                                        MetadataCollector collector,
                                                        SerializationHeader header,
-                                                       Collection<Index> indexes,
+                                                       Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
         SSTable.validateRepairedMetadata(repairedAt, pendingRepair, isTransient);
@@ -1079,7 +1079,7 @@ public class CompactionStrategyManager implements INotificationConsumer
                                                                                               isTransient,
                                                                                               collector,
                                                                                               header,
-                                                                                              indexes,
+                                                                                              indexGroups,
                                                                                               lifecycleNewTracker);
         }
         finally
@@ -1144,7 +1144,7 @@ public class CompactionStrategyManager implements INotificationConsumer
     /**
      * Mutates sstable repairedAt times and notifies listeners of the change with the writeLock held. Prevents races
      * with other processes between when the metadata is changed and when sstables are moved between strategies.
-      */
+     */
     public void mutateRepaired(Collection<SSTableReader> sstables, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
         Set<SSTableReader> changed = new HashSet<>();

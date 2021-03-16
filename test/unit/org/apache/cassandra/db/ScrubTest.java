@@ -432,9 +432,9 @@ public class ScrubTest
             CompressionMetadata compData = CompressionMetadata.create(sstable.getFilename());
 
             CompressionMetadata.Chunk chunk1 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
+            sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
             CompressionMetadata.Chunk chunk2 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
+            sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
 
             startPosition = Math.min(chunk1.offset, chunk2.offset);
             endPosition = Math.max(chunk1.offset + chunk1.length, chunk2.offset + chunk2.length);
@@ -627,7 +627,7 @@ public class ScrubTest
     }
 
     private void testScrubIndex(String cfName, String colName, boolean composite, boolean ... scrubs)
-            throws IOException, ExecutionException, InterruptedException
+    throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.instance.disableAutoCompaction();
         Keyspace keyspace = Keyspace.open(KEYSPACE);
@@ -663,7 +663,7 @@ public class ScrubTest
                 assertEquals(failure ?
                              CompactionManager.AllSSTableOpStatus.ABORTED :
                              CompactionManager.AllSSTableOpStatus.SUCCESSFUL,
-                                result);
+                             result);
             }
         }
 
@@ -695,7 +695,7 @@ public class ScrubTest
         TestWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, boolean isTransient, TableMetadataRef metadata,
                    MetadataCollector collector, SerializationHeader header, LifecycleTransaction txn)
         {
-            super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, Collections.emptySet(), txn);
+            super(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, Collections.emptySet(), txn, Collections.emptySet());
         }
 
         @Override

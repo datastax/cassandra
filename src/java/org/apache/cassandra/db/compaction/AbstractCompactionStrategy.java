@@ -389,7 +389,7 @@ public abstract class AbstractCompactionStrategy
         // if that happens we will end up in infinite compaction loop, so first we check enough if enough time has
         // elapsed since SSTable created.
         if (System.currentTimeMillis() < sstable.getCreationTimeFor(Component.DATA) + tombstoneCompactionInterval * 1000)
-           return false;
+            return false;
 
         double droppableRatio = sstable.getEstimatedDroppableTombstoneRatio(gcBefore);
         if (droppableRatio <= tombstoneThreshold)
@@ -546,10 +546,10 @@ public abstract class AbstractCompactionStrategy
                                                        boolean isTransient,
                                                        MetadataCollector meta,
                                                        SerializationHeader header,
-                                                       Collection<Index> indexes,
+                                                       Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
-        return SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, cfs.metadata, meta, header, indexes, lifecycleNewTracker);
+        return SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, cfs.metadata, meta, header, indexGroups, lifecycleNewTracker);
     }
 
     public boolean supportsEarlyOpen()

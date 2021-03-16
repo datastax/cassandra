@@ -79,8 +79,8 @@ public class Murmur3Partitioner implements IPartitioner
     {
         // using BigInteger to avoid long overflow in intermediate operations
         BigInteger l = BigInteger.valueOf(((LongToken) lToken).token),
-                   r = BigInteger.valueOf(((LongToken) rToken).token),
-                   midpoint;
+        r = BigInteger.valueOf(((LongToken) rToken).token),
+        midpoint;
 
         if (l.compareTo(r) < 0)
         {
@@ -105,8 +105,8 @@ public class Murmur3Partitioner implements IPartitioner
     public Token split(Token lToken, Token rToken, double ratioToLeft)
     {
         BigDecimal l = BigDecimal.valueOf(((LongToken) lToken).token),
-                   r = BigDecimal.valueOf(((LongToken) rToken).token),
-                   ratio = BigDecimal.valueOf(ratioToLeft);
+        r = BigDecimal.valueOf(((LongToken) rToken).token),
+        ratio = BigDecimal.valueOf(ratioToLeft);
         long newToken;
 
         if (l.compareTo(r) < 0)
@@ -204,6 +204,12 @@ public class Murmur3Partitioner implements IPartitioner
         }
 
         @Override
+        public long getLongValue()
+        {
+            return token;
+        }
+
+        @Override
         public double size(Token next)
         {
             LongToken n = (LongToken) next;
@@ -294,7 +300,7 @@ public class Murmur3Partitioner implements IPartitioner
         // 1-case
         if (sortedTokens.size() == 1)
             ownerships.put(i.next(), new Float(1.0));
-        // n-case
+            // n-case
         else
         {
             final BigInteger ri = BigInteger.valueOf(MAXIMUM).subtract(BigInteger.valueOf(MINIMUM.token + 1));  //  (used for addition later)

@@ -1,21 +1,21 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyright ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.cassandra.utils;
 
 import java.nio.ByteBuffer;
@@ -77,7 +77,7 @@ public class MergeIteratorComparisonTest
         }.result;
         testMergeIterator(reducer, lists);
     }
-    
+
     @Test
     public void testNonOverlapInts()
     {
@@ -186,7 +186,7 @@ public class MergeIteratorComparisonTest
         }.result;
         testMergeIterator(reducer, lists);
     }
-    
+
     @Test
     public void testNonOverlapStrings()
     {
@@ -287,7 +287,7 @@ public class MergeIteratorComparisonTest
         testMergeIterator(reducer, lists, type);
     }
 
-    
+
     @Test
     public void testSets()
     {
@@ -485,7 +485,7 @@ public class MergeIteratorComparisonTest
         }
         System.out.format("MI: %.2f\n", cmp.count / (double) cmpb.count);
     }
-    
+
     public <T> void benchmarkIterator(IMergeIterator<T, ?> it, CountingComparator<T> comparator)
     {
         System.out.format("Testing %30s... ", it.getClass().getSimpleName());
@@ -517,7 +517,7 @@ public class MergeIteratorComparisonTest
     static class Counted<T> {
         T item;
         int count;
-        
+
         Counted(T item) {
             this.item = item;
             count = 0;
@@ -537,7 +537,7 @@ public class MergeIteratorComparisonTest
             return item.toString() + "x" + count;
         }
     }
-    
+
     static class Counter<T> extends Reducer<T, Counted<T>> {
         Counted<T> current = null;
         boolean read = true;
@@ -552,7 +552,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -567,14 +567,14 @@ public class MergeIteratorComparisonTest
             return current;
         }
     }
-    
+
     static class KeyedSet<K extends Comparable<? super K>, V> extends Pair<K, Set<V>> implements Comparable<KeyedSet<K, V>>
     {
         protected KeyedSet(K left, V right)
         {
             super(left, ImmutableSet.of(right));
         }
-        
+
         protected KeyedSet(K left, Collection<V> right)
         {
             super(left, Sets.newHashSet(right));
@@ -586,7 +586,7 @@ public class MergeIteratorComparisonTest
             return left.compareTo(o.left);
         }
     }
-    
+
     static class Union<K extends Comparable<K>, V> extends Reducer<KeyedSet<K, V>, KeyedSet<K, V>> {
         KeyedSet<K, V> current = null;
         boolean read = true;
@@ -603,7 +603,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -618,7 +618,7 @@ public class MergeIteratorComparisonTest
             return current;
         }
     }
-    
+
     // closeable list iterator
     public static class CLI<E> extends AbstractIterator<E> implements CloseableIterator<E>
     {

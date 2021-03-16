@@ -253,8 +253,8 @@ public class CustomCassandraIndex implements Index
     }
 
     protected CBuilder buildIndexClusteringPrefix(ByteBuffer partitionKey,
-                                               ClusteringPrefix<?> prefix,
-                                               CellPath path)
+                                                  ClusteringPrefix<?> prefix,
+                                                  CellPath path)
     {
         CBuilder builder = CBuilder.create(getIndexComparator());
         builder.add(partitionKey);
@@ -262,8 +262,8 @@ public class CustomCassandraIndex implements Index
     }
 
     protected ByteBuffer getIndexedValue(ByteBuffer partitionKey,
-                                      Clustering<?> clustering,
-                                      CellPath path, ByteBuffer cellValue)
+                                         Clustering<?> clustering,
+                                         CellPath path, ByteBuffer cellValue)
     {
         return cellValue;
     }
@@ -281,15 +281,16 @@ public class CustomCassandraIndex implements Index
         Cell<?> cell = row.getCell(indexedColumn);
 
         return (cell == null
-             || !cell.isLive(nowInSec)
-             || indexedColumn.type.compare(indexValue, cell.buffer()) != 0);
+                || !cell.isLive(nowInSec)
+                || indexedColumn.type.compare(indexValue, cell.buffer()) != 0);
     }
 
     public Indexer indexerFor(final DecoratedKey key,
                               final RegularAndStaticColumns columns,
                               final int nowInSec,
                               final WriteContext ctx,
-                              final IndexTransaction.Type transactionType)
+                              final IndexTransaction.Type transactionType,
+                              final Memtable memtable)
     {
         if (!isPrimaryKeyIndex() && !columns.contains(indexedColumn))
             return null;
@@ -461,7 +462,7 @@ public class CustomCassandraIndex implements Index
                                                                cell));
         Row row = BTreeRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
         PartitionUpdate upd = partitionUpdate(valueKey, row);
-        indexCfs.getWriteHandler().write(upd, ctx, UpdateTransaction.NO_OP);
+        indexCfs.getWriteHandler().write(upd, ctx, false);
         logger.debug("Inserted entry into index for value {}", valueKey);
     }
 
@@ -507,7 +508,7 @@ public class CustomCassandraIndex implements Index
     {
         Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);
-        indexCfs.getWriteHandler().write(upd, ctx, UpdateTransaction.NO_OP);
+        indexCfs.getWriteHandler().write(upd, ctx, false);
         logger.debug("Removed index entry for value {}", indexKey);
     }
 
@@ -551,13 +552,13 @@ public class CustomCassandraIndex implements Index
     {
         if (value != null && value.remaining() >= FBUtilities.MAX_UNSIGNED_SHORT)
             throw new InvalidRequestException(String.format(
-                                                           "Cannot index value of size %d for index %s on %s.%s(%s) (maximum allowed size=%d)",
-                                                           value.remaining(),
-                                                           metadata.name,
-                                                           baseCfs.metadata.keyspace,
-                                                           baseCfs.metadata.name,
-                                                           indexedColumn.name.toString(),
-                                                           FBUtilities.MAX_UNSIGNED_SHORT));
+            "Cannot index value of size %d for index %s on %s.%s(%s) (maximum allowed size=%d)",
+            value.remaining(),
+            metadata.name,
+            baseCfs.metadata.keyspace,
+            baseCfs.metadata.name,
+            indexedColumn.name.toString(),
+            FBUtilities.MAX_UNSIGNED_SHORT));
     }
 
     private ByteBuffer getIndexedValue(ByteBuffer rowKey,
@@ -572,8 +573,8 @@ public class CustomCassandraIndex implements Index
     }
 
     private Clustering<?> buildIndexClustering(ByteBuffer rowKey,
-                                            Clustering<?> clustering,
-                                            Cell<?> cell)
+                                               Clustering<?> clustering,
+                                               Cell<?> cell)
     {
         return buildIndexClusteringPrefix(rowKey,
                                           clustering,

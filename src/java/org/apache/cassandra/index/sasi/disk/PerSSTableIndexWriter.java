@@ -27,6 +27,7 @@ import java.util.concurrent.*;
 
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -109,6 +110,18 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     {
         currentKey = key;
         currentKeyPosition = curPosition;
+    }
+
+    @Override
+    public void partitionLevelDeletion(DeletionTime deletionTime, long position)
+    {
+        // do nothing
+    }
+
+    @Override
+    public void staticRow(Row staticRow, long position)
+    {
+        nextUnfilteredCluster(staticRow);
     }
 
     public void nextUnfilteredCluster(Unfiltered unfiltered)
@@ -210,11 +223,11 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
                 if (token.remaining() >= OnDiskIndexBuilder.MAX_TERM_SIZE)
                 {
                     logger.info("Rejecting value (size {}, maximum {}) for column {} (analyzed {}) at {} SSTable.",
-                            FBUtilities.prettyPrintMemory(term.remaining()),
-                            FBUtilities.prettyPrintMemory(OnDiskIndexBuilder.MAX_TERM_SIZE),
-                            columnIndex.getColumnName(),
-                            columnIndex.getMode().isAnalyzed,
-                            descriptor);
+                                FBUtilities.prettyPrintMemory(term.remaining()),
+                                FBUtilities.prettyPrintMemory(OnDiskIndexBuilder.MAX_TERM_SIZE),
+                                columnIndex.getColumnName(),
+                                columnIndex.getMode().isAnalyzed,
+                                descriptor);
                     continue;
                 }
 

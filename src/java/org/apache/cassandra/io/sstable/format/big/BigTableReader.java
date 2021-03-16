@@ -82,8 +82,8 @@ public class BigTableReader extends SSTableReader
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
         return reversed
-             ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, ifile)
-             : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, ifile);
+               ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, ifile)
+               : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, ifile);
     }
 
     @Override
@@ -302,20 +302,24 @@ public class BigTableReader extends SSTableReader
     @Override
     public DecoratedKey keyAt(long indexPosition) throws IOException
     {
-        DecoratedKey key;
         try (FileDataInput in = ifile.createReader(indexPosition))
         {
-            if (in.isEOF())
-                return null;
-
-            key = decorateKey(ByteBufferUtil.readWithShortLength(in));
-
-            // hint read path about key location if caching is enabled
-            // this saves index summary lookup and index file iteration which whould be pretty costly
-            // especially in presence of promoted column indexes
-            if (isKeyCacheEnabled())
-                cacheKey(key, rowIndexEntrySerializer.deserialize(in));
+            return keyAt(in);
         }
+    }
+
+    @Override
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException
+    {
+        if (reader.isEOF()) return null;
+
+        DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
+
+        // hint read path about key location if caching is enabled
+        // this saves index summary lookup and index file iteration which whould be pretty costly
+        // especially in presence of promoted column indexes
+        if (isKeyCacheEnabled())
+            cacheKey(key, rowIndexEntrySerializer.deserialize(reader));
 
         return key;
     }

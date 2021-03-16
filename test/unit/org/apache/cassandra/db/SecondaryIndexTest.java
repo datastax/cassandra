@@ -1,21 +1,21 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyright ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.cassandra.db;
 
 import java.io.IOException;
@@ -115,10 +115,10 @@ public class SecondaryIndexTest
 
         // Verify getIndexSearchers finds the data for our rc
         ReadCommand rc = Util.cmd(cfs).fromKeyIncl("k1")
-                                      .toKeyIncl("k3")
-                                      .columns("birthdate")
-                                      .filterOn("birthdate", Operator.EQ, 1L)
-                                      .build();
+                             .toKeyIncl("k3")
+                             .columns("birthdate")
+                             .filterOn("birthdate", Operator.EQ, 1L)
+                             .build();
 
         Index.Searcher searcher = rc.getIndex(cfs).searcherFor(rc);
         try (ReadExecutionController executionController = rc.executionController();
@@ -143,14 +143,14 @@ public class SecondaryIndexTest
 
         // Filter on non-indexed, LT comparison
         Util.assertEmpty(Util.cmd(cfs).fromKeyExcl("k1").toKeyIncl("k4aaa")
-                                      .filterOn("notbirthdate", Operator.NEQ, 2L)
-                                      .build());
+                             .filterOn("notbirthdate", Operator.NEQ, 2L)
+                             .build());
 
         // Hit on primary, fail on non-indexed filter
         Util.assertEmpty(Util.cmd(cfs).fromKeyExcl("k1").toKeyIncl("k4aaa")
-                                      .filterOn("birthdate", Operator.EQ, 1L)
-                                      .filterOn("notbirthdate", Operator.NEQ, 2L)
-                                      .build());
+                             .filterOn("birthdate", Operator.EQ, 1L)
+                             .filterOn("notbirthdate", Operator.NEQ, 2L)
+                             .build());
     }
 
     @Test
@@ -163,11 +163,11 @@ public class SecondaryIndexTest
         for (int i = 0; i < 100; i++)
         {
             new RowUpdateBuilder(cfs.metadata(), FBUtilities.timestampMicros(), "key" + i)
-                    .clustering("c")
-                    .add("birthdate", 34L)
-                    .add("notbirthdate", ByteBufferUtil.bytes((long) (i % 2)))
-                    .build()
-                    .applyUnsafe();
+            .clustering("c")
+            .add("birthdate", 34L)
+            .add("notbirthdate", ByteBufferUtil.bytes((long) (i % 2)))
+            .build()
+            .applyUnsafe();
         }
 
         List<FilteredPartition> partitions = Util.getAll(Util.cmd(cfs)
@@ -470,18 +470,18 @@ public class SecondaryIndexTest
         String indexName = "birthdate_index";
         ColumnMetadata old = cfs.metadata().getColumn(ByteBufferUtil.bytes("birthdate"));
         IndexMetadata indexDef =
-            IndexMetadata.fromIndexTargets(
-            Collections.singletonList(new IndexTarget(old.name, IndexTarget.Type.VALUES)),
-                                           indexName,
-                                           IndexMetadata.Kind.COMPOSITES,
-                                           Collections.EMPTY_MAP);
+        IndexMetadata.fromIndexTargets(
+        Collections.singletonList(new IndexTarget(old.name, IndexTarget.Type.VALUES)),
+        indexName,
+        IndexMetadata.Kind.COMPOSITES,
+        Collections.EMPTY_MAP);
 
         TableMetadata current = cfs.metadata();
 
         TableMetadata updated =
-            current.unbuild()
-                   .indexes(current.indexes.with(indexDef))
-                   .build();
+        current.unbuild()
+               .indexes(current.indexes.with(indexDef))
+               .build();
         MigrationManager.announceTableUpdate(updated, true);
 
         // wait for the index to be built
@@ -546,7 +546,7 @@ public class SecondaryIndexTest
                              .filterOn("notbirthdate", Operator.EQ, 0L)
                              .build();
 
-        assertEquals("notbirthdate_key_index", rc.indexMetadata().name);
+        assertEquals("notbirthdate_key_index", rc.indexQueryPlan().getFirst().getIndexMetadata().name);
     }
 
     private void assertIndexedNone(ColumnFamilyStore cfs, ByteBuffer col, Object val)

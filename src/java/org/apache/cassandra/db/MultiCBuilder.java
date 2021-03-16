@@ -20,9 +20,15 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.TreeSet;
 
+import com.google.common.collect.ImmutableList;
+
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.btree.BTreeSet;
@@ -73,8 +79,8 @@ public abstract class MultiCBuilder
     public static MultiCBuilder create(ClusteringComparator comparator, boolean forMultipleValues)
     {
         return forMultipleValues
-             ? new MultiClusteringBuilder(comparator)
-             : new OneClusteringBuilder(comparator);
+               ? new MultiClusteringBuilder(comparator)
+               : new OneClusteringBuilder(comparator);
     }
 
     /**
@@ -164,6 +170,13 @@ public abstract class MultiCBuilder
      * @return the clusterings
      */
     public abstract NavigableSet<Clustering<?>> build();
+
+    /**
+     * Builds the serialized partition keys.
+     *
+     * @return the serialized partition keys
+     */
+    public abstract List<ByteBuffer> buildSerializedPartitionKeys();
 
     /**
      * Builds the <code>ClusteringBound</code>s for slice restrictions.
@@ -263,6 +276,23 @@ public abstract class MultiCBuilder
         }
 
         @Override
+        public List<ByteBuffer> buildSerializedPartitionKeys()
+        {
+            built = true;
+
+            if (hasMissingElements)
+                return Collections.EMPTY_LIST;
+
+            if (size == 0)
+                return ImmutableList.of(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+
+            if (size == 1)
+                return ImmutableList.of(elements[0]);
+
+            return ImmutableList.of(CompositeType.build(ByteBufferAccessor.instance, elements));
+        }
+
+        @Override
         public NavigableSet<ClusteringBound<?>> buildBoundForSlice(boolean isStart,
                                                                    boolean isInclusive,
                                                                    boolean isOtherBoundInclusive,
@@ -282,8 +312,8 @@ public abstract class MultiCBuilder
                 return BTreeSet.of(comparator, isStart ? BufferClusteringBound.BOTTOM : BufferClusteringBound.TOP);
 
             ByteBuffer[] newValues = size == elements.length
-                                   ? elements
-                                   : Arrays.copyOf(elements, size);
+                                     ? elements
+                                     : Arrays.copyOf(elements, size);
 
             return BTreeSet.of(comparator, BufferClusteringBound.create(ClusteringBound.boundKind(isStart, isInclusive), newValues));
         }
@@ -416,6 +446,36 @@ public abstract class MultiCBuilder
                 set.add(builder.buildWith(elements));
             }
             return set.build();
+        }
+
+        @Override
+        public List<ByteBuffer> buildSerializedPartitionKeys()
+        {
+            built = true;
+
+            if (hasMissingElements)
+                return Collections.EMPTY_LIST;
+
+            // Use a TreeSet here to remove duplicates and return the values in comparator sorted order
+            TreeSet<ByteBuffer> set = comparator.size() == 1 ? new TreeSet<>(comparator.subtype(0))
+                                                             : new TreeSet<>(CompositeType.getInstance(comparator.subtypes()));
+
+            for (int i = 0, m = elementsList.size(); i < m; i++)
+            {
+                List<ByteBuffer> elements = elementsList.get(i);
+                set.add(comparator.size() == 1 ? elements.get(0) : toComposite(elements));
+            }
+            return new ArrayList<>(set);
+        }
+
+        private ByteBuffer toComposite(List<ByteBuffer> elements)
+        {
+            ByteBuffer[] tmp = new ByteBuffer[elements.size()];
+            for (int i = 0, m = elements.size(); i < m; i++)
+            {
+                tmp[i] = elements.get(i);
+            }
+            return CompositeType.build(ByteBufferAccessor.instance, tmp);
         }
 
         public NavigableSet<ClusteringBound<?>> buildBoundForSlice(boolean isStart,

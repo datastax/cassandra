@@ -240,10 +240,10 @@ public abstract class UnfilteredRowIterators
     public static UnfilteredRowIterator concat(final UnfilteredRowIterator iter1, final UnfilteredRowIterator iter2)
     {
         assert iter1.metadata().id.equals(iter2.metadata().id)
-            && iter1.partitionKey().equals(iter2.partitionKey())
-            && iter1.partitionLevelDeletion().equals(iter2.partitionLevelDeletion())
-            && iter1.isReverseOrder() == iter2.isReverseOrder()
-            && iter1.staticRow().equals(iter2.staticRow());
+               && iter1.partitionKey().equals(iter2.partitionKey())
+               && iter1.partitionLevelDeletion().equals(iter2.partitionLevelDeletion())
+               && iter1.isReverseOrder() == iter2.isReverseOrder()
+               && iter1.staticRow().equals(iter2.staticRow());
 
         class Extend implements MoreRows<UnfilteredRowIterator>
         {
@@ -514,8 +514,8 @@ public abstract class UnfilteredRowIterators
                 regulars = regulars.mergeTo(cols.regulars);
             }
             return statics == first.statics && regulars == first.regulars
-                 ? first
-                 : new RegularAndStaticColumns(statics, regulars);
+                   ? first
+                   : new RegularAndStaticColumns(statics, regulars);
         }
 
         protected Unfiltered computeNext()
@@ -594,7 +594,7 @@ public abstract class UnfilteredRowIterators
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 if (nextKind == Unfiltered.Kind.ROW)
                     rowMerger.clear();
