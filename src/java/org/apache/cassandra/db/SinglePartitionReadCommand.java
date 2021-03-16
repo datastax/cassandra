@@ -656,16 +656,13 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                     continue;
                 }
 
-                UnfilteredRowIterator iter;
-                if (intersects)
-                {
-                    iter = makeIterator(cfs, sstable, metricsCollector);
-                }
-                else
+                @SuppressWarnings("resource")
+                UnfilteredRowIterator iter = intersects
+                                             ? makeIterator(cfs, sstable, metricsCollector)
+                                             : makeIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
+                if (!intersects)
                 {
                     nonIntersectingSSTables++;
-
-                    iter = makeIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
 
                     if (!hasRequiredStatics) { // => has partition level deletions
                         if (!iter.partitionLevelDeletion().isLive())
