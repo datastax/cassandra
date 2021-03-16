@@ -36,6 +36,7 @@ import org.junit.Test;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import org.apache.cassandra.concurrent.SEPExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -76,10 +77,19 @@ public class ViewTest extends CQLTester
 
     private void createView(String name, String query) throws Throwable
     {
-        executeNet(protocolVersion, String.format(query, name));
-        // If exception is thrown, the view will not be added to the list; since it shouldn't have been created, this is
-        // the desired behavior
-        views.add(name);
+        try
+        {
+            executeNet(protocolVersion, String.format(query, name));
+            // If exception is thrown, the view will not be added to the list; since it shouldn't have been created, this is
+            // the desired behavior
+            views.add(name);
+        }
+        catch (OperationTimedOutException ex)
+        {
+            // ... except for timeout, when we actually do not know whether the view was created or not
+            views.add(name);
+            throw ex;
+        }
     }
 
     private void updateView(String query, Object... params) throws Throwable
@@ -1441,5 +1451,22 @@ public class ViewTest extends CQLTester
         {
             DatabaseDescriptor.setEnableMaterializedViews(enableMaterializedViews);
         }
+    }
+
+    @Test
+    public void testQuotedIdentifiersInWhereClause() throws Throwable
+    {
+        createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering_1\" int, \"theClustering_2\" int, \"theValue\" int, PRIMARY KEY (\"theKey\", \"theClustering_1\", \"theClustering_2\"))");
+
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        createView("view1", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE \"theKey\" IS NOT NULL AND \"theClustering_1\" IS NOT NULL AND \"theClustering_2\" IS NOT NULL AND \"theValue\" IS NOT NULL  PRIMARY KEY (\"theKey\", \"theClustering_1\", \"theClustering_2\");");
+        createView("view2", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE \"theKey\" IS NOT NULL AND (\"theClustering_1\", \"theClustering_2\") = (1, 2) AND \"theValue\" IS NOT NULL  PRIMARY KEY (\"theKey\", \"theClustering_1\", \"theClustering_2\");");
+        createView("view3", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE token(\"theKey\") > token(1) AND \"theClustering_1\" = 1 AND \"theClustering_2\" > 2 AND \"theValue\" IS NOT NULL  PRIMARY KEY (\"theKey\", \"theClustering_1\", \"theClustering_2\");");
+
+        assertRows(execute("SELECT where_clause FROM system_schema.views"),
+                   row("\"theKey\" IS NOT NULL AND \"theClustering_1\" IS NOT NULL AND \"theClustering_2\" IS NOT NULL AND \"theValue\" IS NOT NULL"),
+                   row("\"theKey\" IS NOT NULL AND (\"theClustering_1\", \"theClustering_2\") = (1, 2) AND \"theValue\" IS NOT NULL"),
+                   row("token(\"theKey\") > token(1) AND \"theClustering_1\" = 1 AND \"theClustering_2\" > 2 AND \"theValue\" IS NOT NULL"));
     }
 }

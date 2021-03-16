@@ -135,11 +135,11 @@ public class ReadRepairEmptyRangeTombstonesTest extends TestBaseImpl
                              "WITH CLUSTERING ORDER BY (c %s) AND read_repair='%s'")
                 .mutate(1, "DELETE FROM %s USING TIMESTAMP 1 WHERE k=0 AND c>0 AND c<3")
                 .mutate(1, "INSERT INTO %s (k, s) VALUES (0, 0)")
-                .assertRowsDistributed("SELECT * FROM %s WHERE k=0 AND c>1 and c<=1", 1)
+                .assertRowsDistributed("SELECT * FROM %s WHERE k=0 AND c>1 and c<=1", 0)
                 .assertRowsDistributed("SELECT * FROM %s WHERE k=0 AND c>2 and c<=2", 0)
-                .assertRowsInternal("SELECT * FROM %s", row(0, null, 0))
+                .assertRowsInternal("SELECT * FROM %s")
                 .mutate(2, "DELETE FROM %s WHERE k=0 AND c>0 AND c<3")
-                .assertRowsInternal("SELECT * FROM %s", row(0, null, 0));
+                .assertRowsInternal("SELECT * FROM %s");
     }
 
     /**
@@ -169,7 +169,7 @@ public class ReadRepairEmptyRangeTombstonesTest extends TestBaseImpl
      * Test range queries asking for a not-empty range targeting rows overlapping with a tombstone range in one replica.
      */
     @Test
-    public void testRangeQueriesWithRowsOverlappingWithTombstoneRangeStart()
+    public void testRangeQueriesWithRowsOvetrlappingWithTombstoneRangeStart()
     {
         tester().createTable("CREATE TABLE %s(k int, c int, PRIMARY KEY (k, c)) " +
                              "WITH CLUSTERING ORDER BY (c %s) AND read_repair='%s'")

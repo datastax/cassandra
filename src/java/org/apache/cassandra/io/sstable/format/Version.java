@@ -107,7 +107,6 @@ public abstract class Version
         return version;
     }
 
-
     @Override
     public boolean equals(Object o)
     {

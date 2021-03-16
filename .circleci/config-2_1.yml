@@ -2,6 +2,8 @@ version: 2.1
 
 default_env_vars: &default_env_vars
     ANT_HOME: /usr/share/ant
+    JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     LANG: en_US.UTF-8
     KEEP_TEST_DIR: true
     DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -108,6 +110,12 @@ j8_with_dtests_jobs: &j8_with_dtests_jobs
     - utests_fqltool:
         requires:
           - start_utests_fqltool
+          - j8_build
+    - start_utests_system_keyspace_directory:
+        type: approval
+    - utests_system_keyspace_directory:
+        requires:
+          - start_utests_system_keyspace_directory
           - j8_build
     - start_jvm_upgrade_dtest:
         type: approval
@@ -373,6 +381,7 @@ jobs:
       - log_environment
       - run_parallel_junit_tests:
           classlistprefix: distributed
+          target: "testclasslist -Dtest.runners=1"
 
   j11_jvm_dtests:
     <<: *j11_small_par_executor
@@ -385,6 +394,7 @@ jobs:
       - log_environment
       - run_parallel_junit_tests:
           classlistprefix: distributed
+          target: "testclasslist -Dtest.runners=1"
 
   j8_jvm_upgrade_dtests:
     <<: *j8_medium_par_executor
@@ -397,6 +407,7 @@ jobs:
       - log_environment
       - run_parallel_junit_tests:
           classlistprefix: distributed
+          target: "testclasslist -Dtest.runners=1"
 
   j11_unit_tests:
     <<: *j11_par_executor
@@ -454,6 +465,16 @@ jobs:
           at: /home/cassandra
       - run_junit_tests:
           target: fqltool-test
+
+  utests_system_keyspace_directory:
+    <<: *j8_par_executor
+    steps:
+      - attach_workspace:
+          at: /home/cassandra
+      - create_junit_containers
+      - log_environment
+      - run_parallel_junit_tests:
+          target: testclasslist-system-keyspace-directory
 
   j8_dtests-with-vnodes:
     <<: *j8_par_executor

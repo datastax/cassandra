@@ -36,7 +36,7 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public interface ClusteringIndexFilter
 {
-    public static Serializer serializer = AbstractClusteringIndexFilter.serializer;
+    public static final Serializer serializer = AbstractClusteringIndexFilter.serializer;
 
     public enum Kind
     {
@@ -62,6 +62,8 @@ public interface ClusteringIndexFilter
      * @return whether the filter query rows in reversed clustering order or not.
      */
     public boolean isReversed();
+
+    public boolean isEmpty(ClusteringComparator comparator);
 
     /**
      * Returns a filter for continuing the paging of this filter given the last returned clustering prefix.

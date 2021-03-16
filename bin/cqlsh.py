@@ -45,7 +45,7 @@ UTF8 = 'utf-8'
 CP65001 = 'cp65001'  # Win utf-8 variant
 
 description = "CQL Shell for Apache Cassandra"
-version = "5.0.1"
+version = "6.0.0"
 
 readline = None
 try:
@@ -201,7 +201,7 @@ parser.add_option("-C", "--color", action='store_true', dest='color',
 parser.add_option("--no-color", action='store_false', dest='color',
                   help='Never use color output')
 parser.add_option("--browser", dest='browser', help="""The browser to use to display CQL help, where BROWSER can be:
-                                                    - one of the supported browsers in https://docs.python.org/2/library/webbrowser.html.
+                                                    - one of the supported browsers in https://docs.python.org/3/library/webbrowser.html.
                                                     - browser path followed by %s, example: /usr/bin/google-chrome-stable %s""")
 parser.add_option('--ssl', action='store_true', help='Use SSL', default=False)
 parser.add_option("-u", "--username", help="Authenticate as user.")
@@ -461,8 +461,6 @@ class Shell(cmd.Cmd):
             kwargs = {}
             if protocol_version is not None:
                 kwargs['protocol_version'] = protocol_version
-            else:
-                kwargs['protocol_version'] = 5
             self.conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=cqlver,
                                 auth_provider=self.auth_provider,
                                 ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,

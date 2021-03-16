@@ -1,4 +1,8 @@
 4.0-beta5
+ * Increase the cqlsh version number (CASSANDRA-16509)
+ * Fix the CQL generated for the views.where_clause column when some identifiers require quoting (CASSANDRA-16479)
+ * Send FAILED_SESSION_MSG on shutdown and on in-progress repairs during startup (CASSANDRA-16425)
+ * Reinstate removed ApplicationState padding (CASSANDRA-16484)
  * Expose data dirs to ColumnFamilyStoreMBean (CASSANDRA-16335)
  * Add possibility to copy SSTables in SSTableImporter instead of moving them (CASSANDRA-16407)
  * Fix DESCRIBE statement for CUSTOM indices with options (CASSANDRA-16482)
@@ -35,6 +39,8 @@ Merged from 3.11:
  * Reduce amount of allocations during batch statement execution (CASSANDRA-16201)
  * Update jflex-1.6.0.jar to match upstream (CASSANDRA-16393)
 Merged from 3.0:
+ * Refuse DROP COMPACT STORAGE if some 2.x sstables are in use (CASSANDRA-15897)
+ * Fix ColumnFilter::toString not returning a valid CQL fragment (CASSANDRA-16483)
  * Fix ColumnFilter behaviour to prevent digest mitmatches during upgrades (CASSANDRA-16415)
  * Update debian packaging for python3 (CASSANDRA-16396)
  * Avoid pushing schema mutations when setting up distributed system keyspaces locally (CASSANDRA-16387)
@@ -43,6 +49,7 @@ Merged from 3.0:
  * Fix skipping on pre-3.0 created compact storage sstables due to missing primary key liveness (CASSANDRA-16226)
  * Allow empty string in collections with COPY FROM in cqlsh (CASSANDRA-16372)
 Merged from 2.2:
+ * Fix centos packaging for arm64, >=4.0 rpm's now require python3 (CASSANDRA-16477)
  * Make TokenMetadata's ring version increments atomic (CASSANDRA-16286)
 
 4.0-beta4

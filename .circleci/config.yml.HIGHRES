@@ -52,7 +52,7 @@ jobs:
           which java
           java -version
     - run:
-        name: Run Unit Tests (testclasslist)
+        name: Run Unit Tests (testclasslist -Dtest.runners=1)
         command: |
           set -x
           export PATH=$JAVA_HOME/bin:$PATH
@@ -65,7 +65,7 @@ jobs:
           if [ -z "$test_timeout" ]; then
             test_timeout=$(grep 'name="test.timeout"' build.xml | awk -F'"' '{print $4}')
           fi
-          ant testclasslist -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
+          ant testclasslist -Dtest.runners=1 -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
         no_output_timeout: 15m
     - store_test_results:
         path: /tmp/cassandra/build/test/output/
@@ -77,6 +77,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -154,6 +156,8 @@ jobs:
         destination: dtest_j8_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -245,6 +249,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -323,6 +329,8 @@ jobs:
         destination: dtest_j8_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -400,6 +408,8 @@ jobs:
         destination: dtest_j11_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -478,6 +488,8 @@ jobs:
         destination: dtest_j11_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -556,6 +568,8 @@ jobs:
         destination: dtest_j11_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -634,6 +648,8 @@ jobs:
         destination: dtest_j8_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -711,6 +727,8 @@ jobs:
         destination: dtest_j8_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -788,6 +806,8 @@ jobs:
         destination: dtest_j11_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -869,6 +889,8 @@ jobs:
         destination: dtest_j11_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -928,6 +950,8 @@ jobs:
         destination: dtest_j8_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -986,6 +1010,8 @@ jobs:
         destination: dtest_j8_upgradetests_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1031,6 +1057,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1122,6 +1150,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1188,7 +1218,7 @@ jobs:
           which java
           java -version
     - run:
-        name: Run Unit Tests (testclasslist)
+        name: Run Unit Tests (testclasslist -Dtest.runners=1)
         command: |
           set -x
           export PATH=$JAVA_HOME/bin:$PATH
@@ -1201,7 +1231,7 @@ jobs:
           if [ -z "$test_timeout" ]; then
             test_timeout=$(grep 'name="test.timeout"' build.xml | awk -F'"' '{print $4}')
           fi
-          ant testclasslist -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
+          ant testclasslist -Dtest.runners=1 -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
         no_output_timeout: 15m
     - store_test_results:
         path: /tmp/cassandra/build/test/output/
@@ -1213,6 +1243,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1294,6 +1326,8 @@ jobs:
         - .m2
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1372,6 +1406,8 @@ jobs:
         destination: dtest_j11_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1409,6 +1445,8 @@ jobs:
         path: /tmp/cassandra/pylib
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1468,6 +1506,8 @@ jobs:
         destination: dtest_j8_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1545,6 +1585,8 @@ jobs:
         destination: dtest_j11_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1612,7 +1654,7 @@ jobs:
           which java
           java -version
     - run:
-        name: Run Unit Tests (testclasslist)
+        name: Run Unit Tests (testclasslist -Dtest.runners=1)
         command: |
           set -x
           export PATH=$JAVA_HOME/bin:$PATH
@@ -1625,7 +1667,7 @@ jobs:
           if [ -z "$test_timeout" ]; then
             test_timeout=$(grep 'name="test.timeout"' build.xml | awk -F'"' '{print $4}')
           fi
-          ant testclasslist -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
+          ant testclasslist -Dtest.runners=1 -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=distributed
         no_output_timeout: 15m
     - store_test_results:
         path: /tmp/cassandra/build/test/output/
@@ -1637,6 +1679,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1717,6 +1761,8 @@ jobs:
         - .m2
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1794,6 +1840,8 @@ jobs:
         destination: dtest_j8_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1871,6 +1919,8 @@ jobs:
         destination: dtest_j8_with_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1916,6 +1966,101 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+    - LANG: en_US.UTF-8
+    - KEEP_TEST_DIR: true
+    - DEFAULT_DIR: /home/cassandra/cassandra-dtest
+    - PYTHONIOENCODING: utf-8
+    - PYTHONUNBUFFERED: true
+    - CASS_DRIVER_NO_EXTENSIONS: true
+    - CASS_DRIVER_NO_CYTHON: true
+    - CASSANDRA_SKIP_SYNC: true
+    - DTEST_REPO: git://github.com/apache/cassandra-dtest.git
+    - DTEST_BRANCH: trunk
+    - CCM_MAX_HEAP_SIZE: 1024M
+    - CCM_HEAP_NEWSIZE: 256M
+    - JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+    - JDK_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+  utests_system_keyspace_directory:
+    docker:
+    - image: apache/cassandra-testing-ubuntu2004-java11-w-dependencies:20210304
+    resource_class: xlarge
+    working_directory: ~/
+    shell: /bin/bash -eo pipefail -l
+    parallelism: 100
+    steps:
+    - attach_workspace:
+        at: /home/cassandra
+    - run:
+        name: Determine unit Tests to Run
+        command: |
+          # reminder: this code (along with all the steps) is independently executed on every circle container
+          # so the goal here is to get the circleci script to return the tests *this* container will run
+          # which we do via the `circleci` cli tool.
+
+          rm -fr ~/cassandra-dtest/upgrade_tests
+          echo "***java tests***"
+
+          # get all of our unit test filenames
+          set -eo pipefail && circleci tests glob "$HOME/cassandra/test/unit/**/*.java" > /tmp/all_java_unit_tests.txt
+
+          # split up the unit tests into groups based on the number of containers we have
+          set -eo pipefail && circleci tests split --split-by=timings --timings-type=filename --index=${CIRCLE_NODE_INDEX} --total=${CIRCLE_NODE_TOTAL} /tmp/all_java_unit_tests.txt > /tmp/java_tests_${CIRCLE_NODE_INDEX}.txt
+          set -eo pipefail && cat /tmp/java_tests_${CIRCLE_NODE_INDEX}.txt | sed "s;^/home/cassandra/cassandra/test/unit/;;g" | grep "Test\.java$"  > /tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt
+          echo "** /tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt"
+          cat /tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt
+        no_output_timeout: 15m
+    - run:
+        name: Log Environment Information
+        command: |
+          echo '*** id ***'
+          id
+          echo '*** cat /proc/cpuinfo ***'
+          cat /proc/cpuinfo
+          echo '*** free -m ***'
+          free -m
+          echo '*** df -m ***'
+          df -m
+          echo '*** ifconfig -a ***'
+          ifconfig -a
+          echo '*** uname -a ***'
+          uname -a
+          echo '*** mount ***'
+          mount
+          echo '*** env ***'
+          env
+          echo '*** java ***'
+          which java
+          java -version
+    - run:
+        name: Run Unit Tests (testclasslist-system-keyspace-directory)
+        command: |
+          set -x
+          export PATH=$JAVA_HOME/bin:$PATH
+          time mv ~/cassandra /tmp
+          cd /tmp/cassandra
+          if [ -d ~/dtest_jars ]; then
+            cp ~/dtest_jars/dtest* /tmp/cassandra/build/
+          fi
+          test_timeout=$(grep 'name="test.unit.timeout"' build.xml | awk -F'"' '{print $4}' || true)
+          if [ -z "$test_timeout" ]; then
+            test_timeout=$(grep 'name="test.timeout"' build.xml | awk -F'"' '{print $4}')
+          fi
+          ant testclasslist-system-keyspace-directory -Dtest.timeout="$test_timeout" -Dtest.classlistfile=/tmp/java_tests_${CIRCLE_NODE_INDEX}_final.txt  -Dtest.classlistprefix=unit
+        no_output_timeout: 15m
+    - store_test_results:
+        path: /tmp/cassandra/build/test/output/
+    - store_artifacts:
+        path: /tmp/cassandra/build/test/output
+        destination: junitxml
+    - store_artifacts:
+        path: /tmp/cassandra/build/test/logs
+        destination: logs
+    environment:
+    - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1952,6 +2097,8 @@ jobs:
         path: /tmp/cassandra/pylib
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -1997,6 +2144,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -2077,6 +2226,8 @@ jobs:
         destination: dtest_j11_without_vnodes_logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -2169,6 +2320,8 @@ jobs:
         destination: logs
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -2243,6 +2396,8 @@ jobs:
         - dtest_jars
     environment:
     - ANT_HOME: /usr/share/ant
+    - JAVA11_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    - JAVA8_HOME: /usr/lib/jvm/java-8-openjdk-amd64
     - LANG: en_US.UTF-8
     - KEEP_TEST_DIR: true
     - DEFAULT_DIR: /home/cassandra/cassandra-dtest
@@ -2300,6 +2455,12 @@ workflows:
     - utests_fqltool:
         requires:
         - start_utests_fqltool
+        - j8_build
+    - start_utests_system_keyspace_directory:
+        type: approval
+    - utests_system_keyspace_directory:
+        requires:
+        - start_utests_system_keyspace_directory
         - j8_build
     - start_jvm_upgrade_dtest:
         type: approval
