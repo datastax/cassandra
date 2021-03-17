@@ -62,6 +62,7 @@ public class ClientRequestSizeMetricsTest extends CQLTester
         requireNetwork();
     }
 
+
     @Test
     public void testReadAndWriteMetricsAreRecordedDuringNativeRequests() throws Throwable
     {
