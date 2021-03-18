@@ -126,6 +126,8 @@ public class CassandraStreamManager implements TableStreamManager
                 return sstables;
             }).refs);
 
+            // Persistent memtables will not flush, make an sstable with their data.
+            refs = cfs.writeAndAddMemtableRanges(refs, session.getPendingRepair(), () -> Range.normalize(keyRanges));
 
             List<Range<Token>> normalizedFullRanges = Range.normalize(replicas.onlyFull().ranges());
             List<Range<Token>> normalizedAllRanges = Range.normalize(replicas.ranges());

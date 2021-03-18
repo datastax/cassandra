@@ -23,6 +23,7 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 
 import com.google.common.base.Throwables;
 
@@ -30,15 +31,15 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.*;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 15, time = 2, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1)
 @Threads(1)
 @State(Scope.Benchmark)
@@ -63,6 +64,9 @@ public abstract class ReadTest extends CQLTester
     @Param({"INMEM", "YES"})
     Flush flush = Flush.INMEM;
 
+    @Param({""})
+    String memtableClass = "";
+
     public enum Execution
     {
         SERIAL,
@@ -81,8 +85,11 @@ public abstract class ReadTest extends CQLTester
         CQLTester.setUpClass();
         CQLTester.prepareServer();
         System.err.println("setupClass done.");
+        String memtableSetup = "";
+        if (!memtableClass.isEmpty())
+            memtableSetup = String.format(" AND memtable = { 'class': '%s' }", memtableClass);
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
-        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}");
+        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid)) with compression = {'enabled': false}" + memtableSetup);
         execute("use "+keyspace+";");
         switch (async)
         {
@@ -97,30 +104,32 @@ public abstract class ReadTest extends CQLTester
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         //Warm up
+        long writeStart = System.currentTimeMillis();
         System.err.println("Writing " + count);
         long i;
         for (i = 0; i <= count - BATCH; i += BATCH)
             performWrite(writeStatement, i, BATCH);
         if (i < count)
             performWrite(writeStatement, i, count - i);
+        long writeLength = System.currentTimeMillis() - writeStart;
+        System.err.format("... done in %.3f s.\n", writeLength / 1000.0);
 
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        System.err.format("Memtable in %s mode: %d ops, %s serialized bytes, %s (%.0f%%) on heap, %s (%.0f%%) off-heap\n",
+        Memtable.MemoryUsage usage = memtable.getMemoryUsage();
+        System.err.format("%s in %s mode: %d ops, %s serialized bytes, %s\n",
+                          memtable.getClass().getSimpleName(),
                           DatabaseDescriptor.getMemtableAllocationType(),
                           memtable.getOperations(),
                           FBUtilities.prettyPrintMemory(memtable.getLiveDataSize()),
-                          FBUtilities.prettyPrintMemory(memtable.getAllocator().onHeap().owns()),
-                          100 * memtable.getAllocator().onHeap().ownershipRatio(),
-                          FBUtilities.prettyPrintMemory(memtable.getAllocator().offHeap().owns()),
-                          100 * memtable.getAllocator().offHeap().ownershipRatio());
+                          usage);
 
         switch (flush)
         {
         case YES:
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
             break;
         case INMEM:
             if (!cfs.getLiveSSTables().isEmpty())
@@ -141,10 +150,44 @@ public abstract class ReadTest extends CQLTester
 
     public void performWrite(String writeStatement, long ofs, long count) throws Throwable
     {
+        switch (async)
+        {
+        case SERIAL:
+        case SERIAL_NET:
+            performWriteSerial(writeStatement, ofs, count);
+            break;
+        case PARALLEL:
+        case PARALLEL_NET:
+            performWriteThreads(writeStatement, ofs, count);
+            break;
+        }
+    }
+
+    public void performWriteSerial(String writeStatement, long ofs, long count) throws Throwable
+    {
         for (long i = ofs; i < ofs + count; ++i)
             execute(writeStatement, writeArguments(i));
     }
 
+    public void performWriteThreads(String writeStatement, long ofs, long count) throws Throwable
+    {
+        long done = LongStream.range(ofs, ofs + count)
+                              .parallel()
+                              .map(i ->
+                                   {
+                                       try
+                                       {
+                                           execute(writeStatement, writeArguments(i));
+                                           return 1;
+                                       }
+                                       catch (Throwable throwable)
+                                       {
+                                           throw Throwables.propagate(throwable);
+                                       }
+                                   })
+                              .sum();
+        assert done == count;
+    }
 
     @TearDown(Level.Trial)
     public void teardown() throws InterruptedException
@@ -153,7 +196,7 @@ public abstract class ReadTest extends CQLTester
             throw new AssertionError("SSTables created for INMEM test.");
 
         // do a flush to print sizes
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         CommitLog.instance.shutdownBlocking();
         CQLTester.tearDownClass();

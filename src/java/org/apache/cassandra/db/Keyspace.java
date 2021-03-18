@@ -413,7 +413,11 @@ public class Keyspace
     // disassociate a cfs from this keyspace instance.
     private void unloadCf(ColumnFamilyStore cfs)
     {
-        cfs.forceBlockingFlush();
+        if (getMetadata().params.durableWrites && !cfs.memtableWritesAreDurable())  // need to clear dirty regions
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.DROP);
+        else
+            FBUtilities.waitOnFuture(cfs.dumpMemtable(ColumnFamilyStore.FlushReason.DROP));
+
         cfs.invalidate();
     }
 
@@ -685,11 +689,11 @@ public class Keyspace
         return replicationStrategy;
     }
 
-    public List<Future<?>> flush()
+    public List<Future<?>> flush(ColumnFamilyStore.FlushReason reason)
     {
         List<Future<?>> futures = new ArrayList<>(columnFamilyStores.size());
         for (ColumnFamilyStore cfs : columnFamilyStores.values())
-            futures.add(cfs.forceFlush());
+            futures.add(cfs.forceFlush(reason));
         return futures;
     }
 
