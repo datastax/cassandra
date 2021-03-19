@@ -108,19 +108,23 @@ public class FailureTest extends AbstractNodeLifecycleTest
         execute("INSERT INTO %s (id, v1) VALUES ('1', 1)");
         execute("INSERT INTO %s (id, v1) VALUES ('2', 2)");
 
+        // We need to create an index first or the failure injection fails
+        // because byteman can't find the class.
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
-        String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         // Verify that the initial index build fails...
-        verifyInitialIndexFailed(v1IndexName);
+        verifyInitialIndexFailed(v2IndexName);
 
         verifyIndexFiles(0, 0, 0, 0);
-        verifySSTableIndexes(v1IndexName, 0);
+        verifySSTableIndexes(v2IndexName, 0);
 
         // ...and then verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v1 > 1"))
+        Assertions.assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v2 = '1'"))
                   .isInstanceOf(ReadFailureException.class);
     }
 
