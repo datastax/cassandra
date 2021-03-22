@@ -76,7 +76,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         // once the index is dropped, make sure MBeans are no longer accessible
         assertThatThrownBy(() -> getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")))
-                .isInstanceOf(javax.management.InstanceNotFoundException.class);
+                .hasCauseInstanceOf(javax.management.InstanceNotFoundException.class);
     }
 
     @Test

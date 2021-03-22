@@ -22,9 +22,12 @@ package org.apache.cassandra.index.sai.functional;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -39,12 +42,17 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.SSTableIndexWriter;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
@@ -52,6 +60,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -60,11 +69,12 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-public class CompactionTest extends AbstractNodeLifecycleTest
+public class CompactionTest extends SAITester
 {
     @Test
     public void testAntiCompaction() throws Throwable
@@ -76,7 +86,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         // create 100 rows in 1 sstable
         int num = 100;
         for (int i = 0; i < num; i++)
-            execute( "INSERT INTO %s (id, v1) VALUES (?, 0)", Integer.toString(i));
+            execute( "INSERT INTO %s (id1, v1) VALUES (?, 0)", Integer.toString(i));
         flush();
 
         // verify 1 sstable index
@@ -112,7 +122,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         verifySSTableIndexes(indexName, 2);
 
         // index components are included after anti-compaction
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
     }
 
     @Test
@@ -126,7 +136,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         int num = 10;
         for (int i = 0; i < num; i++)
         {
-            execute("INSERT INTO %s (id, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
             flush();
         }
 
@@ -135,8 +145,8 @@ public class CompactionTest extends AbstractNodeLifecycleTest
             {
                 try
                 {
-                    assertNumRows(num, "SELECT id FROM %s WHERE v1>=0");
-                    assertNumRows(num, "SELECT id FROM %s WHERE v2='0'");
+                    assertNumRows(num, "SELECT id1 FROM %s WHERE v1>=0");
+                    assertNumRows(num, "SELECT id1 FROM %s WHERE v2='0'");
                 }
                 catch (Throwable e)
                 {
@@ -149,7 +159,6 @@ public class CompactionTest extends AbstractNodeLifecycleTest
 
         verifySSTableIndexes(v1IndexName, num);
         verifySSTableIndexes(v2IndexName, num);
-        assertValidationCount(0, 0);
     }
 
     @Test
@@ -166,7 +175,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
             if (i == num / sstables)
                 flush();
 
-            execute("INSERT INTO %s (id, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
         }
         flush();
 
@@ -204,8 +213,8 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         assertNotEquals(0, earlyOpenCounter.get());
 
         // verify indexes are working
-        assertNumRows(num, "SELECT id FROM %%s WHERE v1=0");
-        assertNumRows(num, "SELECT id FROM %%s WHERE v2='0'");
+        assertNumRows(num, "SELECT id1 FROM %%s WHERE v1=0");
+        assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
         verifySSTableIndexes(v1IndexName, sstables);
         verifySSTableIndexes(v2IndexName, sstables);
     }
@@ -220,7 +229,7 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         int num = 100;
         for (int i = 0; i < num; i++)
         {
-            execute("INSERT INTO %s (id, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
         }
         flush();
 
@@ -274,8 +283,8 @@ public class CompactionTest extends AbstractNodeLifecycleTest
             compactionLatch.disable();
         }
 
-        assertNumRows(num, "SELECT id FROM %%s WHERE v1>=0");
-        assertNumRows(num, "SELECT id FROM %%s WHERE v2='0'");
+        assertNumRows(num, "SELECT id1 FROM %%s WHERE v1>=0");
+        assertNumRows(num, "SELECT id1 FROM %%s WHERE v2='0'");
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), sstables);
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V2_COLUMN_IDENTIFIER), sstables);
     }
@@ -292,12 +301,12 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         int num = 100;
         for (int i = 0; i < num; i++)
         {
-            execute("INSERT INTO %s (id, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '0')", Integer.toString(i));
         }
         flush();
 
-        assertNotEquals(0, getOpenIndexFiles(currentTable()));
-        assertNotEquals(0, getDiskUsage(currentTable()));
+        assertNotEquals(0, getOpenIndexFiles());
+        assertNotEquals(0, getDiskUsage());
 
         Injections.Barrier compactionLatch =
                 Injections.newBarrier("pause_compaction_for_drop", 2, false)
@@ -338,17 +347,16 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         }
 
         // verify index group metrics are cleared.
-        assertEquals(0, getOpenIndexFiles(currentTable()));
-        assertEquals(0, getDiskUsage(currentTable()));
+        assertEquals(0, getOpenIndexFiles());
+        assertEquals(0, getDiskUsage());
 
         // verify indexes are dropped
         // verify indexes are dropped
-        assertThatThrownBy(() -> executeNet("SELECT id FROM %s WHERE v1>=0"))
+        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0"))
                 .isInstanceOf(InvalidQueryException.class)
                 .hasMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-        assertThatThrownBy(() -> executeNet("SELECT id FROM %s WHERE v2='0'"))
+        assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v2='0'"))
                 .isInstanceOf(InvalidQueryException.class)
                 .hasMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
     }
-
 }

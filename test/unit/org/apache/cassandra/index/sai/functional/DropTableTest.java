@@ -22,12 +22,14 @@ package org.apache.cassandra.index.sai.functional;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import com.google.common.collect.Iterables;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;
@@ -38,7 +40,10 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
 
-public class DropTableTest extends AbstractNodeLifecycleTest
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+public class DropTableTest extends SAITester
 {
     @Test
     public void testDropTableLifecycle() throws Throwable
@@ -51,11 +56,11 @@ public class DropTableTest extends AbstractNodeLifecycleTest
         int rows = 100;
         for (int j = 0; j < rows; j++)
         {
-            execute("INSERT INTO %s (id, v1, v2) VALUES (?, 1 , '1')", Integer.toString(j));
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 1 , '1')", Integer.toString(j));
         }
         flush();
 
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
 
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
@@ -80,5 +85,24 @@ public class DropTableTest extends AbstractNodeLifecycleTest
         dropTable("DROP TABLE %s");
 
         assertAllFileRemoved(files);
+    }
+
+    void assertAllFileExists(List<String> filePaths) throws Exception
+    {
+        for (String path : filePaths)
+        {
+            File file = new File(path);
+            assertTrue("Expect file exists, but it's removed: " + path, file.exists());
+        }
+    }
+
+    void assertAllFileRemoved(List<String> filePaths) throws Exception
+    {
+        for (String path : filePaths)
+        {
+            File file = new File(path);
+            System.err.println("## check="+path);
+            assertFalse("Expect file being removed, but it still exists: " + path, file.exists());
+        }
     }
 }

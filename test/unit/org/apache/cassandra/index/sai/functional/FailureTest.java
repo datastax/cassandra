@@ -22,8 +22,8 @@ package org.apache.cassandra.index.sai.functional;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
@@ -31,7 +31,7 @@ import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 
-public class FailureTest extends AbstractNodeLifecycleTest
+public class FailureTest extends SAITester
 {
     @Test
     public void shouldMakeIndexNonQueryableOnSSTableContextFailureDuringFlush() throws Throwable
@@ -39,17 +39,16 @@ public class FailureTest extends AbstractNodeLifecycleTest
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
-        execute("INSERT INTO %s (id, v1) VALUES ('1', 1)");
-        execute("INSERT INTO %s (id, v1) VALUES ('2', 2)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('1', 1)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('2', 2)");
         flush();
 
-        ResultSet rows = executeNet("SELECT id FROM %s WHERE v1 > 1");
-        assertEquals(1, rows.all().size());
+        assertEquals(1, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
 
         verifyIndexFiles(1, 1, 0, 1);
         verifySSTableIndexes(v1IndexName, 1, 1);
 
-        execute("INSERT INTO %s (id, v1) VALUES ('3', 3)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('3', 3)");
 
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_flush", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
@@ -57,8 +56,8 @@ public class FailureTest extends AbstractNodeLifecycleTest
         flush();
 
         // Verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v1 > 1"))
-                  .isInstanceOf(ReadFailureException.class);
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v1 > 1"))
+                  .isInstanceOf(IndexNotAvailableException.class);
 
         ssTableContextCreationFailure.disable();
 
@@ -68,8 +67,7 @@ public class FailureTest extends AbstractNodeLifecycleTest
         verifyIndexFiles(2, 0);
         verifySSTableIndexes(v1IndexName, 2, 2);
 
-        rows = executeNet("SELECT id FROM %s WHERE v1 > 1");
-        assertEquals(2, rows.all().size());
+        assertEquals(2, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
     }
 
     @Test
@@ -78,14 +76,13 @@ public class FailureTest extends AbstractNodeLifecycleTest
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
-        execute("INSERT INTO %s (id, v1) VALUES ('1', 1)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('1', 1)");
         flush();
 
-        execute("INSERT INTO %s (id, v1) VALUES ('2', 2)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('2', 2)");
         flush();
 
-        ResultSet rows = executeNet("SELECT id FROM %s WHERE v1 > 1");
-        assertEquals(1, rows.all().size());
+        assertEquals(1, execute("SELECT id1 FROM %s WHERE v1 > 1").size());
 
         verifyIndexFiles(2, 2, 0, 2);
         verifySSTableIndexes(v1IndexName, 2, 2);
@@ -95,9 +92,9 @@ public class FailureTest extends AbstractNodeLifecycleTest
 
         compact();
 
-        // Verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v1 > 1"))
-                  .isInstanceOf(ReadFailureException.class);
+        // Verify that the index is not available.
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v1 > 1"))
+                  .isInstanceOf(IndexNotAvailableException.class);
     }
 
     @Test
@@ -105,12 +102,12 @@ public class FailureTest extends AbstractNodeLifecycleTest
     {
         createTable(CREATE_TABLE_TEMPLATE);
 
-        execute("INSERT INTO %s (id, v1) VALUES ('1', 1)");
-        execute("INSERT INTO %s (id, v1) VALUES ('2', 2)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('1', 1)");
+        execute("INSERT INTO %s (id1, v1) VALUES ('2', 2)");
 
-        // We need to create an index first or the failure injection fails
+        // We need to reference SSTableContext first or the failure injection fails
         // because byteman can't find the class.
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        SSTableContext.openFilesPerSSTable();
 
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "create", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
@@ -124,8 +121,7 @@ public class FailureTest extends AbstractNodeLifecycleTest
         verifySSTableIndexes(v2IndexName, 0);
 
         // ...and then verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> executeNet("SELECT * FROM %s WHERE v2 = '1'"))
-                  .isInstanceOf(ReadFailureException.class);
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v2 = '1'"))
+                  .isInstanceOf(IndexNotAvailableException.class);
     }
-
 }

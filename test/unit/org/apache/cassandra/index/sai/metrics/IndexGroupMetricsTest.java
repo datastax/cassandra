@@ -95,12 +95,12 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
         assertEquals(0, getDiskUsage());
     }
 
-    protected int getOpenIndexFiles() throws Throwable
+    protected int getOpenIndexFiles()
     {
         return (int) getMetricValue(objectNameNoIndex("OpenIndexFiles", KEYSPACE, currentTable(), "IndexGroupMetrics"));
     }
 
-    private long getDiskUsage() throws Exception
+    protected long getDiskUsage()
     {
         return (long) getMetricValue(objectNameNoIndex("DiskUsedBytes", KEYSPACE, currentTable(), "IndexGroupMetrics"));
     }

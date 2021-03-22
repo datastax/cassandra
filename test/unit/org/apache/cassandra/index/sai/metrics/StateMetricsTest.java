@@ -62,7 +62,7 @@ public class StateMetricsTest extends AbstractMetricsTest
 
         // When the whole table is dropped, we should finally fail to find table-level state metrics:
         dropTable(String.format("DROP TABLE %s." + table, keyspace));
-        assertThatThrownBy(() -> getTableStateMetrics(keyspace, table, "TotalIndexCount")).isInstanceOf(InstanceNotFoundException.class);
+        assertThatThrownBy(() -> getTableStateMetrics(keyspace, table, "TotalIndexCount")).hasCauseInstanceOf(InstanceNotFoundException.class);
     }
 
     @Test
