@@ -30,6 +30,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
@@ -257,7 +258,7 @@ public class CompactionController extends AbstractCompactionController
         {
             // if we don't have bloom filter(bf_fp_chance=1.0 or filter file is missing),
             // we check index file instead.
-            if (sstable.getBloomFilter() instanceof AlwaysPresentFilter && sstable.checkEntryExists(key, AbstractSSTableReader.Operator.EQ, false)
+            if (sstable.getBloomFilter() instanceof AlwaysPresentFilter && sstable.checkEntryExists(key, SSTableReader.Operator.EQ, false)
                 || sstable.getBloomFilter().isPresent(key))
             {
                 minTimestampSeen = Math.min(minTimestampSeen, sstable.getMinTimestamp());

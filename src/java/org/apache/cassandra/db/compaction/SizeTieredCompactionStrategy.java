@@ -32,6 +32,7 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.SplittingSizeTieredCompactionWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.Pair;
@@ -103,7 +104,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         if (sstablesWithTombstones.isEmpty())
             return Collections.emptyList();
 
-        return Collections.singletonList(Collections.max(sstablesWithTombstones, AbstractSSTableReader.sizeComparator));
+        return Collections.singletonList(Collections.max(sstablesWithTombstones, SSTableReader.sizeComparator));
     }
 
 

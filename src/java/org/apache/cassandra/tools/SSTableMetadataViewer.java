@@ -174,7 +174,7 @@ public class SSTableMetadataViewer
     private void printScannedOverview(Descriptor descriptor, StatsMetadata stats) throws IOException
     {
         TableMetadata cfm = Util.metadataFromSSTable(descriptor);
-        AbstractSSTableReader reader = AbstractSSTableReader.openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
+        AbstractSSTableReader reader = descriptor.getFormat().getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
         try (ISSTableScanner scanner = reader.getScanner())
         {
             long bytes = scanner.getLengthInBytes();

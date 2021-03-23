@@ -29,7 +29,7 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
@@ -57,7 +57,7 @@ public class CassandraStreamWriter
 
     protected final AbstractSSTableReader sstable;
     private final LZ4Compressor compressor = LZ4Factory.fastestInstance().fastCompressor();
-    protected final Collection<AbstractBigTableReader.PartitionPositionBounds> sections;
+    protected final Collection<SSTableReader.PartitionPositionBounds> sections;
     protected final StreamRateLimiter limiter;
     protected final StreamSession session;
     private final long totalSize;
@@ -97,7 +97,7 @@ public class CassandraStreamWriter
             long progress = 0L;
 
             // stream each of the required sections of the file
-            for (AbstractBigTableReader.PartitionPositionBounds section : sections)
+            for (SSTableReader.PartitionPositionBounds section : sections)
             {
                 long start = validator == null ? section.lowerPosition : validator.chunkStart(section.lowerPosition);
                 // if the transfer does not start on the valididator's chunk boundary, this is the number of bytes to offset by

@@ -24,6 +24,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -117,7 +118,7 @@ public class Scrubber implements Closeable
         this.checkData = checkData && !this.isIndex; //LocalByPartitionerType does not support validation
         this.expectedBloomFilterSize = Math.max(
             cfs.metadata().params.minIndexInterval,
-            hasIndexFile ? AbstractSSTableReader.getApproximateKeyCount(toScrub) : 0);
+            hasIndexFile ? SSTableReader.getApproximateKeyCount(toScrub) : 0);
 
         // loop through each row, deserializing to check for damage.
         // we'll also loop through the index at the same time, using the position from the index to recover if the
@@ -160,7 +161,7 @@ public class Scrubber implements Closeable
         List<AbstractSSTableReader> finished = new ArrayList<>();
         boolean completed = false;
         outputHandler.output(String.format("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length())));
-        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge);
+        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.getMaxDataAge());
              Refs<AbstractSSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {
             assert !indexAvailable() || indexIterator.dataPosition() == 0 : indexIterator.dataPosition();
@@ -277,7 +278,7 @@ public class Scrubber implements Closeable
                 {
                     for (Partition partition : outOfOrder)
                         inOrderWriter.append(partition.unfilteredIterator());
-                    newInOrderSstable = inOrderWriter.finish(-1, sstable.maxDataAge, true);
+                    newInOrderSstable = inOrderWriter.finish(-1, sstable.getMaxDataAge(), true);
                 }
                 transaction.update(newInOrderSstable, false);
                 finished.add(newInOrderSstable);

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 
@@ -85,7 +86,7 @@ public class BigTableScanner implements ISSTableScanner
     public static ISSTableScanner getScanner(BigTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<BigSSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
+        List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
         if (positions.isEmpty())
             return new EmptySSTableScanner(sstable);
 

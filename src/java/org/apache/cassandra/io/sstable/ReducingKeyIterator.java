@@ -35,21 +35,27 @@ import org.apache.cassandra.utils.Throwables;
 public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
 {
     private final ArrayList<KeyIterator> iters;
-    private IMergeIterator<DecoratedKey,DecoratedKey> mi;
+    private IMergeIterator<DecoratedKey, DecoratedKey> mi;
+    private final long totalLength;
 
     public ReducingKeyIterator(Collection<AbstractSSTableReader> sstables)
     {
         iters = new ArrayList<>(sstables.size());
+        long len = 0;
         try
         {
             for (AbstractSSTableReader sstable : sstables)
+            {
                 iters.add(KeyIterator.forSSTable(sstable));
+                len += sstable.uncompressedLength();
+            }
         }
         catch (IOException | RuntimeException ex)
         {
             iters.forEach(KeyIterator::close);
             throw Throwables.cleaned(ex);
         }
+        this.totalLength = len;
     }
 
     private void maybeInit()
@@ -87,14 +93,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
 
     public long getTotalBytes()
     {
-        maybeInit();
-
-        long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
-        {
-            m += ((KeyIterator) iter).getTotalBytes();
-        }
-        return m;
+        return totalLength;
     }
 
     public long getBytesRead()
@@ -104,7 +103,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         long m = 0;
         for (Iterator<DecoratedKey> iter : mi.iterators())
         {
-            m += ((KeyIterator) iter).getBytesRead();
+            m += ((KeyIterator) iter).getDataPosition();
         }
         return m;
     }

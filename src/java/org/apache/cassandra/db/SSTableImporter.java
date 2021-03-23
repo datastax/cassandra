@@ -37,6 +37,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -136,7 +137,7 @@ public class SSTableImporter
                     Descriptor newDescriptor = cfs.getUniqueDescriptorFor(entry.getKey(), targetDir);
                     maybeMutateMetadata(entry.getKey(), options);
                     movedSSTables.add(new MovedSSTable(newDescriptor, entry.getKey(), entry.getValue()));
-                    AbstractSSTableReader sstable = AbstractSSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
+                    AbstractSSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
                     newSSTablesPerDirectory.add(sstable);
                 }
                 catch (Throwable t)
@@ -215,7 +216,7 @@ public class SSTableImporter
         AbstractSSTableReader sstable = null;
         try
         {
-            sstable = AbstractSSTableReader.open(descriptor, components, cfs.metadata);
+            sstable = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             targetDirectory = cfs.getDirectories().getLocationForDisk(cfs.diskBoundaryManager.getDiskBoundaries(cfs).getCorrectDiskForSSTable(sstable));
         }
         finally
@@ -342,7 +343,7 @@ public class SSTableImporter
         AbstractSSTableReader reader = null;
         try
         {
-            reader = AbstractSSTableReader.open(descriptor, components, cfs.metadata);
+            reader = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             Verifier.Options verifierOptions = Verifier.options()
                                                        .extendedVerification(extendedVerify)
                                                        .checkOwnsTokens(verifyTokens)

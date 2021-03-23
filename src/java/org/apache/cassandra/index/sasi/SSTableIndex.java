@@ -43,7 +43,7 @@ import com.google.common.base.Function;
 public class SSTableIndex
 {
     private final ColumnIndex columnIndex;
-    private final Ref<AbstractSSTableReader> sstableRef;
+    private final Ref<? extends AbstractSSTableReader> sstableRef;
     private final AbstractSSTableReader sstable;
     private final OnDiskIndex index;
     private final AtomicInteger references = new AtomicInteger(1);

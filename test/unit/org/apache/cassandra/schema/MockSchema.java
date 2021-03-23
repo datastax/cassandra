@@ -34,6 +34,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IndexSummary;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -144,9 +145,9 @@ public class MockSchema
                                                      .sstableLevel(level)
                                                      .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, UNREPAIRED_SSTABLE, null, false, header)
                                                      .get(MetadataType.STATS);
-            AbstractSSTableReader reader = AbstractSSTableReader.internalOpen(descriptor, components, cfs.metadata,
-                                                                              fileHandle.sharedCopy(), fileHandle.sharedCopy(), indexSummary.sharedCopy(),
-                                                                              new AlwaysPresentFilter(), 1L, metadata, BigSSTableReader.OpenReason.NORMAL, header);
+            AbstractSSTableReader reader = SSTableReader.internalOpen(descriptor, components, cfs.metadata,
+                                                                      fileHandle.sharedCopy(), fileHandle.sharedCopy(), indexSummary.sharedCopy(),
+                                                                      new AlwaysPresentFilter(), 1L, metadata, SSTableReader.OpenReason.NORMAL, header);
             reader.first = readerBounds(firstToken);
             reader.last = readerBounds(lastToken);
             if (!keepRef)

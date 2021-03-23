@@ -72,7 +72,7 @@ public class SSTableExpiredBlockers
             {
                 try
                 {
-                    AbstractSSTableReader reader = AbstractSSTableReader.open(sstable.getKey());
+                    AbstractSSTableReader reader = sstable.getKey().getFormat().getReaderFactory().open(sstable.getKey());
                     sstables.add(reader);
                 }
                 catch (Throwable t)

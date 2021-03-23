@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -100,13 +101,15 @@ public class BigFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory implements AbstractSSTableReader.Factory
+    static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
-        @Override
-        public AbstractSSTableReader open(SSTableReaderBuilder builder)
-        {
-            return new BigTableReader(builder);
-        }
+//        @Override
+//        public AbstractSSTableReader open(BigSSTableReaderBuilder builder)
+//        {
+//            return new BigTableReader(builder);
+//        }
+
+
 
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
@@ -123,6 +126,12 @@ public class BigFormat implements SSTableFormat
             {
                 throw new RuntimeException(ex);
             }
+        }
+
+        @Override
+        public AbstractSSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+        {
+            return SSTableReader.moveAndOpenSSTable(cfs, oldDescriptor, newDescriptor, components, copyData);
         }
     }
 

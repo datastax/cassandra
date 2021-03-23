@@ -122,7 +122,7 @@ public class StandaloneSplitter
             {
                 try
                 {
-                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs);
+                    AbstractSSTableReader sstable = fn.getKey().getFormat().getReaderFactory().openNoValidation(fn.getKey(), fn.getValue(), cfs);
                     if (!isSSTableLargerEnough(sstable, options.sizeInMB)) {
                         System.out.println(String.format("Skipping %s: it's size (%.3f MB) is less than the split size (%d MB)",
                                 sstable.getFilename(), ((sstable.onDiskLength() * 1.0d) / 1024L) / 1024L, options.sizeInMB));

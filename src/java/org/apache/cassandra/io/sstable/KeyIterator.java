@@ -33,7 +33,7 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
 
     private final PartitionIndexIterator it;
 
-    private long keyPosition = -1;
+    private long indexPosition = -1;
 
     public KeyIterator(PartitionIndexIterator it, IPartitioner partitioner)
     {
@@ -55,16 +55,16 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
     {
         try
         {
-            if (keyPosition < 0)
+            if (indexPosition < 0)
             {
-                keyPosition = 0;
+                indexPosition = 0;
                 return it.isExhausted()
                        ? endOfData()
                        : partitioner.decorateKey(it.key());
             }
             else
             {
-                keyPosition = it.indexPosition();
+                indexPosition = it.indexPosition();
                 return it.advance()
                        ? partitioner.decorateKey(it.key())
                        : endOfData();
@@ -81,19 +81,14 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         it.close();
     }
 
-    public long getBytesRead()
+    public long getIndexPosition()
     {
-        return it.indexPosition();
+        return indexPosition;
     }
 
-    public long getTotalBytes()
+    public long getDataPosition()
     {
-        return it.indexLength();
-    }
-
-    public long getKeyPosition()
-    {
-        return keyPosition;
+        return it.dataPosition();
     }
 
     public void reset()
@@ -101,7 +96,7 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         try
         {
             it.reset();
-            keyPosition = -1;
+            indexPosition = -1;
         }
         catch (IOException ex)
         {

@@ -57,6 +57,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -671,7 +672,7 @@ public class ReadCommandTest
         cfs.forceBlockingFlush();
         List<AbstractSSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
         assertEquals(2, sstables.size());
-        Collections.sort(sstables, AbstractSSTableReader.maxTimestampDescending);
+        Collections.sort(sstables, BigTableReader.maxTimestampDescending);
 
         ReadCommand readCommand = Util.cmd(cfs, Util.dk("key")).includeRow("dd").columns("a").build();
 

@@ -24,6 +24,8 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -141,7 +143,7 @@ public class SSTableLoader implements StreamEventHandler
                                               // To conserve memory, open SSTableReaders without bloom filters and discard
                                               // the index summary after calculating the file sections to stream and the estimated
                                               // number of keys for each endpoint. See CASSANDRA-5555 for details.
-                                              AbstractSSTableReader sstable = AbstractSSTableReader.openForBatch(desc, components, metadata);
+                                              AbstractSSTableReader sstable = desc.getFormat().getReaderFactory().openForBatch(desc, components, metadata);
                                               sstables.add(sstable);
 
                                               // calculate the sstable sections to stream as well as the estimated number of
@@ -151,15 +153,16 @@ public class SSTableLoader implements StreamEventHandler
                                                   InetAddressAndPort endpoint = entry.getKey();
                                                   List<Range<Token>> tokenRanges = Range.normalize(entry.getValue());
 
-                                                  List<BigSSTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges);
+                                                  List<SSTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges);
                                                   long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges);
-                                                  Ref<AbstractSSTableReader> ref = sstable.ref();
+                                                  Ref<? extends AbstractSSTableReader> ref = sstable.ref();
                                                   OutgoingStream stream = new CassandraOutgoingFile(StreamOperation.BULK_LOAD, ref, sstableSections, tokenRanges, estimatedKeys);
                                                   streamingDetails.put(endpoint, stream);
                                               }
 
                                               // to conserve heap space when bulk loading
-                                              sstable.releaseSummary();
+                                              if (sstable.descriptor.formatType == SSTableFormat.Type.BIG)
+                                                  ((SSTableReader) sstable).releaseSummary();
                                           }
                                           catch (FSError e)
                                           {

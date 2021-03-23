@@ -30,13 +30,17 @@ import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
-import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
@@ -44,13 +48,14 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.CheckedFunction;
 import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.TableMetadata;
@@ -66,8 +71,7 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     public ForwardingSSTableReader(AbstractSSTableReader delegate)
     {
         super(delegate.descriptor, SSTable.componentsFor(delegate.descriptor),
-              TableMetadataRef.forOfflineTools(delegate.metadata()), delegate.maxDataAge, delegate.getSSTableMetadata(),
-              delegate.openReason, delegate.header, delegate.indexSummary, delegate.dfile, delegate.ifile, delegate.bf);
+              TableMetadataRef.forOfflineTools(delegate.metadata()), DatabaseDescriptor.getDiskOptimizationStrategy(), delegate.openReason, delegate.header);
         this.delegate = delegate;
         this.first = delegate.first;
         this.last = delegate.last;
@@ -122,6 +126,12 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
+    public <R> R runWithLock(CheckedFunction<Descriptor, R, IOException> task) throws IOException
+    {
+        return delegate.runWithLock(task);
+    }
+
+    @Override
     public AbstractSSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
     {
         return delegate.cloneWithRestoredStart(restoredStart);
@@ -134,51 +144,21 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public AbstractSSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
-    {
-        return delegate.cloneWithNewSummarySamplingLevel(parent, samplingLevel);
-    }
-
-    @Override
     public RestorableMeter getReadMeter()
     {
         return delegate.getReadMeter();
     }
 
     @Override
-    public int getIndexSummarySamplingLevel()
+    public void mutateRepairedAndReload(long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
-        return delegate.getIndexSummarySamplingLevel();
+        delegate.mutateRepairedAndReload(repairedAt, pendingRepair, isTransient);
     }
 
     @Override
-    public long getIndexSummaryOffHeapSize()
+    public void mutateLevelAndReload(int level) throws IOException
     {
-        return delegate.getIndexSummaryOffHeapSize();
-    }
-
-    @Override
-    public int getMinIndexInterval()
-    {
-        return delegate.getMinIndexInterval();
-    }
-
-    @Override
-    public double getEffectiveIndexInterval()
-    {
-        return delegate.getEffectiveIndexInterval();
-    }
-
-    @Override
-    public void releaseSummary()
-    {
-        delegate.releaseSummary();
-    }
-
-    @Override
-    public long getIndexScanPosition(PartitionPosition key)
-    {
-        return delegate.getIndexScanPosition(key);
+        delegate.mutateLevelAndReload(level);
     }
 
     @Override
@@ -224,21 +204,15 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public int getIndexSummarySize()
+    public boolean checkEntryExists(PartitionPosition key, SSTableReader.Operator op, boolean updateCacheAndStats)
     {
-        return delegate.getIndexSummarySize();
+        return delegate.checkEntryExists(key, op, updateCacheAndStats);
     }
 
     @Override
-    public int getMaxIndexSummarySize()
+    public RowIndexEntry<?> getPosition(PartitionPosition key, SSTableReader.Operator op)
     {
-        return delegate.getMaxIndexSummarySize();
-    }
-
-    @Override
-    public byte[] getIndexSummaryKey(int index)
-    {
-        return delegate.getIndexSummaryKey(index);
+        return delegate.getPosition(key, op);
     }
 
     @Override
@@ -248,7 +222,7 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public List<PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges)
+    public List<SSTableReader.PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges)
     {
         return delegate.getPositionsForRanges(ranges);
     }
@@ -272,21 +246,9 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    protected BigTableRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
-    {
-        return delegate.getCachedPosition(unifiedKey, updateStats);
-    }
-
-    @Override
     public boolean isKeyCacheEnabled()
     {
         return delegate.isKeyCacheEnabled();
-    }
-
-    @Override
-    protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
-    {
-        return (BigTableRowIndexEntry) delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
     }
 
     @Override
@@ -323,6 +285,30 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     public double getCrcCheckChance()
     {
         return delegate.getCrcCheckChance();
+    }
+
+    @Override
+    public DeletionTime partitionLevelDeletionAt(long position) throws IOException
+    {
+        return delegate.partitionLevelDeletionAt(position);
+    }
+
+    @Override
+    public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
+    {
+        return delegate.staticRowAt(position, columnFilter);
+    }
+
+    @Override
+    public ClusteringPrefix<?> clusteringAt(long position) throws IOException
+    {
+        return delegate.clusteringAt(position);
+    }
+
+    @Override
+    public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
+    {
+        return delegate.unfilteredAt(position, columnFilter);
     }
 
     @Override
@@ -422,9 +408,9 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(FileDataInput reader) throws IOException
+    public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
     {
-        return delegate.keyAt(reader);
+        return delegate.keyAt(indexFileReader, indexPosition);
     }
 
     @Override
@@ -554,27 +540,9 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public int getMaxTTL()
-    {
-        return delegate.getMaxTTL();
-    }
-
-    @Override
-    public long getTotalColumnsSet()
-    {
-        return delegate.getTotalColumnsSet();
-    }
-
-    @Override
     public long getTotalRows()
     {
         return delegate.getTotalRows();
-    }
-
-    @Override
-    public int getAvgColumnSetPerRow()
-    {
-        return delegate.getAvgColumnSetPerRow();
     }
 
     @Override
@@ -596,6 +564,12 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
+    public long getMaxDataAge()
+    {
+        return delegate.getMaxDataAge();
+    }
+
+    @Override
     public RandomAccessReader openDataReader(RateLimiter limiter)
     {
         return delegate.openDataReader(limiter);
@@ -608,27 +582,9 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public RandomAccessReader openIndexReader()
-    {
-        return delegate.openIndexReader();
-    }
-
-    @Override
     public ChannelProxy getDataChannel()
     {
         return delegate.getDataChannel();
-    }
-
-    @Override
-    public ChannelProxy getIndexChannel()
-    {
-        return delegate.getIndexChannel();
-    }
-
-    @Override
-    public FileHandle getIndexFile()
-    {
-        return delegate.getIndexFile();
     }
 
     @Override
@@ -662,27 +618,21 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     }
 
     @Override
-    public Ref<AbstractSSTableReader> tryRef()
+    public Ref<? extends AbstractSSTableReader> tryRef()
     {
         return delegate.tryRef();
     }
 
     @Override
-    public Ref<AbstractSSTableReader> selfRef()
+    public Ref<? extends AbstractSSTableReader> selfRef()
     {
         return delegate.selfRef();
     }
 
     @Override
-    public Ref<AbstractSSTableReader> ref()
+    public Ref<? extends AbstractSSTableReader> ref()
     {
         return delegate.ref();
-    }
-
-    @Override
-    protected void setup(boolean trackHotness)
-    {
-        delegate.setup(trackHotness);
     }
 
     @Override
@@ -761,5 +711,11 @@ public abstract class ForwardingSSTableReader extends AbstractSSTableReader
     public AbstractBounds<Token> getBounds()
     {
         return delegate.getBounds();
+    }
+
+    @Override
+    public AbstractSSTableReader cloneAndReplace(IFilter filter)
+    {
+        return cloneAndReplace(filter);
     }
 }

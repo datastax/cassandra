@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -86,11 +87,11 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                             throw new CompactionInterruptedException(getCompactionInfo());
 
                         final DecoratedKey key = keys.next();
-                        final long keyPosition = keys.getKeyPosition();
+                        final long keyPosition = keys.getDataPosition();
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, AbstractSSTableReader.Operator.EQ);
+                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                         dataFile.seek(indexEntry.position);
                         ByteBufferUtil.readWithShortLength(dataFile); // key
 

@@ -25,6 +25,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.stream.Collector;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -142,9 +143,9 @@ import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR
  *
  * TODO: fill in details about Tracker and lifecycle interactions for tools, and for compaction strategies
  */
-public abstract class AbstractBigTableReader extends AbstractSSTableReader<AbstractBigTableReader>
+public abstract class SSTableReader extends AbstractSSTableReader
 {
-    private static final Logger logger = LoggerFactory.getLogger(AbstractBigTableReader.class);
+    private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
     private static final ScheduledThreadPoolExecutor syncExecutor = initSyncExecutor();
     private static ScheduledThreadPoolExecutor initSyncExecutor()
@@ -161,24 +162,18 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
     }
     private static final RateLimiter meterSyncThrottle = RateLimiter.create(100.0);
 
-    public static final Comparator<AbstractBigTableReader> maxTimestampDescending = (o1, o2) -> Long.compare(o2.getMaxTimestamp(), o1.getMaxTimestamp());
-    public static final Comparator<AbstractBigTableReader> maxTimestampAscending = (o1, o2) -> Long.compare(o1.getMaxTimestamp(), o2.getMaxTimestamp());
+    public static final Comparator<AbstractSSTableReader> maxTimestampDescending = (o1, o2) -> Long.compare(o2.getMaxTimestamp(), o1.getMaxTimestamp());
+    public static final Comparator<AbstractSSTableReader> maxTimestampAscending = (o1, o2) -> Long.compare(o1.getMaxTimestamp(), o2.getMaxTimestamp());
 
     // it's just an object, which we use regular Object equality on; we introduce a special class just for easy recognition
     public static final class UniqueIdentifier {}
-    public static final Comparator<AbstractBigTableReader> sstableComparator = (o1, o2) -> o1.first.compareTo(o2.first);
+    public static final Comparator<AbstractSSTableReader> sstableComparator = (o1, o2) -> o1.first.compareTo(o2.first);
 
     public static final Comparator<AbstractSSTableReader> generationReverseComparator = (o1, o2) -> -Integer.compare(o1.descriptor.generation, o2.descriptor.generation);
 
-    public static final Ordering<AbstractBigTableReader> sstableOrdering = Ordering.from(sstableComparator);
+    public static final Ordering<AbstractSSTableReader> sstableOrdering = Ordering.from(sstableComparator);
 
-    public static final Comparator<AbstractBigTableReader> sizeComparator = new Comparator<AbstractBigTableReader>()
-    {
-        public int compare(AbstractBigTableReader o1, AbstractBigTableReader o2)
-        {
-            return Longs.compare(o1.onDiskLength(), o2.onDiskLength());
-        }
-    };
+    public static final Comparator<? super AbstractSSTableReader> sizeComparator = (o1, o2) -> Longs.compare(o1.onDiskLength(), o2.onDiskLength());
 
     /**
      * maxDataAge is a timestamp in local server time (e.g. System.currentTimeMilli) which represents an upper bound
@@ -202,7 +197,6 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         MOVED_START
     }
 
-    public final OpenReason openReason;
     public final UniqueIdentifier instanceId = new UniqueIdentifier();
 
     // indexfile and datafile: might be null before a call to load()
@@ -222,17 +216,25 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
     // not final since we need to be able to change level on a file.
     protected volatile StatsMetadata sstableMetadata;
 
-    public final SerializationHeader header;
-
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
     protected final AtomicLong keyCacheRequest = new AtomicLong(0);
 
     private final InstanceTidier tidy;
-    private final Ref<AbstractBigTableReader> selfRef;
+    private final Ref<SSTableReader> selfRef;
 
     private RestorableMeter readMeter;
 
     private volatile double crcCheckChance;
+
+    public static Iterable<SSTableReader> selectOnlyBigTableReaders(Iterable<? extends AbstractSSTableReader> readers)
+    {
+        return Iterables.transform(Iterables.filter(readers, tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG), SSTableReader.class::cast);
+    }
+
+    public static <T> T selectOnlyBigTableReaders(Collection<? extends AbstractSSTableReader> readers, Collector<? super SSTableReader, ?, T> collector)
+    {
+        return readers.stream().filter(tr -> tr.descriptor.formatType == SSTableFormat.Type.BIG).map(SSTableReader.class::cast).collect(collector);
+    }
 
     /**
      * Calculate approximate key count.
@@ -243,7 +245,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      * @param sstables SSTables to calculate key count
      * @return estimated key count
      */
-    public static long getApproximateKeyCount(Iterable<AbstractBigTableReader> sstables)
+    public static long getApproximateKeyCount(Iterable<? extends AbstractSSTableReader> sstables)
     {
         long count = -1;
 
@@ -252,7 +254,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
 
         boolean failed = false;
         ICardinality cardinality = null;
-        for (AbstractBigTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             if (sstable.openReason == OpenReason.EARLY)
                 continue;
@@ -294,7 +296,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         if (count < 0)
         {
             count = 0;
-            for (AbstractBigTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
                 count += sstable.estimatedKeys();
         }
         return count;
@@ -303,10 +305,10 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
     /**
      * Estimates how much of the keys we would keep if the sstables were compacted together
      */
-    public static double estimateCompactionGain(Set<AbstractBigTableReader> overlapping)
+    public static double estimateCompactionGain(Set<SSTableReader> overlapping)
     {
         Set<ICardinality> cardinalities = new HashSet<>(overlapping.size());
-        for (AbstractBigTableReader sstable : overlapping)
+        for (SSTableReader sstable : overlapping)
         {
             try
             {
@@ -348,7 +350,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         return base;
     }
 
-    public static AbstractBigTableReader open(Descriptor descriptor)
+    public static SSTableReader open(Descriptor descriptor)
     {
         TableMetadataRef metadata;
         if (descriptor.cfname.contains(SECONDARY_INDEX_NAME_SEPARATOR))
@@ -366,24 +368,24 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         return open(descriptor, metadata);
     }
 
-    public static AbstractBigTableReader open(Descriptor desc, TableMetadataRef metadata)
+    private static SSTableReader open(Descriptor desc, TableMetadataRef metadata)
     {
         return open(desc, componentsFor(desc), metadata);
     }
 
-    public static AbstractBigTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         return open(descriptor, components, metadata, true, false);
     }
 
     // use only for offline or "Standalone" operations
-    public static AbstractBigTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
+    private static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs)
     {
         return open(descriptor, components, cfs.metadata, false, true);
     }
 
     // use only for offline or "Standalone" operations
-    public static AbstractBigTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
+    private static SSTableReader openNoValidation(Descriptor descriptor, TableMetadataRef metadata)
     {
         return open(descriptor, componentsFor(descriptor), metadata, false, true);
     }
@@ -397,7 +399,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      * @return opened BigSSTableReader
      * @throws IOException
      */
-    public static AbstractBigTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    private static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -448,14 +450,14 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      * @param validate Check SSTable for corruption (limited)
      * @param isOffline Whether we are opening this SSTable "offline", for example from an external tool or not for inclusion in queries (validations)
      *                  This stops regenerating BF + Summaries and also disables tracking of hotness for the SSTable.
-     * @return {@link AbstractBigTableReader}
+     * @return {@link SSTableReader}
      * @throws IOException
      */
-    public static AbstractBigTableReader open(Descriptor descriptor,
-                                              Set<Component> components,
-                                              TableMetadataRef metadata,
-                                              boolean validate,
-                                              boolean isOffline)
+    private static SSTableReader open(Descriptor descriptor,
+                                      Set<Component> components,
+                                      TableMetadataRef metadata,
+                                      boolean validate,
+                                      boolean isOffline)
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -493,7 +495,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
             System.exit(1);
         }
 
-        AbstractBigTableReader sstable;
+        SSTableReader sstable;
         try
         {
             sstable = new SSTableReaderBuilder.ForRead(descriptor,
@@ -526,10 +528,10 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         }
     }
 
-    public static Collection<AbstractBigTableReader> openAll(Set<Map.Entry<Descriptor, Set<Component>>> entries,
+    public static Collection<AbstractSSTableReader> openAll(Set<Map.Entry<Descriptor, Set<Component>>> entries,
                                                              final TableMetadataRef metadata)
     {
-        final Collection<AbstractBigTableReader> sstables = new LinkedBlockingQueue<>();
+        final Collection<AbstractSSTableReader> sstables = new LinkedBlockingQueue<>();
 
         ExecutorService executor = DebuggableThreadPoolExecutor.createWithFixedPoolSize("SSTableBatchOpen", FBUtilities.getAvailableProcessors());
         for (final Map.Entry<Descriptor, Set<Component>> entry : entries)
@@ -538,10 +540,10 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
             {
                 public void run()
                 {
-                    AbstractBigTableReader sstable;
+                    AbstractSSTableReader sstable;
                     try
                     {
-                        sstable = open(entry.getKey(), entry.getValue(), metadata);
+                        sstable = entry.getKey().getFormat().getReaderFactory().open(entry.getKey(), entry.getValue(), metadata);
                     }
                     catch (CorruptSSTableException ex)
                     {
@@ -578,17 +580,17 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
     /**
      * Open a RowIndexedReader which already has its state initialized (by SSTableWriter).
      */
-    public static AbstractBigTableReader internalOpen(Descriptor desc,
-                                                      Set<Component> components,
-                                                      TableMetadataRef metadata,
-                                                      FileHandle ifile,
-                                                      FileHandle dfile,
-                                                      IndexSummary summary,
-                                                      IFilter bf,
-                                                      long maxDataAge,
-                                                      StatsMetadata sstableMetadata,
-                                                      OpenReason openReason,
-                                                      SerializationHeader header)
+    public static SSTableReader internalOpen(Descriptor desc,
+                                             Set<Component> components,
+                                             TableMetadataRef metadata,
+                                             FileHandle ifile,
+                                             FileHandle dfile,
+                                             IndexSummary summary,
+                                             IFilter bf,
+                                             long maxDataAge,
+                                             StatsMetadata sstableMetadata,
+                                             OpenReason openReason,
+                                             SerializationHeader header)
     {
         assert desc != null && ifile != null && dfile != null && summary != null && bf != null && sstableMetadata != null;
 
@@ -627,7 +629,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         }
     }
 
-    protected AbstractBigTableReader(SSTableReaderBuilder builder)
+    protected SSTableReader(SSTableReaderBuilder builder)
     {
         this(builder.descriptor,
              builder.components,
@@ -642,53 +644,71 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
              builder.bf);
     }
 
-    protected AbstractBigTableReader(final Descriptor desc,
-                                     Set<Component> components,
-                                     TableMetadataRef metadata,
-                                     long maxDataAge,
-                                     StatsMetadata sstableMetadata,
-                                     OpenReason openReason,
-                                     SerializationHeader header,
-                                     IndexSummary summary,
-                                     FileHandle dfile,
-                                     FileHandle ifile,
-                                     IFilter bf)
+    protected SSTableReader(final Descriptor desc,
+                            Set<Component> components,
+                            TableMetadataRef metadata,
+                            long maxDataAge,
+                            StatsMetadata sstableMetadata,
+                            OpenReason openReason,
+                            SerializationHeader header,
+                            IndexSummary summary,
+                            FileHandle dfile,
+                            FileHandle ifile,
+                            IFilter bf)
     {
-        super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy(), openReason, header);
         this.sstableMetadata = sstableMetadata;
-        this.header = header;
         this.indexSummary = summary;
         this.dfile = dfile;
         this.ifile = ifile;
         this.bf = bf;
         this.maxDataAge = maxDataAge;
-        this.openReason = openReason;
         tidy = new InstanceTidier(descriptor, metadata.id);
         selfRef = new Ref<>(this, tidy);
     }
 
-    public static long getTotalBytes(Iterable<AbstractBigTableReader> sstables)
+    public static long getTotalBytes(Iterable<AbstractSSTableReader> sstables)
     {
         long sum = 0;
-        for (AbstractBigTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             sum += sstable.onDiskLength();
         return sum;
     }
 
-    public static long getTotalUncompressedBytes(Iterable<AbstractBigTableReader> sstables)
+    public static long getTotalUncompressedBytes(Iterable<AbstractSSTableReader> sstables)
     {
         long sum = 0;
-        for (AbstractBigTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             sum += sstable.uncompressedLength();
 
         return sum;
+    }
+
+    public boolean isPendingRepair()
+    {
+        return sstableMetadata.pendingRepair != ActiveRepairService.NO_PENDING_REPAIR;
+    }
+
+    public UUID getPendingRepair()
+    {
+        return sstableMetadata.pendingRepair;
+    }
+
+    public long getRepairedAt()
+    {
+        return sstableMetadata.repairedAt;
+    }
+
+    public boolean isTransient()
+    {
+        return sstableMetadata.isTransient;
     }
 
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
 
     public boolean equals(Object that)
     {
-        return that instanceof AbstractBigTableReader && ((AbstractBigTableReader) that).descriptor.equals(this.descriptor);
+        return that instanceof SSTableReader && ((SSTableReader) that).descriptor.equals(this.descriptor);
     }
 
     public int hashCode()
@@ -833,7 +853,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      *
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    private AbstractBigTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
+    private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason)
     {
         return cloneAndReplace(newFirst, reason, indexSummary.sharedCopy());
     }
@@ -848,19 +868,19 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      *
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
-    private AbstractBigTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
+    private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
     {
-        AbstractBigTableReader replacement = internalOpen(descriptor,
-                                                          components,
-                                                          metadata,
+        SSTableReader replacement = internalOpen(descriptor,
+                                                 components,
+                                                 metadata,
                                                  ifile != null ? ifile.sharedCopy() : null,
-                                                          dfile.sharedCopy(),
-                                                          newSummary,
-                                                          bf.sharedCopy(),
-                                                          maxDataAge,
-                                                          sstableMetadata,
-                                                          reason,
-                                                          header);
+                                                 dfile.sharedCopy(),
+                                                 newSummary,
+                                                 bf.sharedCopy(),
+                                                 maxDataAge,
+                                                 sstableMetadata,
+                                                 reason,
+                                                 header);
 
         replacement.first = newFirst;
         replacement.last = last;
@@ -876,19 +896,19 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      * @return the cloned reader. That reader is set as a replacement by the method.
      */
     @VisibleForTesting
-    public AbstractBigTableReader cloneAndReplace(IFilter newBloomFilter)
+    public SSTableReader cloneAndReplace(IFilter newBloomFilter)
     {
-        AbstractBigTableReader replacement = internalOpen(descriptor,
-                                                          components,
-                                                          metadata,
-                                                          ifile.sharedCopy(),
-                                                          dfile.sharedCopy(),
-                                                          indexSummary,
-                                                          newBloomFilter,
-                                                          maxDataAge,
-                                                          sstableMetadata,
-                                                          openReason,
-                                                          header);
+        SSTableReader replacement = internalOpen(descriptor,
+                                                 components,
+                                                 metadata,
+                                                 ifile.sharedCopy(),
+                                                 dfile.sharedCopy(),
+                                                 indexSummary,
+                                                 newBloomFilter,
+                                                 maxDataAge,
+                                                 sstableMetadata,
+                                                 openReason,
+                                                 header);
 
         replacement.first = first;
         replacement.last = last;
@@ -896,7 +916,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         return replacement;
     }
 
-    public AbstractBigTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
+    public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
     {
         synchronized (tidy.global)
         {
@@ -905,7 +925,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
     }
 
     // runOnClose must NOT be an anonymous or non-static inner class, nor must it retain a reference chain to this reader
-    public AbstractBigTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
+    public SSTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
     {
         synchronized (tidy.global)
         {
@@ -959,7 +979,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      * @throws IOException
      */
     @SuppressWarnings("resource")
-    public AbstractBigTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
+    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
     {
         assert openReason != OpenReason.EARLY;
 
@@ -1004,7 +1024,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
              IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata().params.minIndexInterval, newSamplingLevel))
         {
             while (iterator.hasNext())
-                summaryBuilder.maybeAddEntry(iterator.next(), iterator.getKeyPosition());
+                summaryBuilder.maybeAddEntry(iterator.next(), iterator.getIndexPosition());
 
             return summaryBuilder.build(getPartitioner());
         }
@@ -1605,13 +1625,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
 
     public abstract DecoratedKey keyAt(FileDataInput reader) throws IOException;
 
-    /**
-     * Retrieves the partition-level deletion time at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#partitionLevelDeletion(DeletionTime, long)}.
-     *
-     * @param position the start position of the partion-level deletion time in the data file
-     * @return the partion-level deletion time at the specified position
-     */
+    @Override
     public DeletionTime partitionLevelDeletionAt(long position) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1623,14 +1637,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         }
     }
 
-    /**
-     * Retrieves the static row at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#staticRow(Row, long)}.
-     *
-     * @param position the start position of the static row in the data file
-     * @param columnFilter the columns to fetch, {@code null} to select all the columns
-     * @return the static row at the specified position
-     */
+    @Override
     public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
     {
         if (!header.hasStatic())
@@ -1651,13 +1658,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         }
     }
 
-    /**
-     * Retrieves the clustering prefix of the unfiltered at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
-     *
-     * @param position the start position of the unfiltered in the data file
-     * @return the clustering prefix of the unfiltered at the specified position
-     */
+    @Override
     public ClusteringPrefix clusteringAt(long position) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1675,14 +1676,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         }
     }
 
-    /**
-     * Retrieves the unfiltered at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
-     *
-     * @param position the start position of the unfiltered in the data file
-     * @param columnFilter the columns to fetch, {@code null} to select all the columns
-     * @return the unfiltered at the specified position
-     */
+    @Override
     public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
     {
         try (FileDataInput in = dfile.createReader(position))
@@ -1697,26 +1691,6 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
                                                                      columnFilter);
             return UnfilteredSerializer.serializer.deserialize(in, header, helper, BTreeRow.sortedBuilder());
         }
-    }
-
-    public boolean isPendingRepair()
-    {
-        return sstableMetadata.pendingRepair != ActiveRepairService.NO_PENDING_REPAIR;
-    }
-
-    public UUID getPendingRepair()
-    {
-        return sstableMetadata.pendingRepair;
-    }
-
-    public long getRepairedAt()
-    {
-        return sstableMetadata.repairedAt;
-    }
-
-    public boolean isTransient()
-    {
-        return sstableMetadata.isTransient;
     }
 
     public boolean intersects(Collection<Range<Token>> ranges)
@@ -1990,17 +1964,17 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         return sstableMetadata.encodingStats;
     }
 
-    public Ref<AbstractBigTableReader> tryRef()
+    public Ref<SSTableReader> tryRef()
     {
         return selfRef.tryRef();
     }
 
-    public Ref<AbstractBigTableReader> selfRef()
+    public Ref<SSTableReader> selfRef()
     {
         return selfRef;
     }
 
-    public Ref<AbstractBigTableReader> ref()
+    public Ref<SSTableReader> ref()
     {
         return selfRef.ref();
     }
@@ -2056,7 +2030,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
 
         private volatile boolean setup;
 
-        void setup(AbstractBigTableReader reader, boolean trackHotness)
+        void setup(SSTableReader reader, boolean trackHotness)
         {
             this.setup = true;
             this.bf = reader.bf;
@@ -2163,7 +2137,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
         // shared state managing if the logical sstable has been compacted; this is used in cleanup
         private volatile Runnable obsoletion;
 
-        GlobalTidy(final AbstractBigTableReader reader)
+        GlobalTidy(final SSTableReader reader)
         {
             this.desc = reader.descriptor;
         }
@@ -2227,7 +2201,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
 
         // get a new reference to the shared GlobalTidy for this sstable
         @SuppressWarnings("resource")
-        public static Ref<GlobalTidy> get(AbstractBigTableReader sstable)
+        public static Ref<GlobalTidy> get(SSTableReader sstable)
         {
             Descriptor descriptor = sstable.descriptor;
             Ref<GlobalTidy> refc = lookup.get(descriptor);
@@ -2311,7 +2285,7 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
      *
      * All components given will be moved/renamed
      */
-    public static AbstractBigTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
+    public static SSTableReader moveAndOpenSSTable(ColumnFamilyStore cfs, Descriptor oldDescriptor, Descriptor newDescriptor, Set<Component> components, boolean copyData)
     {
         if (!oldDescriptor.isCompatible())
             throw new RuntimeException(String.format("Can't open incompatible SSTable! Current version %s, found file: %s",
@@ -2352,10 +2326,10 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
             SSTableWriter.rename(oldDescriptor, newDescriptor, components);
         }
 
-        AbstractBigTableReader reader;
+        SSTableReader reader;
         try
         {
-            reader = AbstractBigTableReader.open(newDescriptor, components, cfs.metadata);
+            reader = SSTableReader.open(newDescriptor, components, cfs.metadata);
         }
         catch (Throwable t)
         {
@@ -2370,5 +2344,43 @@ public abstract class AbstractBigTableReader extends AbstractSSTableReader<Abstr
 
         ExecutorUtils.shutdownNowAndWait(timeout, unit, syncExecutor);
         resetTidying();
+    }
+
+    public abstract static class AbstractBigTableReaderFactory implements AbstractSSTableReader.Factory {
+
+        public AbstractSSTableReader openForBatch(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return SSTableReader.openForBatch(desc, components, metadata);
+        }
+
+        public AbstractSSTableReader open(Descriptor desc)
+        {
+            return SSTableReader.open(desc);
+        }
+
+        public AbstractSSTableReader open(Descriptor desc, TableMetadataRef metadata)
+        {
+            return SSTableReader.open(desc, metadata);
+        }
+
+        public AbstractSSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata)
+        {
+            return SSTableReader.open(desc, components, metadata);
+        }
+
+        public AbstractSSTableReader open(Descriptor desc, Set<Component> components, TableMetadataRef metadata, boolean validate, boolean isOffline)
+        {
+            return SSTableReader.open(desc, components, metadata, validate, isOffline);
+        }
+
+        public AbstractSSTableReader openNoValidation(Descriptor desc, TableMetadataRef tableMetadataRef)
+        {
+            return SSTableReader.openNoValidation(desc, tableMetadataRef);
+        }
+
+        public AbstractSSTableReader openNoValidation(Descriptor desc, Set<Component> components, ColumnFamilyStore cfs)
+        {
+            return SSTableReader.openNoValidation(desc, components, cfs);
+        }
     }
 }

@@ -93,7 +93,7 @@ public class Tracker
     /**
      * @return a Transaction over the provided sstables if we are able to mark the given @param sstables as compacted, before anyone else
      */
-    public LifecycleTransaction tryModify(Iterable<AbstractSSTableReader> sstables, OperationType operationType)
+    public LifecycleTransaction tryModify(Iterable<? extends AbstractSSTableReader> sstables, OperationType operationType)
     {
         if (Iterables.isEmpty(sstables))
             return new LifecycleTransaction(this, operationType, sstables);
@@ -367,7 +367,6 @@ public class Tracker
             return;
         }
 
-        // TODO STAR-247: pull up to AbstractSSTableReader
         sstables.forEach(AbstractSSTableReader::setupOnline);
         // back up before creating a new Snapshot (which makes the new one eligible for compaction)
         maybeIncrementallyBackup(sstables);
@@ -402,7 +401,7 @@ public class Tracker
         return view.get().select(SSTableSet.NONCOMPACTING);
     }
 
-    public Iterable<AbstractSSTableReader> getUncompacting(Iterable<AbstractSSTableReader> candidates)
+    public Iterable<? extends AbstractSSTableReader> getUncompacting(Iterable<? extends AbstractSSTableReader> candidates)
     {
         return view.get().getUncompacting(candidates);
     }

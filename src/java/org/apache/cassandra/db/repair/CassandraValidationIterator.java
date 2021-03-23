@@ -50,6 +50,7 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
@@ -234,7 +235,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         long estimatedTotalBytes = 0;
         for (AbstractSSTableReader sstable : sstables)
         {
-            for (BigSSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges))
+            for (SSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges))
                 estimatedTotalBytes += positionsForRanges.upperPosition - positionsForRanges.lowerPosition;
         }
         estimatedBytes = estimatedTotalBytes;

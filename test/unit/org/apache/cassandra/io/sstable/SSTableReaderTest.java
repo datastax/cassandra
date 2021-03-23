@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
@@ -50,7 +51,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.schema.CachingParams;
@@ -61,6 +64,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -132,7 +136,7 @@ public class SSTableReaderTest
         // confirm that positions increase continuously
         AbstractSSTableReader sstable = store.getLiveSSTables().iterator().next();
         long previous = -1;
-        for (BigSSTableReader.PartitionPositionBounds section : sstable.getPositionsForRanges(ranges))
+        for (SSTableReader.PartitionPositionBounds section : sstable.getPositionsForRanges(ranges))
         {
             assert previous <= section.lowerPosition : previous + " ! < " + section.lowerPosition;
             assert section.lowerPosition < section.upperPosition : section.lowerPosition + " ! < " + section.upperPosition;
@@ -170,7 +174,7 @@ public class SSTableReaderTest
             for (int j = 0; j < 100; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
-                FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, AbstractSSTableReader.Operator.EQ).position);
+                FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
                 DecoratedKey keyInDisk = sstable.decorateKey(ByteBufferUtil.readWithShortLength(file));
                 assert keyInDisk.equals(dk) : String.format("%s != %s in %s", keyInDisk, dk, file.getPath());
             }
@@ -179,7 +183,7 @@ public class SSTableReaderTest
             for (int j = 1; j < 110; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
-                assert sstable.getPosition(dk, AbstractSSTableReader.Operator.EQ) == null;
+                assert sstable.getPosition(dk, SSTableReader.Operator.EQ) == null;
             }
         }
         finally
@@ -270,12 +274,12 @@ public class SSTableReaderTest
         CompactionManager.instance.performMaximal(store, false);
 
         AbstractSSTableReader sstable = store.getLiveSSTables().iterator().next();
-        long p2 = sstable.getPosition(k(2), AbstractSSTableReader.Operator.EQ).position;
-        long p3 = sstable.getPosition(k(3), AbstractSSTableReader.Operator.EQ).position;
-        long p6 = sstable.getPosition(k(6), AbstractSSTableReader.Operator.EQ).position;
-        long p7 = sstable.getPosition(k(7), AbstractSSTableReader.Operator.EQ).position;
+        long p2 = sstable.getPosition(k(2), SSTableReader.Operator.EQ).position;
+        long p3 = sstable.getPosition(k(3), SSTableReader.Operator.EQ).position;
+        long p6 = sstable.getPosition(k(6), SSTableReader.Operator.EQ).position;
+        long p7 = sstable.getPosition(k(7), SSTableReader.Operator.EQ).position;
 
-        BigSSTableReader.PartitionPositionBounds p = sstable.getPositionsForRanges(makeRanges(t(2), t(6))).get(0);
+        SSTableReader.PartitionPositionBounds p = sstable.getPositionsForRanges(makeRanges(t(2), t(6))).get(0);
 
         // range are start exclusive so we should start at 3
         assert p.lowerPosition == p3;
@@ -324,13 +328,13 @@ public class SSTableReaderTest
         CompactionManager.instance.performMaximal(store, false);
 
         AbstractSSTableReader sstable = store.getLiveSSTables().iterator().next();
-        sstable.getPosition(k(2), AbstractSSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
         assertEquals(0, sstable.getKeyCacheHit());
         assertEquals(1, sstable.getBloomFilterTruePositiveCount());
-        sstable.getPosition(k(2), AbstractSSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
         assertEquals(1, sstable.getKeyCacheHit());
         assertEquals(2, sstable.getBloomFilterTruePositiveCount());
-        sstable.getPosition(k(15), AbstractSSTableReader.Operator.EQ);
+        sstable.getPosition(k(15), SSTableReader.Operator.EQ);
         assertEquals(1, sstable.getKeyCacheHit());
         assertEquals(2, sstable.getBloomFilterTruePositiveCount());
 
@@ -374,7 +378,7 @@ public class SSTableReaderTest
         Descriptor desc = sstable.descriptor;
 
         // test to see if sstable can be opened as expected
-        AbstractSSTableReader target = AbstractSSTableReader.open(desc);
+        AbstractSSTableReader target = desc.getFormat().getReaderFactory().open(desc);
         assert target.first.equals(firstKey);
         assert target.last.equals(lastKey);
 
@@ -391,7 +395,7 @@ public class SSTableReaderTest
 
         // Offline tests
         // check that bloomfilter/summary ARE NOT regenerated
-        target = AbstractSSTableReader.openNoValidation(desc, store.metadata);
+        target = desc.getFormat().getReaderFactory().openNoValidation(desc, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
         assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
@@ -401,7 +405,7 @@ public class SSTableReaderTest
         // check that bloomfilter/summary ARE NOT regenerated and BF=AlwaysPresent when filter component is missing
         Set<Component> components = SSTable.discoverComponentsFor(desc);
         components.remove(Component.FILTER);
-        target = AbstractSSTableReader.openNoValidation(desc, components, store);
+        target = desc.getFormat().getReaderFactory().openNoValidation(desc, components, store);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
         assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
@@ -411,7 +415,7 @@ public class SSTableReaderTest
 
         // #### online tests ####
         // check that summary & bloomfilter are not regenerated when SSTable is opened and BFFP has been changed
-        target = AbstractSSTableReader.open(desc, store.metadata);
+        target = desc.getFormat().getReaderFactory().open(desc, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
         assertEquals(summaryModified, Files.getLastModifiedTime(summaryPath).toMillis());
@@ -422,7 +426,7 @@ public class SSTableReaderTest
         components = SSTable.discoverComponentsFor(desc);
         components.remove(Component.FILTER);
 
-        target = AbstractSSTableReader.open(desc, components, store.metadata);
+        target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata);
 
         assertTrue("Bloomfilter was not recreated", bloomModified < Files.getLastModifiedTime(bloomPath).toMillis());
         assertTrue("Summary was not recreated", summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
@@ -437,7 +441,7 @@ public class SSTableReaderTest
         TimeUnit.MILLISECONDS.sleep(1000); // sleep to ensure modified time will be different
         bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
 
-        target = AbstractSSTableReader.open(desc, components, store.metadata);
+        target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata);
 
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
         assertTrue("Summary was not recreated", summaryModified < Files.getLastModifiedTime(summaryPath).toMillis());
@@ -449,7 +453,7 @@ public class SSTableReaderTest
         components.remove(Component.PRIMARY_INDEX);
 
         summaryModified = Files.getLastModifiedTime(summaryPath).toMillis();
-        target = AbstractSSTableReader.open(desc, components, store.metadata, false, false);
+        target = desc.getFormat().getReaderFactory().open(desc, components, store.metadata, false, false);
 
         TimeUnit.MILLISECONDS.sleep(1000); // sleep to ensure modified time will be different
         assertEquals(bloomModified, Files.getLastModifiedTime(bloomPath).toMillis());
@@ -475,11 +479,11 @@ public class SSTableReaderTest
         for(ColumnFamilyStore indexCfs : store.indexManager.getAllIndexColumnFamilyStores())
         {
             assert indexCfs.isIndex();
-            AbstractSSTableReader sstable = indexCfs.getLiveSSTables().iterator().next();
+            SSTableReader sstable = (SSTableReader) indexCfs.getLiveSSTables().iterator().next();
             assert sstable.first.getToken() instanceof LocalToken;
 
-            AbstractSSTableReader.saveSummary(sstable.descriptor, sstable.first, sstable.last, sstable.indexSummary);
-            AbstractSSTableReader reopened = AbstractSSTableReader.open(sstable.descriptor);
+            SSTableReader.saveSummary(sstable.descriptor, sstable.first, sstable.last, sstable.indexSummary);
+            AbstractSSTableReader reopened = sstable.descriptor.getFormat().getReaderFactory().open(sstable.descriptor);
             assert reopened.first.getToken() instanceof LocalToken;
             reopened.selfRef().release();
         }
@@ -542,14 +546,14 @@ public class SSTableReaderTest
         ranges.add(new Range<Token>(t(98), t(99)));
 
         AbstractSSTableReader sstable = store.getLiveSSTables().iterator().next();
-        List<BigSSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
+        List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
         assert sections.size() == 1 : "Expected to find range in sstable" ;
 
         // re-open the same sstable as it would be during bulk loading
         Set<Component> components = Sets.newHashSet(Component.DATA, Component.PRIMARY_INDEX);
         if (sstable.components.contains(Component.COMPRESSION_INFO))
             components.add(Component.COMPRESSION_INFO);
-        AbstractSSTableReader bulkLoaded = AbstractSSTableReader.openForBatch(sstable.descriptor, components, store.metadata);
+        AbstractSSTableReader bulkLoaded = sstable.descriptor.getFormat().getReaderFactory().openForBatch(sstable.descriptor, components, store.metadata);
         sections = bulkLoaded.getPositionsForRanges(ranges);
         assert sections.size() == 1 : "Expected to find range in sstable opened for bulk loading";
         bulkLoaded.selfRef().release();
@@ -575,9 +579,9 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
-        Collection<AbstractSSTableReader> sstables = store.getLiveSSTables();
+        List<SSTableReader> sstables = selectOnlyBigTableReaders(store.getLiveSSTables(), Collectors.toList());
         assert sstables.size() == 1;
-        final AbstractSSTableReader sstable = sstables.iterator().next();
+        final SSTableReader sstable = sstables.get(0);
 
         ThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(5);
         List<Future> futures = new ArrayList<>(NUM_PARTITIONS * 2);
@@ -654,9 +658,9 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
         CompactionManager.instance.performMaximal(store, false);
 
-        Collection<AbstractSSTableReader> sstables = store.getLiveSSTables();
+        Collection<SSTableReader> sstables = selectOnlyBigTableReaders(store.getLiveSSTables(), Collectors.toList());
         assert sstables.size() == 1;
-        final AbstractSSTableReader sstable = sstables.iterator().next();
+        final SSTableReader sstable = sstables.iterator().next();
 
         try (LifecycleTransaction txn = store.getTracker().tryModify(Arrays.asList(sstable), OperationType.UNKNOWN))
         {
@@ -664,7 +668,7 @@ public class SSTableReaderTest
             txn.update(replacement, true);
             txn.finish();
         }
-        AbstractSSTableReader reopen = AbstractSSTableReader.open(sstable.descriptor);
+        SSTableReader reopen = (SSTableReader) SSTableFormat.Type.BIG.info.getReaderFactory().open(sstable.descriptor);
         assert reopen.getIndexSummarySamplingLevel() == sstable.getIndexSummarySamplingLevel() + 1;
     }
 
@@ -707,7 +711,7 @@ public class SSTableReaderTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
         AbstractSSTableReader sstable = getNewSSTable(cfs);
         Descriptor notLiveDesc = new Descriptor(new File("/tmp"), "", "", 0);
-        AbstractSSTableReader.moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
+        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
     }
 
     @Test(expected = RuntimeException.class)
@@ -717,7 +721,7 @@ public class SSTableReaderTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
         AbstractSSTableReader sstable = getNewSSTable(cfs);
         Descriptor notLiveDesc = new Descriptor(new File("/tmp"), "", "", 0);
-        AbstractSSTableReader.moveAndOpenSSTable(cfs, notLiveDesc, sstable.descriptor, sstable.components, false);
+        sstable.descriptor.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, notLiveDesc, sstable.descriptor, sstable.components, false);
     }
 
     @Test
@@ -738,7 +742,7 @@ public class SSTableReaderTest
             assertFalse(f.exists());
             assertTrue(new File(sstable.descriptor.filenameFor(c)).exists());
         }
-        AbstractSSTableReader.moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
+        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
         // make sure the files were moved:
         for (Component c : sstable.components)
         {
@@ -782,7 +786,7 @@ public class SSTableReaderTest
 
             TimeUnit.MILLISECONDS.sleep(1000); //Giving enough time to clear files.
             List<AbstractSSTableReader> sstables = new ArrayList<>(viewFragment1.sstables);
-            assertEquals(50, AbstractSSTableReader.getApproximateKeyCount(sstables));
+            assertEquals(50, SSTableReader.getApproximateKeyCount(sstables));
         }
     }
 
@@ -804,7 +808,7 @@ public class SSTableReaderTest
 
         expectedException.expect(CorruptSSTableException.class);
         expectedException.expectMessage("CompressionInfo.db");
-        AbstractSSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
+        SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
     }
 
     @Test
@@ -812,7 +816,7 @@ public class SSTableReaderTest
     {
         Descriptor desc = setUpForTestVerfiyCompressionInfoExistence();
         Set<Component> components = SSTable.discoverComponentsFor(desc);
-        AbstractSSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
+        SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
 
         // mark the toc file not readable in order to trigger the FSReadError
         File tocFile = new File(desc.filenameFor(Component.TOC));
@@ -820,7 +824,7 @@ public class SSTableReaderTest
 
         expectedException.expect(FSReadError.class);
         expectedException.expectMessage("TOC.txt");
-        AbstractSSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
+        SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
     }
 
     @Test
@@ -828,7 +832,7 @@ public class SSTableReaderTest
     {
         Descriptor desc = setUpForTestVerfiyCompressionInfoExistence();
         Set<Component> components = SSTable.discoverComponentsFor(desc);
-        AbstractSSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
+        SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
     }
 
     private Descriptor setUpForTestVerfiyCompressionInfoExistence()

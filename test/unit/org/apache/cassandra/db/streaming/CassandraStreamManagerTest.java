@@ -134,7 +134,7 @@ public class CassandraStreamManagerTest
         Set<AbstractSSTableReader> sstables = new HashSet<>();
         for (OutgoingStream stream: streams)
         {
-            Ref<AbstractSSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
+            Ref<? extends AbstractSSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
             sstables.add(ref.get());
             ref.release();
         }

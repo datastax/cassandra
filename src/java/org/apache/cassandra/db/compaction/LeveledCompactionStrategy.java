@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -416,7 +417,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 
             totalLength = length;
             compressedLength = cLength;
-            Collections.sort(this.sstables, AbstractSSTableReader.sstableComparator);
+            Collections.sort(this.sstables, SSTableReader.sstableComparator);
             sstableIterator = this.sstables.iterator();
             assert sstableIterator.hasNext(); // caller should check intersecting first
             AbstractSSTableReader currentSSTable = sstableIterator.next();

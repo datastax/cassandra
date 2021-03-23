@@ -142,7 +142,7 @@ public class SSTableExport
         try
         {
             TableMetadata metadata = Util.metadataFromSSTable(desc);
-            AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
+            AbstractSSTableReader sstable = desc.getFormat().getReaderFactory().openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
             IPartitioner partitioner = sstable.getPartitioner();
             if (cmd.hasOption(ENUMERATE_KEYS_OPTION))
             {

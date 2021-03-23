@@ -27,6 +27,7 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -117,7 +118,7 @@ public class LongLeveledCompactionStrategyTest
         {
             Set<AbstractSSTableReader> sstables = manifest.getLevel(level);
             // score check
-            assert (double) AbstractSSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
+            assert (double) SSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
             // overlap check for levels greater than 0
             for (AbstractSSTableReader sstable : sstables)
             {

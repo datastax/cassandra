@@ -49,14 +49,14 @@ public abstract class SSTableReaderBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReaderBuilder.class);
 
-    protected final AbstractBigTableReader.Factory readerFactory;
+    protected final SSTableReader.Factory readerFactory;
     protected final Descriptor descriptor;
     protected final TableMetadataRef metadataRef;
     protected final TableMetadata metadata;
     protected final long maxDataAge;
     protected final Set<Component> components;
     protected final StatsMetadata statsMetadata;
-    protected final AbstractBigTableReader.OpenReason openReason;
+    protected final SSTableReader.OpenReason openReason;
     protected final SerializationHeader header;
 
     protected IndexSummary summary;
@@ -71,7 +71,7 @@ public abstract class SSTableReaderBuilder
                                 long maxDataAge,
                                 Set<Component> components,
                                 StatsMetadata statsMetadata,
-                                AbstractBigTableReader.OpenReason openReason,
+                                SSTableReader.OpenReason openReason,
                                 SerializationHeader header)
     {
         this.descriptor = descriptor;
@@ -85,7 +85,7 @@ public abstract class SSTableReaderBuilder
         this.readerFactory = descriptor.getFormat().getReaderFactory();
     }
 
-    public abstract AbstractBigTableReader build();
+    public abstract SSTableReader build();
 
     public SSTableReaderBuilder dfile(FileHandle dfile)
     {
@@ -211,7 +211,7 @@ public abstract class SSTableReaderBuilder
                             first = decoratedKey;
                         last = decoratedKey;
 
-                        summaryBuilder.maybeAddEntry(decoratedKey, keyIterator.getKeyPosition());
+                        summaryBuilder.maybeAddEntry(decoratedKey, keyIterator.getIndexPosition());
                     }
 
                     if (recreateBloomFilter)
@@ -250,16 +250,16 @@ public abstract class SSTableReaderBuilder
                          long maxDataAge,
                          Set<Component> components,
                          StatsMetadata statsMetadata,
-                         AbstractBigTableReader.OpenReason openReason,
+                         SSTableReader.OpenReason openReason,
                          SerializationHeader header)
         {
             super(descriptor, metadataRef, maxDataAge, components, statsMetadata, openReason, header);
         }
 
         @Override
-        public AbstractBigTableReader build()
+        public SSTableReader build()
         {
-            AbstractBigTableReader reader = readerFactory.open(this);
+            SSTableReader reader = new BigTableReader(this);
 
             reader.setup(true);
             return reader;
@@ -274,11 +274,11 @@ public abstract class SSTableReaderBuilder
                         StatsMetadata statsMetadata,
                         SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, AbstractBigTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
         }
 
         @Override
-        public AbstractBigTableReader build()
+        public SSTableReader build()
         {
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
@@ -298,7 +298,7 @@ public abstract class SSTableReaderBuilder
                 dfile = dbuilder.bufferSize(dataBufferSize).complete();
                 bf = FilterFactory.AlwaysPresent;
 
-                AbstractBigTableReader sstable = new BigTableReader(this);
+                SSTableReader sstable = new BigTableReader(this);
 
                 sstable.first = first;
                 sstable.last = last;
@@ -338,13 +338,13 @@ public abstract class SSTableReaderBuilder
                        StatsMetadata statsMetadata,
                        SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, AbstractBigTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
             this.validationMetadata = validationMetadata;
             this.isOffline = isOffline;
         }
 
         @Override
-        public AbstractBigTableReader build()
+        public SSTableReader build()
         {
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
@@ -362,7 +362,7 @@ public abstract class SSTableReaderBuilder
                 throw new CorruptSSTableException(t, dataFilePath);
             }
 
-            AbstractBigTableReader sstable = new BigTableReader(this);
+            SSTableReader sstable = new BigTableReader(this);
 
             sstable.first = first;
             sstable.last = last;
@@ -443,9 +443,9 @@ public abstract class SSTableReaderBuilder
                 if (buildSummary)
                 {
                     if (saveSummaryIfCreated)
-                        AbstractBigTableReader.saveSummary(descriptor, first, last, summary);
+                        SSTableReader.saveSummary(descriptor, first, last, summary);
                     if (recreateBloomFilter)
-                        AbstractBigTableReader.saveBloomFilter(descriptor, bf);
+                        SSTableReader.saveBloomFilter(descriptor, bf);
                 }
             }
             catch (Throwable t)

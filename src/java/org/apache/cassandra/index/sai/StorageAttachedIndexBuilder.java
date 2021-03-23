@@ -56,6 +56,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
@@ -140,7 +141,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
 
-        Ref<AbstractSSTableReader> ref = sstable.tryRef();
+        Ref<? extends AbstractSSTableReader> ref = sstable.tryRef();
         if (ref == null)
         {
             logger.warn(logMessage("Couldn't acquire reference to the SSTable {}. It may have been removed."), sstable.descriptor);
@@ -172,11 +173,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     }
 
                     final DecoratedKey key = keys.next();
-                    final long keyPosition = keys.getKeyPosition();
+                    final long keyPosition = keys.getDataPosition();
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry indexEntry = sstable.getPosition(key, AbstractSSTableReader.Operator.EQ);
+                    RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
                     dataFile.seek(indexEntry.position);
                     ByteBufferUtil.skipShortLength(dataFile); // key
 
@@ -206,8 +207,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                         }
                     }
 
-                    bytesProcessed += keyPosition - previousKeyPosition;
-                    previousKeyPosition = keyPosition;
+                    bytesProcessed += keys.getDataPosition() - previousKeyPosition;
+                    previousKeyPosition = keys.getDataPosition();
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);

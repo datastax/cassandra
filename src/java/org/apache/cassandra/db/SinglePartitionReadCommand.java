@@ -37,9 +37,11 @@ import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -590,7 +592,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
-        Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
+        Collections.sort(view.sstables, BigTableReader.maxTimestampDescending);
         ClusteringIndexFilter filter = clusteringIndexFilter();
         long minTimestamp = Long.MAX_VALUE;
         long mostRecentPartitionTombstone = Long.MIN_VALUE;
@@ -628,7 +630,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
              * In other words, iterating in descending maxTimestamp order allow to do our mostRecentPartitionTombstone
              * elimination in one pass, and minimize the number of sstables for which we read a partition tombstone.
             */
-            Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
+            Collections.sort(view.sstables, SSTableReader.maxTimestampDescending);
             int nonIntersectingSSTables = 0;
             int includedDueToTombstones = 0;
 
@@ -835,7 +837,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
 
         /* add the SSTables on disk */
-        Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
+        Collections.sort(view.sstables, SSTableReader.maxTimestampDescending);
         // read sorted sstables
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
         for (AbstractSSTableReader sstable : view.sstables)

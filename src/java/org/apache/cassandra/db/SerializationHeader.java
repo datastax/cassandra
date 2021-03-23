@@ -28,7 +28,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataComponentSerializer;
@@ -92,13 +92,9 @@ public class SerializationHeader
         // We need to order the SSTables by descending generation to be sure that we use latest column metadata.
         for (AbstractSSTableReader sstable : orderByDescendingGeneration(sstables))
         {
-            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateTimestamp(sstable.getMinTimestamp());
-            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
-            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateTTL(sstable.getMinTTL());
-            // TODO STAR-247: pull up to AbstractSSTableReader
             columns.addAll(sstable.header.columns());
         }
         return new SerializationHeader(true, metadata, columns.build(), stats.get());
@@ -110,7 +106,7 @@ public class SerializationHeader
             return sstables;
 
         List<AbstractSSTableReader> readers = new ArrayList<>(sstables);
-        readers.sort(AbstractBigTableReader.generationReverseComparator);
+        readers.sort(SSTableReader.generationReverseComparator);
         return readers;
     }
 

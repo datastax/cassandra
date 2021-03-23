@@ -35,6 +35,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState.Action;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.Pair;
@@ -253,7 +254,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     protected TestableTransaction newTest()
     {
         LogTransaction.waitForDeletions();
-        AbstractSSTableReader.resetTidying();
+        SSTableReader.resetTidying();
         return new TxnTest();
     }
 

@@ -29,6 +29,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
@@ -214,7 +216,7 @@ public abstract class AbstractCompactionStrategy
      * @param originalCandidates The collection to check for excluded SSTables
      * @return list of the SSTables with excluded ones filtered out
      */
-    public static List<AbstractSSTableReader> filterSuspectSSTables(Iterable<AbstractSSTableReader> originalCandidates)
+    public static List<AbstractSSTableReader> filterSuspectSSTables(Iterable<? extends AbstractSSTableReader> originalCandidates)
     {
         List<AbstractSSTableReader> filtered = new ArrayList<>();
         for (AbstractSSTableReader sstable : originalCandidates)
@@ -412,7 +414,7 @@ public abstract class AbstractCompactionStrategy
         else
         {
             // what percentage of columns do we expect to compact outside of overlap?
-            if (sstable.getIndexSummarySize() < 2)
+            if (sstable.descriptor.formatType == SSTableFormat.Type.BIG && ((SSTableReader) sstable).getIndexSummarySize() < 2)
             {
                 // we have too few samples to estimate correct percentage
                 return false;
@@ -514,7 +516,7 @@ public abstract class AbstractCompactionStrategy
     {
         int groupSize = 2;
         List<AbstractSSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
-        Collections.sort(sortedSSTablesToGroup, AbstractSSTableReader.sstableComparator);
+        Collections.sort(sortedSSTablesToGroup, SSTableReader.sstableComparator);
 
         Collection<Collection<AbstractSSTableReader>> groupedSSTables = new ArrayList<>();
         Collection<AbstractSSTableReader> currGroup = new ArrayList<>(groupSize);

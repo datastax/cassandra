@@ -133,7 +133,7 @@ public abstract class CompactionStress implements Runnable
 
                 try
                 {
-                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    AbstractSSTableReader sstable = entry.getKey().getFormat().getReaderFactory().openNoValidation(entry.getKey(), components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)

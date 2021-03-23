@@ -85,7 +85,7 @@ public class SSTableContext extends SharedCloseableImpl
     {
         IndexComponents groupComponents = IndexComponents.perSSTable(sstable);
 
-        Ref<AbstractSSTableReader> sstableRef = null;
+        Ref<? extends AbstractSSTableReader> sstableRef = null;
         FileHandle token = null, offset = null;
         LongArray.Factory tokenReaderFactory, offsetReaderFactory;
         KeyFetcher keyFetcher;
@@ -140,9 +140,9 @@ public class SSTableContext extends SharedCloseableImpl
     private static class Cleanup implements RefCounted.Tidy
     {
         private final FileHandle token, offset;
-        private final Ref<AbstractSSTableReader> sstableRef;
+        private final Ref<? extends AbstractSSTableReader> sstableRef;
 
-        private Cleanup(FileHandle token, FileHandle offset, Ref<AbstractSSTableReader> sstableRef)
+        private Cleanup(FileHandle token, FileHandle offset, Ref<? extends AbstractSSTableReader> sstableRef)
         {
             this.token = token;
             this.offset = offset;
@@ -232,7 +232,7 @@ public class SSTableContext extends SharedCloseableImpl
         @Override
         public RandomAccessReader createReader()
         {
-            return sstable.openIndexReader();
+            return sstable.openDataReader();
         }
 
         @Override

@@ -27,6 +27,7 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
@@ -118,7 +119,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         return writer;
     }
 
-    public BigTableRowIndexEntry append(UnfilteredRowIterator partition)
+    public RowIndexEntry<?> append(UnfilteredRowIterator partition)
     {
         // we do this before appending to ensure we can resetAndTruncate() safely if the append fails
         DecoratedKey key = partition.partitionKey();
@@ -142,7 +143,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     }
 
     // attempts to append the row, if fails resets the writer position
-    public BigTableRowIndexEntry tryAppend(UnfilteredRowIterator partition)
+    public RowIndexEntry<?> tryAppend(UnfilteredRowIterator partition)
     {
         writer.mark();
         try
@@ -164,7 +165,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             {
                 for (AbstractSSTableReader reader : transaction.originals())
                 {
-                    RowIndexEntry<?> index = reader.getPosition(key, AbstractSSTableReader.Operator.GE);
+                    RowIndexEntry<?> index = reader.getPosition(key, SSTableReader.Operator.GE);
                     NativeLibrary.trySkipCache(reader.getFilename(), 0, index == null ? 0 : index.position);
                 }
             }

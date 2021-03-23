@@ -34,6 +34,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.assertj.core.api.Assertions;
@@ -183,6 +184,6 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
                 }
         });
 
-        AbstractSSTableReader.resetTidying();
+        SSTableReader.resetTidying();
     }
 }

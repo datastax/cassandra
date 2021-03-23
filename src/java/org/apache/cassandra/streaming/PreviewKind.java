@@ -36,7 +36,6 @@ public enum PreviewKind
         throw new RuntimeException("Can't get preview predicate for preview kind NONE");
     }),
     ALL(1, Predicates.alwaysTrue()),
-    // TODO STAR-247: pull up to AbstractSSTableReader
     UNREPAIRED(2, sstable -> !sstable.isRepaired()),
     REPAIRED(3, new PreviewRepairedSSTablePredicate());
 
@@ -85,7 +84,6 @@ public enum PreviewKind
         public boolean apply(AbstractSSTableReader sstable)
         {
             // grab the metadata before checking pendingRepair since this can be nulled out at any time
-            // TODO STAR-247: pull up to AbstractSSTableReader
             StatsMetadata sstableMetadata = sstable.getSSTableMetadata();
             if (sstableMetadata.pendingRepair != null)
             {
