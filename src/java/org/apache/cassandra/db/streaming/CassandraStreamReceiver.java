@@ -28,7 +28,7 @@ import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.streaming.StreamReceiveTask;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +46,7 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.streaming.IncomingStream;
 import org.apache.cassandra.streaming.StreamReceiver;
 import org.apache.cassandra.streaming.StreamSession;
@@ -67,7 +67,7 @@ public class CassandraStreamReceiver implements StreamReceiver
     private final LifecycleTransaction txn;
 
     //  holds references to SSTables received
-    protected Collection<SSTableReader> sstables;
+    protected Collection<AbstractSSTableReader> sstables;
 
     private final boolean requiresWritePath;
 
@@ -101,7 +101,7 @@ public class CassandraStreamReceiver implements StreamReceiver
     {
         CassandraIncomingFile file = getFile(stream);
 
-        Collection<SSTableReader> finished = null;
+        Collection<AbstractSSTableReader> finished = null;
         SSTableMultiWriter sstable = file.getSSTable();
         try
         {
@@ -185,10 +185,10 @@ public class CassandraStreamReceiver implements StreamReceiver
         return hasCDC(cfs) || (session.streamOperation().requiresViewBuild() && hasViews(cfs));
     }
 
-    private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
+    private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<AbstractSSTableReader> readers) {
         boolean hasCdc = hasCDC(cfs);
         ColumnFilter filter = ColumnFilter.all(cfs.metadata());
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
         {
             Keyspace ks = Keyspace.open(reader.getKeyspaceName());
             // When doing mutation-based repair we split each partition into smaller batches
@@ -221,9 +221,9 @@ public class CassandraStreamReceiver implements StreamReceiver
     public void finished()
     {
         boolean requiresWritePath = requiresWritePath(cfs);
-        Collection<SSTableReader> readers = sstables;
+        Collection<AbstractSSTableReader> readers = sstables;
 
-        try (Refs<SSTableReader> refs = Refs.ref(readers))
+        try (Refs<AbstractSSTableReader> refs = Refs.ref(readers))
         {
             if (requiresWritePath)
             {

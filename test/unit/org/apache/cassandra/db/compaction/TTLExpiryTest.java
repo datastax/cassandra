@@ -37,7 +37,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
@@ -132,10 +132,10 @@ public class TTLExpiryTest
 
         cfs.forceBlockingFlush();
 
-        Set<SSTableReader> sstables = Sets.newHashSet(cfs.getLiveSSTables());
+        Set<AbstractSSTableReader> sstables = Sets.newHashSet(cfs.getLiveSSTables());
         int now = (int)(System.currentTimeMillis() / 1000);
         int gcBefore = now + 2;
-        Set<SSTableReader> expired = CompactionController.getFullyExpiredSSTables(
+        Set<AbstractSSTableReader> expired = CompactionController.getFullyExpiredSSTables(
                 cfs,
                 sstables,
                 Collections.EMPTY_SET,
@@ -243,7 +243,7 @@ public class TTLExpiryTest
         assertEquals(4, cfs.getLiveSSTables().size());
         cfs.enableAutoCompaction(true);
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         ISSTableScanner scanner = sstable.getScanner(ColumnFilter.all(cfs.metadata()),
                                                      DataRange.allData(cfs.getPartitioner()),
                                                      SSTableReadsListener.NOOP_LISTENER);
@@ -271,7 +271,7 @@ public class TTLExpiryTest
                 .applyUnsafe();
 
         cfs.forceBlockingFlush();
-        SSTableReader blockingSSTable = cfs.getSSTables(SSTableSet.LIVE).iterator().next();
+        AbstractSSTableReader blockingSSTable = cfs.getSSTables(SSTableSet.LIVE).iterator().next();
         for (int i = 0; i < 10; i++)
         {
             new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), "test")
@@ -281,7 +281,7 @@ public class TTLExpiryTest
                             .applyUnsafe();
             cfs.forceBlockingFlush();
         }
-        Multimap<SSTableReader, SSTableReader> blockers = SSTableExpiredBlockers.checkForExpiredSSTableBlockers(cfs.getSSTables(SSTableSet.LIVE), (int) (System.currentTimeMillis() / 1000) + 100);
+        Multimap<AbstractSSTableReader, AbstractSSTableReader> blockers = SSTableExpiredBlockers.checkForExpiredSSTableBlockers(cfs.getSSTables(SSTableSet.LIVE), (int) (System.currentTimeMillis() / 1000) + 100);
         assertEquals(1, blockers.keySet().size());
         assertTrue(blockers.keySet().contains(blockingSSTable));
         assertEquals(10, blockers.get(blockingSSTable).size());

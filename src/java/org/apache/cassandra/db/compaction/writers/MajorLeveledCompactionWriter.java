@@ -26,7 +26,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
@@ -45,7 +45,7 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     public MajorLeveledCompactionWriter(ColumnFamilyStore cfs,
                                         Directories directories,
                                         LifecycleTransaction txn,
-                                        Set<SSTableReader> nonExpiredSSTables,
+                                        Set<AbstractSSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize)
     {
         this(cfs, directories, txn, nonExpiredSSTables, maxSSTableSize, false);
@@ -55,14 +55,14 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     public MajorLeveledCompactionWriter(ColumnFamilyStore cfs,
                                         Directories directories,
                                         LifecycleTransaction txn,
-                                        Set<SSTableReader> nonExpiredSSTables,
+                                        Set<AbstractSSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize,
                                         boolean keepOriginals)
     {
         super(cfs, directories, txn, nonExpiredSSTables, keepOriginals);
         this.maxSSTableSize = maxSSTableSize;
         this.levelFanoutSize = cfs.getLevelFanoutSize();
-        long estimatedSSTables = Math.max(1, SSTableReader.getTotalBytes(nonExpiredSSTables) / maxSSTableSize);
+        long estimatedSSTables = Math.max(1, AbstractSSTableReader.getTotalBytes(nonExpiredSSTables) / maxSSTableSize);
         keysPerSSTable = estimatedTotalKeys / estimatedSSTables;
     }
 

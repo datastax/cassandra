@@ -40,7 +40,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -71,7 +71,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     protected AbstractTransactionalTest.TestableTransaction newTest() throws Exception
     {
         LogTransaction.waitForDeletions();
-        SSTableReader.resetTidying();
+        AbstractSSTableReader.resetTidying();
         return new TxnTest();
     }
 
@@ -82,8 +82,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
             final ColumnFamilyStore cfs;
             final LogTransaction txnLogs;
             final File dataFolder;
-            final SSTableReader sstableOld;
-            final SSTableReader sstableNew;
+            final AbstractSSTableReader sstableOld;
+            final AbstractSSTableReader sstableNew;
             final LogTransaction.SSTableTidier tidier;
 
             Transaction(ColumnFamilyStore cfs, LogTransaction txnLogs) throws IOException
@@ -203,7 +203,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // complete a transaction without keep the new files since they were untracked
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -226,9 +226,9 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld1 = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableOld2 = sstable(dataFolder, cfs, 0, 256);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld1 = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableOld2 = sstable(dataFolder, cfs, 0, 256);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(log);
@@ -257,7 +257,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(log);
@@ -275,7 +275,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(log);
@@ -301,10 +301,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -332,7 +332,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(log);
@@ -350,7 +350,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(log);
@@ -377,10 +377,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -407,8 +407,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // simulate tracking sstables with a failed transaction (new log file NOT deleted)
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -444,8 +444,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // simulate tracking sstables with a committed transaction (new log file deleted)
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -490,10 +490,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -541,10 +541,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -716,10 +716,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -768,7 +768,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable1 = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable1 = sstable(dataFolder, cfs, 0, 128);
 
         Set<File> tmpFiles = getTemporaryFiles(dataFolder);
         assertNotNull(tmpFiles);
@@ -780,7 +780,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
             File[] beforeSecondSSTable = dataFolder.listFiles(pathname -> !pathname.isDirectory());
 
-            SSTableReader sstable2 = sstable(dataFolder, cfs, 1, 128);
+            AbstractSSTableReader sstable2 = sstable(dataFolder, cfs, 1, 128);
             log.trackNew(sstable2);
 
             Map<Descriptor, Set<Component>> sstables = directories.sstableLister(Directories.OnTxnErr.THROW).list();
@@ -841,10 +841,10 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Files.createDirectories(dataFolder1.toPath());
         Files.createDirectories(dataFolder2.toPath());
 
-        SSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
-                                     sstable(dataFolder1, cfs, 1, 128),
-                                     sstable(dataFolder2, cfs, 2, 128),
-                                     sstable(dataFolder2, cfs, 3, 128)
+        AbstractSSTableReader[] sstables = { sstable(dataFolder1, cfs, 0, 128),
+                                             sstable(dataFolder1, cfs, 1, 128),
+                                             sstable(dataFolder2, cfs, 2, 128),
+                                             sstable(dataFolder2, cfs, 3, 128)
         };
 
         // they should all have the same number of files since they are created in the same way
@@ -991,12 +991,12 @@ public class LogTransactionTest extends AbstractTransactionalTest
         }), false);
     }
 
-    private static void testCorruptRecord(BiConsumer<LogTransaction, SSTableReader> modifier, boolean isRecoverable) throws IOException
+    private static void testCorruptRecord(BiConsumer<LogTransaction, AbstractSSTableReader> modifier, boolean isRecoverable) throws IOException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // simulate tracking sstables with a committed transaction except the checksum will be wrong
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -1063,12 +1063,12 @@ public class LogTransactionTest extends AbstractTransactionalTest
                                   });
     }
 
-    private static void testObsoletedFilesChanged(Consumer<SSTableReader> modifier) throws IOException
+    private static void testObsoletedFilesChanged(Consumer<AbstractSSTableReader> modifier) throws IOException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // simulate tracking sstables with a committed transaction except the checksum will be wrong
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -1123,12 +1123,12 @@ public class LogTransactionTest extends AbstractTransactionalTest
                                   });
     }
 
-    private static void testTruncatedModificationTimesHelper(Consumer<SSTableReader> modifier) throws IOException
+    private static void testTruncatedModificationTimesHelper(Consumer<AbstractSSTableReader> modifier) throws IOException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
-        SSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
+        AbstractSSTableReader sstableOld = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstableNew = sstable(dataFolder, cfs, 1, 128);
 
         // simulate tracking sstables with a committed transaction except the checksum will be wrong
         LogTransaction log = new LogTransaction(OperationType.COMPACTION);
@@ -1163,7 +1163,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction logs = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(logs);
@@ -1187,7 +1187,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
-        SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
+        AbstractSSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
         LogTransaction logs = new LogTransaction(OperationType.COMPACTION);
         assertNotNull(logs);
@@ -1216,7 +1216,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         logs.finish();
     }
 
-    private static SSTableReader sstable(File dataFolder, ColumnFamilyStore cfs, int generation, int size) throws IOException
+    private static AbstractSSTableReader sstable(File dataFolder, ColumnFamilyStore cfs, int generation, int size) throws IOException
     {
         Descriptor descriptor = new Descriptor(dataFolder, cfs.keyspace.getName(), cfs.getTableName(), generation, SSTableFormat.Type.BIG);
         Set<Component> components = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.TOC);
@@ -1238,17 +1238,17 @@ public class LogTransactionTest extends AbstractTransactionalTest
         StatsMetadata metadata = (StatsMetadata) new MetadataCollector(cfs.metadata().comparator)
                                                  .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, -1, null, false, header)
                                                  .get(MetadataType.STATS);
-        SSTableReader reader = SSTableReader.internalOpen(descriptor,
-                                                          components,
-                                                          cfs.metadata,
-                                                          iFile,
-                                                          dFile,
-                                                          MockSchema.indexSummary.sharedCopy(),
-                                                          new AlwaysPresentFilter(),
-                                                          1L,
-                                                          metadata,
-                                                          SSTableReader.OpenReason.NORMAL,
-                                                          header);
+        AbstractSSTableReader reader = AbstractSSTableReader.internalOpen(descriptor,
+                                                                          components,
+                                                                          cfs.metadata,
+                                                                          iFile,
+                                                                          dFile,
+                                                                          MockSchema.indexSummary.sharedCopy(),
+                                                                          new AlwaysPresentFilter(),
+                                                                          1L,
+                                                                          metadata,
+                                                                          BigSSTableReader.OpenReason.NORMAL,
+                                                                          header);
         reader.first = reader.last = MockSchema.readerBounds(generation);
         return reader;
     }

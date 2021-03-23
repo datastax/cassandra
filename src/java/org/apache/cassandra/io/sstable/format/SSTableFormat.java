@@ -34,7 +34,7 @@ public interface SSTableFormat
     Version getVersion(String version);
 
     SSTableWriter.Factory getWriterFactory();
-    SSTableReader.Factory getReaderFactory();
+    AbstractSSTableReader.Factory getReaderFactory();
 
     public enum Type
     {

@@ -55,7 +55,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedSSTableContainer;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.schema.CompactionParams;
@@ -89,7 +89,7 @@ public class CompactionStrategyManagerTest
         DatabaseDescriptor.setIncrementalBackupsEnabled(false);
         /**
          * We use byte ordered partitioner in this test to be able to easily infer an SSTable
-         * disk assignment based on its generation - See {@link this#getSSTableIndex(Integer[], SSTableReader)}
+         * disk assignment based on its generation - See {@link this#getSSTableIndex(Integer[], AbstractSSTableReader)}
          */
         originalPartitioner = StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         SchemaLoader.createKeyspace(KS_PREFIX,
@@ -119,12 +119,12 @@ public class CompactionStrategyManagerTest
         int numSSTables = 100;
         ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
         cfs.disableAutoCompaction();
-        Set<SSTableReader> previousSSTables = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> previousSSTables = cfs.getLiveSSTables();
         for (int i = 0; i < numSSTables; i++)
         {
             createSSTableWithKey(KS_PREFIX, TABLE_PREFIX, i);
-            Set<SSTableReader> currentSSTables = cfs.getLiveSSTables();
-            Set<SSTableReader> newSSTables = Sets.difference(currentSSTables, previousSSTables);
+            Set<AbstractSSTableReader> currentSSTables = cfs.getLiveSSTables();
+            Set<AbstractSSTableReader> newSSTables = Sets.difference(currentSSTables, previousSSTables);
             assertEquals(1, newSSTables.size());
             if (i % 3 == 0)
             {
@@ -163,7 +163,7 @@ public class CompactionStrategyManagerTest
                                                                       true);
 
         // Check that SSTables are assigned to the correct Compaction Strategy
-        for (SSTableReader reader : cfs.getLiveSSTables())
+        for (AbstractSSTableReader reader : cfs.getLiveSSTables())
         {
             verifySSTableIsAssignedToCorrectStrategy(boundaries, csm, reader);
         }
@@ -176,7 +176,7 @@ public class CompactionStrategyManagerTest
 
             // Check that SSTables are still assigned to the previous boundary layout
             logger.debug("Old boundaries: {} New boundaries: {}", Arrays.toString(previousBoundaries), Arrays.toString(boundaries));
-            for (SSTableReader reader : cfs.getLiveSSTables())
+            for (AbstractSSTableReader reader : cfs.getLiveSSTables())
             {
                 verifySSTableIsAssignedToCorrectStrategy(previousBoundaries, csm, reader);
             }
@@ -184,7 +184,7 @@ public class CompactionStrategyManagerTest
             // Reload CompactionStrategyManager so new disk boundaries will be loaded
             csm.maybeReloadDiskBoundaries();
 
-            for (SSTableReader reader : cfs.getLiveSSTables())
+            for (AbstractSSTableReader reader : cfs.getLiveSSTables())
             {
                 // Check that SSTables are assigned to the new boundary layout
                 verifySSTableIsAssignedToCorrectStrategy(boundaries, csm, reader);
@@ -341,10 +341,10 @@ public class CompactionStrategyManagerTest
         ColumnFamilyStore cfs = createJBODMockCFS(numDir);
         Keyspace.open(cfs.keyspace.getName()).getColumnFamilyStore(cfs.name).disableAutoCompaction();
         assertTrue(cfs.getLiveSSTables().isEmpty());
-        List<SSTableReader> transientRepairs = new ArrayList<>();
-        List<SSTableReader> pendingRepair = new ArrayList<>();
-        List<SSTableReader> unrepaired = new ArrayList<>();
-        List<SSTableReader> repaired = new ArrayList<>();
+        List<AbstractSSTableReader> transientRepairs = new ArrayList<>();
+        List<AbstractSSTableReader> pendingRepair = new ArrayList<>();
+        List<AbstractSSTableReader> unrepaired = new ArrayList<>();
+        List<AbstractSSTableReader> repaired = new ArrayList<>();
 
         for (int i = 0; i < numDir; i++)
         {
@@ -373,9 +373,9 @@ public class CompactionStrategyManagerTest
             AbstractStrategyHolder holder = csm.getHolders().get(x);
             for (int y=0; y<numDir; y++)
             {
-                SSTableReader sstable = Iterables.getOnlyElement(group.getGroup(y));
+                AbstractSSTableReader sstable = Iterables.getOnlyElement(group.getGroup(y));
                 assertTrue(holder.managesSSTable(sstable));
-                SSTableReader expected;
+                AbstractSSTableReader expected;
                 if (sstable.isRepaired())
                     expected = repaired.get(y);
                 else if (sstable.isPendingRepair())
@@ -430,7 +430,7 @@ public class CompactionStrategyManagerTest
         boundaryManager.invalidateBoundaries();
     }
 
-    private void verifySSTableIsAssignedToCorrectStrategy(Integer[] boundaries, CompactionStrategyManager csm, SSTableReader reader)
+    private void verifySSTableIsAssignedToCorrectStrategy(Integer[] boundaries, CompactionStrategyManager csm, AbstractSSTableReader reader)
     {
         // Check that sstable is assigned to correct disk
         int index = getSSTableIndex(boundaries, reader);
@@ -456,7 +456,7 @@ public class CompactionStrategyManagerTest
         return result;
     }
 
-    private int getSSTableIndex(Integer[] boundaries, SSTableReader reader)
+    private int getSSTableIndex(Integer[] boundaries, AbstractSSTableReader reader)
     {
         int index = 0;
         int firstKey = Integer.parseInt(new String(ByteBufferUtil.getArray(reader.first.getKey())));
@@ -500,7 +500,7 @@ public class CompactionStrategyManagerTest
         }
     }
 
-    private static SSTableReader createSSTableWithKey(String keyspace, String table, int key)
+    private static AbstractSSTableReader createSSTableWithKey(String keyspace, String table, int key)
     {
         long timestamp = System.currentTimeMillis();
         DecoratedKey dk = Util.dk(String.format("%04d", key));
@@ -510,9 +510,9 @@ public class CompactionStrategyManagerTest
         .add("val", "val")
         .build()
         .applyUnsafe();
-        Set<SSTableReader> before = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> before = cfs.getLiveSSTables();
         cfs.forceBlockingFlush();
-        Set<SSTableReader> after = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> after = cfs.getLiveSSTables();
         return Iterables.getOnlyElement(Sets.difference(after, before));
     }
 

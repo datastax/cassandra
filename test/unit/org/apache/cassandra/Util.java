@@ -74,7 +74,7 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -249,12 +249,12 @@ public class Util
     public static Future<?> compactAll(ColumnFamilyStore cfs, int gcBefore)
     {
         List<Descriptor> descriptors = new ArrayList<>();
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             descriptors.add(sstable.descriptor);
         return CompactionManager.instance.submitUserDefined(cfs, descriptors, gcBefore);
     }
 
-    public static void compact(ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
+    public static void compact(ColumnFamilyStore cfs, Collection<AbstractSSTableReader> sstables)
     {
         int gcBefore = cfs.gcBefore(FBUtilities.nowInSeconds());
         try (CompactionTasks tasks = cfs.getCompactionStrategyManager().getUserDefinedTasks(sstables, gcBefore))
@@ -980,10 +980,10 @@ public class Util
      */
     public static void disableBloomFilter(ColumnFamilyStore cfs)
     {
-        Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.UNKNOWN))
         {
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
             {
                 sstable = sstable.cloneAndReplace(FilterFactory.AlwaysPresent);
                 txn.update(sstable, true);
@@ -992,7 +992,7 @@ public class Util
             txn.finish();
         }
 
-        for (SSTableReader reader : cfs.getLiveSSTables())
+        for (AbstractSSTableReader reader : cfs.getLiveSSTables())
             assertEquals(FilterFactory.AlwaysPresent, reader.getBloomFilter());
     }
 

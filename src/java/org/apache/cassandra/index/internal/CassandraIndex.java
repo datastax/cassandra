@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
-import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -45,7 +44,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -54,9 +52,8 @@ import org.apache.cassandra.index.*;
 import org.apache.cassandra.index.internal.composites.CompositesSearcher;
 import org.apache.cassandra.index.internal.keys.KeysSearcher;
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -684,7 +681,7 @@ public abstract class CassandraIndex implements Index
         baseCfs.forceBlockingFlush();
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL));
-             Refs<SSTableReader> sstables = viewFragment.refs)
+             Refs<AbstractSSTableReader> sstables = viewFragment.refs)
         {
             if (sstables.isEmpty())
             {
@@ -710,10 +707,10 @@ public abstract class CassandraIndex implements Index
         logger.info("Index build of {} complete", metadata.name);
     }
 
-    private static String getSSTableNames(Collection<SSTableReader> sstables)
+    private static String getSSTableNames(Collection<AbstractSSTableReader> sstables)
     {
         return StreamSupport.stream(sstables.spliterator(), false)
-                            .map(SSTableReader::toString)
+                            .map(AbstractSSTableReader::toString)
                             .collect(Collectors.joining(", "));
     }
 

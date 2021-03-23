@@ -59,7 +59,7 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -360,7 +360,7 @@ public class QueryController
     private Set<SSTableIndex> applyScope(Set<SSTableIndex> indexes)
     {
         return Sets.filter(indexes, index -> {
-            SSTableReader sstable = index.getSSTable();
+            AbstractSSTableReader sstable = index.getSSTable();
 
             return mergeRange.left.compareTo(sstable.last) <= 0 && (mergeRange.right.isMinimum() || sstable.first.compareTo(mergeRange.right) <= 0);
         });

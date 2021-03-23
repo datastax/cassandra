@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class TimeWindowCompactionController extends CompactionController
 {
@@ -33,7 +33,7 @@ public class TimeWindowCompactionController extends CompactionController
 
     private final boolean ignoreOverlaps;
 
-    public TimeWindowCompactionController(ColumnFamilyStore cfs, Set<SSTableReader> compacting, int gcBefore, boolean ignoreOverlaps)
+    public TimeWindowCompactionController(ColumnFamilyStore cfs, Set<AbstractSSTableReader> compacting, int gcBefore, boolean ignoreOverlaps)
     {
         super(cfs, compacting, gcBefore);
         this.ignoreOverlaps = ignoreOverlaps;

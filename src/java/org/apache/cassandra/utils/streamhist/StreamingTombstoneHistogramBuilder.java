@@ -26,12 +26,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * Histogram that can be constructed from streaming of data.
  *
  * Histogram used to retrieve the number of droppable tombstones for example via
- * {@link org.apache.cassandra.io.sstable.format.SSTableReader#getDroppableTombstonesBefore(int)}.
+ * {@link AbstractSSTableReader#getDroppableTombstonesBefore(int)}.
  * <p>
  * When an sstable is written (or streamed), this histogram-builder receives the "local deletion timestamp"
  * as an {@code int} via {@link #update(int)}. Negative values are not supported.

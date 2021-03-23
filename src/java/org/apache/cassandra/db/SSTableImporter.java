@@ -37,7 +37,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.Pair;
@@ -75,7 +75,7 @@ public class SSTableImporter
         List<Pair<Directories.SSTableLister, String>> listers = getSSTableListers(options.srcPaths);
 
         Set<Descriptor> currentDescriptors = new HashSet<>();
-        for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
             currentDescriptors.add(sstable.descriptor);
         List<String> failedDirectories = new ArrayList<>();
 
@@ -114,7 +114,7 @@ public class SSTableImporter
             }
         }
 
-        Set<SSTableReader> newSSTables = new HashSet<>();
+        Set<AbstractSSTableReader> newSSTables = new HashSet<>();
         for (Pair<Directories.SSTableLister, String> listerPair : listers)
         {
             Directories.SSTableLister lister = listerPair.left;
@@ -123,7 +123,7 @@ public class SSTableImporter
                 continue;
 
             Set<MovedSSTable> movedSSTables = new HashSet<>();
-            Set<SSTableReader> newSSTablesPerDirectory = new HashSet<>();
+            Set<AbstractSSTableReader> newSSTablesPerDirectory = new HashSet<>();
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
             {
                 try
@@ -136,7 +136,7 @@ public class SSTableImporter
                     Descriptor newDescriptor = cfs.getUniqueDescriptorFor(entry.getKey(), targetDir);
                     maybeMutateMetadata(entry.getKey(), options);
                     movedSSTables.add(new MovedSSTable(newDescriptor, entry.getKey(), entry.getValue()));
-                    SSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
                     newSSTablesPerDirectory.add(sstable);
                 }
                 catch (Throwable t)
@@ -176,10 +176,10 @@ public class SSTableImporter
 
         logger.info("Loading new SSTables and building secondary indexes for {}/{}: {}", cfs.keyspace.getName(), cfs.getTableName(), newSSTables);
 
-        try (Refs<SSTableReader> refs = Refs.ref(newSSTables))
+        try (Refs<AbstractSSTableReader> refs = Refs.ref(newSSTables))
         {
             cfs.getTracker().addSSTables(newSSTables);
-            for (SSTableReader reader : newSSTables)
+            for (AbstractSSTableReader reader : newSSTables)
             {
                 try
                 {
@@ -212,10 +212,10 @@ public class SSTableImporter
             return descriptor.directory;
 
         File targetDirectory = null;
-        SSTableReader sstable = null;
+        AbstractSSTableReader sstable = null;
         try
         {
-            sstable = SSTableReader.open(descriptor, components, cfs.metadata);
+            sstable = AbstractSSTableReader.open(descriptor, components, cfs.metadata);
             targetDirectory = cfs.getDirectories().getLocationForDisk(cfs.diskBoundaryManager.getDiskBoundaries(cfs).getCorrectDiskForSSTable(sstable));
         }
         finally
@@ -318,7 +318,7 @@ public class SSTableImporter
      * Iterates over all keys in the sstable index and invalidates the row cache
      */
     @VisibleForTesting
-    void invalidateCachesForSSTable(SSTableReader reader) throws IOException
+    void invalidateCachesForSSTable(AbstractSSTableReader reader) throws IOException
     {
         try (KeyIterator iter = KeyIterator.forSSTable(reader))
         {
@@ -339,10 +339,10 @@ public class SSTableImporter
      */
     private void verifySSTableForImport(Descriptor descriptor, Set<Component> components, boolean verifyTokens, boolean verifySSTables, boolean extendedVerify)
     {
-        SSTableReader reader = null;
+        AbstractSSTableReader reader = null;
         try
         {
-            reader = SSTableReader.open(descriptor, components, cfs.metadata);
+            reader = AbstractSSTableReader.open(descriptor, components, cfs.metadata);
             Verifier.Options verifierOptions = Verifier.options()
                                                        .extendedVerification(extendedVerify)
                                                        .checkOwnsTokens(verifyTokens)

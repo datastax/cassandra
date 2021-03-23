@@ -39,7 +39,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.repair.consistent.LocalSessionTest.InstrumentedLocalSessions;
 import org.apache.cassandra.repair.consistent.admin.PendingStats;
@@ -105,9 +105,9 @@ public class PendingRepairStatTest extends AbstractRepairTest
         return builder.build();
     }
 
-    private static SSTableReader createSSTable(int startKey, int keys)
+    private static AbstractSSTableReader createSSTable(int startKey, int keys)
     {
-        Set<SSTableReader> existing = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> existing = cfs.getLiveSSTables();
         assert keys > 0;
         for (int i=0; i<keys; i++)
         {
@@ -118,7 +118,7 @@ public class PendingRepairStatTest extends AbstractRepairTest
         return Iterables.getOnlyElement(Sets.difference(cfs.getLiveSSTables(), existing));
     }
 
-    private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair)
+    private static void mutateRepaired(AbstractSSTableReader sstable, long repairedAt, UUID pendingRepair)
     {
         try
         {
@@ -136,9 +136,9 @@ public class PendingRepairStatTest extends AbstractRepairTest
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         cfs.disableAutoCompaction();
-        SSTableReader sstable1 = createSSTable(0, 10);
-        SSTableReader sstable2 = createSSTable(10, 10);
-        SSTableReader sstable3 = createSSTable(10, 20);
+        AbstractSSTableReader sstable1 = createSSTable(0, 10);
+        AbstractSSTableReader sstable2 = createSSTable(10, 10);
+        AbstractSSTableReader sstable3 = createSSTable(10, 20);
 
         LocalSession session1 = createSession();
         sessions.putSessionUnsafe(session1);

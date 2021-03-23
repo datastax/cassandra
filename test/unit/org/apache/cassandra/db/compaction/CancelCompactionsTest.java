@@ -35,7 +35,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -49,7 +48,7 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
@@ -74,8 +73,8 @@ public class CancelCompactionsTest extends CQLTester
     public void cancelTest() throws InterruptedException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        List<SSTableReader> sstables = createSSTables(cfs, 10, 0);
-        Set<SSTableReader> toMarkCompacting = new HashSet<>(sstables.subList(0, 3));
+        List<AbstractSSTableReader> sstables = createSSTables(cfs, 10, 0);
+        Set<AbstractSSTableReader> toMarkCompacting = new HashSet<>(sstables.subList(0, 3));
 
         TestCompactionTask tct = new TestCompactionTask(cfs, toMarkCompacting);
         try
@@ -118,7 +117,7 @@ public class CancelCompactionsTest extends CQLTester
     public void multipleCompactionsCancelTest() throws InterruptedException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        List<SSTableReader> sstables = createSSTables(cfs, 10, 0);
+        List<AbstractSSTableReader> sstables = createSSTables(cfs, 10, 0);
 
         List<TestCompactionTask> tcts = new ArrayList<>();
         tcts.add(new TestCompactionTask(cfs, new HashSet<>(sstables.subList(0, 3))));
@@ -131,10 +130,10 @@ public class CancelCompactionsTest extends CQLTester
             List<CompactionInfo.Holder> activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(2, activeCompactions.size());
 
-            Set<Set<SSTableReader>> compactingSSTables = new HashSet<>();
+            Set<Set<AbstractSSTableReader>> compactingSSTables = new HashSet<>();
             compactingSSTables.add(activeCompactions.get(0).getCompactionInfo().getSSTables());
             compactingSSTables.add(activeCompactions.get(1).getCompactionInfo().getSSTables());
-            Set<Set<SSTableReader>> expectedSSTables = new HashSet<>();
+            Set<Set<AbstractSSTableReader>> expectedSSTables = new HashSet<>();
             expectedSSTables.add(new HashSet<>(sstables.subList(0, 3)));
             expectedSSTables.add(new HashSet<>(sstables.subList(6, 9)));
             assertEquals(compactingSSTables, expectedSSTables);
@@ -175,7 +174,7 @@ public class CancelCompactionsTest extends CQLTester
     public void testSubrangeCompaction() throws InterruptedException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        List<SSTableReader> sstables = createSSTables(cfs, 10, 0);
+        List<AbstractSSTableReader> sstables = createSSTables(cfs, 10, 0);
 
         List<TestCompactionTask> tcts = new ArrayList<>();
         tcts.add(new TestCompactionTask(cfs, new HashSet<>(sstables.subList(0, 2))));
@@ -232,9 +231,9 @@ public class CancelCompactionsTest extends CQLTester
     public void testAnticompaction() throws InterruptedException, ExecutionException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        List<SSTableReader> sstables = createSSTables(cfs, 10, 0);
-        List<SSTableReader> alreadyRepairedSSTables = createSSTables(cfs, 10, 10);
-        for (SSTableReader sstable : alreadyRepairedSSTables)
+        List<AbstractSSTableReader> sstables = createSSTables(cfs, 10, 0);
+        List<AbstractSSTableReader> alreadyRepairedSSTables = createSSTables(cfs, 10, 10);
+        for (AbstractSSTableReader sstable : alreadyRepairedSSTables)
             AbstractPendingRepairTest.mutateRepaired(sstable, System.currentTimeMillis());
         assertEquals(20, cfs.getLiveSSTables().size());
         List<TestCompactionTask> tcts = new ArrayList<>();
@@ -280,7 +279,7 @@ public class CancelCompactionsTest extends CQLTester
             assertEquals(2, toAbort.size());
             toAbort.forEach(TestCompactionTask::abort);
             fut.get();
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
                 assertTrue(!sstable.intersects(Collections.singleton(range)) || sstable.isPendingRepair());
         }
         finally
@@ -297,7 +296,7 @@ public class CancelCompactionsTest extends CQLTester
     public void testIndexRebuild() throws ExecutionException, InterruptedException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        List<SSTableReader> sstables = createSSTables(cfs, 5, 0);
+        List<AbstractSSTableReader> sstables = createSSTables(cfs, 5, 0);
         Index idx = new StubIndex(cfs, null);
         CountDownLatch indexBuildStarted = new CountDownLatch(1);
         CountDownLatch indexBuildRunning = new CountDownLatch(1);
@@ -353,7 +352,7 @@ public class CancelCompactionsTest extends CQLTester
         assertTrue(getActiveCompactionsForTable(cfs).isEmpty());
     }
 
-    long first(SSTableReader sstable)
+    long first(AbstractSSTableReader sstable)
     {
         return (long)sstable.first.getToken().getTokenValue();
     }
@@ -363,9 +362,9 @@ public class CancelCompactionsTest extends CQLTester
         return new Murmur3Partitioner.LongToken(t);
     }
 
-    private List<SSTableReader> createSSTables(ColumnFamilyStore cfs, int count, int startGeneration)
+    private List<AbstractSSTableReader> createSSTables(ColumnFamilyStore cfs, int count, int startGeneration)
     {
-        List<SSTableReader> sstables = new ArrayList<>();
+        List<AbstractSSTableReader> sstables = new ArrayList<>();
         for (int i = 0; i < count; i++)
         {
             long first = i * 10;
@@ -380,13 +379,13 @@ public class CancelCompactionsTest extends CQLTester
     private static class TestCompactionTask
     {
         private ColumnFamilyStore cfs;
-        private final Set<SSTableReader> sstables;
+        private final Set<AbstractSSTableReader> sstables;
         private LifecycleTransaction txn;
         private CompactionController controller;
         private CompactionIterator ci;
         private List<ISSTableScanner> scanners;
 
-        public TestCompactionTask(ColumnFamilyStore cfs, Set<SSTableReader> sstables)
+        public TestCompactionTask(ColumnFamilyStore cfs, Set<AbstractSSTableReader> sstables)
         {
             this.cfs = cfs;
             this.sstables = sstables;
@@ -394,7 +393,7 @@ public class CancelCompactionsTest extends CQLTester
 
         public void start()
         {
-            scanners = sstables.stream().map(SSTableReader::getScanner).collect(Collectors.toList());
+            scanners = sstables.stream().map(AbstractSSTableReader::getScanner).collect(Collectors.toList());
             txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
             assertNotNull(txn);
             controller = new CompactionController(cfs, sstables, Integer.MIN_VALUE);
@@ -427,7 +426,7 @@ public class CancelCompactionsTest extends CQLTester
             execute("insert into %s (id, something) values (?, ?)", i, i);
         flush();
         ColumnFamilyStore idx = getCurrentColumnFamilyStore().indexManager.getAllIndexColumnFamilyStores().iterator().next();
-        Set<SSTableReader> sstables = new HashSet<>();
+        Set<AbstractSSTableReader> sstables = new HashSet<>();
         try (LifecycleTransaction txn = idx.getTracker().tryModify(idx.getLiveSSTables(), OperationType.COMPACTION))
         {
             getCurrentColumnFamilyStore().runWithCompactionsDisabled(() -> true, (sstable) -> { sstables.add(sstable); return true;}, false, false, false);

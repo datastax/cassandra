@@ -45,7 +45,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -96,7 +96,7 @@ class PendingRepairManager
         return strategies.get(id);
     }
 
-    AbstractCompactionStrategy get(SSTableReader sstable)
+    AbstractCompactionStrategy get(AbstractSSTableReader sstable)
     {
         assert sstable.isPendingRepair();
         return get(sstable.getSSTableMetadata().pendingRepair);
@@ -132,7 +132,7 @@ class PendingRepairManager
         }
     }
 
-    AbstractCompactionStrategy getOrCreate(SSTableReader sstable)
+    AbstractCompactionStrategy getOrCreate(AbstractSSTableReader sstable)
     {
         return getOrCreate(sstable.getSSTableMetadata().pendingRepair);
     }
@@ -146,7 +146,7 @@ class PendingRepairManager
         strategies = ImmutableMap.copyOf(Maps.filterKeys(strategies, k -> !k.equals(sessionID)));
     }
 
-    synchronized void removeSSTable(SSTableReader sstable)
+    synchronized void removeSSTable(AbstractSSTableReader sstable)
     {
         for (Map.Entry<UUID, AbstractCompactionStrategy> entry : strategies.entrySet())
         {
@@ -156,32 +156,32 @@ class PendingRepairManager
     }
 
 
-    void removeSSTables(Iterable<SSTableReader> removed)
+    void removeSSTables(Iterable<AbstractSSTableReader> removed)
     {
-        for (SSTableReader sstable : removed)
+        for (AbstractSSTableReader sstable : removed)
             removeSSTable(sstable);
     }
 
-    synchronized void addSSTable(SSTableReader sstable)
+    synchronized void addSSTable(AbstractSSTableReader sstable)
     {
         Preconditions.checkArgument(sstable.isTransient() == isTransient);
         getOrCreate(sstable).addSSTable(sstable);
     }
 
-    void addSSTables(Iterable<SSTableReader> added)
+    void addSSTables(Iterable<AbstractSSTableReader> added)
     {
-        for (SSTableReader sstable : added)
+        for (AbstractSSTableReader sstable : added)
             addSSTable(sstable);
     }
 
-    synchronized void replaceSSTables(Set<SSTableReader> removed, Set<SSTableReader> added)
+    synchronized void replaceSSTables(Set<AbstractSSTableReader> removed, Set<AbstractSSTableReader> added)
     {
         if (removed.isEmpty() && added.isEmpty())
             return;
 
         // left=removed, right=added
-        Map<UUID, Pair<Set<SSTableReader>, Set<SSTableReader>>> groups = new HashMap<>();
-        for (SSTableReader sstable : removed)
+        Map<UUID, Pair<Set<AbstractSSTableReader>, Set<AbstractSSTableReader>>> groups = new HashMap<>();
+        for (AbstractSSTableReader sstable : removed)
         {
             UUID sessionID = sstable.getSSTableMetadata().pendingRepair;
             if (!groups.containsKey(sessionID))
@@ -191,7 +191,7 @@ class PendingRepairManager
             groups.get(sessionID).left.add(sstable);
         }
 
-        for (SSTableReader sstable : added)
+        for (AbstractSSTableReader sstable : added)
         {
             UUID sessionID = sstable.getSSTableMetadata().pendingRepair;
             if (!groups.containsKey(sessionID))
@@ -201,11 +201,11 @@ class PendingRepairManager
             groups.get(sessionID).right.add(sstable);
         }
 
-        for (Map.Entry<UUID, Pair<Set<SSTableReader>, Set<SSTableReader>>> entry : groups.entrySet())
+        for (Map.Entry<UUID, Pair<Set<AbstractSSTableReader>, Set<AbstractSSTableReader>>> entry : groups.entrySet())
         {
             AbstractCompactionStrategy strategy = getOrCreate(entry.getKey());
-            Set<SSTableReader> groupRemoved = entry.getValue().left;
-            Set<SSTableReader> groupAdded = entry.getValue().right;
+            Set<AbstractSSTableReader> groupRemoved = entry.getValue().left;
+            Set<AbstractSSTableReader> groupAdded = entry.getValue().right;
 
             if (!groupRemoved.isEmpty())
                 strategy.replaceSSTables(groupRemoved, groupAdded);
@@ -268,7 +268,7 @@ class PendingRepairManager
         AbstractCompactionStrategy compactionStrategy = get(sessionID);
         if (compactionStrategy == null)
             return null;
-        Set<SSTableReader> sstables = compactionStrategy.getSSTables();
+        Set<AbstractSSTableReader> sstables = compactionStrategy.getSSTables();
         long repairedAt = ActiveRepairService.instance.consistent.local.getFinalSessionRepairedAt(sessionID);
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         return txn == null ? null : new RepairFinishedCompactionTask(cfs, txn, sessionID, repairedAt);
@@ -427,15 +427,15 @@ class PendingRepairManager
     }
 
     @SuppressWarnings("resource")
-    synchronized Set<ISSTableScanner> getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    synchronized Set<ISSTableScanner> getScanners(Collection<AbstractSSTableReader> sstables, Collection<Range<Token>> ranges)
     {
         if (sstables.isEmpty())
         {
             return Collections.emptySet();
         }
 
-        Map<UUID, Set<SSTableReader>> sessionSSTables = new HashMap<>();
-        for (SSTableReader sstable : sstables)
+        Map<UUID, Set<AbstractSSTableReader>> sessionSSTables = new HashMap<>();
+        for (AbstractSSTableReader sstable : sstables)
         {
             UUID sessionID = sstable.getSSTableMetadata().pendingRepair;
             checkPendingID(sessionID);
@@ -445,7 +445,7 @@ class PendingRepairManager
         Set<ISSTableScanner> scanners = new HashSet<>(sessionSSTables.size());
         try
         {
-            for (Map.Entry<UUID, Set<SSTableReader>> entry : sessionSSTables.entrySet())
+            for (Map.Entry<UUID, Set<AbstractSSTableReader>> entry : sessionSSTables.entrySet())
             {
                 scanners.addAll(getOrCreate(entry.getKey()).getScanners(entry.getValue(), ranges).scanners);
             }
@@ -467,7 +467,7 @@ class PendingRepairManager
         return strategies.keySet().contains(sessionID);
     }
 
-    boolean containsSSTable(SSTableReader sstable)
+    boolean containsSSTable(AbstractSSTableReader sstable)
     {
         if (!sstable.isPendingRepair())
             return false;
@@ -476,9 +476,9 @@ class PendingRepairManager
         return strategy != null && strategy.getSSTables().contains(sstable);
     }
 
-    public Collection<AbstractCompactionTask> createUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore)
+    public Collection<AbstractCompactionTask> createUserDefinedTasks(Collection<AbstractSSTableReader> sstables, int gcBefore)
     {
-        Map<UUID, List<SSTableReader>> group = sstables.stream().collect(Collectors.groupingBy(s -> s.getSSTableMetadata().pendingRepair));
+        Map<UUID, List<AbstractSSTableReader>> group = sstables.stream().collect(Collectors.groupingBy(s -> s.getSSTableMetadata().pendingRepair));
         return group.entrySet().stream().map(g -> strategies.get(g.getKey()).getUserDefinedTask(g.getValue(), gcBefore)).collect(Collectors.toList());
     }
 
@@ -512,7 +512,7 @@ class PendingRepairManager
                 if (obsoleteSSTables)
                 {
                     logger.info("Obsoleting transient repaired sstables for {}", sessionID);
-                    Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
+                    Preconditions.checkState(Iterables.all(transaction.originals(), AbstractSSTableReader::isTransient));
                     transaction.obsoleteOriginals();
                 }
                 else
@@ -542,7 +542,7 @@ class PendingRepairManager
             }
         }
 
-        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables)
         {
             throw new UnsupportedOperationException();
         }

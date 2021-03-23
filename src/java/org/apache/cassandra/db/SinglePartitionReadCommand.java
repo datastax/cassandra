@@ -38,14 +38,13 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -591,7 +590,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
-        Collections.sort(view.sstables, SSTableReader.maxTimestampDescending);
+        Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
         ClusteringIndexFilter filter = clusteringIndexFilter();
         long minTimestamp = Long.MAX_VALUE;
         long mostRecentPartitionTombstone = Long.MIN_VALUE;
@@ -629,7 +628,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
              * In other words, iterating in descending maxTimestamp order allow to do our mostRecentPartitionTombstone
              * elimination in one pass, and minimize the number of sstables for which we read a partition tombstone.
             */
-            Collections.sort(view.sstables, SSTableReader.maxTimestampDescending);
+            Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
             int nonIntersectingSSTables = 0;
             int includedDueToTombstones = 0;
 
@@ -638,7 +637,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             if (isTrackingRepairedStatus())
                 Tracing.trace("Collecting data from sstables and tracking repaired status");
 
-            for (SSTableReader sstable : view.sstables)
+            for (AbstractSSTableReader sstable : view.sstables)
             {
                 // if we've already seen a partition tombstone with a timestamp greater
                 // than the most recent update to this sstable, we can skip it
@@ -715,24 +714,24 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
     }
 
-    private boolean intersects(SSTableReader sstable)
+    private boolean intersects(AbstractSSTableReader sstable)
     {
         return clusteringIndexFilter().intersects(sstable.metadata().comparator, sstable.getSSTableMetadata().coveredClustering);
     }
 
-    private boolean hasRequiredStatics(SSTableReader sstable) {
+    private boolean hasRequiredStatics(AbstractSSTableReader sstable) {
         // If some static columns are queried, we should always include the sstable: the clustering values stats of the sstable
         // don't tell us if the sstable contains static values in particular.
         return !columnFilter().fetchedColumns().statics.isEmpty() && sstable.header.hasStatic();
     }
 
-    private boolean hasPartitionLevelDeletions(SSTableReader sstable)
+    private boolean hasPartitionLevelDeletions(AbstractSSTableReader sstable)
     {
         return sstable.getSSTableMetadata().hasPartitionLevelDeletions;
     }
 
     private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs,
-                                                             SSTableReader sstable,
+                                                             AbstractSSTableReader sstable,
                                                              SSTableReadsListener listener)
     {
         return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
@@ -745,7 +744,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     private UnfilteredRowIterator makeIteratorWithSkippedNonStaticContent(ColumnFamilyStore cfs,
-                                                                          SSTableReader sstable,
+                                                                          AbstractSSTableReader sstable,
                                                                           SSTableReadsListener listener)
     {
         return StorageHook.instance.makeRowIterator(cfs,
@@ -836,10 +835,10 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
 
         /* add the SSTables on disk */
-        Collections.sort(view.sstables, SSTableReader.maxTimestampDescending);
+        Collections.sort(view.sstables, AbstractSSTableReader.maxTimestampDescending);
         // read sorted sstables
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
-        for (SSTableReader sstable : view.sstables)
+        for (AbstractSSTableReader sstable : view.sstables)
         {
             // if we've already seen a partition tombstone with a timestamp greater
             // than the most recent update to this sstable, we're done, since the rest of the sstables
@@ -1159,7 +1158,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         private int mergedSSTables;
 
         @Override
-        public void onSSTableSelected(SSTableReader sstable, RowIndexEntry<?> indexEntry, SelectionReason reason)
+        public void onSSTableSelected(AbstractSSTableReader sstable, RowIndexEntry<?> indexEntry, SelectionReason reason)
         {
             sstable.incrementReadCount();
             mergedSSTables++;

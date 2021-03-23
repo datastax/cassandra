@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implements UnfilteredRowIterator
 {
-    protected final SSTableReader sstable;
+    protected final AbstractSSTableReader sstable;
     // We could use sstable.metadata(), but that can change during execution so it's good hygiene to grab an immutable instance
     protected final TableMetadata metadata;
 
@@ -53,7 +53,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implem
 
     @SuppressWarnings("resource") // We need this because the analysis is not able to determine that we do close
                                   // file on every path where we created it.
-    protected AbstractSSTableIterator(SSTableReader sstable,
+    protected AbstractSSTableIterator(AbstractSSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
                                       E indexEntry,
@@ -154,7 +154,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry<?>> implem
      */
     protected abstract boolean hasMoreSlices();
 
-    private static Row readStaticRow(SSTableReader sstable,
+    private static Row readStaticRow(AbstractSSTableReader sstable,
                                      FileDataInput file,
                                      DeserializationHelper helper,
                                      Columns statics) throws IOException

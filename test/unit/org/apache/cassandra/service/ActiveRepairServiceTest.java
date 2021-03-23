@@ -20,12 +20,10 @@ package org.apache.cassandra.service;
 
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 
 import com.google.common.collect.ImmutableList;
@@ -49,7 +47,7 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -274,7 +272,7 @@ public class ActiveRepairServiceTest
     {
         ColumnFamilyStore store = prepareColumnFamilyStore();
         UUID prsId = UUID.randomUUID();
-        Set<SSTableReader> original = Sets.newHashSet(store.select(View.select(SSTableSet.CANONICAL, (s) -> !s.isRepaired())).sstables);
+        Set<AbstractSSTableReader> original = Sets.newHashSet(store.select(View.select(SSTableSet.CANONICAL, (s) -> !s.isRepaired())).sstables);
         Collection<Range<Token>> ranges = Collections.singleton(new Range<>(store.getPartitioner().getMinimumToken(), store.getPartitioner().getMinimumToken()));
         ActiveRepairService.instance.registerParentRepairSession(prsId, FBUtilities.getBroadcastAddressAndPort(), Collections.singletonList(store),
                                                                  ranges, true, System.currentTimeMillis(), true, PreviewKind.NONE);
@@ -288,7 +286,7 @@ public class ActiveRepairServiceTest
                                                                  true, PreviewKind.NONE);
         createSSTables(store, 2);
         store.getRepairManager().snapshot(prsId.toString(), ranges, false);
-        try (Refs<SSTableReader> refs = store.getSnapshotSSTableReaders(prsId.toString()))
+        try (Refs<AbstractSSTableReader> refs = store.getSnapshotSSTableReaders(prsId.toString()))
         {
             assertEquals(original, Sets.newHashSet(refs.iterator()));
         }

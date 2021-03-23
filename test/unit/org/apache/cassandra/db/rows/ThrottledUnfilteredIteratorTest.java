@@ -21,7 +21,6 @@ package org.apache.cassandra.db.rows;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.junit.Assert.*;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -50,7 +49,6 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
@@ -60,7 +58,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -117,7 +115,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader reader = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
         try (ISSTableScanner scanner = reader.getScanner();
                 CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 100))
@@ -152,7 +150,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader reader = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
         try (ISSTableScanner scanner = reader.getScanner();
              CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 100))
@@ -210,7 +208,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader reader = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
         try (ISSTableScanner scanner = reader.getScanner())
         {

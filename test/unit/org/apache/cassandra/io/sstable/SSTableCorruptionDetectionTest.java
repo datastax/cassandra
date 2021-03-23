@@ -41,7 +41,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.*;
@@ -69,7 +69,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     private static SSTableWriter writer;
     private static LifecycleTransaction txn;
     private static ColumnFamilyStore cfs;
-    private static SSTableReader ssTableReader;
+    private static AbstractSSTableReader ssTableReader;
     private static Config.CorruptedTombstoneStrategy original;
 
     @BeforeClass
@@ -146,7 +146,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         bruteForceCorruptionTest(ssTableReader, sstableScanner());
     }
 
-    private void bruteForceCorruptionTest(SSTableReader ssTableReader, Consumer<SSTableReader> walker) throws Throwable
+    private void bruteForceCorruptionTest(AbstractSSTableReader ssTableReader, Consumer<AbstractSSTableReader> walker) throws Throwable
     {
         RandomAccessFile raf = new RandomAccessFile(ssTableReader.getFilename(), "rw");
 
@@ -182,9 +182,9 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         FileUtils.closeQuietly(raf);
     }
 
-    private Consumer<SSTableReader> sstableScanner()
+    private Consumer<AbstractSSTableReader> sstableScanner()
     {
-        return (SSTableReader sstable) -> {
+        return (AbstractSSTableReader sstable) -> {
             try (ISSTableScanner scanner = sstable.getScanner())
             {
                 while (scanner.hasNext())
@@ -208,9 +208,9 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         };
     }
 
-    private Consumer<SSTableReader> partitionIterator()
+    private Consumer<AbstractSSTableReader> partitionIterator()
     {
-        return (SSTableReader sstable) -> {
+        return (AbstractSSTableReader sstable) -> {
             for (int i = 0; i < numberOfPks; i++)
             {
                 DecoratedKey dk = Util.dk(String.format("pkvalue_%07d", i));

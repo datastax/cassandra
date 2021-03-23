@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 
@@ -164,7 +164,7 @@ public class SSTablesSystemViewTest extends SAITester
 
         for (SSTableIndex sstableIndex : sai.getContext().getView())
         {
-            SSTableReader sstable = sstableIndex.getSSTable();
+            AbstractSSTableReader sstable = sstableIndex.getSSTable();
 
             if (sstable.descriptor.generation == generation)
             {

@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.ICompressor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.store.ByteArrayIndexInput;
 import org.apache.lucene.store.IndexInput;
@@ -33,12 +33,12 @@ import org.apache.lucene.util.BytesRef;
 public class CryptoUtils
 {
 
-    public static CompressionMetadata getCompressionMeta(SSTableReader ssTableReader)
+    public static CompressionMetadata getCompressionMeta(AbstractSSTableReader ssTableReader)
     {
         return ssTableReader.compression ? ssTableReader.getCompressionMetadata() : null;
     }
 
-    public static CompressionParams getCompressionParams(SSTableReader ssTableReader)
+    public static CompressionParams getCompressionParams(AbstractSSTableReader ssTableReader)
     {
         return getCompressionParams(getCompressionMeta(ssTableReader));
     }

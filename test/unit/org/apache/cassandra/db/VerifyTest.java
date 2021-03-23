@@ -24,7 +24,6 @@ import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.UpdateBuilder;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.Verifier;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -35,10 +34,9 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -52,7 +50,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.*;
-import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -121,7 +118,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
@@ -142,7 +139,7 @@ public class VerifyTest
 
         fillCounterCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
             verifier.verify();
@@ -162,7 +159,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
             verifier.verify();
@@ -182,7 +179,7 @@ public class VerifyTest
 
         fillCounterCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).extendedVerification(true).build()))
         {
@@ -203,7 +200,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
@@ -224,7 +221,7 @@ public class VerifyTest
 
         fillCounterCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
@@ -245,7 +242,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().extendedVerification(true).invokeDiskFailurePolicy(true).build()))
         {
@@ -266,7 +263,7 @@ public class VerifyTest
 
         fillCounterCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().extendedVerification(true).invokeDiskFailurePolicy(true).build()))
         {
@@ -290,7 +287,7 @@ public class VerifyTest
 
         Util.getAll(Util.cmd(cfs).build());
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
 
         try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
@@ -327,11 +324,11 @@ public class VerifyTest
 
         Util.getAll(Util.cmd(cfs).build());
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         // overwrite one row with garbage
-        long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("0"), cfs.getPartitioner()), SSTableReader.Operator.EQ).position;
-        long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("1"), cfs.getPartitioner()), SSTableReader.Operator.EQ).position;
+        long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("0"), cfs.getPartitioner()), AbstractSSTableReader.Operator.EQ).position;
+        long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("1"), cfs.getPartitioner()), AbstractSSTableReader.Operator.EQ).position;
         long startPosition = row0Start < row1Start ? row0Start : row1Start;
         long endPosition = row0Start < row1Start ? row1Start : row0Start;
 
@@ -384,7 +381,7 @@ public class VerifyTest
 
         Util.getAll(Util.cmd(cfs).build());
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         String filenameToCorrupt = sstable.descriptor.filenameFor(Component.STATS);
         RandomAccessFile file = new RandomAccessFile(filenameToCorrupt, "rw");
@@ -420,7 +417,7 @@ public class VerifyTest
         Util.getAll(Util.cmd(cfs).build());
 
         // make the sstable repaired:
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, System.currentTimeMillis(), sstable.getPendingRepair(), sstable.isTransient());
         sstable.reloadSSTableMetadata();
 
@@ -465,7 +462,7 @@ public class VerifyTest
         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().checkOwnsTokens(true).extendedVerification(true).build()))
         {
             verifier.verify();
@@ -486,7 +483,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, 1, sstable.getPendingRepair(), sstable.isTransient());
         sstable.reloadSSTableMetadata();
         cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
@@ -535,7 +532,7 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().build()))
         {
             verifier.verify(); //still not corrupt, should pass
@@ -568,7 +565,7 @@ public class VerifyTest
 
         Util.getAll(Util.cmd(cfs).build());
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
 
         try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))

@@ -24,7 +24,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertEquals;
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
@@ -45,9 +45,9 @@ public class SSTableSkippingReadTest extends TestBaseImpl
             cluster.get(1).flush(KEYSPACE);
             // expect a single sstable, where minTimestamp equals the timestamp of the partition delete
             cluster.get(1).runOnInstance(() -> {
-                Set<SSTableReader> sstables = Keyspace.open(KEYSPACE)
-                                                      .getColumnFamilyStore("tbl")
-                                                      .getLiveSSTables();
+                Set<AbstractSSTableReader> sstables = Keyspace.open(KEYSPACE)
+                                                              .getColumnFamilyStore("tbl")
+                                                              .getLiveSSTables();
                 assertEquals("Expected a single sstable, but found " + sstables.size(), 1, sstables.size());
                 long minTimestamp = sstables.iterator().next().getMinTimestamp();
                 assertEquals("Expected min timestamp of 1, but was " + minTimestamp, 1, minTimestamp);

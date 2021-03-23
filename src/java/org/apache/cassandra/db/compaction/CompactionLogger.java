@@ -42,20 +42,20 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 public class CompactionLogger
 {
     public interface Strategy
     {
-        JsonNode sstable(SSTableReader sstable);
+        JsonNode sstable(AbstractSSTableReader sstable);
 
         JsonNode options();
 
         static Strategy none = new Strategy()
         {
-            public JsonNode sstable(SSTableReader sstable)
+            public JsonNode sstable(AbstractSSTableReader sstable)
             {
                 return null;
             }
@@ -98,7 +98,7 @@ public class CompactionLogger
 
     private interface CompactionStrategyAndTableFunction
     {
-        JsonNode apply(AbstractCompactionStrategy strategy, SSTableReader sstable);
+        JsonNode apply(AbstractCompactionStrategy strategy, AbstractSSTableReader sstable);
     }
 
     private static final JsonNodeFactory json = JsonNodeFactory.instance;
@@ -132,7 +132,7 @@ public class CompactionLogger
         return node;
     }
 
-    private ArrayNode sstableMap(Collection<SSTableReader> sstables, CompactionStrategyAndTableFunction csatf)
+    private ArrayNode sstableMap(Collection<AbstractSSTableReader> sstables, CompactionStrategyAndTableFunction csatf)
     {
         CompactionStrategyManager csm = csmRef.get();
         ArrayNode node = json.arrayNode();
@@ -154,7 +154,7 @@ public class CompactionLogger
         ColumnFamilyStore cfs = cfsRef.get();
         if (csm == null || cfs == null)
             return node;
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             if (csm.getCompactionStrategyFor(sstable) == strategy)
                 node.add(formatSSTable(strategy, sstable));
@@ -162,7 +162,7 @@ public class CompactionLogger
         return node;
     }
 
-    private JsonNode formatSSTable(AbstractCompactionStrategy strategy, SSTableReader sstable)
+    private JsonNode formatSSTable(AbstractCompactionStrategy strategy, AbstractSSTableReader sstable)
     {
         ObjectNode node = json.objectNode();
         node.put("generation", sstable.descriptor.generation);
@@ -205,7 +205,7 @@ public class CompactionLogger
         return node;
     }
 
-    private JsonNode describeSSTable(AbstractCompactionStrategy strategy, SSTableReader sstable)
+    private JsonNode describeSSTable(AbstractCompactionStrategy strategy, AbstractSSTableReader sstable)
     {
         ObjectNode node = json.objectNode();
         node.put("strategyId", getId(strategy));
@@ -252,7 +252,7 @@ public class CompactionLogger
         }
     }
 
-    public void flush(Collection<SSTableReader> sstables)
+    public void flush(Collection<AbstractSSTableReader> sstables)
     {
         if (enabled.get())
         {
@@ -264,7 +264,7 @@ public class CompactionLogger
         }
     }
 
-    public void compaction(long startTime, Collection<SSTableReader> input, long endTime, Collection<SSTableReader> output)
+    public void compaction(long startTime, Collection<AbstractSSTableReader> input, long endTime, Collection<AbstractSSTableReader> output)
     {
         if (enabled.get())
         {

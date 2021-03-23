@@ -69,7 +69,7 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -218,7 +218,7 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             File file = sstable.descriptor.fileFor(ndiComponent);
             corruptionType.corrupt(file);
@@ -285,7 +285,7 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             IndexComponents components = IndexComponents.create(context.getIndexName(), sstable);
             if (!components.validatePerSSTableComponentsChecksum() || !components.validatePerColumnComponentsChecksum(context.isLiteral()))
@@ -649,7 +649,7 @@ public class SAITester extends CQLTester
     protected int snapshot(String snapshotName)
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        Set<SSTableReader> snapshottedSSTables = cfs.snapshot(snapshotName);
+        Set<AbstractSSTableReader> snapshottedSSTables = cfs.snapshot(snapshotName);
         return snapshottedSSTables.size();
     }
 

@@ -42,7 +42,7 @@ public class BigFormat implements SSTableFormat
 {
     public static final BigFormat instance = new BigFormat();
     public static final Version latestVersion = new BigVersion(BigVersion.current_version);
-    private static final SSTableReader.Factory readerFactory = new ReaderFactory();
+    private static final AbstractSSTableReader.Factory readerFactory = new ReaderFactory();
     private static final SSTableWriter.Factory writerFactory = new WriterFactory();
 
     private BigFormat()
@@ -75,7 +75,7 @@ public class BigFormat implements SSTableFormat
     }
 
     @Override
-    public SSTableReader.Factory getReaderFactory()
+    public AbstractSSTableReader.Factory getReaderFactory()
     {
         return readerFactory;
     }
@@ -100,10 +100,10 @@ public class BigFormat implements SSTableFormat
         }
     }
 
-    static class ReaderFactory implements SSTableReader.Factory
+    static class ReaderFactory implements AbstractSSTableReader.Factory
     {
         @Override
-        public SSTableReader open(SSTableReaderBuilder builder)
+        public AbstractSSTableReader open(SSTableReaderBuilder builder)
         {
             return new BigTableReader(builder);
         }

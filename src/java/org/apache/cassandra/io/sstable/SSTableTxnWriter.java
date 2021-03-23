@@ -31,7 +31,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.RangeAwareSSTableWriter;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -91,7 +91,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
         return super.doPostCleanup(accumulate);
     }
 
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<AbstractSSTableReader> finish(boolean openResult)
     {
         writer.setOpenResult(openResult);
         finish();

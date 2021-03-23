@@ -29,7 +29,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Futures;
@@ -57,7 +56,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
@@ -137,11 +136,11 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         if (!schemaConverged)
             logger.warn("Failed to get schema to converge before building view {}.{}", baseCfs.keyspace.getName(), view.name);
 
-        Function<org.apache.cassandra.db.lifecycle.View, Iterable<SSTableReader>> function;
+        Function<org.apache.cassandra.db.lifecycle.View, Iterable<AbstractSSTableReader>> function;
         function = org.apache.cassandra.db.lifecycle.View.select(SSTableSet.CANONICAL, s -> range.intersects(s.getBounds()));
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(function);
-             Refs<SSTableReader> sstables = viewFragment.refs;
+             Refs<AbstractSSTableReader> sstables = viewFragment.refs;
              ReducingKeyIterator keyIter = new ReducingKeyIterator(sstables))
         {
             PeekingIterator<DecoratedKey> iter = Iterators.peekingIterator(keyIter);

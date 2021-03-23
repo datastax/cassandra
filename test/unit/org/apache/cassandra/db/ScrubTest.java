@@ -75,7 +75,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -180,7 +180,7 @@ public class ScrubTest
 
         assertEquals(1, cfs.getLiveSSTables().size());
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         //make sure to override at most 1 chunk when compression is enabled
         overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
@@ -238,7 +238,7 @@ public class ScrubTest
 
         assertOrderedAll(cfs, 2);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         // overwrite one row with garbage
         overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
@@ -281,7 +281,7 @@ public class ScrubTest
         fillCF(cfs, 4);
         assertOrderedAll(cfs, 4);
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         overrideWithGarbage(sstable, 0, 2);
 
         CompactionManager.instance.performScrub(cfs, false, true, 2);
@@ -335,7 +335,7 @@ public class ScrubTest
         fillCF(cfs, 10);
         assertOrderedAll(cfs, 10);
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
 
         CompactionManager.instance.performScrub(cfs, false, true, 2);
@@ -384,7 +384,7 @@ public class ScrubTest
 
             try
             {
-                SSTableReader.open(desc, cfs.metadata);
+                AbstractSSTableReader.open(desc, cfs.metadata);
                 fail("SSTR validation should have caught the out-of-order rows");
             }
             catch (CorruptSSTableException ise)
@@ -401,7 +401,7 @@ public class ScrubTest
             components.add(Component.SUMMARY);
             components.add(Component.TOC);
 
-            SSTableReader sstable = SSTableReader.openNoValidation(desc, components, cfs);
+            AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(desc, components, cfs);
             if (sstable.last.compareTo(sstable.first) < 0)
                 sstable.last = sstable.first;
 
@@ -422,7 +422,7 @@ public class ScrubTest
         }
     }
 
-    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2) throws IOException
+    private void overrideWithGarbage(AbstractSSTableReader sstable, ByteBuffer key1, ByteBuffer key2) throws IOException
     {
         boolean compression = Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false"));
         long startPosition, endPosition;
@@ -432,9 +432,9 @@ public class ScrubTest
             CompressionMetadata compData = CompressionMetadata.create(sstable.getFilename());
 
             CompressionMetadata.Chunk chunk1 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
+                    sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), AbstractSSTableReader.Operator.EQ).position);
             CompressionMetadata.Chunk chunk2 = compData.chunkFor(
-                    sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
+                    sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), AbstractSSTableReader.Operator.EQ).position);
 
             startPosition = Math.min(chunk1.offset, chunk2.offset);
             endPosition = Math.max(chunk1.offset + chunk1.length, chunk2.offset + chunk2.length);
@@ -443,8 +443,8 @@ public class ScrubTest
         }
         else
         { // overwrite with garbage from key1 to key2
-            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position;
-            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), SSTableReader.Operator.EQ).position;
+            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), AbstractSSTableReader.Operator.EQ).position;
+            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(key2, sstable.getPartitioner()), AbstractSSTableReader.Operator.EQ).position;
             startPosition = Math.min(row0Start, row1Start);
             endPosition = Math.max(row0Start, row1Start);
         }
@@ -452,7 +452,7 @@ public class ScrubTest
         overrideWithGarbage(sstable, startPosition, endPosition);
     }
 
-    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition) throws IOException
+    private void overrideWithGarbage(AbstractSSTableReader sstable, long startPosition, long endPosition) throws IOException
     {
         RandomAccessFile file = new RandomAccessFile(sstable.getFilename(), "rw");
         file.seek(startPosition);
@@ -795,7 +795,7 @@ public class ScrubTest
         fillCounterCF(cfs, numPartitions);
         assertOrderedAll(cfs, numPartitions);
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
 

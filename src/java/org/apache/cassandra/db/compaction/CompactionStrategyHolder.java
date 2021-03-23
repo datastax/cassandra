@@ -29,14 +29,13 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -89,7 +88,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public AbstractCompactionStrategy getStrategyFor(SSTableReader sstable)
+    public AbstractCompactionStrategy getStrategyFor(AbstractSSTableReader sstable)
     {
         Preconditions.checkArgument(managesSSTable(sstable), "Attempting to get compaction strategy from wrong holder");
         return strategies.get(router.getIndexForSSTable(sstable));
@@ -197,13 +196,13 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
         return scanners;
     }
 
-    Collection<Collection<SSTableReader>> groupForAnticompaction(Iterable<SSTableReader> sstables)
+    Collection<Collection<AbstractSSTableReader>> groupForAnticompaction(Iterable<AbstractSSTableReader> sstables)
     {
         Preconditions.checkState(!isRepaired);
         GroupedSSTableContainer group = createGroupedSSTableContainer();
         sstables.forEach(group::add);
 
-        Collection<Collection<SSTableReader>> anticompactionGroups = new ArrayList<>();
+        Collection<Collection<AbstractSSTableReader>> anticompactionGroups = new ArrayList<>();
         for (int i = 0; i < strategies.size(); i++)
         {
             if (group.isGroupEmpty(i))
@@ -258,7 +257,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public boolean containsSSTable(SSTableReader sstable)
+    public boolean containsSSTable(AbstractSSTableReader sstable)
     {
         return Iterables.any(strategies, acs -> acs.getSSTables().contains(sstable));
     }

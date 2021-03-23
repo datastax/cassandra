@@ -41,7 +41,7 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.StubIndex;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -237,7 +237,7 @@ public class RangeTombstoneTest
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1000, nowInSec)).apply();
         cfs.forceBlockingFlush();
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 1000, 1000, nowInSec);
         cfs.forceMajorCompaction();
         sstable = cfs.getLiveSSTables().iterator().next();
@@ -259,7 +259,7 @@ public class RangeTombstoneTest
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1000, nowInSec)).apply();
         cfs.forceBlockingFlush();
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 999, 1000, Integer.MAX_VALUE);
         cfs.forceMajorCompaction();
         sstable = cfs.getLiveSSTables().iterator().next();
@@ -278,7 +278,7 @@ public class RangeTombstoneTest
         new RowUpdateBuilder(cfs.metadata(), nowInSec, 1000L, key).addRangeTombstone(1, 2).build().apply();
         cfs.forceBlockingFlush();
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 1000, 1000, nowInSec);
         cfs.forceMajorCompaction();
         sstable = cfs.getLiveSSTables().iterator().next();
@@ -301,7 +301,7 @@ public class RangeTombstoneTest
         cfs.forceBlockingFlush();
 
         cfs.forceBlockingFlush();
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 999, 1000, Integer.MAX_VALUE);
         cfs.forceMajorCompaction();
         sstable = cfs.getLiveSSTables().iterator().next();
@@ -551,7 +551,7 @@ public class RangeTombstoneTest
         assertEquals(1, cfs.getLiveSSTables().size());
 
         // test the physical structure of the sstable i.e. rt & columns on disk
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (UnfilteredPartitionIterator scanner = sstable.getScanner())
         {
             try (UnfilteredRowIterator iter = scanner.next())

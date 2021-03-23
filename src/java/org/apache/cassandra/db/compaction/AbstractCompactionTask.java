@@ -27,7 +27,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.io.FSDiskFullWriteError;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
@@ -49,8 +49,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         this.isUserDefined = false;
         this.compactionType = OperationType.COMPACTION;
         // enforce contract that caller should mark sstables compacting
-        Set<SSTableReader> compacting = transaction.tracker.getCompacting();
-        for (SSTableReader sstable : transaction.originals())
+        Set<AbstractSSTableReader> compacting = transaction.tracker.getCompacting();
+        for (AbstractSSTableReader sstable : transaction.originals())
             assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
 
         validateSSTables(transaction.originals());
@@ -59,18 +59,18 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /**
      * Confirm that we're not attempting to compact repaired/unrepaired/pending repair sstables together
      */
-    private void validateSSTables(Set<SSTableReader> sstables)
+    private void validateSSTables(Set<AbstractSSTableReader> sstables)
     {
         // do not allow  to be compacted together
         if (!sstables.isEmpty())
         {
-            Iterator<SSTableReader> iter = sstables.iterator();
-            SSTableReader first = iter.next();
+            Iterator<AbstractSSTableReader> iter = sstables.iterator();
+            AbstractSSTableReader first = iter.next();
             boolean isRepaired = first.isRepaired();
             UUID pendingRepair = first.getPendingRepair();
             while (iter.hasNext())
             {
-                SSTableReader next = iter.next();
+                AbstractSSTableReader next = iter.next();
                 Preconditions.checkArgument(isRepaired == next.isRepaired(),
                                             "Cannot compact repaired and unrepaired sstables");
 
@@ -110,7 +110,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
             transaction.close();
         }
     }
-    public abstract CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
+    public abstract CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables);
 
     protected abstract int executeInternal(ActiveCompactionsTracker activeCompactions);
 

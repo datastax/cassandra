@@ -22,7 +22,7 @@ import java.io.IOException;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -41,12 +41,12 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         this.partitioner = partitioner;
     }
 
-    public static KeyIterator forSSTable(SSTableReader ssTableReader) throws IOException
+    public static KeyIterator forSSTable(AbstractSSTableReader ssTableReader) throws IOException
     {
         return new KeyIterator(ssTableReader.allKeysIterator(), ssTableReader.getPartitioner());
     }
 
-    public static KeyIterator create(SSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
+    public static KeyIterator create(AbstractSSTableReader.Factory factory, Descriptor descriptor, TableMetadata metadata)
     {
         return new KeyIterator(factory.indexIterator(descriptor, metadata), metadata.partitioner);
     }

@@ -43,7 +43,7 @@ import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
@@ -444,7 +444,7 @@ public class CacheService implements CacheServiceMBean
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
-            SSTableReader reader;
+            AbstractSSTableReader reader;
             if (cfs == null || !cfs.isKeyCacheEnabled() || (reader = findDesc(generation, cfs.getSSTables(SSTableSet.CANONICAL))) == null)
             {
                 // The sstable doesn't exist anymore, so we can't be sure of the exact version and assume its the current version. The only case where we'll be
@@ -459,9 +459,9 @@ public class CacheService implements CacheServiceMBean
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 
-        private SSTableReader findDesc(int generation, Iterable<SSTableReader> collection)
+        private AbstractSSTableReader findDesc(int generation, Iterable<AbstractSSTableReader> collection)
         {
-            for (SSTableReader sstable : collection)
+            for (AbstractSSTableReader sstable : collection)
             {
                 if (sstable.descriptor.generation == generation)
                     return sstable;

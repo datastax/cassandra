@@ -30,7 +30,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Throwables;
@@ -48,14 +48,14 @@ import static org.apache.cassandra.index.sai.disk.OnDiskKeyProducer.NO_OFFSET;
  */
 public class SSTableContext extends SharedCloseableImpl
 {
-    public final SSTableReader sstable;
+    public final AbstractSSTableReader sstable;
 
     private final IndexComponents groupComponents;
     // mapping from sstable row id to token or offset
     public final LongArray.Factory tokenReaderFactory, offsetReaderFactory;
     public final KeyFetcher keyFetcher;
 
-    private SSTableContext(SSTableReader sstable,
+    private SSTableContext(AbstractSSTableReader sstable,
                            LongArray.Factory tokenReaderFactory,
                            LongArray.Factory offsetReaderFactory,
                            KeyFetcher keyFetcher,
@@ -81,11 +81,11 @@ public class SSTableContext extends SharedCloseableImpl
     }
 
     @SuppressWarnings("resource")
-    public static SSTableContext create(SSTableReader sstable)
+    public static SSTableContext create(AbstractSSTableReader sstable)
     {
         IndexComponents groupComponents = IndexComponents.perSSTable(sstable);
 
-        Ref<SSTableReader> sstableRef = null;
+        Ref<AbstractSSTableReader> sstableRef = null;
         FileHandle token = null, offset = null;
         LongArray.Factory tokenReaderFactory, offsetReaderFactory;
         KeyFetcher keyFetcher;
@@ -140,9 +140,9 @@ public class SSTableContext extends SharedCloseableImpl
     private static class Cleanup implements RefCounted.Tidy
     {
         private final FileHandle token, offset;
-        private final Ref<SSTableReader> sstableRef;
+        private final Ref<AbstractSSTableReader> sstableRef;
 
-        private Cleanup(FileHandle token, FileHandle offset, Ref<SSTableReader> sstableRef)
+        private Cleanup(FileHandle token, FileHandle offset, Ref<AbstractSSTableReader> sstableRef)
         {
             this.token = token;
             this.offset = offset;
@@ -173,7 +173,7 @@ public class SSTableContext extends SharedCloseableImpl
         return sstable.descriptor;
     }
 
-    public SSTableReader sstable()
+    public AbstractSSTableReader sstable()
     {
         return sstable;
     }
@@ -222,9 +222,9 @@ public class SSTableContext extends SharedCloseableImpl
     @VisibleForTesting
     public static class DecoratedKeyFetcher implements KeyFetcher
     {
-        private final SSTableReader sstable;
+        private final AbstractSSTableReader sstable;
 
-        DecoratedKeyFetcher(SSTableReader sstable)
+        DecoratedKeyFetcher(AbstractSSTableReader sstable)
         {
             this.sstable = sstable;
         }

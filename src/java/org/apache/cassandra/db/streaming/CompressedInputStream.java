@@ -28,7 +28,6 @@ import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RebufferingInputStream;
@@ -88,7 +87,7 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
     }
 
     /**
-     * Invoked when crossing into the next {@link SSTableReader.PartitionPositionBounds} section
+     * Invoked when crossing into the next {@link BigSSTableReader.PartitionPositionBounds} section
      * in {@link CassandraCompressedStreamReader#read(DataInputPlus)}.
      * Will skip 1..n compressed chunks of the original sstable.
      */

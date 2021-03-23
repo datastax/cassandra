@@ -32,7 +32,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.Pair;
@@ -169,10 +169,10 @@ public class SizeTieredCompactionStrategyTest
         }
         cfs.forceBlockingFlush();
 
-        List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
-        Pair<List<SSTableReader>, Double> bucket;
+        List<AbstractSSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
+        Pair<List<AbstractSSTableReader>, Double> bucket;
 
-        List<SSTableReader> interestingBucket = mostInterestingBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32);
+        List<AbstractSSTableReader> interestingBucket = mostInterestingBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32);
         assertTrue("nothing should be returned when all buckets are below the min threshold", interestingBucket.isEmpty());
 
         sstrs.get(0).overrideReadMeter(new RestorableMeter(100.0, 100.0));

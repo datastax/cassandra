@@ -23,14 +23,14 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterator>, UnfilteredRowIterator
 {
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
     private final DecoratedKey key;
     private final DeletionTime partitionLevelDeletion;
     private final String filename;
@@ -38,8 +38,8 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     protected final SSTableSimpleIterator iterator;
     private final Row staticRow;
 
-    public SSTableIdentityIterator(SSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
-            String filename, SSTableSimpleIterator iterator) throws IOException
+    public SSTableIdentityIterator(AbstractSSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
+                                   String filename, SSTableSimpleIterator iterator) throws IOException
     {
         super();
         this.sstable = sstable;
@@ -51,7 +51,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     }
 
     @SuppressWarnings("resource")
-    public static SSTableIdentityIterator create(SSTableReader sstable, RandomAccessReader file, DecoratedKey key)
+    public static SSTableIdentityIterator create(AbstractSSTableReader sstable, RandomAccessReader file, DecoratedKey key)
     {
         try
         {
@@ -70,7 +70,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     }
 
     @SuppressWarnings("resource")
-    public static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput dfile, RowIndexEntry<?> indexEntry, DecoratedKey key, boolean tombstoneOnly)
+    public static SSTableIdentityIterator create(AbstractSSTableReader sstable, FileDataInput dfile, RowIndexEntry<?> indexEntry, DecoratedKey key, boolean tombstoneOnly)
     {
         try
         {

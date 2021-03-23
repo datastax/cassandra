@@ -35,7 +35,7 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.Schema;
 
 public class DropTableTest extends AbstractNodeLifecycleTest
@@ -58,7 +58,7 @@ public class DropTableTest extends AbstractNodeLifecycleTest
         verifyIndexComponentsIncludedInSSTable(currentTable());
 
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
+        AbstractSSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         ArrayList<String> files = new ArrayList<>();
         for (Component component : sstable.components)

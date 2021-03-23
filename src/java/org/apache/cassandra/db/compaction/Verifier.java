@@ -32,7 +32,7 @@ import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
@@ -66,7 +66,7 @@ import java.util.function.LongPredicate;
 public class Verifier implements Closeable
 {
     private final ColumnFamilyStore cfs;
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
 
     private final CompactionController controller;
 
@@ -87,12 +87,12 @@ public class Verifier implements Closeable
     private final OutputHandler outputHandler;
     private FileDigestValidator validator;
 
-    public Verifier(ColumnFamilyStore cfs, SSTableReader sstable, boolean isOffline, Options options)
+    public Verifier(ColumnFamilyStore cfs, AbstractSSTableReader sstable, boolean isOffline, Options options)
     {
         this(cfs, sstable, new OutputHandler.LogOutput(), isOffline, options);
     }
 
-    public Verifier(ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    public Verifier(ColumnFamilyStore cfs, AbstractSSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
         this.cfs = cfs;
         this.sstable = sstable;
@@ -400,7 +400,7 @@ public class Verifier implements Closeable
         }
     }
 
-    private void deserializeIndex(SSTableReader sstable) throws IOException
+    private void deserializeIndex(AbstractSSTableReader sstable) throws IOException
     {
         try (PartitionIndexIterator it = sstable.allKeysIterator()) {
             //noinspection StatementWithEmptyBody
@@ -408,7 +408,7 @@ public class Verifier implements Closeable
         }
     }
 
-    private void deserializeIndexSummary(SSTableReader sstable) throws IOException
+    private void deserializeIndexSummary(AbstractSSTableReader sstable) throws IOException
     {
         File file = new File(sstable.descriptor.filenameFor(Component.SUMMARY));
         TableMetadata metadata = cfs.metadata();
@@ -425,7 +425,7 @@ public class Verifier implements Closeable
         }
     }
 
-    private void deserializeBloomFilter(SSTableReader sstable) throws IOException
+    private void deserializeBloomFilter(AbstractSSTableReader sstable) throws IOException
     {
         try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(sstable.descriptor.filenameFor(Component.FILTER)))));
              IFilter bf = BloomFilterSerializer.deserialize(stream, sstable.descriptor.version.hasOldBfFormat()))
@@ -477,10 +477,10 @@ public class Verifier implements Closeable
     private static class VerifyInfo extends CompactionInfo.Holder
     {
         private final RandomAccessReader dataFile;
-        private final SSTableReader sstable;
+        private final AbstractSSTableReader sstable;
         private final UUID verificationCompactionId;
 
-        public VerifyInfo(RandomAccessReader dataFile, SSTableReader sstable)
+        public VerifyInfo(RandomAccessReader dataFile, AbstractSSTableReader sstable)
         {
             this.dataFile = dataFile;
             this.sstable = sstable;

@@ -35,7 +35,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -68,41 +68,41 @@ public class MockSchema
         return new Memtable(cfs.metadata());
     }
 
-    public static SSTableReader sstable(int generation, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, ColumnFamilyStore cfs)
     {
         return sstable(generation, false, cfs);
     }
 
-    public static SSTableReader sstable(int generation, long first, long last, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, long first, long last, ColumnFamilyStore cfs)
     {
         return sstable(generation, 0, false, first, last, cfs);
     }
 
-    public static SSTableReader sstable(int generation, boolean keepRef, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, boolean keepRef, ColumnFamilyStore cfs)
     {
         return sstable(generation, 0, keepRef, cfs);
     }
 
-    public static SSTableReader sstable(int generation, int size, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, int size, ColumnFamilyStore cfs)
     {
         return sstable(generation, size, false, cfs);
     }
-    public static SSTableReader sstable(int generation, int size, boolean keepRef, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, int size, boolean keepRef, ColumnFamilyStore cfs)
     {
         return sstable(generation, size, keepRef, generation, generation, cfs);
     }
 
-    public static SSTableReader sstableWithLevel(int generation, long firstToken, long lastToken, int level, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstableWithLevel(int generation, long firstToken, long lastToken, int level, ColumnFamilyStore cfs)
     {
         return sstable(generation, 0, false, firstToken, lastToken, level, cfs);
     }
 
-    public static SSTableReader sstable(int generation, int size, boolean keepRef, long firstToken, long lastToken, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, int size, boolean keepRef, long firstToken, long lastToken, ColumnFamilyStore cfs)
     {
         return sstable(generation, size, keepRef, firstToken, lastToken, 0, cfs);
     }
 
-    public static SSTableReader sstable(int generation, int size, boolean keepRef, long firstToken, long lastToken, int level, ColumnFamilyStore cfs)
+    public static AbstractSSTableReader sstable(int generation, int size, boolean keepRef, long firstToken, long lastToken, int level, ColumnFamilyStore cfs)
     {
         Descriptor descriptor = new Descriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
                                                cfs.keyspace.getName(),
@@ -144,9 +144,9 @@ public class MockSchema
                                                      .sstableLevel(level)
                                                      .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, UNREPAIRED_SSTABLE, null, false, header)
                                                      .get(MetadataType.STATS);
-            SSTableReader reader = SSTableReader.internalOpen(descriptor, components, cfs.metadata,
-                                                              fileHandle.sharedCopy(), fileHandle.sharedCopy(), indexSummary.sharedCopy(),
-                                                              new AlwaysPresentFilter(), 1L, metadata, SSTableReader.OpenReason.NORMAL, header);
+            AbstractSSTableReader reader = AbstractSSTableReader.internalOpen(descriptor, components, cfs.metadata,
+                                                                              fileHandle.sharedCopy(), fileHandle.sharedCopy(), indexSummary.sharedCopy(),
+                                                                              new AlwaysPresentFilter(), 1L, metadata, BigSSTableReader.OpenReason.NORMAL, header);
             reader.first = readerBounds(firstToken);
             reader.last = readerBounds(lastToken);
             if (!keepRef)

@@ -36,7 +36,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -96,7 +96,7 @@ public class SegmentsSystemView extends AbstractVirtualTable
         forEachIndex(columnContext -> {
             for (SSTableIndex sstableIndex : columnContext.getView())
             {
-                SSTableReader sstable = sstableIndex.getSSTable();
+                AbstractSSTableReader sstable = sstableIndex.getSSTable();
                 List<SegmentMetadata> segments = sstableIndex.segments();
                 Descriptor descriptor = sstable.descriptor;
                 Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();

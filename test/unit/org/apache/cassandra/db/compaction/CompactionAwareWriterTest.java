@@ -32,7 +32,7 @@ import org.apache.cassandra.db.compaction.writers.MajorLeveledCompactionWriter;
 import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
 import org.apache.cassandra.db.compaction.writers.SplittingSizeTieredCompactionWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -114,17 +114,17 @@ public class CompactionAwareWriterTest extends CQLTester
         CompactionAwareWriter writer = new SplittingSizeTieredCompactionWriter(cfs, cfs.getDirectories(), txn, txn.originals(), 0);
         int rows = compact(cfs, txn, writer);
         long expectedSize = beforeSize / 2;
-        List<SSTableReader> sortedSSTables = new ArrayList<>(cfs.getLiveSSTables());
+        List<AbstractSSTableReader> sortedSSTables = new ArrayList<>(cfs.getLiveSSTables());
 
-        Collections.sort(sortedSSTables, new Comparator<SSTableReader>()
+        Collections.sort(sortedSSTables, new Comparator<AbstractSSTableReader>()
                                 {
                                     @Override
-                                    public int compare(SSTableReader o1, SSTableReader o2)
+                                    public int compare(AbstractSSTableReader o1, AbstractSSTableReader o2)
                                     {
                                         return Longs.compare(o2.onDiskLength(), o1.onDiskLength());
                                     }
                                 });
-        for (SSTableReader sstable : sortedSSTables)
+        for (AbstractSSTableReader sstable : sortedSSTables)
         {
             // we dont create smaller files than this, everything will be in the last file
             if (expectedSize > SplittingSizeTieredCompactionWriter.DEFAULT_SMALLEST_SSTABLE_BYTES)
@@ -152,7 +152,7 @@ public class CompactionAwareWriterTest extends CQLTester
         assertEquals(targetSSTableCount, cfs.getLiveSSTables().size());
         int [] levelCounts = new int[5];
         assertEquals(rowCount, rows);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             levelCounts[sstable.getSSTableLevel()]++;
         }

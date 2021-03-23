@@ -17,15 +17,15 @@
  */
 package org.apache.cassandra.notifications;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 
 public class SSTableMetadataChanged implements INotification
 {
-    public final SSTableReader sstable;
+    public final AbstractSSTableReader sstable;
     public final StatsMetadata oldMetadata;
 
-    public SSTableMetadataChanged(SSTableReader levelChanged, StatsMetadata oldMetadata)
+    public SSTableMetadataChanged(AbstractSSTableReader levelChanged, StatsMetadata oldMetadata)
     {
         this.sstable = levelChanged;
         this.oldMetadata = oldMetadata;

@@ -46,8 +46,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
@@ -70,7 +69,7 @@ public class EntireSSTableStreamingCorrectFilesCountTest
     public static final String KEYSPACE = "EntireSSTableStreamingCorrectFilesCountTest";
     public static final String CF_STANDARD = "Standard1";
 
-    private static SSTableReader sstable;
+    private static AbstractSSTableReader sstable;
     private static ColumnFamilyStore store;
     private static RangesAtEndpoint rangesAtEndpoint;
 

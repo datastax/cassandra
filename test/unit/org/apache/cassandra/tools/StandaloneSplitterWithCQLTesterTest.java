@@ -34,7 +34,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.assertj.core.api.Assertions;
 
@@ -141,7 +141,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.forceBlockingFlush();
 
-        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         sstableFileName = sstables.iterator().next().getFilename();
         assertTrue("Generated sstable must be at least 1MB", (new File(sstableFileName)).length() > 1024*1024);
         sstablesDir = new File(sstableFileName).getParentFile();
@@ -183,6 +183,6 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
                 }
         });
 
-        SSTableReader.resetTidying();
+        AbstractSSTableReader.resetTidying();
     }
 }

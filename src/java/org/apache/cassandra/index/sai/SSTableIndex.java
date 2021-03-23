@@ -45,7 +45,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
@@ -64,7 +64,7 @@ public class SSTableIndex
     private final Version version;
     private final SSTableContext sstableContext;
     private final ColumnContext columnContext;
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
     private final IndexComponents components;
 
     private final ImmutableList<Segment> segments;
@@ -292,7 +292,7 @@ public class SSTableIndex
         }
     }
 
-    public SSTableReader getSSTable()
+    public AbstractSSTableReader getSSTable()
     {
         return sstable;
     }

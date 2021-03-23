@@ -38,7 +38,7 @@ import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
@@ -76,7 +76,7 @@ public class ViewTest
                             continue;
 
                         AbstractBounds<PartitionPosition> bounds = AbstractBounds.bounds(min, minInc, max, maxInc);
-                        List<SSTableReader> r = ImmutableList.copyOf(initialView.liveSSTablesInBounds(bounds.left, bounds.right));
+                        List<AbstractSSTableReader> r = ImmutableList.copyOf(initialView.liveSSTablesInBounds(bounds.left, bounds.right));
                         Assert.assertEquals(String.format("%d(%s) %d(%s)", i, minInc, j, maxInc), j - i + (minInc ? 0 : -1) + (maxInc ? 1 : 0), r.size());
                     }
                 }
@@ -90,7 +90,7 @@ public class ViewTest
         ColumnFamilyStore cfs = MockSchema.newCFS();
         View initialView = fakeView(0, 5, cfs, true);
         View cur = initialView;
-        List<SSTableReader> readers = ImmutableList.copyOf(initialView.sstables);
+        List<AbstractSSTableReader> readers = ImmutableList.copyOf(initialView.sstables);
         Assert.assertTrue(View.permitCompacting(readers).apply(cur));
         // check we permit compacting duplicates in the predicate, so we don't spin infinitely if there is a screw up
         Assert.assertTrue(View.permitCompacting(ImmutableList.copyOf(concat(readers, readers))).apply(cur));
@@ -114,7 +114,7 @@ public class ViewTest
         testFailure(View.updateCompacting(copyOf(readers.subList(0, 1)), readers.subList(1, 2)), cur);
 
         // make equivalents of readers.subList(0, 3) that are different instances
-        SSTableReader r0 = MockSchema.sstable(0, cfs), r1 = MockSchema.sstable(1, cfs), r2 = MockSchema.sstable(2, cfs);
+        AbstractSSTableReader r0 = MockSchema.sstable(0, cfs), r1 = MockSchema.sstable(1, cfs), r2 = MockSchema.sstable(2, cfs);
         // attempt to mark compacting a version not in the live set
         testFailure(View.updateCompacting(emptySet(), of(r2)), cur);
         // update one compacting, one non-compacting, of the liveset to another instance of the same readers;
@@ -134,12 +134,12 @@ public class ViewTest
         testFailure(View.updateCompacting(copyOf(readers.subList(0, 2)), emptySet()), cur);
         Assert.assertTrue(copyOf(concat(readers.subList(0, 1), readers.subList(2, 5))).containsAll(copyOf(cur.getUncompacting(readers))));
         Assert.assertEquals(4, copyOf(cur.getUncompacting(readers)).size());
-        Set<SSTableReader> nonCompacting = ImmutableSet.copyOf(cur.select(SSTableSet.NONCOMPACTING));
+        Set<AbstractSSTableReader> nonCompacting = ImmutableSet.copyOf(cur.select(SSTableSet.NONCOMPACTING));
         Assert.assertTrue(nonCompacting.containsAll(readers.subList(2, 5)));
         Assert.assertTrue(nonCompacting.containsAll(readers.subList(0, 1)));
         Assert.assertEquals(4, nonCompacting.size());
 
-        for (SSTableReader sstable : initialView.sstables)
+        for (AbstractSSTableReader sstable : initialView.sstables)
             sstable.selfRef().release();
     }
 
@@ -202,7 +202,7 @@ public class ViewTest
         Assert.assertEquals(memtable1, cur.flushingMemtables.get(0));
         Assert.assertEquals(memtable3, cur.getCurrentMemtable());
 
-        SSTableReader sstable = MockSchema.sstable(1, cfs);
+        AbstractSSTableReader sstable = MockSchema.sstable(1, cfs);
         cur = View.replaceFlushed(memtable1, singleton(sstable)).apply(cur);
         Assert.assertEquals(0, cur.flushingMemtables.size());
         Assert.assertEquals(1, cur.liveMemtables.size());
@@ -219,12 +219,12 @@ public class ViewTest
     static View fakeView(int memtableCount, int sstableCount, ColumnFamilyStore cfs, boolean keepRef)
     {
         List<Memtable> memtables = new ArrayList<>();
-        List<SSTableReader> sstables = new ArrayList<>();
+        List<AbstractSSTableReader> sstables = new ArrayList<>();
         for (int i = 0 ; i < memtableCount ; i++)
             memtables.add(MockSchema.memtable(cfs));
         for (int i = 0 ; i < sstableCount ; i++)
             sstables.add(MockSchema.sstable(i, keepRef, cfs));
         return new View(ImmutableList.copyOf(memtables), Collections.<Memtable>emptyList(), Helpers.identityMap(sstables),
-                        Collections.<SSTableReader, SSTableReader>emptyMap(), SSTableIntervalTree.build(sstables));
+                        Collections.<AbstractSSTableReader, AbstractSSTableReader>emptyMap(), SSTableIntervalTree.build(sstables));
     }
 }

@@ -22,7 +22,7 @@ import java.util.Set;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class TimeWindowCompactionTask extends CompactionTask
 {
@@ -35,7 +35,7 @@ public class TimeWindowCompactionTask extends CompactionTask
     }
 
     @Override
-    public CompactionController getCompactionController(Set<SSTableReader> toCompact)
+    public CompactionController getCompactionController(Set<AbstractSSTableReader> toCompact)
     {
         return new TimeWindowCompactionController(cfs, toCompact, gcBefore, ignoreOverlaps);
     }

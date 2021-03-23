@@ -24,7 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class QueryWithIndexedSSTableTest extends CQLTester
@@ -57,9 +57,9 @@ public class QueryWithIndexedSSTableTest extends CQLTester
         // tweak ROWS and VALUE_LENGTH, or skip the test on those settings.
         DecoratedKey dk = Util.dk(ByteBufferUtil.bytes(0));
         boolean hasIndexed = false;
-        for (SSTableReader sstable : getCurrentColumnFamilyStore().getLiveSSTables())
+        for (AbstractSSTableReader sstable : getCurrentColumnFamilyStore().getLiveSSTables())
         {
-            BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
+            BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, AbstractSSTableReader.Operator.EQ);
             hasIndexed |= indexEntry != null && indexEntry.isIndexed();
         }
         assert hasIndexed;

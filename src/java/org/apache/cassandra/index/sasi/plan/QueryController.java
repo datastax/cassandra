@@ -44,7 +44,7 @@ import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.index.sasi.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.index.sasi.utils.RangeUnionIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
@@ -251,7 +251,7 @@ public class QueryController
     private Set<SSTableIndex> applyScope(Set<SSTableIndex> indexes)
     {
         return Sets.filter(indexes, index -> {
-            SSTableReader sstable = index.getSSTable();
+            AbstractSSTableReader sstable = index.getSSTable();
             return range.startKey().compareTo(sstable.last) <= 0 && (range.stopKey().isMinimum() || sstable.first.compareTo(range.stopKey()) <= 0);
         });
     }

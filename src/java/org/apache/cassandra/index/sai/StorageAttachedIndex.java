@@ -102,7 +102,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -154,10 +154,10 @@ public class StorageAttachedIndex implements Index
     {
         public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs,
                                                        Set<Index> indexes,
-                                                       Collection<SSTableReader> sstablesToRebuild,
+                                                       Collection<AbstractSSTableReader> sstablesToRebuild,
                                                        boolean isFullRebuild)
         {
-            NavigableMap<SSTableReader, Set<StorageAttachedIndex>> sstables = new TreeMap<>(Comparator.comparingInt(a -> a.descriptor.generation));
+            NavigableMap<AbstractSSTableReader, Set<StorageAttachedIndex>> sstables = new TreeMap<>(Comparator.comparingInt(a -> a.descriptor.generation));
             StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
 
             indexes.stream()
@@ -169,7 +169,7 @@ public class StorageAttachedIndex implements Index
 
                                 // If this is not a full manual index rebuild we can skip SSTables that already have an
                                 // attached index. Otherwise, we override any pre-existent index.
-                                Collection<SSTableReader> ss = sstablesToRebuild;
+                                Collection<AbstractSSTableReader> ss = sstablesToRebuild;
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
@@ -357,7 +357,7 @@ public class StorageAttachedIndex implements Index
         initBuildStarted = true;
 
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
-        List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate, true);
+        List<AbstractSSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate, true);
 
         if (nonIndexed.isEmpty())
         {
@@ -365,12 +365,12 @@ public class StorageAttachedIndex implements Index
         }
 
         // split sorted sstables into groups with similar size and build each group in separate compaction thread
-        List<List<SSTableReader>> groups = groupBySize(nonIndexed, DatabaseDescriptor.getConcurrentCompactors());
+        List<List<AbstractSSTableReader>> groups = groupBySize(nonIndexed, DatabaseDescriptor.getConcurrentCompactors());
         List<ListenableFuture<?>> futures = new ArrayList<>();
 
-        for (List<SSTableReader> group : groups)
+        for (List<AbstractSSTableReader> group : groups)
         {
-            SortedMap<SSTableReader, Set<StorageAttachedIndex>> current = new TreeMap<>(Comparator.comparingLong(sstable -> sstable.descriptor.generation));
+            SortedMap<AbstractSSTableReader, Set<StorageAttachedIndex>> current = new TreeMap<>(Comparator.comparingLong(sstable -> sstable.descriptor.generation));
             group.forEach(sstable -> current.put(sstable, Collections.singleton(this)));
 
             futures.add(CompactionManager.instance.submitIndexBuild(new StorageAttachedIndexBuilder(indexGroup, current, false, true)));
@@ -386,25 +386,25 @@ public class StorageAttachedIndex implements Index
      * @param toRebuild a list of SSTables to split (Note that this list will be sorted in place!)
      * @param parallelism an upper bound on the number of groups
      *
-     * @return a {@link List} of SSTable groups, each represented as a {@link List} of {@link SSTableReader}
+     * @return a {@link List} of SSTable groups, each represented as a {@link List} of {@link AbstractSSTableReader}
      */
     @VisibleForTesting
-    public static List<List<SSTableReader>> groupBySize(List<SSTableReader> toRebuild, int parallelism)
+    public static List<List<AbstractSSTableReader>> groupBySize(List<AbstractSSTableReader> toRebuild, int parallelism)
     {
-        List<List<SSTableReader>> groups = new ArrayList<>();
+        List<List<AbstractSSTableReader>> groups = new ArrayList<>();
 
-        toRebuild.sort(Comparator.comparingLong(SSTableReader::onDiskLength).reversed());
-        Iterator<SSTableReader> sortedSSTables = toRebuild.iterator();
-        double dataPerCompactor = toRebuild.stream().mapToLong(SSTableReader::onDiskLength).sum() * 1.0 / parallelism;
+        toRebuild.sort(Comparator.comparingLong(AbstractSSTableReader::onDiskLength).reversed());
+        Iterator<AbstractSSTableReader> sortedSSTables = toRebuild.iterator();
+        double dataPerCompactor = toRebuild.stream().mapToLong(AbstractSSTableReader::onDiskLength).sum() * 1.0 / parallelism;
 
         while (sortedSSTables.hasNext())
         {
             long sum = 0;
-            List<SSTableReader> current = new ArrayList<>();
+            List<AbstractSSTableReader> current = new ArrayList<>();
 
             while (sortedSSTables.hasNext() && sum < dataPerCompactor)
             {
-                SSTableReader sstable = sortedSSTables.next();
+                AbstractSSTableReader sstable = sortedSSTables.next();
                 sum += sstable.onDiskLength();
                 current.add(sstable);
             }
@@ -470,7 +470,7 @@ public class StorageAttachedIndex implements Index
             }
 
             StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
-            Collection<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, group, true, true);
+            Collection<AbstractSSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, group, true, true);
 
             if (nonIndexed.isEmpty())
             {
@@ -556,19 +556,19 @@ public class StorageAttachedIndex implements Index
      *
      * @return a list SSTables without attached indexes
      */
-    private synchronized List<SSTableReader> findNonIndexedSSTables(ColumnFamilyStore baseCfs, StorageAttachedIndexGroup group, boolean validate, boolean rename)
+    private synchronized List<AbstractSSTableReader> findNonIndexedSSTables(ColumnFamilyStore baseCfs, StorageAttachedIndexGroup group, boolean validate, boolean rename)
     {
-        Set<SSTableReader> sstables = baseCfs.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = baseCfs.getLiveSSTables();
 
         // Initialize the SSTable indexes w/ valid existing components...
         assert group != null : "Missing index group on " + baseCfs.name;
         group.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate, rename);
 
         // ...then identify and rebuild the SSTable indexes that are missing.
-        List<SSTableReader> nonIndexed = new ArrayList<>();
+        List<AbstractSSTableReader> nonIndexed = new ArrayList<>();
         View view = context.getView();
 
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             // An SSTable is considered not indexed if:
             //   1. The current view does not contain the SSTable
@@ -721,7 +721,7 @@ public class StorageAttachedIndex implements Index
         logger.warn(context.logMessage("Storage-attached index is no longer queryable. Please restart this node to repair it."));
     }
 
-    void deleteIndexFiles(SSTableReader sstable)
+    void deleteIndexFiles(AbstractSSTableReader sstable)
     {
         IndexComponents.create(context.getIndexName(), sstable).deleteColumnIndex();
     }

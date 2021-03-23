@@ -42,7 +42,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
@@ -78,9 +78,9 @@ public class RealTransactionsTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(REWRITE_FINISHED_CF);
 
-        SSTableReader oldSSTable = getSSTable(cfs, 1);
+        AbstractSSTableReader oldSSTable = getSSTable(cfs, 1);
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
-        SSTableReader newSSTable = replaceSSTable(cfs, txn, false);
+        AbstractSSTableReader newSSTable = replaceSSTable(cfs, txn, false);
         LogTransaction.waitForDeletions();
 
         // both sstables are in the same folder
@@ -94,7 +94,7 @@ public class RealTransactionsTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(REWRITE_ABORTED_CF);
 
-        SSTableReader oldSSTable = getSSTable(cfs, 1);
+        AbstractSSTableReader oldSSTable = getSSTable(cfs, 1);
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
 
         replaceSSTable(cfs, txn, true);
@@ -109,17 +109,17 @@ public class RealTransactionsTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(FLUSH_CF);
 
-        SSTableReader ssTableReader = getSSTable(cfs, 100);
+        AbstractSSTableReader ssTableReader = getSSTable(cfs, 100);
 
         String dataFolder = cfs.getLiveSSTables().iterator().next().descriptor.directory.getPath();
         assertFiles(dataFolder, new HashSet<>(ssTableReader.getAllFilePaths()));
     }
 
-    private SSTableReader getSSTable(ColumnFamilyStore cfs, int numPartitions) throws IOException
+    private AbstractSSTableReader getSSTable(ColumnFamilyStore cfs, int numPartitions) throws IOException
     {
         createSSTable(cfs, numPartitions);
 
-        Set<SSTableReader> sstables = new HashSet<>(cfs.getLiveSSTables());
+        Set<AbstractSSTableReader> sstables = new HashSet<>(cfs.getLiveSSTables());
         assertEquals(1, sstables.size());
         return sstables.iterator().next();
     }
@@ -144,9 +144,9 @@ public class RealTransactionsTest extends SchemaLoader
         cfs.loadNewSSTables();
     }
 
-    private SSTableReader replaceSSTable(ColumnFamilyStore cfs, LifecycleTransaction txn, boolean fail)
+    private AbstractSSTableReader replaceSSTable(ColumnFamilyStore cfs, LifecycleTransaction txn, boolean fail)
     {
-        List<SSTableReader> newsstables = null;
+        List<AbstractSSTableReader> newsstables = null;
         int nowInSec = FBUtilities.nowInSeconds();
         try (CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(FBUtilities.nowInSeconds())))
         {

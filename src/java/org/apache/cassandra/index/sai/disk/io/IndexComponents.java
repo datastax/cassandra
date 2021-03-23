@@ -46,7 +46,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -271,7 +271,7 @@ public class IndexComponents
     /**
      * Used to access per-sstable and per-index components
      */
-    public static IndexComponents create(String indexName, SSTableReader ssTableReader)
+    public static IndexComponents create(String indexName, AbstractSSTableReader ssTableReader)
     {
         return create(indexName, ssTableReader.descriptor, CryptoUtils.getCompressionParams(ssTableReader));
     }
@@ -297,7 +297,7 @@ public class IndexComponents
         return new IndexComponents(descriptor, defaultWriterOption, params);
     }
 
-    public static IndexComponents perSSTable(SSTableReader ssTableReader)
+    public static IndexComponents perSSTable(AbstractSSTableReader ssTableReader)
     {
         return perSSTable(ssTableReader.descriptor, CryptoUtils.getCompressionParams(ssTableReader));
     }

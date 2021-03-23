@@ -31,7 +31,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileUtils;
@@ -44,7 +44,7 @@ import org.apache.cassandra.utils.memory.HeapAllocator;
 public class Scrubber implements Closeable
 {
     private final ColumnFamilyStore cfs;
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
     private final LifecycleTransaction transaction;
     private final File destination;
     private final boolean skipCorrupted;
@@ -102,7 +102,7 @@ public class Scrubber implements Closeable
         this.skipCorrupted = skipCorrupted;
         this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
 
-        List<SSTableReader> toScrub = Collections.singletonList(sstable);
+        List<AbstractSSTableReader> toScrub = Collections.singletonList(sstable);
 
         this.destination = cfs.getDirectories().getLocationForDisk(cfs.getDiskBoundaries().getCorrectDiskForSSTable(sstable));
         this.isCommutative = cfs.metadata().isCounter();
@@ -117,7 +117,7 @@ public class Scrubber implements Closeable
         this.checkData = checkData && !this.isIndex; //LocalByPartitionerType does not support validation
         this.expectedBloomFilterSize = Math.max(
             cfs.metadata().params.minIndexInterval,
-            hasIndexFile ? SSTableReader.getApproximateKeyCount(toScrub) : 0);
+            hasIndexFile ? AbstractSSTableReader.getApproximateKeyCount(toScrub) : 0);
 
         // loop through each row, deserializing to check for damage.
         // we'll also loop through the index at the same time, using the position from the index to recover if the
@@ -157,11 +157,11 @@ public class Scrubber implements Closeable
 
     public void scrub()
     {
-        List<SSTableReader> finished = new ArrayList<>();
+        List<AbstractSSTableReader> finished = new ArrayList<>();
         boolean completed = false;
         outputHandler.output(String.format("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length())));
         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge);
-             Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
+             Refs<AbstractSSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {
             assert !indexAvailable() || indexIterator.dataPosition() == 0 : indexIterator.dataPosition();
 
@@ -272,7 +272,7 @@ public class Scrubber implements Closeable
             {
                 // out of order rows, but no bad rows found - we can keep our repairedAt time
                 long repairedAt = badRows > 0 ? ActiveRepairService.UNREPAIRED_SSTABLE : metadata.repairedAt;
-                SSTableReader newInOrderSstable;
+                AbstractSSTableReader newInOrderSstable;
                 try (SSTableWriter inOrderWriter = CompactionManager.createWriter(cfs, destination, expectedBloomFilterSize, repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction))
                 {
                     for (Partition partition : outOfOrder)
@@ -441,10 +441,10 @@ public class Scrubber implements Closeable
     private static class ScrubInfo extends CompactionInfo.Holder
     {
         private final RandomAccessReader dataFile;
-        private final SSTableReader sstable;
+        private final AbstractSSTableReader sstable;
         private final UUID scrubCompactionId;
 
-        public ScrubInfo(RandomAccessReader dataFile, SSTableReader sstable)
+        public ScrubInfo(RandomAccessReader dataFile, AbstractSSTableReader sstable)
         {
             this.dataFile = dataFile;
             this.sstable = sstable;

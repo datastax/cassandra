@@ -50,7 +50,7 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -185,7 +185,7 @@ public class StreamingTransferTest
         int[] offs;
         if (transferSSTables)
         {
-            SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+            AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
             cfs.clearUnsafe();
             transferSSTables(sstable);
             offs = new int[]{1, 3};
@@ -226,7 +226,7 @@ public class StreamingTransferTest
         return keys;
     }
 
-    private void transferSSTables(SSTableReader sstable) throws Exception
+    private void transferSSTables(AbstractSSTableReader sstable) throws Exception
     {
         IPartitioner p = sstable.getPartitioner();
         List<Range<Token>> ranges = new ArrayList<>();
@@ -256,7 +256,7 @@ public class StreamingTransferTest
         }
     }
 
-    private void transfer(SSTableReader sstable, List<Range<Token>> ranges) throws Exception
+    private void transfer(AbstractSSTableReader sstable, List<Range<Token>> ranges) throws Exception
     {
         StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferStreams(LOCAL, makeOutgoingStreams(ranges, Refs.tryRef(Arrays.asList(sstable))));
         streamPlan.execute().get();
@@ -273,10 +273,10 @@ public class StreamingTransferTest
         }
     }
 
-    private Collection<OutgoingStream> makeOutgoingStreams(StreamOperation operation, List<Range<Token>> ranges, Refs<SSTableReader> sstables)
+    private Collection<OutgoingStream> makeOutgoingStreams(StreamOperation operation, List<Range<Token>> ranges, Refs<AbstractSSTableReader> sstables)
     {
         ArrayList<OutgoingStream> streams = new ArrayList<>();
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             streams.add(new CassandraOutgoingFile(operation,
                                                   sstables.get(sstable),
@@ -287,7 +287,7 @@ public class StreamingTransferTest
         return streams;
     }
 
-    private Collection<OutgoingStream> makeOutgoingStreams(List<Range<Token>> ranges, Refs<SSTableReader> sstables)
+    private Collection<OutgoingStream> makeOutgoingStreams(List<Range<Token>> ranges, Refs<AbstractSSTableReader> sstables)
     {
         return makeOutgoingStreams(StreamOperation.OTHER, ranges, sstables);
     }
@@ -366,7 +366,7 @@ public class StreamingTransferTest
 
         cfs.forceBlockingFlush();
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         cfs.clearUnsafe();
         transferSSTables(sstable);
 

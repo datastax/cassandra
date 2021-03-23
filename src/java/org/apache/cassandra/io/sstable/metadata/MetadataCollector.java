@@ -33,7 +33,7 @@ import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.MurmurHash;
@@ -138,12 +138,12 @@ public class MetadataCollector implements PartitionStatisticsCollector
             comparators[i] = comparator.subtype(i);
     }
 
-    public MetadataCollector(Iterable<SSTableReader> sstables, ClusteringComparator comparator, int level)
+    public MetadataCollector(Iterable<AbstractSSTableReader> sstables, ClusteringComparator comparator, int level)
     {
         this(comparator);
 
         IntervalSet.Builder<CommitLogPosition> intervals = new IntervalSet.Builder<>();
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             intervals.addAll(sstable.getSSTableMetadata().commitLogIntervals);
         }

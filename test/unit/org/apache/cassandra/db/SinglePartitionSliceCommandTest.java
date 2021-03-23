@@ -42,7 +42,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -573,7 +573,7 @@ public class SinglePartitionSliceCommandTest
     public void testLowerBoundApplicableSingleColumnAsc()
     {
         String query = "INSERT INTO %s.%s (k, i) VALUES ('k1', %s)";
-        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE, query);
+        AbstractSSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE, query);
         assertEquals(Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(0)),
                                 Util.clustering(metadata.comparator, BigInteger.valueOf(9))),
                      sstable.getSSTableMetadata().coveredClustering);
@@ -608,7 +608,7 @@ public class SinglePartitionSliceCommandTest
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE_REVERSED);
         TableMetadata metadata = cfs.metadata();
         String query = "INSERT INTO %s.%s (k, i) VALUES ('k1', %s)";
-        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
+        AbstractSSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
         assertEquals(Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(9)),
                                 Util.clustering(metadata.comparator, BigInteger.valueOf(0))),
                      sstable.getSSTableMetadata().coveredClustering);
@@ -636,7 +636,7 @@ public class SinglePartitionSliceCommandTest
     public void testLowerBoundApplicableMultipleColumnsAsc()
     {
         String query = "INSERT INTO %s.%s (k, c1, c2) VALUES ('k1', 0, %s)";
-        SSTableReader sstable = createSSTable(CFM_SLICES, KEYSPACE, TABLE_SCLICES, query);
+        AbstractSSTableReader sstable = createSSTable(CFM_SLICES, KEYSPACE, TABLE_SCLICES, query);
         assertEquals(Slice.make(Util.clustering(CFM_SLICES.comparator, 0, 0),
                                 Util.clustering(CFM_SLICES.comparator, 0, 9)),
                      sstable.getSSTableMetadata().coveredClustering);
@@ -672,7 +672,7 @@ public class SinglePartitionSliceCommandTest
         TableMetadata metadata = cfs.metadata();
 
         String query = "INSERT INTO %s.%s (k, c1, c2) VALUES ('k1', 0, %s)";
-        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
+        AbstractSSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
         assertEquals(Slice.make(Util.clustering(metadata.comparator, 0, 9),
                                 Util.clustering(metadata.comparator, 0, 0)),
                      sstable.getSSTableMetadata().coveredClustering);
@@ -696,7 +696,7 @@ public class SinglePartitionSliceCommandTest
         assertFalse(lowerBoundApplicable(metadata, key, slice4, sstable, true));
     }
 
-    private SSTableReader createSSTable(TableMetadata metadata, String keyspace, String table, String query)
+    private AbstractSSTableReader createSSTable(TableMetadata metadata, String keyspace, String table, String query)
     {
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         for (int i = 0; i < 10; i++)
@@ -708,7 +708,7 @@ public class SinglePartitionSliceCommandTest
         return view.sstables.get(0);
     }
 
-    private boolean lowerBoundApplicable(TableMetadata metadata, DecoratedKey key, Slice slice, SSTableReader sstable, boolean isReversed)
+    private boolean lowerBoundApplicable(TableMetadata metadata, DecoratedKey key, Slice slice, AbstractSSTableReader sstable, boolean isReversed)
     {
         Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
         slicesBuilder.add(slice);

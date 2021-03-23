@@ -39,7 +39,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.repair.RepairJobDesc;
@@ -64,9 +64,9 @@ public class CompactionManagerGetSSTablesForValidationTest
 
     private static Token MT;
 
-    private SSTableReader repaired;
-    private SSTableReader unrepaired;
-    private SSTableReader pendingRepair;
+    private AbstractSSTableReader repaired;
+    private AbstractSSTableReader unrepaired;
+    private AbstractSSTableReader pendingRepair;
 
     private UUID sessionID;
     private RepairJobDesc desc;
@@ -116,7 +116,7 @@ public class CompactionManagerGetSSTablesForValidationTest
 
     private void modifySSTables() throws Exception
     {
-        Iterator<SSTableReader> iter = cfs.getLiveSSTables().iterator();
+        Iterator<AbstractSSTableReader> iter = cfs.getLiveSSTables().iterator();
 
         repaired = iter.next();
         repaired.descriptor.getMetadataSerializer().mutateRepairMetadata(repaired.descriptor, System.currentTimeMillis(), null, false);
@@ -140,7 +140,7 @@ public class CompactionManagerGetSSTablesForValidationTest
 
         // get sstables for repair
         Validator validator = new Validator(desc, coordinator, FBUtilities.nowInSeconds(), true, PreviewKind.NONE);
-        Set<SSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
+        Set<AbstractSSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
         Assert.assertNotNull(sstables);
         Assert.assertEquals(1, sstables.size());
         Assert.assertTrue(sstables.contains(pendingRepair));
@@ -155,7 +155,7 @@ public class CompactionManagerGetSSTablesForValidationTest
 
         // get sstables for repair
         Validator validator = new Validator(desc, coordinator, FBUtilities.nowInSeconds(), false, PreviewKind.NONE);
-        Set<SSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
+        Set<AbstractSSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
         Assert.assertNotNull(sstables);
         Assert.assertEquals(2, sstables.size());
         Assert.assertTrue(sstables.contains(pendingRepair));
@@ -171,7 +171,7 @@ public class CompactionManagerGetSSTablesForValidationTest
 
         // get sstables for repair
         Validator validator = new Validator(desc, coordinator, FBUtilities.nowInSeconds(), false, PreviewKind.NONE);
-        Set<SSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
+        Set<AbstractSSTableReader> sstables = Sets.newHashSet(getSSTablesToValidate(cfs, validator.desc.ranges, validator.desc.parentSessionId, validator.isIncremental));
         Assert.assertNotNull(sstables);
         Assert.assertEquals(3, sstables.size());
         Assert.assertTrue(sstables.contains(pendingRepair));

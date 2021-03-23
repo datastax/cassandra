@@ -28,7 +28,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
@@ -44,12 +44,12 @@ public class View implements Iterable<SSTableIndex>
 
     public View(ColumnIndex index, Set<SSTableIndex> indexes)
     {
-        this(index, Collections.<SSTableIndex>emptyList(), Collections.<SSTableReader>emptyList(), indexes);
+        this(index, Collections.<SSTableIndex>emptyList(), Collections.<AbstractSSTableReader>emptyList(), indexes);
     }
 
     public View(ColumnIndex index,
                 Collection<SSTableIndex> currentView,
-                Collection<SSTableReader> oldSSTables,
+                Collection<AbstractSSTableReader> oldSSTables,
                 Set<SSTableIndex> newIndexes)
     {
         Map<Descriptor, SSTableIndex> newView = new HashMap<>();
@@ -63,11 +63,11 @@ public class View implements Iterable<SSTableIndex>
         // Ensure oldSSTables and newIndexes are disjoint (in index redistribution case the intersection can be non-empty).
         // also favor newIndexes over currentView in case an SSTable has been re-opened (also occurs during redistribution)
         // See CASSANDRA-14055
-        Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
+        Collection<AbstractSSTableReader> toRemove = new HashSet<>(oldSSTables);
         toRemove.removeAll(newIndexes.stream().map(SSTableIndex::getSSTable).collect(Collectors.toSet()));
         for (SSTableIndex sstableIndex : Iterables.concat(newIndexes, currentView))
         {
-            SSTableReader sstable = sstableIndex.getSSTable();
+            AbstractSSTableReader sstable = sstableIndex.getSSTable();
             if (toRemove.contains(sstable) || sstable.isMarkedCompacted() || newView.containsKey(sstable.descriptor))
             {
                 sstableIndex.release();

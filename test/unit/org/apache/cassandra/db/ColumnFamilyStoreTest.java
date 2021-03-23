@@ -50,7 +50,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -130,7 +130,7 @@ public class ColumnFamilyStoreTest
 
         Util.writeColumnFamily(rms);
 
-        List<SSTableReader> ssTables = keyspace.getAllSSTables(SSTableSet.LIVE);
+        List<AbstractSSTableReader> ssTables = keyspace.getAllSSTables(SSTableSet.LIVE);
         assertEquals(1, ssTables.size());
         Util.disableBloomFilter(cfs);
         Util.assertEmpty(Util.cmd(cfs, "key2").build());
@@ -488,9 +488,9 @@ public class ColumnFamilyStoreTest
         cfs.forceBlockingFlush();
 
         // Nuke the metadata and reload that sstable
-        Collection<SSTableReader> ssTables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> ssTables = cfs.getLiveSSTables();
         assertEquals(1, ssTables.size());
-        SSTableReader ssTable = ssTables.iterator().next();
+        AbstractSSTableReader ssTable = ssTables.iterator().next();
 
         String dataFileName = ssTable.descriptor.filenameFor(Component.DATA);
         String tmpDataFileName = ssTable.descriptor.tmpFilenameFor(Component.DATA);

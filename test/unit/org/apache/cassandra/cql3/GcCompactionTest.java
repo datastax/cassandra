@@ -34,7 +34,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -119,33 +119,33 @@ public class GcCompactionTest extends CQLTester
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
                 execute("INSERT INTO %s (key, column, data, extra) VALUES (?, ?, ?, ?)", i, j, i+j, "" + i + ":" + j);
 
-        Set<SSTableReader> readers = new HashSet<>();
+        Set<AbstractSSTableReader> readers = new HashSet<>();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader table0 = getNewTable(readers);
+        AbstractSSTableReader table0 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table0));
         int rowCount = countRows(table0);
 
         deleteWithSomeInserts(3, 5, 10);
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table1 = getNewTable(readers);
+        AbstractSSTableReader table1 = getNewTable(readers);
         assertTrue(countRows(table1) > 0);
         assertTrue(countTombstoneMarkers(table1) > 0);
 
         deleteWithSomeInserts(5, 6, 0);
         flush();
         assertEquals(3, cfs.getLiveSSTables().size());
-        SSTableReader table2 = getNewTable(readers);
+        AbstractSSTableReader table2 = getNewTable(readers);
         assertEquals(0, countRows(table2));
         assertTrue(countTombstoneMarkers(table2) > 0);
 
         CompactionManager.instance.forceUserDefinedCompaction(table0.getFilename());
 
         assertEquals(3, cfs.getLiveSSTables().size());
-        SSTableReader table3 = getNewTable(readers);
+        AbstractSSTableReader table3 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table3));
         assertTrue(rowCount > countRows(table3));
     }
@@ -171,19 +171,19 @@ public class GcCompactionTest extends CQLTester
                 execute("INSERT INTO %s (key, column, data, extra) VALUES (?, ?, ?, ?)", i, j, i+j, "" + i + ":" + j);
 
 
-        Set<SSTableReader> readers = new HashSet<>();
+        Set<AbstractSSTableReader> readers = new HashSet<>();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader table0 = getNewTable(readers);
+        AbstractSSTableReader table0 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table0));
         int rowCount0 = countRows(table0);
 
         deleteWithSomeInserts(3, 5, 10);
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table1 = getNewTable(readers);
+        AbstractSSTableReader table1 = getNewTable(readers);
         final int rowCount1 = countRows(table1);
         assertTrue(rowCount1 > 0);
         assertTrue(countTombstoneMarkers(table1) > 0);
@@ -191,7 +191,7 @@ public class GcCompactionTest extends CQLTester
         deleteWithSomeInserts(2, 4, 0);
         flush();
         assertEquals(3, cfs.getLiveSSTables().size());
-        SSTableReader table2 = getNewTable(readers);
+        AbstractSSTableReader table2 = getNewTable(readers);
         assertEquals(0, countRows(table2));
         assertTrue(countTombstoneMarkers(table2) > 0);
 
@@ -202,7 +202,7 @@ public class GcCompactionTest extends CQLTester
                 CompactionManager.instance.performGarbageCollection(getCurrentColumnFamilyStore(), CompactionParams.TombstoneOption.ROW, 1);
         assertEquals(CompactionManager.AllSSTableOpStatus.SUCCESSFUL, status);
 
-        SSTableReader[] tables = cfs.getLiveSSTables().toArray(new SSTableReader[0]);
+        AbstractSSTableReader[] tables = cfs.getLiveSSTables().toArray(new AbstractSSTableReader[0]);
         Arrays.sort(tables, (o1, o2) -> Integer.compare(o1.descriptor.generation, o2.descriptor.generation));  // by order of compaction
 
         // Make sure deleted data was removed
@@ -210,7 +210,7 @@ public class GcCompactionTest extends CQLTester
         assertTrue(rowCount1 > countRows(tables[1]));
 
         // Make sure all tombstones got purged
-        for (SSTableReader t : tables)
+        for (AbstractSSTableReader t : tables)
         {
             assertEquals("Table " + t + " has tombstones", 0, countTombstoneMarkers(t));
         }
@@ -235,26 +235,26 @@ public class GcCompactionTest extends CQLTester
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
                 execute("INSERT INTO %s (key, column, data, extra) VALUES (?, ?, ?, ?)", i, j, i+j, "" + i + ":" + j);
 
-        Set<SSTableReader> readers = new HashSet<>();
+        Set<AbstractSSTableReader> readers = new HashSet<>();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader table0 = getNewTable(readers);
+        AbstractSSTableReader table0 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table0));
         int cellCount = countCells(table0);
 
         deleteWithSomeInserts(3, 0, 2);
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table1 = getNewTable(readers);
+        AbstractSSTableReader table1 = getNewTable(readers);
         assertTrue(countCells(table1) > 0);
         assertEquals(0, countTombstoneMarkers(table0));
 
         CompactionManager.instance.forceUserDefinedCompaction(table0.getFilename());
 
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table3 = getNewTable(readers);
+        AbstractSSTableReader table3 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table3));
         assertTrue(cellCount > countCells(table3));
     }
@@ -275,12 +275,12 @@ public class GcCompactionTest extends CQLTester
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
                 execute("INSERT INTO %s (key, column, data, extra) VALUES (?, ?, ?, ?)", i, j, i+j, "" + i + ":" + j);
 
-        Set<SSTableReader> readers = new HashSet<>();
+        Set<AbstractSSTableReader> readers = new HashSet<>();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader table0 = getNewTable(readers);
+        AbstractSSTableReader table0 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table0));
         int cellCount = countStaticCells(table0);
         assertEquals(KEY_COUNT, cellCount);
@@ -289,14 +289,14 @@ public class GcCompactionTest extends CQLTester
         execute("INSERT INTO %s (key, data) VALUES (1, 0)");  // overwrite static cell
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table1 = getNewTable(readers);
+        AbstractSSTableReader table1 = getNewTable(readers);
         assertTrue(countStaticCells(table1) > 0);
         assertEquals(0, countTombstoneMarkers(table0));
 
         CompactionManager.instance.forceUserDefinedCompaction(table0.getFilename());
 
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table3 = getNewTable(readers);
+        AbstractSSTableReader table3 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table3));
         assertEquals(cellCount - 2, countStaticCells(table3));
     }
@@ -316,26 +316,26 @@ public class GcCompactionTest extends CQLTester
             for (int j = 0; j < CLUSTERING_COUNT; ++j)
                 execute("UPDATE %s SET data[?] = ? WHERE key = ?", j, i+j, i);
 
-        Set<SSTableReader> readers = new HashSet<>();
+        Set<AbstractSSTableReader> readers = new HashSet<>();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
-        SSTableReader table0 = getNewTable(readers);
+        AbstractSSTableReader table0 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table0));
         int cellCount = countComplexCells(table0);
 
         deleteWithSomeInsertsComplexColumn(3, 5, 8);
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table1 = getNewTable(readers);
+        AbstractSSTableReader table1 = getNewTable(readers);
         assertTrue(countComplexCells(table1) > 0);
         assertEquals(0, countTombstoneMarkers(table0));
 
         CompactionManager.instance.forceUserDefinedCompaction(table0.getFilename());
 
         assertEquals(2, cfs.getLiveSSTables().size());
-        SSTableReader table3 = getNewTable(readers);
+        AbstractSSTableReader table3 = getNewTable(readers);
         assertEquals(0, countTombstoneMarkers(table3));
         assertEquals(cellCount - 23, countComplexCells(table3));
     }
@@ -345,13 +345,13 @@ public class GcCompactionTest extends CQLTester
     {
         createTable("create table %s (k int, c1 int, primary key (k, c1)) with compaction = {'class': 'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones':'row'}");
         execute("delete from %s where k = 1");
-        Set<SSTableReader> readers = new HashSet<>(getCurrentColumnFamilyStore().getLiveSSTables());
+        Set<AbstractSSTableReader> readers = new HashSet<>(getCurrentColumnFamilyStore().getLiveSSTables());
         getCurrentColumnFamilyStore().forceBlockingFlush();
-        SSTableReader oldSSTable = getNewTable(readers);
+        AbstractSSTableReader oldSSTable = getNewTable(readers);
         Thread.sleep(2000);
         execute("delete from %s where k = 1");
         getCurrentColumnFamilyStore().forceBlockingFlush();
-        SSTableReader newTable = getNewTable(readers);
+        AbstractSSTableReader newTable = getNewTable(readers);
 
         CompactionManager.instance.forceUserDefinedCompaction(oldSSTable.getFilename());
 
@@ -359,9 +359,9 @@ public class GcCompactionTest extends CQLTester
         assertEquals(Collections.singleton(newTable), getCurrentColumnFamilyStore().getLiveSSTables());
     }
 
-    private SSTableReader getNewTable(Set<SSTableReader> readers)
+    private AbstractSSTableReader getNewTable(Set<AbstractSSTableReader> readers)
     {
-        Set<SSTableReader> newOnes = new HashSet<>(getCurrentColumnFamilyStore().getLiveSSTables());
+        Set<AbstractSSTableReader> newOnes = new HashSet<>(getCurrentColumnFamilyStore().getLiveSSTables());
         newOnes.removeAll(readers);
         assertEquals(1, newOnes.size());
         readers.addAll(newOnes);
@@ -402,30 +402,30 @@ public class GcCompactionTest extends CQLTester
         }
     }
 
-    int countTombstoneMarkers(SSTableReader reader)
+    int countTombstoneMarkers(AbstractSSTableReader reader)
     {
         int nowInSec = FBUtilities.nowInSeconds();
         return count(reader, x -> x.isRangeTombstoneMarker() || x.isRow() && ((Row) x).hasDeletion(nowInSec) ? 1 : 0, x -> x.partitionLevelDeletion().isLive() ? 0 : 1);
     }
 
-    int countRows(SSTableReader reader)
+    int countRows(AbstractSSTableReader reader)
     {
         boolean enforceStrictLiveness = reader.metadata().enforceStrictLiveness();
         int nowInSec = FBUtilities.nowInSeconds();
         return count(reader, x -> x.isRow() && ((Row) x).hasLiveData(nowInSec, enforceStrictLiveness) ? 1 : 0, x -> 0);
     }
 
-    int countCells(SSTableReader reader)
+    int countCells(AbstractSSTableReader reader)
     {
         return count(reader, x -> x.isRow() ? Iterables.size((Row) x) : 0, x -> 0);
     }
 
-    int countStaticCells(SSTableReader reader)
+    int countStaticCells(AbstractSSTableReader reader)
     {
         return count(reader, x -> 0, x -> Iterables.size(x.staticRow()));
     }
 
-    int countComplexCells(SSTableReader reader)
+    int countComplexCells(AbstractSSTableReader reader)
     {
         return count(reader, x -> x.isRow() ? ((Row) x).columnData().stream().mapToInt(this::countComplex).sum() : 0, x -> 0);
     }
@@ -438,7 +438,7 @@ public class GcCompactionTest extends CQLTester
         return ccd.cellsCount();
     }
 
-    int count(SSTableReader reader, ToIntFunction<Unfiltered> predicate, ToIntFunction<UnfilteredRowIterator> partitionPredicate)
+    int count(AbstractSSTableReader reader, ToIntFunction<Unfiltered> predicate, ToIntFunction<UnfilteredRowIterator> partitionPredicate)
     {
         int instances = 0;
         try (ISSTableScanner partitions = reader.getScanner())

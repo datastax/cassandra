@@ -59,7 +59,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IndexSummaryManager;
 import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
 import org.apache.cassandra.io.sstable.SSTableUtils;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
@@ -98,7 +98,7 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
 
     private static final Callable<?> NO_OP = () -> null;
 
-    private static SSTableReader sstable;
+    private static AbstractSSTableReader sstable;
     private static Descriptor descriptor;
     private static ColumnFamilyStore store;
     private static RangesAtEndpoint rangesAtEndpoint;
@@ -234,7 +234,7 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
         {
             CassandraStreamHeader header = CassandraStreamHeader.serializer.deserialize(in, MessagingService.current_version);
             CassandraEntireSSTableStreamReader reader = new CassandraEntireSSTableStreamReader(messageHeader, header, session);
-            SSTableReader streamedSSTable = Iterables.getOnlyElement(reader.read(in).finished());
+            AbstractSSTableReader streamedSSTable = Iterables.getOnlyElement(reader.read(in).finished());
 
             SSTableUtils.assertContentEquals(sstable, streamedSSTable);
         }

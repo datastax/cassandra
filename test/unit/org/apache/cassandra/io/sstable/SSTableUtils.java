@@ -30,7 +30,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 import org.apache.cassandra.Util;
 
@@ -86,7 +86,7 @@ public class SSTableUtils
         return datafile;
     }
 
-    public static void assertContentEquals(SSTableReader lhs, SSTableReader rhs) throws Exception
+    public static void assertContentEquals(AbstractSSTableReader lhs, AbstractSSTableReader rhs) throws Exception
     {
         try (ISSTableScanner slhs = lhs.getScanner();
              ISSTableScanner srhs = rhs.getScanner())
@@ -168,7 +168,7 @@ public class SSTableUtils
             return this;
         }
 
-        public Collection<SSTableReader> write(Set<String> keys) throws IOException
+        public Collection<AbstractSSTableReader> write(Set<String> keys) throws IOException
         {
             Map<String, PartitionUpdate> map = new HashMap<>();
             for (String key : keys)
@@ -180,7 +180,7 @@ public class SSTableUtils
             return write(map);
         }
 
-        public Collection<SSTableReader> write(SortedMap<DecoratedKey, PartitionUpdate> sorted) throws IOException
+        public Collection<AbstractSSTableReader> write(SortedMap<DecoratedKey, PartitionUpdate> sorted) throws IOException
         {
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
             for (PartitionUpdate update : sorted.values())
@@ -204,7 +204,7 @@ public class SSTableUtils
             });
         }
 
-        public Collection<SSTableReader> write(Map<String, PartitionUpdate> entries) throws IOException
+        public Collection<AbstractSSTableReader> write(Map<String, PartitionUpdate> entries) throws IOException
         {
             SortedMap<DecoratedKey, PartitionUpdate> sorted = new TreeMap<>();
             for (Map.Entry<String, PartitionUpdate> entry : entries.entrySet())
@@ -213,7 +213,7 @@ public class SSTableUtils
             return write(sorted);
         }
 
-        public Collection<SSTableReader> write(int expectedSize, Appender appender) throws IOException
+        public Collection<AbstractSSTableReader> write(int expectedSize, Appender appender) throws IOException
         {
             File datafile = (dest == null) ? tempSSTableFile(ksname, cfname, generation) : new File(dest.filenameFor(Component.DATA));
             TableMetadata metadata = Schema.instance.getTableMetadata(ksname, cfname);
@@ -221,11 +221,11 @@ public class SSTableUtils
             SerializationHeader header = appender.header();
             SSTableTxnWriter writer = SSTableTxnWriter.create(cfs, Descriptor.fromFilename(datafile.getAbsolutePath()), expectedSize, UNREPAIRED_SSTABLE, NO_PENDING_REPAIR, false, 0, header);
             while (appender.append(writer)) { /* pass */ }
-            Collection<SSTableReader> readers = writer.finish(true);
+            Collection<AbstractSSTableReader> readers = writer.finish(true);
 
             // mark all components for removal
             if (cleanup)
-                for (SSTableReader reader: readers)
+                for (AbstractSSTableReader reader: readers)
                     for (Component component : reader.components)
                         new File(reader.descriptor.filenameFor(component)).deleteOnExit();
             return readers;

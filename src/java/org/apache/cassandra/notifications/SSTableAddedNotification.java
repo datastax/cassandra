@@ -22,7 +22,7 @@ import java.util.Optional;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.Memtable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * Notification sent after SSTables are added to their {@link org.apache.cassandra.db.ColumnFamilyStore}.
@@ -30,7 +30,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 public class SSTableAddedNotification implements INotification
 {
     /** The added SSTables */
-    public final Iterable<SSTableReader> added;
+    public final Iterable<AbstractSSTableReader> added;
 
     /** The memtable from which the tables come when they have been added due to a flush, {@code null} otherwise. */
     @Nullable
@@ -43,7 +43,7 @@ public class SSTableAddedNotification implements INotification
      * @param memtable the memtable from which the tables come when they have been added due to a memtable flush,
      *                 or {@code null} if they don't come from a flush
      */
-    public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable)
+    public SSTableAddedNotification(Iterable<AbstractSSTableReader> added, @Nullable Memtable memtable)
     {
         this.added = added;
         this.memtable = memtable;

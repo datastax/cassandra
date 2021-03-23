@@ -35,7 +35,7 @@ import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -295,7 +295,7 @@ public class CompactionsPurgeTest
         // flush, remember the current sstable and then resurrect one column
         // for first key. Then submit minor compaction on remembered sstables.
         cfs.forceBlockingFlush();
-        Collection<SSTableReader> sstablesIncomplete = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstablesIncomplete = cfs.getLiveSSTables();
 
         RowUpdateBuilder builder = new RowUpdateBuilder(cfs.metadata(), 2, "key1");
         builder.clustering(String.valueOf(5))
@@ -348,7 +348,7 @@ public class CompactionsPurgeTest
         RowUpdateBuilder.deleteRow(cfs.metadata(), 10, key3, "c1").applyUnsafe();
 
         cfs.forceBlockingFlush();
-        Collection<SSTableReader> sstablesIncomplete = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstablesIncomplete = cfs.getLiveSSTables();
 
         // delete c2 so we have new delete in a diffrent SSTable
         RowUpdateBuilder.deleteRow(cfs.metadata(), 9, key3, "c2").applyUnsafe();

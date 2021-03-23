@@ -19,12 +19,11 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.*;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
 public class SSTableSplitter 
@@ -55,7 +54,7 @@ public class SSTableSplitter
         }
 
         @Override
-        protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
+        protected CompactionController getCompactionController(Set<AbstractSSTableReader> toCompact)
         {
             return new SplitController(cfs);
         }
@@ -64,7 +63,7 @@ public class SSTableSplitter
         public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs,
                                                               Directories directories,
                                                               LifecycleTransaction txn,
-                                                              Set<SSTableReader> nonExpiredSSTables)
+                                                              Set<AbstractSSTableReader> nonExpiredSSTables)
         {
             return new MaxSSTableSizeWriter(cfs, directories, txn, nonExpiredSSTables, sstableSizeInMB * 1024L * 1024L, 0, false);
         }

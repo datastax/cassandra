@@ -55,7 +55,7 @@ import org.apache.cassandra.distributed.impl.Instance;
 import org.apache.cassandra.distributed.shared.RepairResult;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.FinalizePropose;
 import org.apache.cassandra.repair.messages.RepairMessage;
@@ -388,7 +388,7 @@ public class PreviewRepairTest extends TestBaseImpl
                 ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(table);
                 while (true)
                 {
-                    if (cfs.getLiveSSTables().stream().allMatch(SSTableReader::isRepaired))
+                    if (cfs.getLiveSSTables().stream().allMatch(AbstractSSTableReader::isRepaired))
                         return;
                     Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
                 }

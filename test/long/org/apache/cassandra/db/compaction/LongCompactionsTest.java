@@ -33,7 +33,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.SSTableUtils;
 import org.apache.cassandra.schema.CompactionParams;
@@ -100,7 +100,7 @@ public class LongCompactionsTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard1");
 
-        ArrayList<SSTableReader> sstables = new ArrayList<>();
+        ArrayList<AbstractSSTableReader> sstables = new ArrayList<>();
         for (int k = 0; k < sstableCount; k++)
         {
             SortedMap<String, PartitionUpdate> rows = new TreeMap<>();
@@ -114,7 +114,7 @@ public class LongCompactionsTest
                     builder.newRow(String.valueOf(i)).add("val", String.valueOf(i));
                 rows.put(key, builder.build());
             }
-            Collection<SSTableReader> readers = SSTableUtils.prepare().write(rows);
+            Collection<AbstractSSTableReader> readers = SSTableUtils.prepare().write(rows);
             sstables.addAll(readers);
             store.addSSTables(readers);
         }

@@ -29,7 +29,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -84,16 +84,16 @@ public class CassandraStreamManager implements TableStreamManager
     @Override
     public Collection<OutgoingStream> createOutgoingStreams(StreamSession session, RangesAtEndpoint replicas, UUID pendingRepair, PreviewKind previewKind)
     {
-        Refs<SSTableReader> refs = new Refs<>();
+        Refs<AbstractSSTableReader> refs = new Refs<>();
         try
         {
             final List<Range<PartitionPosition>> keyRanges = new ArrayList<>(replicas.size());
             for (Replica replica : replicas)
                 keyRanges.add(Range.makeRowRange(replica.range()));
             refs.addAll(cfs.selectAndReference(view -> {
-                Set<SSTableReader> sstables = Sets.newHashSet();
+                Set<AbstractSSTableReader> sstables = Sets.newHashSet();
                 SSTableIntervalTree intervalTree = SSTableIntervalTree.build(view.select(SSTableSet.CANONICAL));
-                Predicate<SSTableReader> predicate;
+                Predicate<AbstractSSTableReader> predicate;
                 if (previewKind.isPreview())
                 {
                     predicate = previewKind.predicate();
@@ -115,7 +115,7 @@ public class CassandraStreamManager implements TableStreamManager
                     // sort after all keys having the token. That "fake" key cannot however be equal to any real key, so that even
                     // including keyRange.left will still exclude any key having the token of the original token range, and so we're
                     // still actually selecting what we wanted.
-                    for (SSTableReader sstable : Iterables.filter(View.sstablesInBounds(keyRange.left, keyRange.right, intervalTree), predicate))
+                    for (AbstractSSTableReader sstable : Iterables.filter(View.sstablesInBounds(keyRange.left, keyRange.right, intervalTree), predicate))
                     {
                         sstables.add(sstable);
                     }
@@ -131,12 +131,12 @@ public class CassandraStreamManager implements TableStreamManager
             List<Range<Token>> normalizedAllRanges = Range.normalize(replicas.ranges());
             //Create outgoing file streams for ranges possibly skipping repaired ranges in sstables
             List<OutgoingStream> streams = new ArrayList<>(refs.size());
-            for (SSTableReader sstable : refs)
+            for (AbstractSSTableReader sstable : refs)
             {
                 List<Range<Token>> ranges = sstable.isRepaired() ? normalizedFullRanges : normalizedAllRanges;
-                List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
+                List<BigSSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
 
-                Ref<SSTableReader> ref = refs.get(sstable);
+                Ref<AbstractSSTableReader> ref = refs.get(sstable);
                 if (sections.isEmpty())
                 {
                     ref.release();

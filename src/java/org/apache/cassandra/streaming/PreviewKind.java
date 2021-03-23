@@ -23,7 +23,7 @@ import java.util.UUID;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.repair.PreviewRepairConflictWithIncrementalRepairException;
 import org.apache.cassandra.repair.consistent.ConsistentSession;
@@ -36,13 +36,14 @@ public enum PreviewKind
         throw new RuntimeException("Can't get preview predicate for preview kind NONE");
     }),
     ALL(1, Predicates.alwaysTrue()),
+    // TODO STAR-247: pull up to AbstractSSTableReader
     UNREPAIRED(2, sstable -> !sstable.isRepaired()),
     REPAIRED(3, new PreviewRepairedSSTablePredicate());
 
     private final int serializationVal;
-    private final Predicate<SSTableReader> predicate;
+    private final Predicate<AbstractSSTableReader> predicate;
 
-    PreviewKind(int serializationVal, Predicate<SSTableReader> predicate)
+    PreviewKind(int serializationVal, Predicate<AbstractSSTableReader> predicate)
     {
         assert ordinal() == serializationVal;
         this.serializationVal = serializationVal;
@@ -74,16 +75,17 @@ public enum PreviewKind
         return '[' + logPrefix() + " #" + sessionId.toString() + ']';
     }
 
-    public Predicate<SSTableReader> predicate()
+    public Predicate<AbstractSSTableReader> predicate()
     {
         return predicate;
     }
 
-    private static class PreviewRepairedSSTablePredicate implements Predicate<SSTableReader>
+    private static class PreviewRepairedSSTablePredicate implements Predicate<AbstractSSTableReader>
     {
-        public boolean apply(SSTableReader sstable)
+        public boolean apply(AbstractSSTableReader sstable)
         {
             // grab the metadata before checking pendingRepair since this can be nulled out at any time
+            // TODO STAR-247: pull up to AbstractSSTableReader
             StatsMetadata sstableMetadata = sstable.getSSTableMetadata();
             if (sstableMetadata.pendingRepair != null)
             {

@@ -21,7 +21,6 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.Set;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
@@ -38,7 +37,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -95,7 +94,7 @@ public class CompactionControllerTest extends SchemaLoader
             assertTrue(controller.getPurgeEvaluator(key).test(Long.MAX_VALUE)); //no memtables and no sstables
         }
 
-        Set<SSTableReader> compacting = Sets.newHashSet(cfs.getLiveSSTables()); // first sstable is compacting
+        Set<AbstractSSTableReader> compacting = Sets.newHashSet(cfs.getLiveSSTables()); // first sstable is compacting
 
         // create another sstable
         applyMutation(cfs.metadata(), key, timestamp2);
@@ -155,18 +154,18 @@ public class CompactionControllerTest extends SchemaLoader
         cfs.forceBlockingFlush();
 
         // first sstable with tombstone is compacting
-        Set<SSTableReader> compacting = Sets.newHashSet(cfs.getLiveSSTables());
+        Set<AbstractSSTableReader> compacting = Sets.newHashSet(cfs.getLiveSSTables());
 
         // create another sstable with more recent timestamp
         applyMutation(cfs.metadata(), key, timestamp1);
         cfs.forceBlockingFlush();
 
         // second sstable is overlapping
-        Set<SSTableReader> overlapping = Sets.difference(Sets.newHashSet(cfs.getLiveSSTables()), compacting);
+        Set<AbstractSSTableReader> overlapping = Sets.difference(Sets.newHashSet(cfs.getLiveSSTables()), compacting);
 
         // the first sstable should be expired because the overlapping sstable is newer and the gc period is later
         int gcBefore = (int) (System.currentTimeMillis() / 1000) + 5;
-        Set<SSTableReader> expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore);
+        Set<AbstractSSTableReader> expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore);
         assertNotNull(expired);
         assertEquals(1, expired.size());
         assertEquals(compacting.iterator().next(), expired.iterator().next());

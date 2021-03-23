@@ -47,7 +47,7 @@ import org.apache.cassandra.index.sasi.plan.Expression.Op;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.index.sasi.utils.RangeUnionIterator;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -89,7 +89,7 @@ public class ColumnIndex
      *
      * @return A collection of sstables which don't have this specific index attached to them.
      */
-    public Iterable<SSTableReader> init(Set<SSTableReader> sstables)
+    public Iterable<AbstractSSTableReader> init(Set<AbstractSSTableReader> sstables)
     {
         return tracker.update(Collections.emptySet(), sstables);
     }
@@ -142,7 +142,7 @@ public class ColumnIndex
         return builder.build();
     }
 
-    public void update(Collection<SSTableReader> oldSSTables, Collection<SSTableReader> newSSTables)
+    public void update(Collection<AbstractSSTableReader> oldSSTables, Collection<AbstractSSTableReader> newSSTables)
     {
         tracker.update(oldSSTables, newSSTables);
     }
@@ -189,12 +189,12 @@ public class ColumnIndex
         return tracker.getView();
     }
 
-    public boolean hasSSTable(SSTableReader sstable)
+    public boolean hasSSTable(AbstractSSTableReader sstable)
     {
         return tracker.hasSSTable(sstable);
     }
 
-    public void dropData(Collection<SSTableReader> sstablesToRebuild)
+    public void dropData(Collection<AbstractSSTableReader> sstablesToRebuild)
     {
         tracker.dropData(sstablesToRebuild);
     }

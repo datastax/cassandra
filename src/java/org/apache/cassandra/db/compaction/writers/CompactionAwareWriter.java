@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction.writers;
 
-import java.io.File;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -37,7 +36,7 @@ import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -53,7 +52,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
     protected final ColumnFamilyStore cfs;
     protected final Directories directories;
-    protected final Set<SSTableReader> nonExpiredSSTables;
+    protected final Set<AbstractSSTableReader> nonExpiredSSTables;
     protected final long estimatedTotalKeys;
     protected final long maxAge;
     protected final long minRepairedAt;
@@ -69,7 +68,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     public CompactionAwareWriter(ColumnFamilyStore cfs,
                                  Directories directories,
                                  LifecycleTransaction txn,
-                                 Set<SSTableReader> nonExpiredSSTables,
+                                 Set<AbstractSSTableReader> nonExpiredSSTables,
                                  boolean keepOriginals)
     {
         this.cfs = cfs;
@@ -77,7 +76,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         this.nonExpiredSSTables = nonExpiredSSTables;
         this.txn = txn;
 
-        estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
+        estimatedTotalKeys = AbstractSSTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
         sstableWriter = SSTableRewriter.construct(cfs, txn, keepOriginals, maxAge);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);
@@ -112,7 +111,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
      * @return all the written sstables sstables
      */
     @Override
-    public Collection<SSTableReader> finish()
+    public Collection<AbstractSSTableReader> finish()
     {
         super.finish();
         return sstableWriter.finished();
@@ -196,10 +195,10 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
      * @param sstables the sstables to compact
      * @return
      */
-    public Directories.DataDirectory getWriteDirectory(Iterable<SSTableReader> sstables, long estimatedWriteSize)
+    public Directories.DataDirectory getWriteDirectory(Iterable<AbstractSSTableReader> sstables, long estimatedWriteSize)
     {
         Descriptor descriptor = null;
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             if (descriptor == null)
                 descriptor = sstable.descriptor;

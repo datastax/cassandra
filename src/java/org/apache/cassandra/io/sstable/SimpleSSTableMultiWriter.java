@@ -26,7 +26,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.TableId;
@@ -49,17 +49,17 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         return indexEntry != null;
     }
 
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
+    public Collection<AbstractSSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
     {
         return Collections.singleton(writer.finish(repairedAt, maxDataAge, openResult));
     }
 
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<AbstractSSTableReader> finish(boolean openResult)
     {
         return Collections.singleton(writer.finish(openResult));
     }
 
-    public Collection<SSTableReader> finished()
+    public Collection<AbstractSSTableReader> finished()
     {
         return Collections.singleton(writer.finished());
     }

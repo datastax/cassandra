@@ -62,7 +62,7 @@ import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.Throwables;
@@ -1278,20 +1278,20 @@ public class NativeIndexDDLTest extends SAITester
     @Test
     public void testInitialBuildParallelism()
     {
-        Function<Long, SSTableReader> createMockSSTable = onDiskLength -> {
-            SSTableReader reader = Mockito.mock(SSTableReader.class);
+        Function<Long, AbstractSSTableReader> createMockSSTable = onDiskLength -> {
+            AbstractSSTableReader reader = Mockito.mock(AbstractSSTableReader.class);
             when(reader.onDiskLength()).thenReturn(onDiskLength);
             return reader;
         };
 
-        Function<List<SSTableReader>, List<Long>> toSize = sstables -> sstables.stream().map(SSTableReader::onDiskLength).collect(Collectors.toList());
+        Function<List<AbstractSSTableReader>, List<Long>> toSize = sstables -> sstables.stream().map(AbstractSSTableReader::onDiskLength).collect(Collectors.toList());
 
         // total size = 55
-        List<SSTableReader> sstables = LongStream.range(1, 11).boxed().map(createMockSSTable).collect(Collectors.toList());
+        List<AbstractSSTableReader> sstables = LongStream.range(1, 11).boxed().map(createMockSSTable).collect(Collectors.toList());
 
         // avg = 55 == total size
-        List<List<SSTableReader>> groups = StorageAttachedIndex.groupBySize(sstables, 1);
-        Iterator<List<SSTableReader>> iterator = groups.iterator();
+        List<List<AbstractSSTableReader>> groups = StorageAttachedIndex.groupBySize(sstables, 1);
+        Iterator<List<AbstractSSTableReader>> iterator = groups.iterator();
         assertEquals(1, groups.size());
         assertEquals(Arrays.asList(10L, 9L, 8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L), toSize.apply(iterator.next())); // size = 55
 

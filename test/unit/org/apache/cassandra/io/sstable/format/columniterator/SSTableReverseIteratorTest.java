@@ -35,7 +35,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 
 public class SSTableReverseIteratorTest
@@ -82,9 +82,9 @@ public class SSTableReverseIteratorTest
         QueryProcessor.executeInternal(String.format("UPDATE %s.%s SET v1=? WHERE k=? AND c=?", KEYSPACE, table), bytes(0x20000), key, 3);
 
         tbl.forceBlockingFlush();
-        SSTableReader sstable = Iterables.getOnlyElement(tbl.getLiveSSTables());
+        AbstractSSTableReader sstable = Iterables.getOnlyElement(tbl.getLiveSSTables());
         DecoratedKey dk = tbl.getPartitioner().decorateKey(Int32Type.instance.decompose(key));
-        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
+        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, AbstractSSTableReader.Operator.EQ);
         Assert.assertTrue(indexEntry.isIndexed());
         Assert.assertTrue(indexEntry.columnsIndexCount() > 2);
 

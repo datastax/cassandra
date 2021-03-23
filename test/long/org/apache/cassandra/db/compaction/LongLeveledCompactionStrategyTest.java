@@ -27,9 +27,8 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
@@ -40,7 +39,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertFalse;
@@ -117,18 +115,18 @@ public class LongLeveledCompactionStrategyTest
         int levels = manifest.getLevelCount();
         for (int level = 0; level < levels; level++)
         {
-            Set<SSTableReader> sstables = manifest.getLevel(level);
+            Set<AbstractSSTableReader> sstables = manifest.getLevel(level);
             // score check
-            assert (double) SSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
+            assert (double) AbstractSSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
             // overlap check for levels greater than 0
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
             {
                 // level check
                 assert level == sstable.getSSTableLevel();
 
                 if (level > 0)
                 {// overlap check for levels greater than 0
-                    Set<SSTableReader> overlaps = LeveledManifest.overlapping(sstable.first.getToken(), sstable.last.getToken(), sstables);
+                    Set<AbstractSSTableReader> overlaps = LeveledManifest.overlapping(sstable.first.getToken(), sstable.last.getToken(), sstables);
                     assert overlaps.size() == 1 && overlaps.contains(sstable);
                 }
             }
@@ -170,8 +168,8 @@ public class LongLeveledCompactionStrategyTest
         {
             public Void call() throws Exception
             {
-                Iterable<SSTableReader> allSSTables = store.getSSTables(SSTableSet.LIVE);
-                for (SSTableReader sstable : allSSTables)
+                Iterable<AbstractSSTableReader> allSSTables = store.getSSTables(SSTableSet.LIVE);
+                for (AbstractSSTableReader sstable : allSSTables)
                 {
                     if (sstable.getSSTableLevel() == 0)
                     {

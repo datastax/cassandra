@@ -35,7 +35,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -75,7 +75,7 @@ public class CompactionTaskTest
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (3, 3);");
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (4, 4);");
         cfs.forceBlockingFlush();
-        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
 
         Assert.assertEquals(2, sstables.size());
 
@@ -96,7 +96,7 @@ public class CompactionTaskTest
         Assert.assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
     }
 
-    private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
+    private static void mutateRepaired(AbstractSSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, repairedAt, pendingRepair, isTransient);
         sstable.reloadSSTableMetadata();
@@ -119,20 +119,20 @@ public class CompactionTaskTest
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (4, 4);");
         cfs.forceBlockingFlush();
 
-        List<SSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
+        List<AbstractSSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
         Assert.assertEquals(4, sstables.size());
 
-        SSTableReader unrepaired = sstables.get(0);
-        SSTableReader repaired = sstables.get(1);
-        SSTableReader pending1 = sstables.get(2);
-        SSTableReader pending2 = sstables.get(3);
+        AbstractSSTableReader unrepaired = sstables.get(0);
+        AbstractSSTableReader repaired = sstables.get(1);
+        AbstractSSTableReader pending1 = sstables.get(2);
+        AbstractSSTableReader pending2 = sstables.get(3);
 
         mutateRepaired(repaired, FBUtilities.nowInSeconds(), ActiveRepairService.NO_PENDING_REPAIR, false);
         mutateRepaired(pending1, ActiveRepairService.UNREPAIRED_SSTABLE, UUIDGen.getTimeUUID(), false);
         mutateRepaired(pending2, ActiveRepairService.UNREPAIRED_SSTABLE, UUIDGen.getTimeUUID(), false);
 
         LifecycleTransaction txn = null;
-        List<SSTableReader> toCompact = new ArrayList<>(sstables);
+        List<AbstractSSTableReader> toCompact = new ArrayList<>(sstables);
         for (int i=0; i<sstables.size(); i++)
         {
             try

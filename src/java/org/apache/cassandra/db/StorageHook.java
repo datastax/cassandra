@@ -23,7 +23,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIteratorWithLowerBound;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
@@ -36,12 +36,12 @@ public interface StorageHook
     public void reportRead(TableId tableId, DecoratedKey key);
     public UnfilteredRowIteratorWithLowerBound makeRowIteratorWithLowerBound(ColumnFamilyStore cfs,
                                                                       DecoratedKey partitionKey,
-                                                                      SSTableReader sstable,
+                                                                      AbstractSSTableReader sstable,
                                                                       ClusteringIndexFilter filter,
                                                                       ColumnFilter selectedColumns,
                                                                       SSTableReadsListener listener);
     public UnfilteredRowIterator makeRowIterator(ColumnFamilyStore cfs,
-                                                 SSTableReader sstable,
+                                                 AbstractSSTableReader sstable,
                                                  DecoratedKey key,
                                                  Slices slices,
                                                  ColumnFilter selectedColumns,
@@ -64,7 +64,7 @@ public interface StorageHook
 
             public UnfilteredRowIteratorWithLowerBound makeRowIteratorWithLowerBound(ColumnFamilyStore cfs,
                                                                                      DecoratedKey partitionKey,
-                                                                                     SSTableReader sstable,
+                                                                                     AbstractSSTableReader sstable,
                                                                                      ClusteringIndexFilter filter,
                                                                                      ColumnFilter selectedColumns,
                                                                                      SSTableReadsListener listener)
@@ -77,7 +77,7 @@ public interface StorageHook
             }
 
             public UnfilteredRowIterator makeRowIterator(ColumnFamilyStore cfs,
-                                                         SSTableReader sstable,
+                                                         AbstractSSTableReader sstable,
                                                          DecoratedKey key,
                                                          Slices slices,
                                                          ColumnFilter selectedColumns,

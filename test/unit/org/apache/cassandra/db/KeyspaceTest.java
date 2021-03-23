@@ -36,7 +36,7 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -144,7 +144,7 @@ public class KeyspaceTest extends CQLTester
         for (String key : new String[]{"0", "2"})
             Util.assertEmpty(Util.cmd(cfs, key).build());
 
-        Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         assertEquals(1, sstables.size());
         Util.disableBloomFilter(cfs);
 
@@ -408,8 +408,8 @@ public class KeyspaceTest extends CQLTester
             CompactionManager.instance.performMaximal(cfs, false);
 
         // verify that we do indeed have multiple index entries
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(Util.dk("0"), SSTableReader.Operator.EQ);
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(Util.dk("0"), AbstractSSTableReader.Operator.EQ);
         assert indexEntry.columnsIndexCount() > 2;
 
         validateSliceLarge(cfs);

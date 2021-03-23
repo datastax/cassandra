@@ -31,14 +31,13 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
 
@@ -74,7 +73,7 @@ public abstract class AbstractStrategyHolder
 
     public static interface DestinationRouter
     {
-        int getIndexForSSTable(SSTableReader sstable);
+        int getIndexForSSTable(AbstractSSTableReader sstable);
         int getIndexForSSTableDirectory(Descriptor descriptor);
     }
 
@@ -84,7 +83,7 @@ public abstract class AbstractStrategyHolder
     public static class GroupedSSTableContainer
     {
         private final AbstractStrategyHolder holder;
-        private final Set<SSTableReader>[] groups;
+        private final Set<AbstractSSTableReader>[] groups;
 
         private GroupedSSTableContainer(AbstractStrategyHolder holder)
         {
@@ -93,7 +92,7 @@ public abstract class AbstractStrategyHolder
             groups = new Set[holder.numTokenPartitions];
         }
 
-        void add(SSTableReader sstable)
+        void add(AbstractSSTableReader sstable)
         {
             Preconditions.checkArgument(holder.managesSSTable(sstable), "this strategy holder doesn't manage %s", sstable);
             int idx = holder.router.getIndexForSSTable(sstable);
@@ -108,10 +107,10 @@ public abstract class AbstractStrategyHolder
             return groups.length;
         }
 
-        public Set<SSTableReader> getGroup(int i)
+        public Set<AbstractSSTableReader> getGroup(int i)
         {
             Preconditions.checkArgument(i >= 0 && i < groups.length);
-            Set<SSTableReader> group = groups[i];
+            Set<AbstractSSTableReader> group = groups[i];
             return group != null ? group : Collections.emptySet();
         }
 
@@ -161,12 +160,12 @@ public abstract class AbstractStrategyHolder
      */
     public abstract boolean managesRepairedGroup(boolean isRepaired, boolean isPendingRepair, boolean isTransient);
 
-    public boolean managesSSTable(SSTableReader sstable)
+    public boolean managesSSTable(AbstractSSTableReader sstable)
     {
         return managesRepairedGroup(sstable.isRepaired(), sstable.isPendingRepair(), sstable.isTransient());
     }
 
-    public abstract AbstractCompactionStrategy getStrategyFor(SSTableReader sstable);
+    public abstract AbstractCompactionStrategy getStrategyFor(AbstractSSTableReader sstable);
 
     public abstract Iterable<AbstractCompactionStrategy> allStrategies();
 
@@ -206,5 +205,5 @@ public abstract class AbstractStrategyHolder
      */
     public abstract int getStrategyIndex(AbstractCompactionStrategy strategy);
 
-    public abstract boolean containsSSTable(SSTableReader sstable);
+    public abstract boolean containsSSTable(AbstractSSTableReader sstable);
 }

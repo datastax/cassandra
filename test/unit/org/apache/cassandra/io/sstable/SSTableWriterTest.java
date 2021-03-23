@@ -30,10 +30,9 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.fail;
@@ -63,7 +62,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                 writer.append(builder.build().unfilteredIterator());
             }
 
-            SSTableReader s = writer.setMaxDataAge(1000).openEarly();
+            AbstractSSTableReader s = writer.setMaxDataAge(1000).openEarly();
             assert s != null;
             assertFileCounts(dir.list());
             for (int i = 10000; i < 20000; i++)
@@ -73,7 +72,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                     builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
                 writer.append(builder.build().unfilteredIterator());
             }
-            SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
+            AbstractSSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
             assertTrue(s.last.compareTo(s2.last) < 0);
             assertFileCounts(dir.list());
             s.selfRef().release();
@@ -126,7 +125,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                     builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
                 writer.append(builder.build().unfilteredIterator());
             }
-            SSTableReader sstable = writer.finish(true);
+            AbstractSSTableReader sstable = writer.finish(true);
             int datafiles = assertFileCounts(dir.list());
             assertEquals(datafiles, 1);
 
@@ -177,7 +176,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                     builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
                 writer2.append(builder.build().unfilteredIterator());
             }
-            SSTableReader sstable = writer1.finish(true);
+            AbstractSSTableReader sstable = writer1.finish(true);
             txn.update(sstable, false);
 
             assertFileCounts(dir.list());
@@ -221,7 +220,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             largeValue.newRow("clustering").add("val", ByteBuffer.allocate(2 * 1024 * 1024));
             writer1.append(largeValue.build().unfilteredIterator());
 
-            SSTableReader sstable = writer1.finish(true);
+            AbstractSSTableReader sstable = writer1.finish(true);
 
             txn.update(sstable, false);
 

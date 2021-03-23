@@ -33,7 +33,7 @@ import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.jboss.byteman.contrib.bmunit.BMRule;
@@ -61,7 +61,7 @@ public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompact
         makeSSTables(4, cfs2, 5);
         List<Range<Token>> ranges = new ArrayList<>();
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             ranges.add(new Range<>(sstable.first.getToken(), sstable.last.getToken()));
         }

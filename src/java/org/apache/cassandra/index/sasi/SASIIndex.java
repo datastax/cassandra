@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sasi;
 
 import java.util.*;
 import java.util.concurrent.Callable;
-import java.util.function.BiFunction;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 
@@ -33,7 +32,6 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -51,7 +49,7 @@ import org.apache.cassandra.index.sasi.plan.SASIIndexSearcher;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.notifications.*;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -71,10 +69,10 @@ public class SASIIndex implements Index, INotificationConsumer
     {
         public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs,
                                                        Set<Index> indexes,
-                                                       Collection<SSTableReader> sstablesToRebuild,
+                                                       Collection<AbstractSSTableReader> sstablesToRebuild,
                                                        boolean isFullRebuild)
         {
-            NavigableMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>((a, b) -> {
+            NavigableMap<AbstractSSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>((a, b) -> {
                 return Integer.compare(a.descriptor.generation, b.descriptor.generation);
             });
 
@@ -115,10 +113,10 @@ public class SASIIndex implements Index, INotificationConsumer
         Tracker tracker = baseCfs.getTracker();
         tracker.subscribe(this);
 
-        SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> toRebuild = new TreeMap<>((a, b)
+        SortedMap<AbstractSSTableReader, Map<ColumnMetadata, ColumnIndex>> toRebuild = new TreeMap<>((a, b)
                                                 -> Integer.compare(a.descriptor.generation, b.descriptor.generation));
 
-        for (SSTableReader sstable : index.init(tracker.getView().liveSSTables()))
+        for (AbstractSSTableReader sstable : index.init(tracker.getView().liveSSTables()))
         {
             Map<ColumnMetadata, ColumnIndex> perSSTable = toRebuild.get(sstable);
             if (perSSTable == null)
@@ -324,7 +322,7 @@ public class SASIIndex implements Index, INotificationConsumer
         if (notification instanceof SSTableAddedNotification)
         {
             SSTableAddedNotification notice = (SSTableAddedNotification) notification;
-            index.update(Collections.<SSTableReader>emptyList(), Iterables.toList(notice.added));
+            index.update(Collections.<AbstractSSTableReader>emptyList(), Iterables.toList(notice.added));
         }
         else if (notification instanceof SSTableListChangedNotification)
         {

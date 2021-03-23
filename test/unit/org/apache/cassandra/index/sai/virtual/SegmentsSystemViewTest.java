@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 
@@ -201,7 +201,7 @@ public class SegmentsSystemViewTest extends SAITester
 
             for (SSTableIndex sstableIndex : index.getContext().getView().getIndexes())
             {
-                SSTableReader sstable = sstableIndex.getSSTable();
+                AbstractSSTableReader sstable = sstableIndex.getSSTable();
 
                 IndexComponents components = IndexComponents.create(sstableIndex.getColumnContext().getIndexName(), sstable);
 

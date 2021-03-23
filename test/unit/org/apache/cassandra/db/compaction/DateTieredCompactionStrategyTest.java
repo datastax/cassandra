@@ -35,7 +35,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.Pair;
 
@@ -235,9 +235,9 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         }
         cfs.forceBlockingFlush();
 
-        List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
+        List<AbstractSSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
 
-        List<SSTableReader> newBucket = newestBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32, 9, 10, Long.MAX_VALUE, new SizeTieredCompactionStrategyOptions());
+        List<AbstractSSTableReader> newBucket = newestBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32, 9, 10, Long.MAX_VALUE, new SizeTieredCompactionStrategyOptions());
         assertTrue("incoming bucket should not be accepted when it has below the min threshold SSTables", newBucket.isEmpty());
 
         newBucket = newestBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32, 10, 10, Long.MAX_VALUE, new SizeTieredCompactionStrategyOptions());
@@ -271,8 +271,8 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         }
         cfs.forceBlockingFlush();
 
-        Iterable<SSTableReader> filtered;
-        List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
+        Iterable<AbstractSSTableReader> filtered;
+        List<AbstractSSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
 
         filtered = filterOldSSTables(sstrs, 0, 2);
         assertEquals("when maxSSTableAge is zero, no sstables should be filtered", sstrs.size(), Iterables.size(filtered));
@@ -305,7 +305,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
             .add("val", value).build().applyUnsafe();
 
         cfs.forceBlockingFlush();
-        SSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
         Thread.sleep(10);
 
         key = Util.dk(String.valueOf("nonexpired"));
@@ -323,7 +323,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         options.put(DateTieredCompactionStrategyOptions.MAX_SSTABLE_AGE_KEY, Double.toString((1d / (24 * 60 * 60))));
         options.put(DateTieredCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
         DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             dtcs.addSSTable(sstable);
         dtcs.startup();
         assertNull(dtcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
@@ -331,7 +331,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         AbstractCompactionTask t = dtcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
-        SSTableReader sstable = t.transaction.originals().iterator().next();
+        AbstractSSTableReader sstable = t.transaction.originals().iterator().next();
         assertEquals(sstable, expiredSSTable);
         t.transaction.abort();
         cfs.truncateBlocking();
@@ -371,7 +371,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         Map<String, String> options = new HashMap<>();
         options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, "1");
         DateTieredCompactionStrategy dtcs = new DateTieredCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
             dtcs.addSSTable(sstable);
         AbstractCompactionTask task = dtcs.getNextBackgroundTask(0);
         assertEquals(20, task.transaction.originals().size());

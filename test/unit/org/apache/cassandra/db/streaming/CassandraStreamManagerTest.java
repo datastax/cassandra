@@ -50,7 +50,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
@@ -110,18 +110,18 @@ public class CassandraStreamManagerTest
         }
     }
 
-    private SSTableReader createSSTable(Runnable queryable)
+    private AbstractSSTableReader createSSTable(Runnable queryable)
     {
-        Set<SSTableReader> before = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> before = cfs.getLiveSSTables();
         queryable.run();
         cfs.forceBlockingFlush();
-        Set<SSTableReader> after = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> after = cfs.getLiveSSTables();
 
-        Set<SSTableReader> diff = Sets.difference(after, before);
+        Set<AbstractSSTableReader> diff = Sets.difference(after, before);
         return Iterables.getOnlyElement(diff);
     }
 
-    private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
+    private static void mutateRepaired(AbstractSSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
     {
         Descriptor descriptor = sstable.descriptor;
         descriptor.getMetadataSerializer().mutateRepairMetadata(descriptor, repairedAt, pendingRepair, isTransient);
@@ -129,19 +129,19 @@ public class CassandraStreamManagerTest
 
     }
 
-    private static Set<SSTableReader> sstablesFromStreams(Collection<OutgoingStream> streams)
+    private static Set<AbstractSSTableReader> sstablesFromStreams(Collection<OutgoingStream> streams)
     {
-        Set<SSTableReader> sstables = new HashSet<>();
+        Set<AbstractSSTableReader> sstables = new HashSet<>();
         for (OutgoingStream stream: streams)
         {
-            Ref<SSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
+            Ref<AbstractSSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
             sstables.add(ref.get());
             ref.release();
         }
         return sstables;
     }
 
-    private Set<SSTableReader> getReadersForRange(Range<Token> range)
+    private Set<AbstractSSTableReader> getReadersForRange(Range<Token> range)
     {
         Collection<OutgoingStream> streams = cfs.getStreamManager().createOutgoingStreams(session(NO_PENDING_REPAIR),
                                                                                           RangesAtEndpoint.toDummyList(Collections.singleton(range)),
@@ -150,7 +150,7 @@ public class CassandraStreamManagerTest
         return sstablesFromStreams(streams);
     }
 
-    private Set<SSTableReader> selectReaders(UUID pendingRepair)
+    private Set<AbstractSSTableReader> selectReaders(UUID pendingRepair)
     {
         IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
         Collection<Range<Token>> ranges = Lists.newArrayList(new Range<Token>(partitioner.getMinimumToken(), partitioner.getMinimumToken()));
@@ -165,10 +165,10 @@ public class CassandraStreamManagerTest
         cfs.disableAutoCompaction();
 
         // make 3 tables, 1 unrepaired, 2 pending repair with different repair ids, and 1 repaired
-        SSTableReader sstable1 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (1, 1)", keyspace, table)));
-        SSTableReader sstable2 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (2, 2)", keyspace, table)));
-        SSTableReader sstable3 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (3, 3)", keyspace, table)));
-        SSTableReader sstable4 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (4, 4)", keyspace, table)));
+        AbstractSSTableReader sstable1 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (1, 1)", keyspace, table)));
+        AbstractSSTableReader sstable2 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (2, 2)", keyspace, table)));
+        AbstractSSTableReader sstable3 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (3, 3)", keyspace, table)));
+        AbstractSSTableReader sstable4 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (4, 4)", keyspace, table)));
 
 
         UUID pendingRepair = UUIDGen.getTimeUUID();
@@ -196,12 +196,12 @@ public class CassandraStreamManagerTest
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (2, 2)", keyspace, table));
         });
 
-        Collection<SSTableReader> allSSTables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> allSSTables = cfs.getLiveSSTables();
         Assert.assertEquals(1, allSSTables.size());
         final Token firstToken = allSSTables.iterator().next().first.getToken();
         DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMB(1);
 
-        Set<SSTableReader> sstablesBeforeRewrite = getReadersForRange(new Range<>(firstToken, firstToken));
+        Set<AbstractSSTableReader> sstablesBeforeRewrite = getReadersForRange(new Range<>(firstToken, firstToken));
         Assert.assertEquals(1, sstablesBeforeRewrite.size());
         final AtomicInteger checkCount = new AtomicInteger();
         // needed since we get notified when compaction is done as well - we can't get sections for ranges for obsoleted sstables
@@ -214,7 +214,7 @@ public class CassandraStreamManagerTest
                 while (!done.get())
                 {
                     Range<Token> range = new Range<Token>(firstToken, firstToken);
-                    Set<SSTableReader> sstables = getReadersForRange(range);
+                    Set<AbstractSSTableReader> sstables = getReadersForRange(range);
                     if (sstables.size() != 1)
                         failed.set(true);
                     checkCount.incrementAndGet();

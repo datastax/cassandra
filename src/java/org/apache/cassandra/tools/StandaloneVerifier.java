@@ -29,7 +29,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.commons.cli.*;
@@ -78,7 +78,7 @@ public class StandaloneVerifier
             OutputHandler handler = new OutputHandler.SystemOutput(options.verbose, options.debug);
             Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).skipTemporary(true);
 
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<AbstractSSTableReader> sstables = new ArrayList<>();
 
             // Verify sstables
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
@@ -89,7 +89,7 @@ public class StandaloneVerifier
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(entry.getKey(), components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)
@@ -108,7 +108,7 @@ public class StandaloneVerifier
                                                                .tokenLookup(ignore -> options.tokens)
                                                                .build();
             handler.output("Running verifier with the following options: " + verifyOptions);
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
             {
                 try
                 {

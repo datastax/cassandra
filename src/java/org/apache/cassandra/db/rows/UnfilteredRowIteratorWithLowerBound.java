@@ -28,7 +28,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.transform.RTBoundValidator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.IndexInfo;
@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.IteratorWithLowerBound;
  */
 public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilteredRowIterator implements IteratorWithLowerBound<Unfiltered>
 {
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
     private final Slices slices;
     private final boolean isReverseOrder;
     private final ColumnFilter selectedColumns;
@@ -55,7 +55,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
     private boolean firstItemRetrieved;
 
     public UnfilteredRowIteratorWithLowerBound(DecoratedKey partitionKey,
-                                               SSTableReader sstable,
+                                               AbstractSSTableReader sstable,
                                                ClusteringIndexFilter filter,
                                                ColumnFilter selectedColumns,
                                                SSTableReadsListener listener)
@@ -64,7 +64,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
     }
 
     public UnfilteredRowIteratorWithLowerBound(DecoratedKey partitionKey,
-                                               SSTableReader sstable,
+                                               AbstractSSTableReader sstable,
                                                Slices slices,
                                                boolean isReverseOrder,
                                                ColumnFilter selectedColumns,
@@ -234,7 +234,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
      * only allow those in compact tables (for backward compatibility), so we can simply exclude those tables.
      * <p>
      * Note that the information we currently have at our disposal make this condition less precise that it could be.
-     * In particular, {@link SSTableReader#mayHaveTombstones} could return {@code true} (making us not use the stats)
+     * In particular, {@link AbstractSSTableReader#mayHaveTombstones} could return {@code true} (making us not use the stats)
      * because of cell tombstone or even expiring cells even if the sstable has no range tombstone markers, even though
      * it's really only markers we want to exclude here (more precisely, as said above, we want to exclude anything
      * whose clustering is not "full", but that's only markers). It wouldn't be very hard to collect whether a sstable

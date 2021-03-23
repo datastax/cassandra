@@ -41,7 +41,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * Create a decent leveling for the given keyspace/column family
@@ -100,14 +100,14 @@ public class SSTableOfflineRelevel
         Keyspace ks = Keyspace.openWithoutSSTables(keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(columnfamily);
         Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).skipTemporary(true);
-        SetMultimap<File, SSTableReader> sstableMultimap = HashMultimap.create();
+        SetMultimap<File, AbstractSSTableReader> sstableMultimap = HashMultimap.create();
         for (Map.Entry<Descriptor, Set<Component>> sstable : lister.list().entrySet())
         {
             if (sstable.getKey() != null)
             {
                 try
                 {
-                    SSTableReader reader = SSTableReader.open(sstable.getKey());
+                    AbstractSSTableReader reader = AbstractSSTableReader.open(sstable.getKey());
                     sstableMultimap.put(reader.descriptor.directory, reader);
                 }
                 catch (Throwable t)
@@ -137,19 +137,19 @@ public class SSTableOfflineRelevel
 
     private static class Relevel
     {
-        private final Set<SSTableReader> sstables;
+        private final Set<AbstractSSTableReader> sstables;
         private final int approxExpectedLevels;
-        public Relevel(Set<SSTableReader> sstables)
+        public Relevel(Set<AbstractSSTableReader> sstables)
         {
             this.sstables = sstables;
             approxExpectedLevels = (int) Math.ceil(Math.log10(sstables.size()));
         }
 
-        private void printLeveling(Iterable<SSTableReader> sstables)
+        private void printLeveling(Iterable<AbstractSSTableReader> sstables)
         {
-            Multimap<Integer, SSTableReader> leveling = ArrayListMultimap.create();
+            Multimap<Integer, AbstractSSTableReader> leveling = ArrayListMultimap.create();
             int maxLevel = 0;
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
             {
                 leveling.put(sstable.getSSTableLevel(), sstable);
                 maxLevel = Math.max(sstable.getSSTableLevel(), maxLevel);
@@ -162,26 +162,26 @@ public class SSTableOfflineRelevel
         public void relevel(boolean dryRun) throws IOException
         {
             printLeveling(sstables);
-            List<SSTableReader> sortedSSTables = new ArrayList<>(sstables);
-            Collections.sort(sortedSSTables, new Comparator<SSTableReader>()
+            List<AbstractSSTableReader> sortedSSTables = new ArrayList<>(sstables);
+            Collections.sort(sortedSSTables, new Comparator<AbstractSSTableReader>()
             {
                 @Override
-                public int compare(SSTableReader o1, SSTableReader o2)
+                public int compare(AbstractSSTableReader o1, AbstractSSTableReader o2)
                 {
                     return o1.last.compareTo(o2.last);
                 }
             });
 
-            List<List<SSTableReader>> levels = new ArrayList<>();
+            List<List<AbstractSSTableReader>> levels = new ArrayList<>();
 
             while (!sortedSSTables.isEmpty())
             {
-                Iterator<SSTableReader> it = sortedSSTables.iterator();
-                List<SSTableReader> level = new ArrayList<>();
+                Iterator<AbstractSSTableReader> it = sortedSSTables.iterator();
+                List<AbstractSSTableReader> level = new ArrayList<>();
                 DecoratedKey lastLast = null;
                 while (it.hasNext())
                 {
-                    SSTableReader sstable = it.next();
+                    AbstractSSTableReader sstable = it.next();
                     if (lastLast == null || lastLast.compareTo(sstable.first) < 0)
                     {
                         level.add(sstable);
@@ -191,7 +191,7 @@ public class SSTableOfflineRelevel
                 }
                 levels.add(level);
             }
-            List<SSTableReader> l0 = new ArrayList<>();
+            List<AbstractSSTableReader> l0 = new ArrayList<>();
             if (approxExpectedLevels < levels.size())
             {
                 for (int i = approxExpectedLevels; i < levels.size(); i++)
@@ -210,14 +210,14 @@ public class SSTableOfflineRelevel
 
             if (!dryRun)
             {
-                for (SSTableReader sstable : l0)
+                for (AbstractSSTableReader sstable : l0)
                 {
                     if (sstable.getSSTableLevel() != 0)
                         sstable.descriptor.getMetadataSerializer().mutateLevel(sstable.descriptor, 0);
                 }
                 for (int i = levels.size() - 1; i >= 0; i--)
                 {
-                    for (SSTableReader sstable : levels.get(i))
+                    for (AbstractSSTableReader sstable : levels.get(i))
                     {
                         int newLevel = levels.size() - i;
                         if (newLevel != sstable.getSSTableLevel())

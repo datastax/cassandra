@@ -31,7 +31,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
@@ -81,17 +81,17 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
      *
      * @param orphan if true, the sstable will be removed from the unrepaired strategy
      */
-    SSTableReader makeSSTable(boolean orphan)
+    AbstractSSTableReader makeSSTable(boolean orphan)
     {
         int pk = nextSSTableKey++;
-        Set<SSTableReader> pre = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> pre = cfs.getLiveSSTables();
         QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES(?, ?)", ks, tbl), pk, pk);
         cfs.forceBlockingFlush();
-        Set<SSTableReader> post = cfs.getLiveSSTables();
-        Set<SSTableReader> diff = new HashSet<>(post);
+        Set<AbstractSSTableReader> post = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> diff = new HashSet<>(post);
         diff.removeAll(pre);
         assert diff.size() == 1;
-        SSTableReader sstable = diff.iterator().next();
+        AbstractSSTableReader sstable = diff.iterator().next();
         if (orphan)
         {
             csm.getUnrepairedUnsafe().allStrategies().forEach(acs -> acs.removeSSTable(sstable));
@@ -99,7 +99,7 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         return sstable;
     }
 
-    public static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient)
+    public static void mutateRepaired(AbstractSSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient)
     {
         try
         {
@@ -112,12 +112,12 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         }
     }
 
-    public static void mutateRepaired(SSTableReader sstable, long repairedAt)
+    public static void mutateRepaired(AbstractSSTableReader sstable, long repairedAt)
     {
         mutateRepaired(sstable, repairedAt, ActiveRepairService.NO_PENDING_REPAIR, false);
     }
 
-    public static void mutateRepaired(SSTableReader sstable, UUID pendingRepair, boolean isTransient)
+    public static void mutateRepaired(AbstractSSTableReader sstable, UUID pendingRepair, boolean isTransient)
     {
         mutateRepaired(sstable, ActiveRepairService.UNREPAIRED_SSTABLE, pendingRepair, isTransient);
     }

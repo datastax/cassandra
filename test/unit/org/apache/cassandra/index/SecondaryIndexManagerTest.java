@@ -36,7 +36,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -112,7 +112,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         cfs.indexManager.markAllIndexesRemoved();
         assertNotMarkedAsBuilt(indexName);
 
-        try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
+        try (Refs<AbstractSSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null), cfs.getTracker());
             assertMarkedAsBuilt(indexName);
@@ -227,7 +227,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         TestingIndex.blockBuild();
         Thread asyncBuild = new Thread(() -> {
             ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-            try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
+            try (Refs<AbstractSSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
             {
                 cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null), cfs.getTracker());
             }
@@ -291,7 +291,7 @@ public class SecondaryIndexManagerTest extends CQLTester
 
         // try adding sstables and verify they are built but the index is not marked as built because of the pending build:
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
+        try (Refs<AbstractSSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null), cfs.getTracker());
             assertNotMarkedAsBuilt(indexName);
@@ -340,7 +340,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         // try adding sstables but make the build fail:
         TestingIndex.shouldFailBuild = true;
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
+        try (Refs<AbstractSSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
         {
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null), cfs.getTracker());
             fail("Should have failed!");
@@ -766,7 +766,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         {
             return new CollatedViewIndexBuildingSupport()
             {
-                public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild)
+                public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<AbstractSSTableReader> sstables, boolean isFullRebuild)
                 {
                     try
                     {

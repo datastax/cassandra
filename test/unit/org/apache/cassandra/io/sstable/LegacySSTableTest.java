@@ -22,7 +22,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -41,10 +40,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
@@ -52,29 +49,21 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.Verifier;
 import org.apache.cassandra.db.repair.PendingAntiCompaction;
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
-import org.apache.cassandra.db.ReadExecutionController;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SinglePartitionSliceCommandTest;
-import org.apache.cassandra.db.compaction.Verifier;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
-import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.OutgoingStream;
 import org.apache.cassandra.streaming.StreamPlan;
-import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -189,7 +178,7 @@ public class LegacySSTableTest
 
             for (ColumnFamilyStore cfs : Keyspace.open("legacy_tables").getColumnFamilyStores())
             {
-                for (SSTableReader sstable : cfs.getLiveSSTables())
+                for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
                 {
                     sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, 1234, NO_PENDING_REPAIR, false);
                     sstable.reloadSSTableMetadata();
@@ -199,7 +188,7 @@ public class LegacySSTableTest
                 }
 
                 boolean isTransient = false;
-                for (SSTableReader sstable : cfs.getLiveSSTables())
+                for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
                 {
                     UUID random = UUID.randomUUID();
                     sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, UNREPAIRED_SSTABLE, random, isTransient);
@@ -231,7 +220,7 @@ public class LegacySSTableTest
             for (ColumnFamilyStore cfs : Keyspace.open("legacy_tables").getColumnFamilyStores())
             {
                 // set pending
-                for (SSTableReader sstable : cfs.getLiveSSTables())
+                for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
                 {
                     UUID random = UUID.randomUUID();
                     try
@@ -247,7 +236,7 @@ public class LegacySSTableTest
                     }
                 }
                 // set transient
-                for (SSTableReader sstable : cfs.getLiveSSTables())
+                for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
                 {
                     try
                     {
@@ -278,7 +267,7 @@ public class LegacySSTableTest
 
             for (ColumnFamilyStore cfs : Keyspace.open("legacy_tables").getColumnFamilyStores())
             {
-                for (SSTableReader sstable : cfs.getLiveSSTables())
+                for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
                 {
                     sstable.descriptor.getMetadataSerializer().mutateLevel(sstable.descriptor, 1234);
                     sstable.reloadSSTableMetadata();
@@ -342,7 +331,7 @@ public class LegacySSTableTest
             ColumnFamilyStore cfs = Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion));
             loadLegacyTable("legacy_%s_simple", legacyVersion);
 
-            for (SSTableReader sstable : cfs.getLiveSSTables())
+            for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             {
                 try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().checkVersion(true).build()))
                 {
@@ -354,7 +343,7 @@ public class LegacySSTableTest
                 {}
             }
             // make sure we don't throw any exception if not checking version:
-            for (SSTableReader sstable : cfs.getLiveSSTables())
+            for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             {
                 try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().checkVersion(false).build()))
                 {
@@ -432,7 +421,7 @@ public class LegacySSTableTest
     private void streamLegacyTable(String tablePattern, String legacyVersion) throws Exception
     {
         String table = String.format(tablePattern, legacyVersion);
-        SSTableReader sstable = SSTableReader.open(getDescriptor(legacyVersion, table));
+        AbstractSSTableReader sstable = AbstractSSTableReader.open(getDescriptor(legacyVersion, table));
         IPartitioner p = sstable.getPartitioner();
         List<Range<Token>> ranges = new ArrayList<>();
         ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("100"))));

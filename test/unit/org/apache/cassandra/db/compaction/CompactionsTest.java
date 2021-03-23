@@ -66,7 +66,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -191,7 +191,7 @@ public class CompactionsTest
 
         assertEquals(2, store.getLiveSSTables().size());
 
-        Iterator<SSTableReader> it = store.getLiveSSTables().iterator();
+        Iterator<AbstractSSTableReader> it = store.getLiveSSTables().iterator();
         long originalSize1 = it.next().uncompressedLength();
         long originalSize2 = it.next().uncompressedLength();
 
@@ -243,7 +243,7 @@ public class CompactionsTest
     public static void assertMaxTimestamp(ColumnFamilyStore cfs, long maxTimestampExpected)
     {
         long maxTimestampObserved = Long.MIN_VALUE;
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             maxTimestampObserved = Math.max(sstable.getMaxTimestamp(), maxTimestampObserved);
         assertEquals(maxTimestampExpected, maxTimestampObserved);
     }
@@ -268,10 +268,10 @@ public class CompactionsTest
             .build().applyUnsafe();
         }
         cfs.forceBlockingFlush();
-        Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
 
         assertEquals(1, sstables.size());
-        SSTableReader sstable = sstables.iterator().next();
+        AbstractSSTableReader sstable = sstables.iterator().next();
 
         int prevGeneration = sstable.descriptor.generation;
         String file = new File(sstable.descriptor.filenameFor(Component.DATA)).getAbsolutePath();
@@ -331,7 +331,7 @@ public class CompactionsTest
         int[] dkays = {0, 1, 2, 3};
         writeSSTableWithRangeTombstoneMaskingOneColumn(cfs, table, dkays);
 
-        Collection<SSTableReader> toCompact = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> toCompact = cfs.getLiveSSTables();
         assert toCompact.size() == 2;
 
         Util.compact(cfs, toCompact);
@@ -360,7 +360,7 @@ public class CompactionsTest
                 }
             }
         }
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             StatsMetadata stats = sstable.getSSTableMetadata();
             assertEquals(ByteBufferUtil.bytes("0"), stats.coveredClustering.start().bufferAt(0));
@@ -389,7 +389,7 @@ public class CompactionsTest
 
         cfs.forceBlockingFlush();
 
-        Collection<SSTableReader> sstablesBefore = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstablesBefore = cfs.getLiveSSTables();
 
         ImmutableBTreePartition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         assertTrue(!partition.isEmpty());
@@ -407,16 +407,16 @@ public class CompactionsTest
 
         cfs.forceBlockingFlush();
 
-        Collection<SSTableReader> sstablesAfter = cfs.getLiveSSTables();
-        Collection<SSTableReader> toCompact = new ArrayList<SSTableReader>();
-        for (SSTableReader sstable : sstablesAfter)
+        Collection<AbstractSSTableReader> sstablesAfter = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> toCompact = new ArrayList<AbstractSSTableReader>();
+        for (AbstractSSTableReader sstable : sstablesAfter)
             if (!sstablesBefore.contains(sstable))
                 toCompact.add(sstable);
 
         Util.compact(cfs, toCompact);
 
-        SSTableReader newSSTable = null;
-        for (SSTableReader reader : cfs.getLiveSSTables())
+        AbstractSSTableReader newSSTable = null;
+        for (AbstractSSTableReader reader : cfs.getLiveSSTables())
         {
             assert !toCompact.contains(reader);
             if (!sstablesBefore.contains(reader))
@@ -490,7 +490,7 @@ public class CompactionsTest
         store.forceBlockingFlush();
 
         assertEquals(1, store.getLiveSSTables().size());
-        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = store.getLiveSSTables().iterator().next();
 
 
         // contiguous range spans all data

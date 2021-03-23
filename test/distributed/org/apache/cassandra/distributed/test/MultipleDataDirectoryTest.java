@@ -37,7 +37,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class MultipleDataDirectoryTest extends TestBaseImpl
 {
@@ -138,7 +138,7 @@ public class MultipleDataDirectoryTest extends TestBaseImpl
         NODE.runOnInstance(() -> {
             ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore("cf");
             Assert.assertNotEquals(0, cfs.getLiveSSTables().size());
-            Iterator<SSTableReader> sstables = cfs.getLiveSSTables().iterator();
+            Iterator<AbstractSSTableReader> sstables = cfs.getLiveSSTables().iterator();
             // finding 2 descriptors that live in different data directory
             Descriptor first = sstables.next().descriptor;
             Descriptor second = null;
@@ -151,7 +151,7 @@ public class MultipleDataDirectoryTest extends TestBaseImpl
             // getting a new file index in order to move SSTable between directories.
             second = cfs.newSSTableDescriptor(second.directory);
             // now we just move all sstables from first to second
-            for (Component component : SSTableReader.componentsFor(first))
+            for (Component component : AbstractSSTableReader.componentsFor(first))
             {
                 File file = new File(first.filenameFor(component));
                 if (file.exists())

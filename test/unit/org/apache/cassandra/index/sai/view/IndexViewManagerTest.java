@@ -47,7 +47,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
@@ -150,13 +150,13 @@ public class IndexViewManagerTest extends SAITester
         // save sstables 3 and 4
         store.getLiveSSTables().forEach(reader -> copySSTable(reader, tmpDir));
 
-        List<SSTableReader> sstables = IntStream.rangeClosed(1, 4)
-                                                .mapToObj(i -> new Descriptor(tmpDir.toFile(), KEYSPACE, tableName, i))
-                                                .map(SSTableReader::open)
-                                                .collect(Collectors.toList());
+        List<AbstractSSTableReader> sstables = IntStream.rangeClosed(1, 4)
+                                                        .mapToObj(i -> new Descriptor(tmpDir.toFile(), KEYSPACE, tableName, i))
+                                                        .map(AbstractSSTableReader::open)
+                                                        .collect(Collectors.toList());
 
-        List<SSTableReader> none = Collections.emptyList();
-        List<SSTableReader> initial = sstables.stream().limit(2).collect(Collectors.toList());
+        List<AbstractSSTableReader> none = Collections.emptyList();
+        List<AbstractSSTableReader> initial = sstables.stream().limit(2).collect(Collectors.toList());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         for (int i = 0; i < CONCURRENT_UPDATES; i++)
@@ -233,7 +233,7 @@ public class IndexViewManagerTest extends SAITester
         }
     }
 
-    private static void copySSTable(SSTableReader table, Path destDir)
+    private static void copySSTable(AbstractSSTableReader table, Path destDir)
     {
         for (Component component : SSTable.componentsFor(table.descriptor))
         {

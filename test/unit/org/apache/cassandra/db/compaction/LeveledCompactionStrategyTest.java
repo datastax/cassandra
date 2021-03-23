@@ -53,7 +53,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.repair.ValidationManager;
@@ -150,15 +150,15 @@ public class LeveledCompactionStrategyTest
             Assert.fail();
         }
 
-        Collection<Collection<SSTableReader>> groupedSSTables = cfs.getCompactionStrategyManager().groupSSTablesForAntiCompaction(cfs.getLiveSSTables());
-        for (Collection<SSTableReader> sstableGroup : groupedSSTables)
+        Collection<Collection<AbstractSSTableReader>> groupedSSTables = cfs.getCompactionStrategyManager().groupSSTablesForAntiCompaction(cfs.getLiveSSTables());
+        for (Collection<AbstractSSTableReader> sstableGroup : groupedSSTables)
         {
             int groupLevel = -1;
-            Iterator<SSTableReader> it = sstableGroup.iterator();
+            Iterator<AbstractSSTableReader> it = sstableGroup.iterator();
             while (it.hasNext())
             {
 
-                SSTableReader sstable = it.next();
+                AbstractSSTableReader sstable = it.next();
                 int tableLevel = sstable.getSSTableLevel();
                 if (groupLevel == -1)
                     groupLevel = tableLevel;
@@ -270,7 +270,7 @@ public class LeveledCompactionStrategyTest
         assert strategy.getLevelSize(1) > 0;
 
         // get LeveledScanner for level 1 sstables
-        Collection<SSTableReader> sstables = strategy.manifest.getLevel(1);
+        Collection<AbstractSSTableReader> sstables = strategy.manifest.getLevel(1);
         List<ISSTableScanner> scanners = strategy.getScanners(sstables).scanners;
         assertEquals(1, scanners.size()); // should be one per level
         ISSTableScanner scanner = scanners.get(0);
@@ -279,7 +279,7 @@ public class LeveledCompactionStrategyTest
             scanner.next();
 
         // scanner.getCurrentPosition should be equal to total bytes of L1 sstables
-        assertEquals(scanner.getCurrentPosition(), SSTableReader.getTotalUncompressedBytes(sstables));
+        assertEquals(scanner.getCurrentPosition(), AbstractSSTableReader.getTotalUncompressedBytes(sstables));
     }
 
     @Test
@@ -305,7 +305,7 @@ public class LeveledCompactionStrategyTest
         LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getStrategies().get(1).get(0);
         cfs.forceMajorCompaction();
 
-        for (SSTableReader s : cfs.getLiveSSTables())
+        for (AbstractSSTableReader s : cfs.getLiveSSTables())
         {
             assertTrue(s.getSSTableLevel() != 6 && s.getSSTableLevel() > 0);
             strategy.manifest.remove(s);
@@ -314,7 +314,7 @@ public class LeveledCompactionStrategyTest
             strategy.manifest.addSSTables(Collections.singleton(s));
         }
         // verify that all sstables in the changed set is level 6
-        for (SSTableReader s : cfs.getLiveSSTables())
+        for (AbstractSSTableReader s : cfs.getLiveSSTables())
             assertEquals(6, s.getSSTableLevel());
 
         int[] levels = strategy.manifest.getAllLevelSize();
@@ -357,15 +357,15 @@ public class LeveledCompactionStrategyTest
         assertTrue(manager.getSSTableCountPerLevel()[1] > 0);
         assertTrue(manager.getSSTableCountPerLevel()[2] > 0);
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             assertFalse(sstable.isRepaired());
 
         int sstableCount = unrepaired.manifest.getSSTables().size();
         // we only have unrepaired sstables:
         assertEquals(sstableCount, cfs.getLiveSSTables().size());
 
-        SSTableReader sstable1 = unrepaired.manifest.getLevel(2).iterator().next();
-        SSTableReader sstable2 = unrepaired.manifest.getLevel(1).iterator().next();
+        AbstractSSTableReader sstable1 = unrepaired.manifest.getLevel(2).iterator().next();
+        AbstractSSTableReader sstable2 = unrepaired.manifest.getLevel(1).iterator().next();
 
         sstable1.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable1.descriptor, System.currentTimeMillis(), null, false);
         sstable1.reloadSSTableMetadata();
@@ -532,11 +532,11 @@ public class LeveledCompactionStrategyTest
         }
         LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) (cfs.getCompactionStrategyManager()).getStrategies().get(1).get(0);
         // get readers for level 0 sstables
-        Collection<SSTableReader> sstables = strategy.manifest.getLevel(0);
-        Collection<SSTableReader> sortedCandidates = strategy.manifest.ageSortedSSTables(sstables);
+        Collection<AbstractSSTableReader> sstables = strategy.manifest.getLevel(0);
+        Collection<AbstractSSTableReader> sortedCandidates = strategy.manifest.ageSortedSSTables(sstables);
         assertTrue(String.format("More than 1 sstable required for test, found: %d .", sortedCandidates.size()), sortedCandidates.size() > 1);
         long lastMaxTimeStamp = Long.MIN_VALUE;
-        for (SSTableReader sstable : sortedCandidates)
+        for (AbstractSSTableReader sstable : sortedCandidates)
         {
             assertTrue(String.format("SStables not sorted into oldest to newest by maxTimestamp. Current sstable: %d , last sstable: %d", sstable.getMaxTimestamp(), lastMaxTimeStamp),
                        sstable.getMaxTimestamp() > lastMaxTimeStamp);
@@ -557,10 +557,10 @@ public class LeveledCompactionStrategyTest
         localOptions.put("class", "LeveledCompactionStrategy");
         localOptions.put("sstable_size_in_mb", "1");
         cfs.setCompactionParameters(localOptions);
-        List<SSTableReader> sstables = new ArrayList<>();
+        List<AbstractSSTableReader> sstables = new ArrayList<>();
         for (int i = 0; i < 11; i++)
         {
-            SSTableReader l1sstable = MockSchema.sstable(i, 1 * 1024 * 1024, cfs);
+            AbstractSSTableReader l1sstable = MockSchema.sstable(i, 1 * 1024 * 1024, cfs);
             l1sstable.descriptor.getMetadataSerializer().mutateLevel(l1sstable.descriptor, 1);
             l1sstable.reloadSSTableMetadata();
             sstables.add(l1sstable);
@@ -615,7 +615,7 @@ public class LeveledCompactionStrategyTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         LeveledManifest lm = new LeveledManifest(cfs, 10, 10, new SizeTieredCompactionStrategyOptions());
-        List<SSTableReader> currentLevel = new ArrayList<>();
+        List<AbstractSSTableReader> currentLevel = new ArrayList<>();
         int gen = 1;
         currentLevel.add(MockSchema.sstableWithLevel(gen++, 10, 20, 1, cfs));
         currentLevel.add(MockSchema.sstableWithLevel(gen++, 21, 30, 1, cfs));
@@ -627,7 +627,7 @@ public class LeveledCompactionStrategyTest
         assertLevelsEqual(lm.getLevel(1), currentLevel.subList(0, 3));
         assertLevelsEqual(lm.getLevel(0), currentLevel.subList(3, 5));
 
-        List<SSTableReader> newSSTables = new ArrayList<>();
+        List<AbstractSSTableReader> newSSTables = new ArrayList<>();
         // this sstable last token is the same as the first token of L1 above, should get sent to L0:
         newSSTables.add(MockSchema.sstableWithLevel(gen++, 5, 10, 1, cfs));
         lm.addSSTables(newSSTables);
@@ -653,7 +653,7 @@ public class LeveledCompactionStrategyTest
         newSSTables.add(MockSchema.sstableWithLevel(gen++, 100, 140, 1, cfs));
         newSSTables.add(MockSchema.sstableWithLevel(gen++, 120, 140, 1, cfs));
         lm.addSSTables(newSSTables);
-        List<SSTableReader> newL1 = new ArrayList<>(currentLevel.subList(0, 3));
+        List<AbstractSSTableReader> newL1 = new ArrayList<>(currentLevel.subList(0, 3));
         newL1.add(newSSTables.get(1));
         assertLevelsEqual(lm.getLevel(1), newL1);
         newSSTables.remove(1);
@@ -666,14 +666,14 @@ public class LeveledCompactionStrategyTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         LeveledManifest lm = new LeveledManifest(cfs, 10, 10, new SizeTieredCompactionStrategyOptions());
-        List<SSTableReader> expectedL1 = new ArrayList<>();
+        List<AbstractSSTableReader> expectedL1 = new ArrayList<>();
 
         int gen = 1;
         // single sstable, single token (100)
         expectedL1.add(MockSchema.sstableWithLevel(gen++, 100, 100, 1, cfs));
         lm.addSSTables(expectedL1);
 
-        List<SSTableReader> expectedL0 = new ArrayList<>();
+        List<AbstractSSTableReader> expectedL0 = new ArrayList<>();
 
         // should get moved to L0:
         expectedL0.add(MockSchema.sstableWithLevel(gen++, 99, 101, 1, cfs));
@@ -704,7 +704,7 @@ public class LeveledCompactionStrategyTest
         LeveledManifest lm = new LeveledManifest(cfs, 10, 10, new SizeTieredCompactionStrategyOptions());
         long seed = System.currentTimeMillis();
         Random r = new Random(seed);
-        List<SSTableReader> newLevels = generateNewRandomLevels(cfs, 40, levelCount, 0, r);
+        List<AbstractSSTableReader> newLevels = generateNewRandomLevels(cfs, 40, levelCount, 0, r);
 
         int sstableCount = newLevels.size();
         lm.addSSTables(newLevels);
@@ -727,14 +727,14 @@ public class LeveledCompactionStrategyTest
         for (int i = 0; i < levelCount; i++)
         {
             actualSSTableCount += lm.getLevelSize(i);
-            List<SSTableReader> level = new ArrayList<>(lm.getLevel(i));
+            List<AbstractSSTableReader> level = new ArrayList<>(lm.getLevel(i));
             int lvl = i;
             assertTrue(level.stream().allMatch(s -> s.getSSTableLevel() == lvl));
             if (i > 0)
             {
-                level.sort(SSTableReader.sstableComparator);
-                SSTableReader prev = null;
-                for (SSTableReader sstable : level)
+                level.sort(AbstractSSTableReader.sstableComparator);
+                AbstractSSTableReader prev = null;
+                for (AbstractSSTableReader sstable : level)
                 {
                     if (prev != null && sstable.first.compareTo(prev.last) <= 0)
                     {
@@ -751,9 +751,9 @@ public class LeveledCompactionStrategyTest
             assertEquals("[seed = " + seed + "] wrong sstable count in level = " + i, expectedLevelSizes[i], lm.getLevel(i).size());
     }
 
-    private static List<SSTableReader> generateNewRandomLevels(ColumnFamilyStore cfs, int maxSSTableCountPerLevel, int levelCount, int startGen, Random r)
+    private static List<AbstractSSTableReader> generateNewRandomLevels(ColumnFamilyStore cfs, int maxSSTableCountPerLevel, int levelCount, int startGen, Random r)
     {
-        List<SSTableReader> newLevels = new ArrayList<>();
+        List<AbstractSSTableReader> newLevels = new ArrayList<>();
         for (int level = 0; level < levelCount; level++)
         {
             int numLevelSSTables = r.nextInt(maxSSTableCountPerLevel) + 1;
@@ -764,7 +764,7 @@ public class LeveledCompactionStrategyTest
             Collections.sort(tokens);
             for (int i = 0; i < tokens.size() - 1; i += 2)
             {
-                SSTableReader sstable = MockSchema.sstableWithLevel(++startGen, tokens.get(i), tokens.get(i + 1), level, cfs);
+                AbstractSSTableReader sstable = MockSchema.sstableWithLevel(++startGen, tokens.get(i), tokens.get(i + 1), level, cfs);
                 newLevels.add(sstable);
             }
         }
@@ -776,13 +776,13 @@ public class LeveledCompactionStrategyTest
      *
      * @return count of expected sstables to add to each level
      */
-    private static int[] canAdd(LeveledManifest lm, List<SSTableReader> newSSTables, int levelCount)
+    private static int[] canAdd(LeveledManifest lm, List<AbstractSSTableReader> newSSTables, int levelCount)
     {
-        Map<Integer, Collection<SSTableReader>> sstableGroups = new HashMap<>();
+        Map<Integer, Collection<AbstractSSTableReader>> sstableGroups = new HashMap<>();
         newSSTables.forEach(s -> sstableGroups.computeIfAbsent(s.getSSTableLevel(), k -> new ArrayList<>()).add(s));
 
         int[] canAdd = new int[levelCount];
-        for (Map.Entry<Integer, Collection<SSTableReader>> lvlGroup : sstableGroups.entrySet())
+        for (Map.Entry<Integer, Collection<AbstractSSTableReader>> lvlGroup : sstableGroups.entrySet())
         {
             int level = lvlGroup.getKey();
             if (level == 0)
@@ -791,15 +791,15 @@ public class LeveledCompactionStrategyTest
                 continue;
             }
 
-            List<SSTableReader> newLevel = new ArrayList<>(lm.getLevel(level));
-            for (SSTableReader sstable : lvlGroup.getValue())
+            List<AbstractSSTableReader> newLevel = new ArrayList<>(lm.getLevel(level));
+            for (AbstractSSTableReader sstable : lvlGroup.getValue())
             {
                 newLevel.add(sstable);
-                newLevel.sort(SSTableReader.sstableComparator);
+                newLevel.sort(AbstractSSTableReader.sstableComparator);
 
-                SSTableReader prev = null;
+                AbstractSSTableReader prev = null;
                 boolean kept = true;
-                for (SSTableReader sst : newLevel)
+                for (AbstractSSTableReader sst : newLevel)
                 {
                     if (prev != null && prev.last.compareTo(sst.first) >= 0)
                     {
@@ -818,7 +818,7 @@ public class LeveledCompactionStrategyTest
         return canAdd;
     }
 
-    private static void assertLevelsEqual(Collection<SSTableReader> l1, Collection<SSTableReader> l2)
+    private static void assertLevelsEqual(Collection<AbstractSSTableReader> l1, Collection<AbstractSSTableReader> l2)
     {
         assertEquals(l1.size(), l2.size());
         assertEquals(new HashSet<>(l1), new HashSet<>(l2));

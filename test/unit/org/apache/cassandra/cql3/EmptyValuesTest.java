@@ -45,7 +45,7 @@ import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -71,7 +71,7 @@ public class EmptyValuesTest extends CQLTester
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        for (SSTableReader ssTable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader ssTable : cfs.getLiveSSTables())
         {
             try (PrintStream out = new PrintStream(buf, true))
             {

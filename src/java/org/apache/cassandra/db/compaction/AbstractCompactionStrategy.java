@@ -29,7 +29,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -191,7 +191,7 @@ public abstract class AbstractCompactionStrategy
      *
      * Is responsible for marking its sstables as compaction-pending.
      */
-    public abstract AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, final int gcBefore);
+    public abstract AbstractCompactionTask getUserDefinedTask(Collection<AbstractSSTableReader> sstables, final int gcBefore);
 
     public AbstractCompactionTask getCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
     {
@@ -214,10 +214,10 @@ public abstract class AbstractCompactionStrategy
      * @param originalCandidates The collection to check for excluded SSTables
      * @return list of the SSTables with excluded ones filtered out
      */
-    public static List<SSTableReader> filterSuspectSSTables(Iterable<SSTableReader> originalCandidates)
+    public static List<AbstractSSTableReader> filterSuspectSSTables(Iterable<AbstractSSTableReader> originalCandidates)
     {
-        List<SSTableReader> filtered = new ArrayList<>();
-        for (SSTableReader sstable : originalCandidates)
+        List<AbstractSSTableReader> filtered = new ArrayList<>();
+        for (AbstractSSTableReader sstable : originalCandidates)
         {
             if (!sstable.isMarkedSuspect())
                 filtered.add(sstable);
@@ -226,7 +226,7 @@ public abstract class AbstractCompactionStrategy
     }
 
 
-    public ScannerList getScanners(Collection<SSTableReader> sstables, Range<Token> range)
+    public ScannerList getScanners(Collection<AbstractSSTableReader> sstables, Range<Token> range)
     {
         return range == null ? getScanners(sstables, (Collection<Range<Token>>)null) : getScanners(sstables, Collections.singleton(range));
     }
@@ -237,12 +237,12 @@ public abstract class AbstractCompactionStrategy
      * LeveledCompactionStrategy for instance).
      */
     @SuppressWarnings("resource")
-    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public ScannerList getScanners(Collection<AbstractSSTableReader> sstables, Collection<Range<Token>> ranges)
     {
         ArrayList<ISSTableScanner> scanners = new ArrayList<ISSTableScanner>();
         try
         {
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
                 scanners.add(sstable.getScanner(ranges));
         }
         catch (Throwable t)
@@ -263,9 +263,9 @@ public abstract class AbstractCompactionStrategy
      * Note that implementations must be able to handle duplicate notifications here (that removed are already gone and
      * added have already been added)
      * */
-    public synchronized void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
+    public synchronized void replaceSSTables(Collection<AbstractSSTableReader> removed, Collection<AbstractSSTableReader> added)
     {
-        for (SSTableReader remove : removed)
+        for (AbstractSSTableReader remove : removed)
             removeSSTable(remove);
         addSSTables(added);
     }
@@ -273,28 +273,28 @@ public abstract class AbstractCompactionStrategy
     /**
      * Adds sstable, note that implementations must handle duplicate notifications here (added already being in the compaction strategy)
      */
-    public abstract void addSSTable(SSTableReader added);
+    public abstract void addSSTable(AbstractSSTableReader added);
 
     /**
      * Adds sstables, note that implementations must handle duplicate notifications here (added already being in the compaction strategy)
      */
-    public synchronized void addSSTables(Iterable<SSTableReader> added)
+    public synchronized void addSSTables(Iterable<AbstractSSTableReader> added)
     {
-        for (SSTableReader sstable : added)
+        for (AbstractSSTableReader sstable : added)
             addSSTable(sstable);
     }
 
     /**
      * Removes sstable from the strategy, implementations must be able to handle the sstable having already been removed.
      */
-    public abstract void removeSSTable(SSTableReader sstable);
+    public abstract void removeSSTable(AbstractSSTableReader sstable);
 
     /**
      * Removes sstables from the strategy, implementations must be able to handle the sstables having already been removed.
      */
-    public void removeSSTables(Iterable<SSTableReader> removed)
+    public void removeSSTables(Iterable<AbstractSSTableReader> removed)
     {
-        for (SSTableReader sstable : removed)
+        for (AbstractSSTableReader sstable : removed)
             removeSSTable(sstable);
     }
 
@@ -302,7 +302,7 @@ public abstract class AbstractCompactionStrategy
      * Returns the sstables managed by this strategy instance
      */
     @VisibleForTesting
-    protected abstract Set<SSTableReader> getSSTables();
+    protected abstract Set<AbstractSSTableReader> getSSTables();
 
     /**
      * Called when the metadata has changed for an sstable - for example if the level changed
@@ -313,7 +313,7 @@ public abstract class AbstractCompactionStrategy
      * @param oldMetadata
      * @param sstable
      */
-    public void metadataChanged(StatsMetadata oldMetadata, SSTableReader sstable)
+    public void metadataChanged(StatsMetadata oldMetadata, AbstractSSTableReader sstable)
     {
     }
 
@@ -368,7 +368,7 @@ public abstract class AbstractCompactionStrategy
         }
     }
 
-    public ScannerList getScanners(Collection<SSTableReader> toCompact)
+    public ScannerList getScanners(Collection<AbstractSSTableReader> toCompact)
     {
         return getScanners(toCompact, (Collection<Range<Token>>)null);
     }
@@ -381,7 +381,7 @@ public abstract class AbstractCompactionStrategy
      * @param gcBefore time to drop tombstones
      * @return true if given sstable's tombstones are expected to be removed
      */
-    protected boolean worthDroppingTombstones(SSTableReader sstable, int gcBefore)
+    protected boolean worthDroppingTombstones(AbstractSSTableReader sstable, int gcBefore)
     {
         if (disableTombstoneCompactions || CompactionController.NEVER_PURGE_TOMBSTONES || cfs.getNeverPurgeTombstones())
             return false;
@@ -399,7 +399,7 @@ public abstract class AbstractCompactionStrategy
         if (uncheckedTombstoneCompaction)
             return true;
 
-        Collection<SSTableReader> overlaps = cfs.getOverlappingLiveSSTables(Collections.singleton(sstable));
+        Collection<AbstractSSTableReader> overlaps = cfs.getOverlappingLiveSSTables(Collections.singleton(sstable));
         if (overlaps.isEmpty())
         {
             // there is no overlap, tombstones are safely droppable
@@ -420,7 +420,7 @@ public abstract class AbstractCompactionStrategy
             // first, calculate estimated keys that do not overlap
             long keys = sstable.estimatedKeys();
             Set<Range<Token>> ranges = new HashSet<Range<Token>>(overlaps.size());
-            for (SSTableReader overlap : overlaps)
+            for (AbstractSSTableReader overlap : overlaps)
                 ranges.add(new Range<>(overlap.first.getToken(), overlap.last.getToken()));
             long remainingKeys = keys - sstable.estimatedKeysForRanges(ranges);
             // next, calculate what percentage of columns we have within those keys
@@ -510,16 +510,16 @@ public abstract class AbstractCompactionStrategy
      * as a group. If a given compaction strategy creates sstables which
      * cannot be merged due to some constraint it must override this method.
      */
-    public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup)
+    public Collection<Collection<AbstractSSTableReader>> groupSSTablesForAntiCompaction(Collection<AbstractSSTableReader> sstablesToGroup)
     {
         int groupSize = 2;
-        List<SSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
-        Collections.sort(sortedSSTablesToGroup, SSTableReader.sstableComparator);
+        List<AbstractSSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
+        Collections.sort(sortedSSTablesToGroup, AbstractSSTableReader.sstableComparator);
 
-        Collection<Collection<SSTableReader>> groupedSSTables = new ArrayList<>();
-        Collection<SSTableReader> currGroup = new ArrayList<>(groupSize);
+        Collection<Collection<AbstractSSTableReader>> groupedSSTables = new ArrayList<>();
+        Collection<AbstractSSTableReader> currGroup = new ArrayList<>(groupSize);
 
-        for (SSTableReader sstable : sortedSSTablesToGroup)
+        for (AbstractSSTableReader sstable : sortedSSTablesToGroup)
         {
             currGroup.add(sstable);
             if (currGroup.size() == groupSize)

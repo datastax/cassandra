@@ -23,7 +23,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.commons.cli.*;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -117,12 +117,12 @@ public class StandaloneSplitter
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfName);
             String snapshotName = "pre-split-" + System.currentTimeMillis();
 
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<AbstractSSTableReader> sstables = new ArrayList<>();
             for (Map.Entry<Descriptor, Set<Component>> fn : parsedFilenames.entrySet())
             {
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs);
                     if (!isSSTableLargerEnough(sstable, options.sizeInMB)) {
                         System.out.println(String.format("Skipping %s: it's size (%.3f MB) is less than the split size (%d MB)",
                                 sstable.getFilename(), ((sstable.onDiskLength() * 1.0d) / 1024L) / 1024L, options.sizeInMB));
@@ -151,7 +151,7 @@ public class StandaloneSplitter
             if (options.snapshot)
                 System.out.println(String.format("Pre-split sstables snapshotted into snapshot %s", snapshotName));
 
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
             {
                 try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.UNKNOWN, sstable))
                 {
@@ -182,7 +182,7 @@ public class StandaloneSplitter
     /**
      * filter the sstable which size is less than the expected max sstable size.
      */
-    private static boolean isSSTableLargerEnough(SSTableReader sstable, int sizeInMB) {
+    private static boolean isSSTableLargerEnough(AbstractSSTableReader sstable, int sizeInMB) {
         return sstable.onDiskLength() > sizeInMB * 1024L * 1024L;
     }
 

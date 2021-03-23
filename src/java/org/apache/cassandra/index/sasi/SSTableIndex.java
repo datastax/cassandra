@@ -32,7 +32,7 @@ import org.apache.cassandra.index.sasi.disk.Token;
 import org.apache.cassandra.index.sasi.plan.Expression;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -43,13 +43,13 @@ import com.google.common.base.Function;
 public class SSTableIndex
 {
     private final ColumnIndex columnIndex;
-    private final Ref<SSTableReader> sstableRef;
-    private final SSTableReader sstable;
+    private final Ref<AbstractSSTableReader> sstableRef;
+    private final AbstractSSTableReader sstable;
     private final OnDiskIndex index;
     private final AtomicInteger references = new AtomicInteger(1);
     private final AtomicBoolean obsolete = new AtomicBoolean(false);
 
-    public SSTableIndex(ColumnIndex index, File indexFile, SSTableReader referent)
+    public SSTableIndex(ColumnIndex index, File indexFile, AbstractSSTableReader referent)
     {
         this.columnIndex = index;
         this.sstableRef = referent.tryRef();
@@ -103,7 +103,7 @@ public class SSTableIndex
         return index.search(expression);
     }
 
-    public SSTableReader getSSTable()
+    public AbstractSSTableReader getSSTable()
     {
         return sstable;
     }
@@ -165,9 +165,9 @@ public class SSTableIndex
 
     private static class DecoratedKeyFetcher implements Function<Long, DecoratedKey>
     {
-        private final SSTableReader sstable;
+        private final AbstractSSTableReader sstable;
 
-        DecoratedKeyFetcher(SSTableReader reader)
+        DecoratedKeyFetcher(AbstractSSTableReader reader)
         {
             sstable = reader;
         }

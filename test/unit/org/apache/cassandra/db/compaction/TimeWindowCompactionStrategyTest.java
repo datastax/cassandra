@@ -42,7 +42,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.Pair;
 
@@ -183,8 +183,8 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 
         cfs.forceBlockingFlush();
 
-        HashMultimap<Long, SSTableReader> buckets = HashMultimap.create();
-        List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
+        HashMultimap<Long, AbstractSSTableReader> buckets = HashMultimap.create();
+        List<AbstractSSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
 
         // We'll put 3 sstables into the newest bucket
         for (int i = 0 ; i < 3; i++)
@@ -260,7 +260,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
             .add("val", value).build().applyUnsafe();
 
         cfs.forceBlockingFlush();
-        SSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
         Thread.sleep(10);
 
         key = Util.dk(String.valueOf("nonexpired"));
@@ -278,7 +278,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, "MILLISECONDS");
         options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
         TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             twcs.addSSTable(sstable);
         twcs.startup();
         assertNull(twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
@@ -286,7 +286,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
-        SSTableReader sstable = t.transaction.originals().iterator().next();
+        AbstractSSTableReader sstable = t.transaction.originals().iterator().next();
         assertEquals(sstable, expiredSSTable);
         t.transaction.abort();
     }
@@ -308,7 +308,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
             .add("val", value).build().applyUnsafe();
 
         cfs.forceBlockingFlush();
-        SSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader expiredSSTable = cfs.getLiveSSTables().iterator().next();
         Thread.sleep(10);
 
         new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis() - 1000, key.getKey())
@@ -329,7 +329,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, "MILLISECONDS");
         options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
         TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             twcs.addSSTable(sstable);
 
         twcs.startup();
@@ -339,14 +339,14 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 
         options.put(TimeWindowCompactionStrategyOptions.UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_KEY, "true");
         twcs = new TimeWindowCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             twcs.addSSTable(sstable);
 
         twcs.startup();
         AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.transaction.originals()));
-        SSTableReader sstable = t.transaction.originals().iterator().next();
+        AbstractSSTableReader sstable = t.transaction.originals().iterator().next();
         assertEquals(sstable, expiredSSTable);
         twcs.shutdown();
         t.transaction.abort();

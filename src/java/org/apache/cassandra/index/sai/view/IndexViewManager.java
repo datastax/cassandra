@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -82,7 +82,7 @@ public class IndexViewManager
      *
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate, boolean rename)
+    public Set<SSTableContext> update(Collection<AbstractSSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate, boolean rename)
     {
         // Valid indexes on the left and invalid SSTable contexts on the right...
         Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate, rename);
@@ -90,7 +90,7 @@ public class IndexViewManager
         View currentView, newView;
         Collection<SSTableIndex> newViewIndexes = new HashSet<>();
         Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
-        Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
+        Collection<AbstractSSTableReader> toRemove = new HashSet<>(oldSSTables);
         
         do
         {
@@ -103,7 +103,7 @@ public class IndexViewManager
                 // When aborting early open transaction, toRemove may have the same sstable files as newSSTableContexts,
                 // but different SSTableReader java objects with different start positions. So we need to release them
                 // from existing view.  see DSP-19677
-                SSTableReader sstable = sstableIndex.getSSTable();
+                AbstractSSTableReader sstable = sstableIndex.getSSTable();
                 if (toRemove.contains(sstable) || newViewIndexes.contains(sstableIndex))
                     releasableIndexes.add(sstableIndex);
                 else
@@ -130,14 +130,14 @@ public class IndexViewManager
         return indexes.right;
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    public void drop(Collection<AbstractSSTableReader> sstablesToRebuild)
     {
         View currentView = view.get();
 
-        Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
+        Set<AbstractSSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
         for (SSTableIndex index : currentView)
         {
-            SSTableReader sstable = index.getSSTable();
+            AbstractSSTableReader sstable = index.getSSTable();
             if (!toRemove.contains(sstable))
                 continue;
 

@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -40,7 +39,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
 
@@ -64,7 +63,7 @@ public class ActiveCompactionsTest extends CQLTester
         }
 
         Index idx = getCurrentColumnFamilyStore().indexManager.getIndexByName(idxName);
-        Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
         SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, false);
 
         MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
@@ -85,7 +84,7 @@ public class ActiveCompactionsTest extends CQLTester
             execute("INSERT INTO %s (pk, ck, a, b) VALUES ("+i+", 2, 3, 4)");
             getCurrentColumnFamilyStore().forceBlockingFlush();
         }
-        Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
         try (LifecycleTransaction txn = getCurrentColumnFamilyStore().getTracker().tryModify(sstables, OperationType.INDEX_SUMMARY))
         {
             Map<TableId, LifecycleTransaction> transactions = ImmutableMap.<TableId, LifecycleTransaction>builder().put(getCurrentColumnFamilyStore().metadata().id, txn).build();
@@ -135,7 +134,7 @@ public class ActiveCompactionsTest extends CQLTester
             getCurrentColumnFamilyStore().forceBlockingFlush();
         }
 
-        SSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
+        AbstractSSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
         try (LifecycleTransaction txn = getCurrentColumnFamilyStore().getTracker().tryModify(sstable, OperationType.SCRUB))
         {
             MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
@@ -160,7 +159,7 @@ public class ActiveCompactionsTest extends CQLTester
             getCurrentColumnFamilyStore().forceBlockingFlush();
         }
 
-        SSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
+        AbstractSSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
         MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
         CompactionManager.instance.verifyOne(getCurrentColumnFamilyStore(), sstable, new Verifier.Options.Builder().build(), mockActiveCompactions);
         assertTrue(mockActiveCompactions.finished);

@@ -17,16 +17,16 @@
  */
 package org.apache.cassandra.notifications;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * Fired right before removing an SSTable.
  */
 public class SSTableDeletingNotification implements INotification
 {
-    public final SSTableReader deleting;
+    public final AbstractSSTableReader deleting;
 
-    public SSTableDeletingNotification(SSTableReader deleting)
+    public SSTableDeletingNotification(AbstractSSTableReader deleting)
     {
         this.deleting = deleting;
     }

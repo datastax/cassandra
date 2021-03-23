@@ -29,7 +29,7 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 
 /**
@@ -51,7 +51,7 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     }
 
     @Override
-    public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables)
     {
         throw new UnsupportedOperationException("This method should never be called on SingleSSTableLCSTask");
     }
@@ -66,7 +66,7 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     @Override
     protected void runMayThrow()
     {
-        SSTableReader sstable = transaction.onlyOne();
+        AbstractSSTableReader sstable = transaction.onlyOne();
         StatsMetadata metadataBefore = sstable.getSSTableMetadata();
         if (level == metadataBefore.sstableLevel)
         {
@@ -89,7 +89,7 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
         finishTransaction(sstable);
     }
 
-    private void finishTransaction(SSTableReader sstable)
+    private void finishTransaction(AbstractSSTableReader sstable)
     {
         // we simply cancel the transaction since no sstables are added or removed - we just
         // write a new sstable metadata above and then atomically move the new file on top of the old

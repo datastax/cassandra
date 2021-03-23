@@ -29,7 +29,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -110,7 +110,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as LZ4 "fast"
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             LZ4Compressor compressor = (LZ4Compressor) sstable.getCompressionMetadata().parameters.getSstableCompressor();
             assertEquals(LZ4Compressor.LZ4_FAST_COMPRESSOR, compressor.compressorType);
@@ -135,7 +135,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as LZ4 "fast" mode
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             LZ4Compressor compressor = (LZ4Compressor) sstable.getCompressionMetadata().parameters.getSstableCompressor();
             assertEquals(LZ4Compressor.LZ4_FAST_COMPRESSOR, compressor.compressorType);
@@ -159,7 +159,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as LZ4
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
         });
@@ -181,7 +181,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as LZ4
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
         });
@@ -204,7 +204,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as Noop compressor
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof NoopCompressor);
         });
@@ -228,7 +228,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as Zstd
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof ZstdCompressor);
         });
@@ -241,7 +241,7 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore store = flushTwice();
 
         // Should flush as LZ4
-        Set<SSTableReader> sstables = store.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = store.getLiveSSTables();
         sstables.forEach(sstable -> {
             assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
         });

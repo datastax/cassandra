@@ -31,7 +31,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -61,7 +61,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     private long repairedAt = -1;
     // the set of final readers we will expose on commit
     private final ILifecycleTransaction transaction; // the readers we are rewriting (updated as they are replaced)
-    private final List<SSTableReader> preparedForCommit = new ArrayList<>();
+    private final List<AbstractSSTableReader> preparedForCommit = new ArrayList<>();
 
     private long currentlyOpenedEarlyAt; // the position (in MB) in the target file we last (re)opened at
 
@@ -128,7 +128,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         {
             if (!transaction.isOffline() && index != null)
             {
-                for (SSTableReader reader : transaction.originals())
+                for (AbstractSSTableReader reader : transaction.originals())
                 {
                     if (reader.getCachedPosition(key, false) != null)
                     {
@@ -162,15 +162,15 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         {
             if (transaction.isOffline())
             {
-                for (SSTableReader reader : transaction.originals())
+                for (AbstractSSTableReader reader : transaction.originals())
                 {
-                    RowIndexEntry<?> index = reader.getPosition(key, SSTableReader.Operator.GE);
+                    RowIndexEntry<?> index = reader.getPosition(key, AbstractSSTableReader.Operator.GE);
                     NativeLibrary.trySkipCache(reader.getFilename(), 0, index == null ? 0 : index.position);
                 }
             }
             else
             {
-                SSTableReader reader = writer.setMaxDataAge(maxAge).openEarly();
+                AbstractSSTableReader reader = writer.setMaxDataAge(maxAge).openEarly();
                 if (reader != null)
                 {
                     transaction.update(reader, false);
@@ -214,7 +214,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
      * @param newReader the rewritten reader that replaces them for this region
      * @param lowerbound if !reset, must be non-null, and marks the exclusive lowerbound of the start for each sstable
      */
-    private void moveStarts(SSTableReader newReader, DecoratedKey lowerbound)
+    private void moveStarts(AbstractSSTableReader newReader, DecoratedKey lowerbound)
     {
         if (transaction.isOffline() || preemptiveOpenInterval == Long.MAX_VALUE)
             return;
@@ -232,11 +232,11 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         }
 
         cachedKeys.clear();
-        for (SSTableReader sstable : transaction.originals())
+        for (AbstractSSTableReader sstable : transaction.originals())
         {
             // we call getCurrentReplacement() to support multiple rewriters operating over the same source readers at once.
             // note: only one such writer should be written to at any moment
-            final SSTableReader latest = transaction.current(sstable);
+            final AbstractSSTableReader latest = transaction.current(sstable);
 
             // skip any sstables that we know to already be shadowed
             if (latest.first.compareTo(lowerbound) > 0)
@@ -258,7 +258,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
             DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
             assert newStart != null;
-            SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
+            AbstractSSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
             transaction.update(replacement, true);
         }
     }
@@ -268,7 +268,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         final List<KeyCacheKey> cacheKeys = new ArrayList<>();
         final WeakReference<InstrumentingCache<KeyCacheKey, ?>> cacheRef;
 
-        private InvalidateKeys(SSTableReader reader, Collection<DecoratedKey> invalidate)
+        private InvalidateKeys(AbstractSSTableReader reader, Collection<DecoratedKey> invalidate)
         {
             this.cacheRef = new WeakReference<>(reader.getKeyCache());
             if (cacheRef.get() != null)
@@ -314,7 +314,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         if (preemptiveOpenInterval != Long.MAX_VALUE)
         {
             // we leave it as a tmp file, but we open it and add it to the Tracker
-            SSTableReader reader = writer.setMaxDataAge(maxAge).openFinalEarly();
+            AbstractSSTableReader reader = writer.setMaxDataAge(maxAge).openFinalEarly();
             transaction.update(reader, false);
             moveStarts(reader, reader.last);
             transaction.checkpoint();
@@ -347,14 +347,14 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
      *
      *
      */
-    public List<SSTableReader> finish()
+    public List<AbstractSSTableReader> finish()
     {
         super.finish();
         return finished();
     }
 
     // returns, in list form, the
-    public List<SSTableReader> finished()
+    public List<AbstractSSTableReader> finished()
     {
         assert state() == State.COMMITTED || state() == State.READY_TO_COMMIT;
         return preparedForCommit;
@@ -372,7 +372,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         {
             assert writer.getFilePointer() > 0;
             writer.setRepairedAt(repairedAt).setOpenResult(true).prepareToCommit();
-            SSTableReader reader = writer.finished();
+            AbstractSSTableReader reader = writer.finished();
             transaction.update(reader, false);
             preparedForCommit.add(reader);
         }

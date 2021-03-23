@@ -26,7 +26,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CompressionMetadata.Chunk;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -125,7 +125,7 @@ public abstract class CompressionInfo
      * @param sections the file sections
      * @return a {@code CompressionInfo} that will computes the file chunks only upon request.
      */
-    static CompressionInfo newLazyInstance(CompressionMetadata metadata, List<SSTableReader.PartitionPositionBounds> sections)
+    static CompressionInfo newLazyInstance(CompressionMetadata metadata, List<AbstractBigTableReader.PartitionPositionBounds> sections)
     {
         if (metadata == null)
         {

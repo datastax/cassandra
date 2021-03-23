@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LogRecord.Type;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.utils.Throwables;
 
@@ -310,17 +310,17 @@ final class LogFile implements AutoCloseable
         addRecord(makeAddRecord(table));
     }
 
-    public void addAll(Type type, Iterable<SSTableReader> toBulkAdd)
+    public void addAll(Type type, Iterable<AbstractSSTableReader> toBulkAdd)
     {
         for (LogRecord record : makeRecords(type, toBulkAdd).values())
             addRecord(record);
     }
 
-    Map<SSTable, LogRecord> makeRecords(Type type, Iterable<SSTableReader> tables)
+    Map<SSTable, LogRecord> makeRecords(Type type, Iterable<AbstractSSTableReader> tables)
     {
         assert type == Type.ADD || type == Type.REMOVE;
 
-        for (SSTableReader sstable : tables)
+        for (AbstractSSTableReader sstable : tables)
         {
             File directory = sstable.descriptor.directory;
             String fileName = StringUtils.join(directory, File.separator, getFileName());

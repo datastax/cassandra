@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -37,7 +38,7 @@ import org.apache.cassandra.utils.Throwables;
 
 /**
  * {@link FileHandle} provides access to a file for reading, including the ones written by various {@link SequentialWriter}
- * instances, and it is typically used by {@link org.apache.cassandra.io.sstable.format.SSTableReader}.
+ * instances, and it is typically used by {@link AbstractSSTableReader}.
  *
  * Use {@link FileHandle.Builder} to create an instance, and call {@link #createReader()} (and its variants) to
  * access the readers for the underlying file.

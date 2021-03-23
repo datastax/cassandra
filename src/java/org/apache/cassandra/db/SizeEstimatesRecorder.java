@@ -28,7 +28,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -123,17 +123,17 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
             for (Range<Token> unwrappedRange : localRange.unwrap())
             {
                 // filter sstables that have partitions in this range.
-                Refs<SSTableReader> refs = null;
+                Refs<AbstractSSTableReader> refs = null;
                 long partitionsCount, meanPartitionSize;
 
                 try
                 {
                     while (refs == null)
                     {
-                        Iterable<SSTableReader> sstables = table.getTracker().getView().select(SSTableSet.CANONICAL);
+                        Iterable<AbstractSSTableReader> sstables = table.getTracker().getView().select(SSTableSet.CANONICAL);
                         SSTableIntervalTree tree = SSTableIntervalTree.build(sstables);
                         Range<PartitionPosition> r = Range.makeRowRange(unwrappedRange);
-                        Iterable<SSTableReader> canonicalSSTables = View.sstablesInBounds(r.left, r.right, tree);
+                        Iterable<AbstractSSTableReader> canonicalSSTables = View.sstablesInBounds(r.left, r.right, tree);
                         refs = Refs.tryRef(canonicalSSTables);
                     }
 
@@ -154,18 +154,18 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
         return estimates;
     }
 
-    private static long estimatePartitionsCount(Collection<SSTableReader> sstables, Range<Token> range)
+    private static long estimatePartitionsCount(Collection<AbstractSSTableReader> sstables, Range<Token> range)
     {
         long count = 0;
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             count += sstable.estimatedKeysForRanges(Collections.singleton(range));
         return count;
     }
 
-    private static long estimateMeanPartitionSize(Collection<SSTableReader> sstables)
+    private static long estimateMeanPartitionSize(Collection<AbstractSSTableReader> sstables)
     {
         long sum = 0, count = 0;
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             long n = sstable.getEstimatedPartitionSize().count();
             sum += sstable.getEstimatedPartitionSize().mean() * n;

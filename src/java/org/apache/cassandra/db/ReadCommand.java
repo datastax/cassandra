@@ -48,7 +48,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
@@ -789,7 +789,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     {
         final RepairedDataInfo repairedDataInfo;
         private final boolean isTrackingRepairedStatus;
-        Set<SSTableReader> repairedSSTables;
+        Set<AbstractSSTableReader> repairedSSTables;
         BiFunction<List<T>, RepairedDataInfo, T> repairedMerger;
         Function<T, UnfilteredPartitionIterator> postLimitAdditionalPartitions;
         List<T> repairedIters;
@@ -805,7 +805,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             this.isTrackingRepairedStatus = isTrackingRepairedStatus;
             if (isTrackingRepairedStatus)
             {
-                for (SSTableReader sstable : view.sstables)
+                for (AbstractSSTableReader sstable : view.sstables)
                 {
                     if (considerRepairedForTracking(sstable))
                     {
@@ -836,7 +836,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             unrepairedIters.add(iter);
         }
 
-        void addSSTableIterator(SSTableReader sstable, T iter)
+        void addSSTableIterator(AbstractSSTableReader sstable, T iter)
         {
             if (repairedSSTables != null && repairedSSTables.contains(sstable))
                 repairedIters.add(iter);
@@ -871,7 +871,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         // If an sstable is involved in a pending repair which is not yet committed, we mark the
         // repaired data info inconclusive, as the same data on other replicas may be in a
         // slightly different state.
-        private boolean considerRepairedForTracking(SSTableReader sstable)
+        private boolean considerRepairedForTracking(AbstractSSTableReader sstable)
         {
             if (!isTrackingRepairedStatus)
                 return false;

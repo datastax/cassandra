@@ -42,7 +42,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -122,7 +122,7 @@ public abstract class CompactionStress implements Runnable
         if (loadSSTables)
         {
             Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<AbstractSSTableReader> sstables = new ArrayList<>();
 
             //Offline open sstables
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
@@ -133,7 +133,7 @@ public abstract class CompactionStress implements Runnable
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(entry.getKey(), components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)

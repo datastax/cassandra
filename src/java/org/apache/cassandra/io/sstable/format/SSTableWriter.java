@@ -26,7 +26,6 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
@@ -69,7 +68,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     protected abstract class TransactionalProxy extends AbstractTransactional
     {
         // should be set during doPrepare()
-        protected SSTableReader finalReader;
+        protected AbstractSSTableReader finalReader;
         protected boolean openResult;
     }
 
@@ -262,15 +261,15 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     /**
      * Open the resultant SSTableReader before it has been fully written
      */
-    public abstract SSTableReader openEarly();
+    public abstract AbstractSSTableReader openEarly();
 
     /**
      * Open the resultant SSTableReader once it has been fully written, but before the
      * _set_ of tables that are being written together as one atomic operation are all ready
      */
-    public abstract SSTableReader openFinalEarly();
+    public abstract AbstractSSTableReader openFinalEarly();
 
-    public SSTableReader finish(long repairedAt, long maxDataAge, boolean openResult)
+    public AbstractSSTableReader finish(long repairedAt, long maxDataAge, boolean openResult)
     {
         if (repairedAt > 0)
             this.repairedAt = repairedAt;
@@ -278,7 +277,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return finish(openResult);
     }
 
-    public SSTableReader finish(boolean openResult)
+    public AbstractSSTableReader finish(boolean openResult)
     {
         setOpenResult(openResult);
         txnProxy.finish();
@@ -290,7 +289,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      * Open the resultant SSTableReader once it has been fully written, and all related state
      * is ready to be finalised including other sstables being written involved in the same operation
      */
-    public SSTableReader finished()
+    public AbstractSSTableReader finished()
     {
         return txnProxy.finalReader;
     }

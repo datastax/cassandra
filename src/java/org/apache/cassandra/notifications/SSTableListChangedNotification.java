@@ -20,15 +20,15 @@ package org.apache.cassandra.notifications;
 import java.util.Collection;
 
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class SSTableListChangedNotification implements INotification
 {
-    public final Collection<SSTableReader> removed;
-    public final Collection<SSTableReader> added;
+    public final Collection<AbstractSSTableReader> removed;
+    public final Collection<AbstractSSTableReader> added;
     public final OperationType compactionType;
 
-    public SSTableListChangedNotification(Collection<SSTableReader> added, Collection<SSTableReader> removed, OperationType compactionType)
+    public SSTableListChangedNotification(Collection<AbstractSSTableReader> added, Collection<AbstractSSTableReader> removed, OperationType compactionType)
     {
         this.removed = removed;
         this.added = added;

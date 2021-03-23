@@ -32,7 +32,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -104,7 +104,7 @@ public class SSTablesSystemView extends AbstractVirtualTable
 
                         for (SSTableIndex sstableIndex : columnContext.getView())
                         {
-                            SSTableReader sstable = sstableIndex.getSSTable();
+                            AbstractSSTableReader sstable = sstableIndex.getSSTable();
                             Descriptor descriptor = sstable.descriptor;
                             AbstractBounds<Token> bounds = sstable.getBounds();
 

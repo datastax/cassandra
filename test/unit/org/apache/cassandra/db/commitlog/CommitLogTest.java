@@ -58,7 +58,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.security.EncryptionContext;
@@ -910,7 +910,7 @@ public abstract class CommitLogTest
         if (performCompaction)
             cfs.forceMajorCompaction();
         // Make sure metadata saves and reads fine
-        for (SSTableReader reader : cfs.getLiveSSTables())
+        for (AbstractSSTableReader reader : cfs.getLiveSSTables())
             reader.reloadSSTableMetadata();
 
         CommitLog.instance.sync(true);

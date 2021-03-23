@@ -43,7 +43,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -146,9 +146,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public Map<String, Integer> getIndexIntervals()
     {
-        List<SSTableReader> sstables = getAllSSTables();
+        List<AbstractSSTableReader> sstables = getAllSSTables();
         Map<String, Integer> intervals = new HashMap<>(sstables.size());
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             intervals.put(sstable.getFilename(), (int) Math.round(sstable.getEffectiveIndexInterval()));
 
         return intervals;
@@ -156,9 +156,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public double getAverageIndexInterval()
     {
-        List<SSTableReader> sstables = getAllSSTables();
+        List<AbstractSSTableReader> sstables = getAllSSTables();
         double total = 0.0;
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             total += sstable.getEffectiveIndexInterval();
         return total / sstables.size();
     }
@@ -175,14 +175,14 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     public double getMemoryPoolSizeInMB()
     {
         long total = 0;
-        for (SSTableReader sstable : getAllSSTables())
+        for (AbstractSSTableReader sstable : getAllSSTables())
             total += sstable.getIndexSummaryOffHeapSize();
         return total / 1024.0 / 1024.0;
     }
 
-    private List<SSTableReader> getAllSSTables()
+    private List<AbstractSSTableReader> getAllSSTables()
     {
-        List<SSTableReader> result = new ArrayList<>();
+        List<AbstractSSTableReader> result = new ArrayList<>();
         for (Keyspace ks : Keyspace.all())
         {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
@@ -202,13 +202,13 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     @SuppressWarnings("resource")
     private Pair<Long, Map<TableId, LifecycleTransaction>> getRestributionTransactions()
     {
-        List<SSTableReader> allCompacting = new ArrayList<>();
+        List<AbstractSSTableReader> allCompacting = new ArrayList<>();
         Map<TableId, LifecycleTransaction> allNonCompacting = new HashMap<>();
         for (Keyspace ks : Keyspace.all())
         {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
             {
-                Set<SSTableReader> nonCompacting, allSSTables;
+                Set<AbstractSSTableReader> nonCompacting, allSSTables;
                 LifecycleTransaction txn;
                 do
                 {
@@ -222,7 +222,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 allCompacting.addAll(Sets.difference(allSSTables, nonCompacting));
             }
         }
-        long nonRedistributingOffHeapSize = allCompacting.stream().mapToLong(SSTableReader::getIndexSummaryOffHeapSize).sum();
+        long nonRedistributingOffHeapSize = allCompacting.stream().mapToLong(AbstractSSTableReader::getIndexSummaryOffHeapSize).sum();
         return Pair.create(nonRedistributingOffHeapSize, allNonCompacting);
     }
 
@@ -267,7 +267,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
      * @return a list of new SSTableReader instances
      */
     @VisibleForTesting
-    public static List<SSTableReader> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
+    public static List<AbstractSSTableReader> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
     {
         return CompactionManager.instance.runIndexSummaryRedistribution(redistribution);
     }

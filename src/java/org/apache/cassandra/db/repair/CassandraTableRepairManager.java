@@ -31,10 +31,9 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
-import org.apache.cassandra.repair.Validator;
 
 public class CassandraTableRepairManager implements TableRepairManager
 {
@@ -68,9 +67,9 @@ public class CassandraTableRepairManager implements TableRepairManager
     {
         if (force || !cfs.snapshotExists(name))
         {
-            cfs.snapshot(name, new Predicate<SSTableReader>()
+            cfs.snapshot(name, new Predicate<AbstractSSTableReader>()
             {
-                public boolean apply(SSTableReader sstable)
+                public boolean apply(AbstractSSTableReader sstable)
                 {
                     return sstable != null &&
                            !sstable.metadata().isIndex() && // exclude SSTables from 2i

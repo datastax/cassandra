@@ -28,7 +28,7 @@ import java.util.function.Predicate;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 public final class CompactionInfo
@@ -49,14 +49,14 @@ public final class CompactionInfo
     private final long total;
     private final Unit unit;
     private final UUID compactionId;
-    private final ImmutableSet<SSTableReader> sstables;
+    private final ImmutableSet<AbstractSSTableReader> sstables;
 
-    public CompactionInfo(TableMetadata metadata, OperationType tasktype, long bytesComplete, long totalBytes, UUID compactionId, Collection<SSTableReader> sstables)
+    public CompactionInfo(TableMetadata metadata, OperationType tasktype, long bytesComplete, long totalBytes, UUID compactionId, Collection<AbstractSSTableReader> sstables)
     {
         this(metadata, tasktype, bytesComplete, totalBytes, Unit.BYTES, compactionId, sstables);
     }
 
-    private CompactionInfo(TableMetadata metadata, OperationType tasktype, long completed, long total, Unit unit, UUID compactionId, Collection<SSTableReader> sstables)
+    private CompactionInfo(TableMetadata metadata, OperationType tasktype, long completed, long total, Unit unit, UUID compactionId, Collection<AbstractSSTableReader> sstables)
     {
         this.tasktype = tasktype;
         this.completed = completed;
@@ -122,7 +122,7 @@ public final class CompactionInfo
         return unit;
     }
 
-    public Set<SSTableReader> getSSTables()
+    public Set<AbstractSSTableReader> getSSTables()
     {
         return sstables;
     }
@@ -158,7 +158,7 @@ public final class CompactionInfo
         return ret;
     }
 
-    boolean shouldStop(Predicate<SSTableReader> sstablePredicate)
+    boolean shouldStop(Predicate<AbstractSSTableReader> sstablePredicate)
     {
         if (sstables.isEmpty())
         {

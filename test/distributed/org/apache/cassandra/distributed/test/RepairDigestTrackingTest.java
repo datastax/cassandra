@@ -19,8 +19,6 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
@@ -39,12 +37,11 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.SnapshotVerbHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.DiagnosticSnapshotService;
 
@@ -365,13 +362,13 @@ public class RepairDigestTrackingTest extends TestBaseImpl
         {
             try
             {
-                Iterator<SSTableReader> sstables = Keyspace.open(KEYSPACE)
-                                                           .getColumnFamilyStore(TABLE)
-                                                           .getLiveSSTables()
-                                                           .iterator();
+                Iterator<AbstractSSTableReader> sstables = Keyspace.open(KEYSPACE)
+                                                                   .getColumnFamilyStore(TABLE)
+                                                                   .getLiveSSTables()
+                                                                   .iterator();
                 while (sstables.hasNext())
                 {
-                    SSTableReader sstable = sstables.next();
+                    AbstractSSTableReader sstable = sstables.next();
                     Descriptor descriptor = sstable.descriptor;
                     Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer()
                                                                               .deserialize(descriptor, EnumSet.of(MetadataType.STATS));
@@ -393,13 +390,13 @@ public class RepairDigestTrackingTest extends TestBaseImpl
         {
             try
             {
-                Iterator<SSTableReader> sstables = Keyspace.open(KEYSPACE)
-                                                           .getColumnFamilyStore(TABLE)
-                                                           .getLiveSSTables()
-                                                           .iterator();
+                Iterator<AbstractSSTableReader> sstables = Keyspace.open(KEYSPACE)
+                                                                   .getColumnFamilyStore(TABLE)
+                                                                   .getLiveSSTables()
+                                                                   .iterator();
                 while (sstables.hasNext())
                 {
-                    SSTableReader sstable = sstables.next();
+                    AbstractSSTableReader sstable = sstables.next();
                     Descriptor descriptor = sstable.descriptor;
                     descriptor.getMetadataSerializer()
                               .mutateRepairMetadata(descriptor, System.currentTimeMillis(), null, false);
@@ -417,13 +414,13 @@ public class RepairDigestTrackingTest extends TestBaseImpl
         {
             try
             {
-                Iterator<SSTableReader> sstables = Keyspace.open(KEYSPACE)
-                                                           .getColumnFamilyStore(TABLE)
-                                                           .getLiveSSTables()
-                                                           .iterator();
+                Iterator<AbstractSSTableReader> sstables = Keyspace.open(KEYSPACE)
+                                                                   .getColumnFamilyStore(TABLE)
+                                                                   .getLiveSSTables()
+                                                                   .iterator();
                 while (sstables.hasNext())
                 {
-                    SSTableReader sstable = sstables.next();
+                    AbstractSSTableReader sstable = sstables.next();
                     Descriptor descriptor = sstable.descriptor;
                     Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer()
                                                                               .deserialize(descriptor, EnumSet.of(MetadataType.STATS));

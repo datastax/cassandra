@@ -46,7 +46,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileHandle;
@@ -70,7 +70,7 @@ public class BigTableZeroCopyWriterTest
     public static final String CF_INDEXED = "Indexed1";
     public static final String CF_STANDARDLOWINDEXINTERVAL = "StandardLowIndexInterval";
 
-    public static SSTableReader sstable;
+    public static AbstractSSTableReader sstable;
     public static ColumnFamilyStore store;
     private static int expectedRowCount;
 
@@ -165,9 +165,9 @@ public class BigTableZeroCopyWriterTest
             }
         }
 
-        Collection<SSTableReader> readers = btzcw.finish(true);
+        Collection<AbstractSSTableReader> readers = btzcw.finish(true);
 
-        SSTableReader reader = readers.toArray(new SSTableReader[0])[0];
+        AbstractSSTableReader reader = readers.toArray(new AbstractSSTableReader[0])[0];
 
         assertNotEquals(sstable.getFilename(), reader.getFilename());
         assertEquals(sstable.estimatedKeys(), reader.estimatedKeys());
@@ -196,7 +196,7 @@ public class BigTableZeroCopyWriterTest
         assertEquals(expected, count);
     }
 
-    private Pair<DataInputPlus, Long> getSSTableComponentData(SSTableReader sstable, Component component,
+    private Pair<DataInputPlus, Long> getSSTableComponentData(AbstractSSTableReader sstable, Component component,
                                                               Function<ByteBuffer, DataInputPlus> bufferMapper)
     {
         FileHandle componentFile = new FileHandle.Builder(sstable.descriptor.filenameFor(component))

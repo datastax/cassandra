@@ -32,7 +32,7 @@ import com.codahale.metrics.MetricRegistryListener;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -71,9 +71,9 @@ public class ColumnFamilyMetricTest
             applyMutation(cfs.metadata(), String.valueOf(j), ByteBufferUtil.EMPTY_BYTE_BUFFER, FBUtilities.timestampMicros());
         }
         cfs.forceBlockingFlush();
-        Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         long size = 0;
-        for (SSTableReader reader : sstables)
+        for (AbstractSSTableReader reader : sstables)
         {
             size += reader.bytesOnDisk();
         }

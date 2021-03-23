@@ -29,7 +29,6 @@ import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -42,9 +41,8 @@ import org.apache.cassandra.distributed.shared.NetworkTopology;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.format.ForwardingSSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
-import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 
@@ -161,9 +159,9 @@ public class JVMStabilityInspectorCorruptSSTableExceptionTest extends TestBaseIm
             ColumnFamilyStore cf = Keyspace.open(keyspace).getColumnFamilyStore(table);
             cf.forceBlockingFlush();
 
-            Set<SSTableReader> remove = cf.getLiveSSTables();
-            Set<SSTableReader> replace = new HashSet<>();
-            for (SSTableReader r : remove)
+            Set<AbstractSSTableReader> remove = cf.getLiveSSTables();
+            Set<AbstractSSTableReader> replace = new HashSet<>();
+            for (AbstractSSTableReader r : remove)
                 replace.add(new CorruptedSSTableReader(r));
 
             cf.getTracker().removeUnsafe(remove);
@@ -181,7 +179,7 @@ public class JVMStabilityInspectorCorruptSSTableExceptionTest extends TestBaseIm
 
     private static final class CorruptedSSTableReader extends ForwardingSSTableReader
     {
-        public CorruptedSSTableReader(SSTableReader delegate)
+        public CorruptedSSTableReader(AbstractSSTableReader delegate)
         {
             super(delegate);
         }

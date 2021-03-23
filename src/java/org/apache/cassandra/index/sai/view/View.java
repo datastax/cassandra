@@ -38,7 +38,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
@@ -92,7 +92,7 @@ public class View implements Iterable<SSTableIndex>
         return view.values();
     }
 
-    public boolean containsSSTable(SSTableReader sstable)
+    public boolean containsSSTable(AbstractSSTableReader sstable)
     {
         return view.containsKey(sstable.descriptor);
     }

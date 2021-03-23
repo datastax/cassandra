@@ -58,7 +58,7 @@ import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -81,7 +81,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     protected static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexBuilder.class);
 
     // make sure only one builder can write to per sstable files when multiple storage-attached indexes are created simultaneously.
-    private static final Map<SSTableReader, CountDownLatch> inProgress = Maps.newConcurrentMap();
+    private static final Map<AbstractSSTableReader, CountDownLatch> inProgress = Maps.newConcurrentMap();
 
     private final StorageAttachedIndexGroup group;
     private final TableMetadata metadata;
@@ -90,12 +90,12 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private final boolean isFullRebuild;
     private final boolean isInitialBuild;
 
-    private final SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables;
+    private final SortedMap<AbstractSSTableReader, Set<StorageAttachedIndex>> sstables;
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    StorageAttachedIndexBuilder(StorageAttachedIndexGroup group, SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables, boolean isFullRebuild, boolean isInitialBuild)
+    StorageAttachedIndexBuilder(StorageAttachedIndexGroup group, SortedMap<AbstractSSTableReader, Set<StorageAttachedIndex>> sstables, boolean isFullRebuild, boolean isInitialBuild)
     {
         this.group = group;
         this.metadata = group.metadata();
@@ -103,15 +103,15 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         this.tracker = group.table().getTracker();
         this.isFullRebuild = isFullRebuild;
         this.isInitialBuild = isInitialBuild;
-        this.totalSizeInBytes = sstables.keySet().stream().mapToLong(SSTableReader::uncompressedLength).sum();
+        this.totalSizeInBytes = sstables.keySet().stream().mapToLong(AbstractSSTableReader::uncompressedLength).sum();
     }
 
     @Override
     public void build()
     {
-        for (Map.Entry<SSTableReader, Set<StorageAttachedIndex>> e : sstables.entrySet())
+        for (Map.Entry<AbstractSSTableReader, Set<StorageAttachedIndex>> e : sstables.entrySet())
         {
-            SSTableReader sstable = e.getKey();
+            AbstractSSTableReader sstable = e.getKey();
             Set<StorageAttachedIndex> indexes = e.getValue();
 
             Set<StorageAttachedIndex> existing = validateIndexes(indexes, sstable.descriptor);
@@ -135,12 +135,12 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     /**
      * @return true if index build should be stopped
      */
-    private boolean indexSSTable(SSTableReader sstable, Set<StorageAttachedIndex> indexes)
+    private boolean indexSSTable(AbstractSSTableReader sstable, Set<StorageAttachedIndex> indexes)
     {
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
 
-        Ref<SSTableReader> ref = sstable.tryRef();
+        Ref<AbstractSSTableReader> ref = sstable.tryRef();
         if (ref == null)
         {
             logger.warn(logMessage("Couldn't acquire reference to the SSTable {}. It may have been removed."), sstable.descriptor);
@@ -176,7 +176,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                    RowIndexEntry indexEntry = sstable.getPosition(key, AbstractSSTableReader.Operator.EQ);
                     dataFile.seek(indexEntry.position);
                     ByteBufferUtil.skipShortLength(dataFile); // key
 
@@ -275,7 +275,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
      * if the per sstable index files are already created, not need to write it again, unless found corrupted on rebuild
      * if not created, try to acquire a lock, so only one builder will generate per sstable index files
      */
-    private CountDownLatch shouldWriteTokenOffsetFiles(SSTableReader sstable)
+    private CountDownLatch shouldWriteTokenOffsetFiles(AbstractSSTableReader sstable)
     {
         // if per-table files are incomplete or checksum failed during full rebuild.
         if (!IndexComponents.isGroupIndexComplete(sstable.descriptor) ||
@@ -293,7 +293,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     }
 
     private void completeSSTable(SSTableFlushObserver indexWriter,
-                                 SSTableReader sstable,
+                                 AbstractSSTableReader sstable,
                                  Set<StorageAttachedIndex> indexes,
                                  CountDownLatch latch) throws InterruptedException
     {

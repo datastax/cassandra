@@ -35,7 +35,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState.Action;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
@@ -78,9 +78,9 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         Tracker tracker = new Tracker(null, false);
-        SSTableReader[] readers = readersArray(0, 3, cfs);
-        SSTableReader[] readers2 = readersArray(0, 4, cfs);
-        SSTableReader[] readers3 = readersArray(0, 4, cfs);
+        AbstractSSTableReader[] readers = readersArray(0, 3, cfs);
+        AbstractSSTableReader[] readers2 = readersArray(0, 4, cfs);
+        AbstractSSTableReader[] readers3 = readersArray(0, 4, cfs);
         tracker.addInitialSSTables(copyOf(readers));
         LifecycleTransaction txn = tracker.tryModify(copyOf(readers), OperationType.UNKNOWN);
 
@@ -142,14 +142,14 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         Tracker tracker = new Tracker(null, false);
-        List<SSTableReader> readers = readers(0, 3, cfs);
+        List<AbstractSSTableReader> readers = readers(0, 3, cfs);
         tracker.addInitialSSTables(readers);
         LifecycleTransaction txn = tracker.tryModify(readers, OperationType.UNKNOWN);
 
-        SSTableReader cancel = readers.get(0);
-        SSTableReader update = readers(1, 2, cfs).get(0);
-        SSTableReader fresh = readers(3, 4,cfs).get(0);
-        SSTableReader notPresent = readers(4, 5, cfs).get(0);
+        AbstractSSTableReader cancel = readers.get(0);
+        AbstractSSTableReader update = readers(1, 2, cfs).get(0);
+        AbstractSSTableReader fresh = readers(3, 4, cfs).get(0);
+        AbstractSSTableReader notPresent = readers(4, 5, cfs).get(0);
 
         txn.cancel(cancel);
         txn.update(update, true);
@@ -186,7 +186,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         Tracker tracker = new Tracker(null, false);
-        List<SSTableReader> readers = readers(0, 4, cfs);
+        List<AbstractSSTableReader> readers = readers(0, 4, cfs);
         tracker.addInitialSSTables(readers);
         LifecycleTransaction txn = tracker.tryModify(readers, OperationType.UNKNOWN);
         txn.cancel(readers.get(3));
@@ -208,7 +208,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         Assert.assertTrue(failed);
     }
 
-    private static void testBadUpdate(LifecycleTransaction txn, SSTableReader update, boolean original)
+    private static void testBadUpdate(LifecycleTransaction txn, AbstractSSTableReader update, boolean original)
     {
         boolean failed = false;
         try
@@ -222,7 +222,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         Assert.assertTrue(failed);
     }
 
-    private static void testBadObsolete(LifecycleTransaction txn, SSTableReader update)
+    private static void testBadObsolete(LifecycleTransaction txn, AbstractSSTableReader update)
     {
         boolean failed = false;
         try
@@ -236,7 +236,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         Assert.assertTrue(failed);
     }
 
-    private static void testBadCancel(LifecycleTransaction txn, SSTableReader cancel)
+    private static void testBadCancel(LifecycleTransaction txn, AbstractSSTableReader cancel)
     {
         boolean failed = false;
         try
@@ -253,23 +253,23 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     protected TestableTransaction newTest()
     {
         LogTransaction.waitForDeletions();
-        SSTableReader.resetTidying();
+        AbstractSSTableReader.resetTidying();
         return new TxnTest();
     }
 
     private static final class TxnTest extends TestableTransaction
     {
-        final List<SSTableReader> originals;
-        final List<SSTableReader> untouchedOriginals;
-        final List<SSTableReader> loggedUpdate;
-        final List<SSTableReader> loggedObsolete;
-        final List<SSTableReader> stagedObsolete;
-        final List<SSTableReader> loggedNew;
-        final List<SSTableReader> stagedNew;
+        final List<AbstractSSTableReader> originals;
+        final List<AbstractSSTableReader> untouchedOriginals;
+        final List<AbstractSSTableReader> loggedUpdate;
+        final List<AbstractSSTableReader> loggedObsolete;
+        final List<AbstractSSTableReader> stagedObsolete;
+        final List<AbstractSSTableReader> loggedNew;
+        final List<AbstractSSTableReader> stagedNew;
         final Tracker tracker;
         final LifecycleTransaction txn;
 
-        private static Tracker tracker(ColumnFamilyStore cfs, List<SSTableReader> readers)
+        private static Tracker tracker(ColumnFamilyStore cfs, List<AbstractSSTableReader> readers)
         {
             Tracker tracker = new Tracker(new Memtable(new AtomicReference<>(CommitLogPosition.NONE), cfs), false);
             tracker.addInitialSSTables(readers);
@@ -286,17 +286,17 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
             this(cfs, readers(0, 8, cfs));
         }
 
-        private TxnTest(ColumnFamilyStore cfs, List<SSTableReader> readers)
+        private TxnTest(ColumnFamilyStore cfs, List<AbstractSSTableReader> readers)
         {
             this(tracker(cfs, readers), readers);
         }
 
-        private TxnTest(Tracker tracker, List<SSTableReader> readers)
+        private TxnTest(Tracker tracker, List<AbstractSSTableReader> readers)
         {
             this(tracker, readers, tracker.tryModify(readers, OperationType.UNKNOWN));
         }
 
-        private TxnTest(Tracker tracker, List<SSTableReader> readers, LifecycleTransaction txn)
+        private TxnTest(Tracker tracker, List<AbstractSSTableReader> readers, LifecycleTransaction txn)
         {
             super(txn);
             this.tracker = tracker;
@@ -311,9 +311,9 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
             untouchedOriginals = originals.subList(6, 8);
         }
 
-        private ReaderState state(SSTableReader reader, State state)
+        private ReaderState state(AbstractSSTableReader reader, State state)
         {
-            SSTableReader original = select(reader, originals);
+            AbstractSSTableReader original = select(reader, originals);
             boolean isOriginal = original != null;
 
             switch (state)
@@ -327,7 +327,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
                 {
                     ReaderState prev = state(reader, State.IN_PROGRESS);
                     Action logged;
-                    SSTableReader visible;
+                    AbstractSSTableReader visible;
                     if (prev.staged == Action.NONE)
                     {
                         logged = prev.logged;
@@ -345,27 +345,27 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
                 {
                     Action logged = Action.get(loggedUpdate.contains(reader) || loggedNew.contains(reader), loggedObsolete.contains(reader));
                     Action staged = Action.get(stagedNew.contains(reader), stagedObsolete.contains(reader));
-                    SSTableReader currentlyVisible = ReaderState.visible(reader, in(loggedObsolete), loggedNew, loggedUpdate, originals);
-                    SSTableReader nextVisible = ReaderState.visible(reader, orIn(stagedObsolete, loggedObsolete), stagedNew, loggedNew, loggedUpdate, originals);
+                    AbstractSSTableReader currentlyVisible = ReaderState.visible(reader, in(loggedObsolete), loggedNew, loggedUpdate, originals);
+                    AbstractSSTableReader nextVisible = ReaderState.visible(reader, orIn(stagedObsolete, loggedObsolete), stagedNew, loggedNew, loggedUpdate, originals);
                     return new ReaderState(logged, staged, currentlyVisible, nextVisible, isOriginal);
                 }
             }
             throw new IllegalStateException();
         }
 
-        private List<Pair<SSTableReader, ReaderState>> states(State state)
+        private List<Pair<AbstractSSTableReader, ReaderState>> states(State state)
         {
-            List<Pair<SSTableReader, ReaderState>> result = new ArrayList<>();
-            for (SSTableReader reader : concat(originals, loggedNew, stagedNew))
+            List<Pair<AbstractSSTableReader, ReaderState>> result = new ArrayList<>();
+            for (AbstractSSTableReader reader : concat(originals, loggedNew, stagedNew))
                 result.add(Pair.create(reader, state(reader, state)));
             return result;
         }
 
         protected void doAssert(State state)
         {
-            for (Pair<SSTableReader, ReaderState> pair : states(state))
+            for (Pair<AbstractSSTableReader, ReaderState> pair : states(state))
             {
-                SSTableReader reader = pair.left;
+                AbstractSSTableReader reader = pair.left;
                 ReaderState readerState = pair.right;
 
                 Assert.assertEquals(readerState, txn.state(reader));
@@ -390,7 +390,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
             doAssert(State.ABORTED);
             Assert.assertEquals(0, tracker.getView().compacting.size());
             Assert.assertEquals(8, tracker.getView().sstables.size());
-            for (SSTableReader reader : concat(loggedNew, stagedNew))
+            for (AbstractSSTableReader reader : concat(loggedNew, stagedNew))
                 Assert.assertTrue(reader.selfRef().globalCount() == 0);
         }
 
@@ -399,7 +399,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
             doAssert(State.READY_TO_COMMIT);
             Assert.assertEquals(0, tracker.getView().compacting.size());
             Assert.assertEquals(6, tracker.getView().sstables.size());
-            for (SSTableReader reader : concat(loggedObsolete, stagedObsolete))
+            for (AbstractSSTableReader reader : concat(loggedObsolete, stagedObsolete))
                 Assert.assertTrue(reader.selfRef().globalCount() == 0);
         }
 
@@ -410,28 +410,28 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
         }
     }
 
-    private static SSTableReader[] readersArray(int lb, int ub, ColumnFamilyStore cfs)
+    private static AbstractSSTableReader[] readersArray(int lb, int ub, ColumnFamilyStore cfs)
     {
-        return readers(lb, ub, cfs).toArray(new SSTableReader[0]);
+        return readers(lb, ub, cfs).toArray(new AbstractSSTableReader[0]);
     }
 
-    private static List<SSTableReader> readers(int lb, int ub, ColumnFamilyStore cfs)
+    private static List<AbstractSSTableReader> readers(int lb, int ub, ColumnFamilyStore cfs)
     {
-        List<SSTableReader> readers = new ArrayList<>();
+        List<AbstractSSTableReader> readers = new ArrayList<>();
         for (int i = lb ; i < ub ; i++)
             readers.add(MockSchema.sstable(i, i, true, cfs));
         return copyOf(readers);
     }
 
-    private static void update(LifecycleTransaction txn, Iterable<SSTableReader> readers, boolean originals)
+    private static void update(LifecycleTransaction txn, Iterable<AbstractSSTableReader> readers, boolean originals)
     {
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
             txn.update(reader, originals);
     }
 
-    private static void obsolete(LifecycleTransaction txn, Iterable<SSTableReader> readers)
+    private static void obsolete(LifecycleTransaction txn, Iterable<AbstractSSTableReader> readers)
     {
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
             txn.obsolete(reader);
     }
 }

@@ -53,9 +53,8 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -626,7 +625,7 @@ public class CustomCassandraIndex implements Index
         baseCfs.forceBlockingFlush();
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL));
-             Refs<SSTableReader> sstables = viewFragment.refs)
+             Refs<AbstractSSTableReader> sstables = viewFragment.refs)
         {
             if (sstables.isEmpty())
             {
@@ -652,10 +651,10 @@ public class CustomCassandraIndex implements Index
         logger.info("Index build of {} complete", metadata.name);
     }
 
-    private static String getSSTableNames(Collection<SSTableReader> sstables)
+    private static String getSSTableNames(Collection<AbstractSSTableReader> sstables)
     {
         return StreamSupport.stream(sstables.spliterator(), false)
-                            .map(SSTableReader::toString)
+                            .map(AbstractSSTableReader::toString)
                             .collect(Collectors.joining(", "));
     }
 }

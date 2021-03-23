@@ -394,12 +394,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // be notified on the initial loading.
         data.subscribe(StorageService.instance.sstablesTracker);
 
-        Collection<SSTableReader> sstables = null;
+        Collection<AbstractSSTableReader> sstables = null;
         // scan for sstables corresponding to this cf and load them
         if (data.loadsstables)
         {
             Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            sstables = AbstractSSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
             data.addInitialSSTablesWithoutUpdatingSize(sstables);
         }
 
@@ -1092,7 +1092,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 logger.trace("Flush task task {}@{} finished", hashCode(), name);
         }
 
-        public Collection<SSTableReader> flushMemtable(Memtable memtable, boolean flushNonCf2i)
+        public Collection<AbstractSSTableReader> flushMemtable(Memtable memtable, boolean flushNonCf2i)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Flush task task {}@{} flushing memtable {}", hashCode(), name, memtable);
@@ -1108,7 +1108,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
             long minBytesOnDisk = Long.MAX_VALUE;
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<AbstractSSTableReader> sstables = new ArrayList<>();
             try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH))
             {
                 List<Memtable.FlushRunnable> flushRunnables = null;
@@ -1177,8 +1177,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
                 for (SSTableMultiWriter writer : flushResults)
                 {
-                    Collection<SSTableReader> flushedSSTables = writer.finished();
-                    for (SSTableReader sstable : flushedSSTables)
+                    Collection<AbstractSSTableReader> flushedSSTables = writer.finished();
+                    for (AbstractSSTableReader sstable : flushedSSTables)
                     {
                         if (sstable != null)
                         {
@@ -1371,7 +1371,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return sstables whose key range overlaps with that of the given sstables, not including itself.
      * (The given sstables may or may not overlap with each other.)
      */
-    public Collection<SSTableReader> getOverlappingLiveSSTables(Iterable<SSTableReader> sstables)
+    public Collection<AbstractSSTableReader> getOverlappingLiveSSTables(Iterable<AbstractSSTableReader> sstables)
     {
         logger.trace("Checking for sstables overlapping {}", sstables);
 
@@ -1382,7 +1382,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         View view = data.getView();
 
-        List<SSTableReader> sortedByFirst = Lists.newArrayList(sstables);
+        List<AbstractSSTableReader> sortedByFirst = Lists.newArrayList(sstables);
         Collections.sort(sortedByFirst, (o1, o2) -> o1.first.compareTo(o2.first));
 
         List<AbstractBounds<PartitionPosition>> bounds = new ArrayList<>();
@@ -1396,7 +1396,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         only query the tree 2 times, for these intervals;
         [         ]    [          ]
          */
-        for (SSTableReader sstable : sortedByFirst)
+        for (AbstractSSTableReader sstable : sortedByFirst)
         {
             if (first == null)
             {
@@ -1419,7 +1419,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
         }
         bounds.add(AbstractBounds.bounds(first, true, last, true));
-        Set<SSTableReader> results = new HashSet<>();
+        Set<AbstractSSTableReader> results = new HashSet<>();
 
         for (AbstractBounds<PartitionPosition> bound : bounds)
             Iterables.addAll(results, view.liveSSTablesInBounds(bound.left, bound.right));
@@ -1430,12 +1430,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     /**
      * like getOverlappingSSTables, but acquires references before returning
      */
-    public Refs<SSTableReader> getAndReferenceOverlappingLiveSSTables(Iterable<SSTableReader> sstables)
+    public Refs<AbstractSSTableReader> getAndReferenceOverlappingLiveSSTables(Iterable<AbstractSSTableReader> sstables)
     {
         while (true)
         {
-            Iterable<SSTableReader> overlapped = getOverlappingLiveSSTables(sstables);
-            Refs<SSTableReader> refs = Refs.tryRef(overlapped);
+            Iterable<AbstractSSTableReader> overlapped = getOverlappingLiveSSTables(sstables);
+            Refs<AbstractSSTableReader> refs = Refs.tryRef(overlapped);
             if (refs != null)
                 return refs;
         }
@@ -1450,13 +1450,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * param @ filename - filename just flushed to disk
      */
-    public void addSSTable(SSTableReader sstable)
+    public void addSSTable(AbstractSSTableReader sstable)
     {
         assert sstable.getColumnFamilyName().equals(name);
         addSSTables(Collections.singletonList(sstable));
     }
 
-    public void addSSTables(Collection<SSTableReader> sstables)
+    public void addSSTables(Collection<AbstractSSTableReader> sstables)
     {
         data.addSSTables(sstables);
         CompactionManager.instance.submitBackground(this);
@@ -1475,20 +1475,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param operation Operation type
      * @return Expected file size of SSTable after compaction
      */
-    public long getExpectedCompactedFileSize(Iterable<SSTableReader> sstables, OperationType operation)
+    public long getExpectedCompactedFileSize(Iterable<AbstractSSTableReader> sstables, OperationType operation)
     {
         if (operation != OperationType.CLEANUP || isIndex())
         {
-            return SSTableReader.getTotalBytes(sstables);
+            // TODO STAR-247: pull up to AbstractSSTableReader
+            return AbstractSSTableReader.getTotalBytes(sstables);
         }
 
         // cleanup size estimation only counts bytes for keys local to this node
         long expectedFileSize = 0;
         Collection<Range<Token>> ranges = StorageService.instance.getLocalReplicas(keyspace.getName()).ranges();
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
-            List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
-            for (SSTableReader.PartitionPositionBounds position : positions)
+            List<AbstractBigTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
+            for (AbstractBigTableReader.PartitionPositionBounds position : positions)
                 expectedFileSize += position.upperPosition - position.lowerPosition;
         }
 
@@ -1502,12 +1503,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     /*
      *  Find the maximum size file in the list .
      */
-    public SSTableReader getMaxSizeFile(Iterable<SSTableReader> sstables)
+    public AbstractSSTableReader getMaxSizeFile(Iterable<AbstractSSTableReader> sstables)
     {
         long maxSize = 0L;
-        SSTableReader maxFile = null;
-        for (SSTableReader sstable : sstables)
+        AbstractSSTableReader maxFile = null;
+        for (AbstractSSTableReader sstable : sstables)
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             if (sstable.onDiskLength() > maxSize)
             {
                 maxSize = sstable.onDiskLength();
@@ -1591,13 +1593,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return CompactionManager.instance.performGarbageCollection(this, tombstoneOption, jobs);
     }
 
-    public void markObsolete(Collection<SSTableReader> sstables, OperationType compactionType)
+    public void markObsolete(Collection<AbstractSSTableReader> sstables, OperationType compactionType)
     {
         assert !sstables.isEmpty();
         maybeFail(data.dropSSTables(Predicates.in(sstables), compactionType, null));
     }
 
-    void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables)
+    void replaceFlushed(Memtable memtable, Collection<AbstractSSTableReader> sstables)
     {
         data.replaceFlushed(memtable, sstables);
         if (sstables != null && !sstables.isEmpty())
@@ -1617,17 +1619,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return data;
     }
 
-    public Set<SSTableReader> getLiveSSTables()
+    public Set<AbstractSSTableReader> getLiveSSTables()
     {
         return data.getView().liveSSTables();
     }
 
-    public Iterable<SSTableReader> getSSTables(SSTableSet sstableSet)
+    public Iterable<AbstractSSTableReader> getSSTables(SSTableSet sstableSet)
     {
         return data.getView().select(sstableSet);
     }
 
-    public Iterable<SSTableReader> getUncompactingSSTables()
+    public Iterable<AbstractSSTableReader> getUncompactingSSTables()
     {
         return data.getUncompacting();
     }
@@ -1635,8 +1637,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public Map<UUID, PendingStat> getPendingRepairStats()
     {
         Map<UUID, PendingStat.Builder> builders = new HashMap<>();
-        for (SSTableReader sstable : getLiveSSTables())
+        for (AbstractSSTableReader sstable : getLiveSSTables())
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             UUID session = sstable.getPendingRepair();
             if (session == null)
                 continue;
@@ -1665,7 +1668,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         if (force)
         {
-            Predicate<SSTableReader> predicate = sst -> {
+            Predicate<AbstractSSTableReader> predicate = sst -> {
                 UUID session = sst.getPendingRepair();
                 return session != null && sessions.contains(session);
             };
@@ -1713,13 +1716,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     }
 
     @SuppressWarnings("resource")
-    public RefViewFragment selectAndReference(Function<View, Iterable<SSTableReader>> filter)
+    public RefViewFragment selectAndReference(Function<View, Iterable<AbstractSSTableReader>> filter)
     {
         long failingSince = -1L;
         while (true)
         {
             ViewFragment view = select(filter);
-            Refs<SSTableReader> refs = Refs.tryRef(view.sstables);
+            Refs<AbstractSSTableReader> refs = Refs.tryRef(view.sstables);
             if (refs != null)
                 return new RefViewFragment(view.sstables, view.memtables, refs);
             if (failingSince <= 0)
@@ -1728,8 +1731,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
             else if (System.nanoTime() - failingSince > TimeUnit.MILLISECONDS.toNanos(100))
             {
-                List<SSTableReader> released = new ArrayList<>();
-                for (SSTableReader reader : view.sstables)
+                List<AbstractSSTableReader> released = new ArrayList<>();
+                for (AbstractSSTableReader reader : view.sstables)
                     if (reader.selfRef().globalCount() == 0)
                         released.add(reader);
                 NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
@@ -1739,10 +1742,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
     }
 
-    public ViewFragment select(Function<View, Iterable<SSTableReader>> filter)
+    public ViewFragment select(Function<View, Iterable<AbstractSSTableReader>> filter)
     {
         View view = data.getView();
-        List<SSTableReader> sstables = Lists.newArrayList(Objects.requireNonNull(filter.apply(view)));
+        List<AbstractSSTableReader> sstables = Lists.newArrayList(Objects.requireNonNull(filter.apply(view)));
         return new ViewFragment(sstables, view.getAllMemtables());
     }
 
@@ -1759,10 +1762,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         try (OpOrder.Group op = readOrdering.start())
         {
             List<String> files = new ArrayList<>();
-            for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
+            for (AbstractSSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable, without updating cache and stats
-                if (sstr.checkEntryExists(dk, SSTableReader.Operator.EQ, false))
+                // TODO STAR-247: pull up to AbstractSSTableReader
+                if (sstr.checkEntryExists(dk, AbstractBigTableReader.Operator.EQ, false))
                     files.add(sstr.getFilename());
             }
             return files;
@@ -1842,21 +1846,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned during next startup
      */
-    public Set<SSTableReader> snapshotWithoutFlush(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, RateLimiter rateLimiter)
+    public Set<AbstractSSTableReader> snapshotWithoutFlush(String snapshotName, Predicate<AbstractSSTableReader> predicate, boolean ephemeral, RateLimiter rateLimiter)
     {
         if (rateLimiter == null)
             rateLimiter = DatabaseDescriptor.getSnapshotRateLimiter();
 
-        Set<SSTableReader> snapshottedSSTables = new HashSet<>();
+        Set<AbstractSSTableReader> snapshottedSSTables = new HashSet<>();
         final JSONArray filesJSONArr = new JSONArray();
         for (ColumnFamilyStore cfs : concatWithIndexes())
         {
             try (RefViewFragment currentView = cfs.selectAndReference(View.select(SSTableSet.CANONICAL, (x) -> predicate == null || predicate.apply(x))))
             {
-                for (SSTableReader ssTable : currentView.sstables)
+                for (AbstractSSTableReader ssTable : currentView.sstables)
                 {
                     File snapshotDirectory = Directories.getSnapshotDirectory(ssTable.descriptor, snapshotName);
-                    rateLimiter.acquire(SSTableReader.componentsFor(ssTable.descriptor).size());
+                    rateLimiter.acquire(AbstractSSTableReader.componentsFor(ssTable.descriptor).size());
+                    // TODO STAR-247: pull up to AbstractSSTableReader
                     ssTable.createLinks(snapshotDirectory.getPath()); // hard links
                     filesJSONArr.add(ssTable.descriptor.relativeFilenameFor(Component.DATA));
 
@@ -1953,26 +1958,27 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
     }
 
-    public Refs<SSTableReader> getSnapshotSSTableReaders(String tag) throws IOException
+    public Refs<AbstractSSTableReader> getSnapshotSSTableReaders(String tag) throws IOException
     {
-        Map<Integer, SSTableReader> active = new HashMap<>();
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        Map<Integer, AbstractSSTableReader> active = new HashMap<>();
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
             active.put(sstable.descriptor.generation, sstable);
         Map<Descriptor, Set<Component>> snapshots = getDirectories().sstableLister(Directories.OnTxnErr.IGNORE).snapshots(tag).list();
-        Refs<SSTableReader> refs = new Refs<>();
+        Refs<AbstractSSTableReader> refs = new Refs<>();
         try
         {
             for (Map.Entry<Descriptor, Set<Component>> entries : snapshots.entrySet())
             {
                 // Try acquire reference to an active sstable instead of snapshot if it exists,
                 // to avoid opening new sstables. If it fails, use the snapshot reference instead.
-                SSTableReader sstable = active.get(entries.getKey().generation);
+                AbstractSSTableReader sstable = active.get(entries.getKey().generation);
                 if (sstable == null || !refs.tryRef(sstable))
                 {
                     if (logger.isTraceEnabled())
                         logger.trace("using snapshot sstable {}", entries.getKey());
                     // open offline so we don't modify components or track hotness.
-                    sstable = SSTableReader.open(entries.getKey(), entries.getValue(), metadata, true, true);
+                    // TODO STAR-247: entries.getKey().getFormat().getReaderFactory().open(entries.getValue(), metadata, true, true);
+                    sstable = AbstractSSTableReader.open(entries.getKey(), entries.getValue(), metadata, true, true);
                     refs.tryRef(sstable);
                     // release the self ref as we never add the snapshot sstable to DataTracker where it is otherwise released
                     sstable.selfRef().release();
@@ -1998,7 +2004,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * @param snapshotName the name of the associated with the snapshot
      */
-    public Set<SSTableReader> snapshot(String snapshotName)
+    public Set<AbstractSSTableReader> snapshot(String snapshotName)
     {
         return snapshot(snapshotName, false, null);
     }
@@ -2010,7 +2016,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param skipFlush Skip blocking flush of memtable
      * @param rateLimiter Rate limiter for hardlinks-per-second
      */
-    public Set<SSTableReader> snapshot(String snapshotName, boolean skipFlush, RateLimiter rateLimiter)
+    public Set<AbstractSSTableReader> snapshot(String snapshotName, boolean skipFlush, RateLimiter rateLimiter)
     {
         return snapshot(snapshotName, null, false, skipFlush, rateLimiter);
     }
@@ -2020,7 +2026,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned up during next startup
      * @param skipFlush Skip blocking flush of memtable
      */
-    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipFlush)
+    public Set<AbstractSSTableReader> snapshot(String snapshotName, Predicate<AbstractSSTableReader> predicate, boolean ephemeral, boolean skipFlush)
     {
         return snapshot(snapshotName, predicate, ephemeral, skipFlush, null);
     }
@@ -2030,7 +2036,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param skipFlush Skip blocking flush of memtable
      * @param rateLimiter Rate limiter for hardlinks-per-second
      */
-    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, boolean skipFlush, RateLimiter rateLimiter)
+    public Set<AbstractSSTableReader> snapshot(String snapshotName, Predicate<AbstractSSTableReader> predicate, boolean ephemeral, boolean skipFlush, RateLimiter rateLimiter)
     {
         if (!skipFlush)
         {
@@ -2196,8 +2202,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             Iterable<DecoratedKey>[] samples = new Iterable[view.sstables.size()];
             int i = 0;
-            for (SSTableReader sstable: view.sstables)
+            for (AbstractSSTableReader sstable: view.sstables)
             {
+                // TODO STAR-247: pull up to AbstractSSTableReader
                 samples[i++] = sstable.getKeySamples(range);
             }
             return Iterables.concat(samples);
@@ -2209,7 +2216,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         try (RefViewFragment view = selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
             long count = 0;
-            for (SSTableReader sstable : view.sstables)
+            for (AbstractSSTableReader sstable : view.sstables)
+                // TODO STAR-247: pull up to AbstractSSTableReader
                 count += sstable.estimatedKeysForRanges(Collections.singleton(range));
             return count;
         }
@@ -2284,7 +2292,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long now = System.currentTimeMillis();
         // make sure none of our sstables are somehow in the future (clock drift, perhaps)
         for (ColumnFamilyStore cfs : concatWithIndexes())
-            for (SSTableReader sstable : cfs.getLiveSSTables())
+            for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
+                // TODO STAR-247: pull up to AbstractSSTableReader
                 now = Math.max(now, sstable.maxDataAge);
         truncatedAt = now;
 
@@ -2343,7 +2352,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return runWithCompactionsDisabled(callable, (sstable) -> true, interruptValidation, interruptViews, true, trigger);
     }
 
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<AbstractSSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
     {
         return runWithCompactionsDisabled(callable, sstablesPredicate, interruptValidation, interruptViews, interruptIndexes, CompactionInfo.StopTrigger.NONE);
     }
@@ -2358,7 +2367,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @param interruptIndexes if we should interrupt compactions on indexes. NOTE: if you set this to true your sstablePredicate
      *                         must be able to handle LocalPartitioner sstables!
      */
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes, CompactionInfo.StopTrigger trigger)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<AbstractSSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes, CompactionInfo.StopTrigger trigger)
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
@@ -2444,7 +2453,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         Callable<LifecycleTransaction> callable = () -> {
             assert data.getCompacting().isEmpty() : data.getCompacting();
-            Iterable<SSTableReader> sstables = getLiveSSTables();
+            Iterable<AbstractSSTableReader> sstables = getLiveSSTables();
             sstables = AbstractCompactionStrategy.filterSuspectSSTables(sstables);
             LifecycleTransaction modifier = data.tryModify(sstables, operationType);
             assert modifier != null: "something marked things compacting while compactions are disabled";
@@ -2516,7 +2525,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (ColumnFamilyStore cfs : concatWithIndexes())
             {
                 cfs.crcCheckChance.set(crcCheckChance);
-                for (SSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                for (AbstractSSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                    // TODO STAR-247: pull up to AbstractSSTableReader
                     sstable.setCrcCheckChance(crcCheckChance);
             }
         }
@@ -2580,8 +2590,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         long sum = 0;
         long count = 0;
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             long n = sstable.getEstimatedCellPerPartitionCount().count();
             sum += sstable.getEstimatedCellPerPartitionCount().mean() * n;
             count += n;
@@ -2593,8 +2604,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         long sum = 0;
         long count = 0;
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             long n = sstable.getEstimatedPartitionSize().count();
             sum += sstable.getEstimatedPartitionSize().mean() * n;
             count += n;
@@ -2606,9 +2618,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         long totalRows = 0;
         long totalPartitions = 0;
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
         {
             totalPartitions += sstable.getEstimatedPartitionSize().count();
+            // TODO STAR-247: pull up to AbstractSSTableReader
             totalRows += sstable.getTotalRows();
         }
 
@@ -2618,7 +2631,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public long estimateKeys()
     {
         long n = 0;
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
             n += sstable.estimatedKeys();
         return n;
     }
@@ -2668,10 +2681,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public static class ViewFragment
     {
-        public final List<SSTableReader> sstables;
+        public final List<AbstractSSTableReader> sstables;
         public final Iterable<Memtable> memtables;
 
-        public ViewFragment(List<SSTableReader> sstables, Iterable<Memtable> memtables)
+        public ViewFragment(List<AbstractSSTableReader> sstables, Iterable<Memtable> memtables)
         {
             this.sstables = sstables;
             this.memtables = memtables;
@@ -2680,9 +2693,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public static class RefViewFragment extends ViewFragment implements AutoCloseable
     {
-        public final Refs<SSTableReader> refs;
+        public final Refs<AbstractSSTableReader> refs;
 
-        public RefViewFragment(List<SSTableReader> sstables, Iterable<Memtable> memtables, Refs<SSTableReader> refs)
+        public RefViewFragment(List<AbstractSSTableReader> sstables, Iterable<Memtable> memtables, Refs<AbstractSSTableReader> refs)
         {
             super(sstables, memtables);
             this.refs = refs;
@@ -2734,10 +2747,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         assert data.getCompacting().isEmpty() : data.getCompacting();
 
-        List<SSTableReader> truncatedSSTables = new ArrayList<>();
+        List<AbstractSSTableReader> truncatedSSTables = new ArrayList<>();
         int keptSSTables = 0;
-        for (SSTableReader sstable : getSSTables(SSTableSet.LIVE))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.LIVE))
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             if (!sstable.newSince(truncatedAt))
             {
                 truncatedSSTables.add(sstable);
@@ -2762,8 +2776,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long allColumns = 0;
         int localTime = (int)(System.currentTimeMillis()/1000);
 
-        for (SSTableReader sstable : getSSTables(SSTableSet.LIVE))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.LIVE))
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             allDroppable += sstable.getDroppableTombstonesBefore(localTime - metadata().params.gcGraceSeconds);
             allColumns += sstable.getEstimatedCellPerPartitionCount().mean() * sstable.getEstimatedCellPerPartitionCount().count();
         }
@@ -2942,7 +2957,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             return false;
 
         final DiskBoundaries diskBoundaries = getDiskBoundaries();
-        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        for (AbstractSSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
         {
             Directories.DataDirectory dataDirectory = getDirectories().getDataDirectoryForFile(sstable.descriptor);
             if (!diskBoundaries.isInCorrectLocation(sstable, dataDirectory))

@@ -35,7 +35,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -271,7 +271,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
             }
 
             SSTableReadsListener readCountUpdater = newReadCountUpdater();
-            for (SSTableReader sstable : view.sstables)
+            for (AbstractSSTableReader sstable : view.sstables)
             {
                 @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
                 UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange(), readCountUpdater);
@@ -309,7 +309,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return new SSTableReadsListener()
                 {
                     @Override
-                    public void onScanningStarted(SSTableReader sstable)
+                    public void onScanningStarted(AbstractSSTableReader sstable)
                     {
                         sstable.incrementReadCount();
                     }

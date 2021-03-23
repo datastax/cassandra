@@ -28,7 +28,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.Unfiltered;
 
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -44,7 +44,7 @@ public class UnfilteredValidation
     private static final Logger logger = LoggerFactory.getLogger(UnfilteredValidation.class);
     private static final NoSpamLogger nospam1m = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static void maybeValidateUnfiltered(Unfiltered unfiltered, TableMetadata metadata, DecoratedKey key, SSTableReader sstable)
+    public static void maybeValidateUnfiltered(Unfiltered unfiltered, TableMetadata metadata, DecoratedKey key, AbstractSSTableReader sstable)
     {
         Config.CorruptedTombstoneStrategy strat = DatabaseDescriptor.getCorruptedTombstoneStrategy();
         if (strat != Config.CorruptedTombstoneStrategy.disabled && unfiltered != null && !unfiltered.isEmpty())
@@ -75,7 +75,7 @@ public class UnfilteredValidation
         }
     }
 
-    public static void handleInvalid(TableMetadata metadata, DecoratedKey key, SSTableReader sstable, String invalidContent)
+    public static void handleInvalid(TableMetadata metadata, DecoratedKey key, AbstractSSTableReader sstable, String invalidContent)
     {
         Config.CorruptedTombstoneStrategy strat = DatabaseDescriptor.getCorruptedTombstoneStrategy();
         String keyString;

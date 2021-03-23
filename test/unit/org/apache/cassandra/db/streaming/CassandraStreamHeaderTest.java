@@ -39,7 +39,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.schema.CompressionParams;
@@ -56,7 +56,7 @@ public class CassandraStreamHeaderTest
     public static final String KEYSPACE = "CassandraStreamHeaderTest";
     public static final String CF_COMPRESSED = "compressed";
 
-    private static SSTableReader sstable;
+    private static AbstractSSTableReader sstable;
     private static ColumnFamilyStore store;
 
     @BeforeClass
@@ -135,7 +135,7 @@ public class CassandraStreamHeaderTest
         List<Range<Token>> requestedRanges = Collections.singletonList(new Range<>(store.getPartitioner().getMinimumToken(), sstable.last.getToken()));
         requestedRanges = Range.normalize(requestedRanges);
 
-        List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(requestedRanges);
+        List<BigSSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(requestedRanges);
         CompressionInfo compressionInfo = compressed ? CompressionInfo.newLazyInstance(sstable.getCompressionMetadata(), sections)
                                                      : null;
 

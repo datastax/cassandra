@@ -39,7 +39,7 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
@@ -49,15 +49,15 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     private final ColumnFamilyStore cfs;
     private final UUID compactionId = UUIDGen.getTimeUUID();
 
-    private final SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables;
+    private final SortedMap<AbstractSSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables;
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables)
+    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<AbstractSSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables)
     {
         long totalIndexBytes = 0;
-        for (SSTableReader sstable : sstables.keySet())
+        for (AbstractSSTableReader sstable : sstables.keySet())
             totalIndexBytes += getPrimaryIndexLength(sstable);
 
         this.cfs = cfs;
@@ -68,9 +68,9 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     public void build()
     {
         AbstractType<?> keyValidator = cfs.metadata().partitionKeyType;
-        for (Map.Entry<SSTableReader, Map<ColumnMetadata, ColumnIndex>> e : sstables.entrySet())
+        for (Map.Entry<AbstractSSTableReader, Map<ColumnMetadata, ColumnIndex>> e : sstables.entrySet())
         {
-            SSTableReader sstable = e.getKey();
+            AbstractSSTableReader sstable = e.getKey();
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
             try (RandomAccessReader dataFile = sstable.openDataReader())
@@ -90,7 +90,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                        RowIndexEntry<?> indexEntry = sstable.getPosition(key, AbstractSSTableReader.Operator.EQ);
                         dataFile.seek(indexEntry.position);
                         ByteBufferUtil.readWithShortLength(dataFile); // key
 
@@ -134,7 +134,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
         return primaryIndex.exists() ? primaryIndex.length() : 0;
     }
 
-    private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)
+    private void completeSSTable(PerSSTableIndexWriter indexWriter, AbstractSSTableReader sstable, Collection<ColumnIndex> indexes)
     {
         indexWriter.complete();
 
@@ -144,7 +144,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             if (!tmpIndex.exists()) // no data was inserted into the index for given sstable
                 continue;
 
-            index.update(Collections.<SSTableReader>emptyList(), Collections.singletonList(sstable));
+            index.update(Collections.<AbstractSSTableReader>emptyList(), Collections.singletonList(sstable));
         }
     }
 }

@@ -25,7 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.service.StorageService;
 
 public class DiskBoundaries
@@ -101,7 +101,7 @@ public class DiskBoundaries
         this.isInvalid = true;
     }
 
-    public int getDiskIndex(SSTableReader sstable)
+    public int getDiskIndex(AbstractSSTableReader sstable)
     {
         if (positions == null)
         {
@@ -128,7 +128,7 @@ public class DiskBoundaries
         return 0;
     }
 
-    public Directories.DataDirectory getCorrectDiskForSSTable(SSTableReader sstable)
+    public Directories.DataDirectory getCorrectDiskForSSTable(AbstractSSTableReader sstable)
     {
         return directories.get(getDiskIndex(sstable));
     }
@@ -141,7 +141,7 @@ public class DiskBoundaries
         return directories.get(getDiskIndex(key));
     }
 
-    public boolean isInCorrectLocation(SSTableReader sstable, Directories.DataDirectory currentLocation)
+    public boolean isInCorrectLocation(AbstractSSTableReader sstable, Directories.DataDirectory currentLocation)
     {
         int diskIndex = getDiskIndex(sstable);
         PartitionPosition diskLast = positions.get(diskIndex);

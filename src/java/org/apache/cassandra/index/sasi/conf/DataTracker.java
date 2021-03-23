@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sasi.SSTableIndex;
 import org.apache.cassandra.index.sasi.conf.view.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 import org.slf4j.Logger;
@@ -63,11 +63,11 @@ public class DataTracker
      *
      * @return A collection of SSTables which don't have component attached for current index.
      */
-    public Iterable<SSTableReader> update(Collection<SSTableReader> oldSSTables, Collection<SSTableReader> newSSTables)
+    public Iterable<AbstractSSTableReader> update(Collection<AbstractSSTableReader> oldSSTables, Collection<AbstractSSTableReader> newSSTables)
     {
-        final Pair<Set<SSTableIndex>, Set<SSTableReader>> built = getBuiltIndexes(newSSTables);
+        final Pair<Set<SSTableIndex>, Set<AbstractSSTableReader>> built = getBuiltIndexes(newSSTables);
         final Set<SSTableIndex> newIndexes = built.left;
-        final Set<SSTableReader> indexedSSTables = built.right;
+        final Set<AbstractSSTableReader> indexedSSTables = built.right;
 
         View currentView, newView;
         do
@@ -80,7 +80,7 @@ public class DataTracker
         return newSSTables.stream().filter(sstable -> !indexedSSTables.contains(sstable)).collect(Collectors.toList());
     }
 
-    public boolean hasSSTable(SSTableReader sstable)
+    public boolean hasSSTable(AbstractSSTableReader sstable)
     {
         View currentView = view.get();
         for (SSTableIndex index : currentView)
@@ -92,23 +92,23 @@ public class DataTracker
         return false;
     }
 
-    public void dropData(Collection<SSTableReader> sstablesToRebuild)
+    public void dropData(Collection<AbstractSSTableReader> sstablesToRebuild)
     {
         View currentView = view.get();
         if (currentView == null)
             return;
 
-        Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
+        Set<AbstractSSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
         for (SSTableIndex index : currentView)
         {
-            SSTableReader sstable = index.getSSTable();
+            AbstractSSTableReader sstable = index.getSSTable();
             if (!sstablesToRebuild.contains(sstable))
                 continue;
 
             index.markObsolete();
         }
 
-        update(toRemove, Collections.<SSTableReader>emptyList());
+        update(toRemove, Collections.<AbstractSSTableReader>emptyList());
     }
 
     public void dropData(long truncateUntil)
@@ -117,10 +117,10 @@ public class DataTracker
         if (currentView == null)
             return;
 
-        Set<SSTableReader> toRemove = new HashSet<>();
+        Set<AbstractSSTableReader> toRemove = new HashSet<>();
         for (SSTableIndex index : currentView)
         {
-            SSTableReader sstable = index.getSSTable();
+            AbstractSSTableReader sstable = index.getSSTable();
             if (sstable.getMaxTimestamp() > truncateUntil)
                 continue;
 
@@ -128,14 +128,14 @@ public class DataTracker
             toRemove.add(sstable);
         }
 
-        update(toRemove, Collections.<SSTableReader>emptyList());
+        update(toRemove, Collections.<AbstractSSTableReader>emptyList());
     }
 
-    private Pair<Set<SSTableIndex>, Set<SSTableReader>> getBuiltIndexes(Collection<SSTableReader> sstables)
+    private Pair<Set<SSTableIndex>, Set<AbstractSSTableReader>> getBuiltIndexes(Collection<AbstractSSTableReader> sstables)
     {
         Set<SSTableIndex> indexes = new HashSet<>(sstables.size());
-        Set<SSTableReader> builtSSTables = new HashSet<>(sstables.size());
-        for (SSTableReader sstable : sstables)
+        Set<AbstractSSTableReader> builtSSTables = new HashSet<>(sstables.size());
+        for (AbstractSSTableReader sstable : sstables)
         {
             if (sstable.isMarkedCompacted())
                 continue;

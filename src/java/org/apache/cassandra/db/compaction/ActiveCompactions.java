@@ -25,7 +25,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class ActiveCompactions implements ActiveCompactionsTracker
 {
@@ -54,7 +54,7 @@ public class ActiveCompactions implements ActiveCompactionsTracker
      *
      * Number of entries in compactions should be small (< 10) but avoid calling in any time-sensitive context
      */
-    public Collection<CompactionInfo> getCompactionsForSSTable(SSTableReader sstable, OperationType compactionType)
+    public Collection<CompactionInfo> getCompactionsForSSTable(AbstractSSTableReader sstable, OperationType compactionType)
     {
         List<CompactionInfo> toReturn = null;
         synchronized (compactions)

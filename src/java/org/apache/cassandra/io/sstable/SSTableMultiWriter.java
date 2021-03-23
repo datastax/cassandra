@@ -21,7 +21,7 @@ package org.apache.cassandra.io.sstable;
 import java.util.Collection;
 
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -36,9 +36,9 @@ public interface SSTableMultiWriter extends Transactional
      */
     boolean append(UnfilteredRowIterator partition);
 
-    Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult);
-    Collection<SSTableReader> finish(boolean openResult);
-    Collection<SSTableReader> finished();
+    Collection<AbstractSSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult);
+    Collection<AbstractSSTableReader> finish(boolean openResult);
+    Collection<AbstractSSTableReader> finished();
 
     SSTableMultiWriter setOpenResult(boolean openResult);
 

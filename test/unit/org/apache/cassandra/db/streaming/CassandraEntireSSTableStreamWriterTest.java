@@ -42,7 +42,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.SharedDefaultFileRegion;
@@ -72,7 +72,7 @@ public class CassandraEntireSSTableStreamWriterTest
     public static final String CF_INDEXED = "Indexed1";
     public static final String CF_STANDARDLOWINDEXINTERVAL = "StandardLowIndexInterval";
 
-    private static SSTableReader sstable;
+    private static AbstractSSTableReader sstable;
     private static Descriptor descriptor;
     private static ColumnFamilyStore store;
 
@@ -163,7 +163,7 @@ public class CassandraEntireSSTableStreamWriterTest
             CassandraEntireSSTableStreamReader reader = new CassandraEntireSSTableStreamReader(new StreamMessageHeader(sstable.metadata().id, peer, session.planId(), false, 0, 0, 0, null), header, session);
 
             SSTableMultiWriter sstableWriter = reader.read(new DataInputBuffer(serializedFile.nioBuffer(), false));
-            Collection<SSTableReader> newSstables = sstableWriter.finished();
+            Collection<AbstractSSTableReader> newSstables = sstableWriter.finished();
 
             assertEquals(1, newSstables.size());
         }

@@ -59,11 +59,11 @@ import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-public abstract class ForwardingSSTableReader extends SSTableReader
+public abstract class ForwardingSSTableReader extends AbstractSSTableReader
 {
-    private final SSTableReader delegate;
+    private final AbstractSSTableReader delegate;
 
-    public ForwardingSSTableReader(SSTableReader delegate)
+    public ForwardingSSTableReader(AbstractSSTableReader delegate)
     {
         super(delegate.descriptor, SSTable.componentsFor(delegate.descriptor),
               TableMetadataRef.forOfflineTools(delegate.metadata()), delegate.maxDataAge, delegate.getSSTableMetadata(),
@@ -122,19 +122,19 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public SSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
+    public AbstractSSTableReader cloneWithRestoredStart(DecoratedKey restoredStart)
     {
         return delegate.cloneWithRestoredStart(restoredStart);
     }
 
     @Override
-    public SSTableReader cloneWithNewStart(DecoratedKey newStart, Runnable runOnClose)
+    public AbstractSSTableReader cloneWithNewStart(DecoratedKey newStart, Runnable runOnClose)
     {
         return delegate.cloneWithNewStart(newStart, runOnClose);
     }
 
     @Override
-    public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
+    public AbstractSSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
     {
         return delegate.cloneWithNewSummarySamplingLevel(parent, samplingLevel);
     }
@@ -662,19 +662,19 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public Ref<SSTableReader> tryRef()
+    public Ref<AbstractSSTableReader> tryRef()
     {
         return delegate.tryRef();
     }
 
     @Override
-    public Ref<SSTableReader> selfRef()
+    public Ref<AbstractSSTableReader> selfRef()
     {
         return delegate.selfRef();
     }
 
     @Override
-    public Ref<SSTableReader> ref()
+    public Ref<AbstractSSTableReader> ref()
     {
         return delegate.ref();
     }

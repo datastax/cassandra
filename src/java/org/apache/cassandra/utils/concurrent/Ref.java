@@ -42,7 +42,7 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.utils.ExecutorUtils;
@@ -700,7 +700,7 @@ public final class Ref<T> implements RefCounted<T>
                 for (ColumnFamilyStore cfs : ks.getColumnFamilyStores())
                 {
                     View view = cfs.getTracker().getView();
-                    for (SSTableReader reader : view.allKnownSSTables())
+                    for (AbstractSSTableReader reader : view.allKnownSSTables())
                         reader.addTo(expected);
                 }
             }

@@ -70,7 +70,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.notifications.INotification;
@@ -432,7 +432,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // Now that we are tracking new writes and we haven't left untracked contents on the memtables, we are ready to
         // index the sstables
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL));
-             Refs<SSTableReader> allSSTables = viewFragment.refs)
+             Refs<AbstractSSTableReader> allSSTables = viewFragment.refs)
         {
             buildIndexesBlocking(allSSTables, toRebuild, true);
         }
@@ -520,7 +520,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param isFullRebuild True if this method is invoked as a full index rebuild, false otherwise
      */
     @SuppressWarnings({ "unchecked" })
-    private void buildIndexesBlocking(Collection<SSTableReader> sstables, Set<Index> indexes, boolean isFullRebuild)
+    private void buildIndexesBlocking(Collection<AbstractSSTableReader> sstables, Set<Index> indexes, boolean isFullRebuild)
     {
         if (indexes.isEmpty())
             return;
@@ -541,7 +541,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             logger.info("Submitting index {} of {} for data in {}",
                         isFullRebuild ? "recovery" : "build",
                         commaSeparated(indexes),
-                        sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
+                        sstables.stream().map(AbstractSSTableReader::toString).collect(Collectors.joining(",")));
 
             // Group all building tasks
             Map<Index.IndexBuildingSupport, Set<Index>> byType = new HashMap<>();

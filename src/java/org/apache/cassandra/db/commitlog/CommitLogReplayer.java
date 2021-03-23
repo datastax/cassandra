@@ -44,7 +44,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.Schema;
@@ -285,10 +285,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
      * A set of known safe-to-discard commit log replay positions, based on
      * the range covered by on disk sstables and those prior to the most recent truncation record
      */
-    public static IntervalSet<CommitLogPosition> persistedIntervals(Iterable<SSTableReader> onDisk, CommitLogPosition truncatedAt)
+    public static IntervalSet<CommitLogPosition> persistedIntervals(Iterable<AbstractSSTableReader> onDisk, CommitLogPosition truncatedAt)
     {
         IntervalSet.Builder<CommitLogPosition> builder = new IntervalSet.Builder<>();
-        for (SSTableReader reader : onDisk)
+        for (AbstractSSTableReader reader : onDisk)
             builder.addAll(reader.getSSTableMetadata().commitLogIntervals);
 
         if (truncatedAt != null)

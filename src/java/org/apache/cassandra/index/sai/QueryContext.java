@@ -27,7 +27,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -62,7 +62,7 @@ public class QueryContext
 
     public long queryTimeouts = 0;
 
-    private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
+    private final Map<AbstractSSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
 
     @VisibleForTesting
     public QueryContext()
@@ -86,7 +86,7 @@ public class QueryContext
         sstablesHit++;
     }
 
-    public SSTableQueryContext getSSTableQueryContext(SSTableReader reader)
+    public SSTableQueryContext getSSTableQueryContext(AbstractSSTableReader reader)
     {
         return sstableQueryContexts.computeIfAbsent(reader, k -> new SSTableQueryContext(this));
     }

@@ -48,7 +48,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -244,7 +244,7 @@ public class CleanupTest
         // clear token range for localhost on DC1
         if (isUserDefined)
         {
-            for (SSTableReader r : cfs.getLiveSSTables())
+            for (AbstractSSTableReader r : cfs.getLiveSSTables())
                 CompactionManager.instance.forceUserDefinedCleanup(r.getFilename());
         }
         else
@@ -275,14 +275,14 @@ public class CleanupTest
             cfs.forceBlockingFlush();
         }
 
-        Set<SSTableReader> beforeFirstCleanup = Sets.newHashSet(cfs.getLiveSSTables());
+        Set<AbstractSSTableReader> beforeFirstCleanup = Sets.newHashSet(cfs.getLiveSSTables());
         // single token - 127.0.0.1 owns everything, cleanup should be noop
         cfs.forceCleanup(2);
         assertEquals(beforeFirstCleanup, cfs.getLiveSSTables());
         tmd.updateNormalToken(token(new byte[]{ 120 }), InetAddressAndPort.getByName("127.0.0.2"));
 
         cfs.forceCleanup(2);
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
         {
             assertEquals(sstable.first, sstable.last); // single-token sstables
             assertTrue(sstable.first.getToken().compareTo(token(new byte[]{ 50 })) <= 0);
@@ -313,7 +313,7 @@ public class CleanupTest
         tmd.updateNormalToken(new BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(new BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
 
-        for(SSTableReader r: cfs.getLiveSSTables())
+        for(AbstractSSTableReader r: cfs.getLiveSSTables())
             CompactionManager.instance.forceUserDefinedCleanup(r.getFilename());
 
         assertEquals(0, Util.getAll(Util.cmd(cfs).build()).size());
@@ -329,7 +329,7 @@ public class CleanupTest
         fillCF(cfs, "val", LOOPS);
 
         // prepare SSTable and some useful tokens
-        SSTableReader ssTable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader ssTable = cfs.getLiveSSTables().iterator().next();
         final Token ssTableMin = ssTable.first.getToken();
         final Token ssTableMax = ssTable.last.getToken();
 
@@ -413,7 +413,7 @@ public class CleanupTest
     protected List<Long> getMaxTimestampList(ColumnFamilyStore cfs)
     {
         List<Long> list = new LinkedList<Long>();
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             list.add(sstable.getMaxTimestamp());
         return list;
     }

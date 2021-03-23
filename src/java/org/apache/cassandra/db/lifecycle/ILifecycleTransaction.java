@@ -21,19 +21,18 @@ package org.apache.cassandra.db.lifecycle;
 import java.util.Collection;
 import java.util.Set;
 
-import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 public interface ILifecycleTransaction extends Transactional, LifecycleNewTracker
 {
     void checkpoint();
-    void update(SSTableReader reader, boolean original);
-    void update(Collection<SSTableReader> readers, boolean original);
-    public SSTableReader current(SSTableReader reader);
-    void obsolete(SSTableReader reader);
+    void update(AbstractSSTableReader reader, boolean original);
+    void update(Collection<AbstractSSTableReader> readers, boolean original);
+    public AbstractSSTableReader current(AbstractSSTableReader reader);
+    void obsolete(AbstractSSTableReader reader);
     void obsoleteOriginals();
-    Set<SSTableReader> originals();
-    boolean isObsolete(SSTableReader reader);
+    Set<AbstractSSTableReader> originals();
+    boolean isObsolete(AbstractSSTableReader reader);
     boolean isOffline();
 }

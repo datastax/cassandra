@@ -23,7 +23,7 @@ import java.util.Collection;
 import java.util.Iterator;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
@@ -37,12 +37,12 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
     private final ArrayList<KeyIterator> iters;
     private IMergeIterator<DecoratedKey,DecoratedKey> mi;
 
-    public ReducingKeyIterator(Collection<SSTableReader> sstables)
+    public ReducingKeyIterator(Collection<AbstractSSTableReader> sstables)
     {
         iters = new ArrayList<>(sstables.size());
         try
         {
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
                 iters.add(KeyIterator.forSSTable(sstable));
         }
         catch (IOException | RuntimeException ex)

@@ -36,7 +36,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.sstable.LegacySSTableTest;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.assertj.core.api.Assertions;
@@ -142,7 +142,7 @@ public class StandaloneUpgraderOnSStablesTest
         cfs.forceBlockingFlush();
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());
 
-        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        Set<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         if (sstables.isEmpty())
             return Lists.emptyList();
 

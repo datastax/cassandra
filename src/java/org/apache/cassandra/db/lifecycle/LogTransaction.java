@@ -45,7 +45,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SnapshotDeletingTask;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
@@ -163,7 +163,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
      * helper method for tests, creates the remove records per sstable
      */
     @VisibleForTesting
-    SSTableTidier obsoleted(SSTableReader sstable)
+    SSTableTidier obsoleted(AbstractSSTableReader sstable)
     {
         return obsoleted(sstable, LogRecord.make(Type.REMOVE, sstable));
     }
@@ -171,7 +171,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
     /**
      * Schedule a reader for deletion as soon as it is fully unreferenced.
      */
-    SSTableTidier obsoleted(SSTableReader reader, LogRecord logRecord)
+    SSTableTidier obsoleted(AbstractSSTableReader reader, LogRecord logRecord)
     {
         synchronized (lock)
         {
@@ -195,7 +195,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
         }
     }
 
-    Map<SSTable, LogRecord> makeRemoveRecords(Iterable<SSTableReader> sstables)
+    Map<SSTable, LogRecord> makeRemoveRecords(Iterable<AbstractSSTableReader> sstables)
     {
         synchronized (lock)
         {
@@ -328,10 +328,10 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
 
     static class Obsoletion
     {
-        final SSTableReader reader;
+        final AbstractSSTableReader reader;
         final SSTableTidier tidier;
 
-        Obsoletion(SSTableReader reader, SSTableTidier tidier)
+        Obsoletion(AbstractSSTableReader reader, SSTableTidier tidier)
         {
             this.reader = reader;
             this.tidier = tidier;
@@ -355,7 +355,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
         private final Ref<LogTransaction> parentRef;
         private final UUID txnId;
 
-        public SSTableTidier(SSTableReader referent, boolean wasNew, LogTransaction parent)
+        public SSTableTidier(AbstractSSTableReader referent, boolean wasNew, LogTransaction parent)
         {
             this.desc = referent.descriptor;
             this.sizeOnDisk = referent.bytesOnDisk();

@@ -24,7 +24,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Ordering;
 
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 import org.apache.cassandra.db.transform.DuplicateRowChecker;
@@ -62,7 +62,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     private final OperationType type;
     private final AbstractCompactionController controller;
     private final List<ISSTableScanner> scanners;
-    private final ImmutableSet<SSTableReader> sstables;
+    private final ImmutableSet<AbstractSSTableReader> sstables;
     private final int nowInSec;
     private final UUID compactionId;
 

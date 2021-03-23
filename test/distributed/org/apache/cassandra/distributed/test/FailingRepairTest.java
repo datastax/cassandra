@@ -64,7 +64,7 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.ForwardingSSTableReader;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.net.Verb;
@@ -112,11 +112,11 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             String cfName = getCfName(type, parallelism, withTracing);
             ColumnFamilyStore cf = Keyspace.open(KEYSPACE).getColumnFamilyStore(cfName);
             cf.forceBlockingFlush();
-            Set<SSTableReader> remove = cf.getLiveSSTables();
-            Set<SSTableReader> replace = new HashSet<>();
+            Set<AbstractSSTableReader> remove = cf.getLiveSSTables();
+            Set<AbstractSSTableReader> replace = new HashSet<>();
             if (type == Verb.VALIDATION_REQ)
             {
-                for (SSTableReader r : remove)
+                for (AbstractSSTableReader r : remove)
                     replace.add(new FailingSSTableReader(r));
             }
             else
@@ -269,7 +269,7 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
     private static final class FailingSSTableReader extends ForwardingSSTableReader
     {
 
-        private FailingSSTableReader(SSTableReader delegate)
+        private FailingSSTableReader(AbstractSSTableReader delegate)
         {
             super(delegate);
         }
@@ -333,7 +333,7 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             return 0;
         }
 
-        public Set<SSTableReader> getBackingSSTables()
+        public Set<AbstractSSTableReader> getBackingSSTables()
         {
             return Collections.emptySet();
         }

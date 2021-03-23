@@ -42,7 +42,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -229,7 +229,7 @@ public class GcCompactionBench extends CQLTester
         int startTombCount = countTombstoneMarkers(cfs);
         int startRowDeletions = countRowDeletions(cfs);
         int startTableCount = cfs.getLiveSSTables().size();
-        long startSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long startSize = AbstractSSTableReader.getTotalBytes(cfs.getLiveSSTables());
         System.out.println();
 
         String hashesBefore = getHashes();
@@ -242,7 +242,7 @@ public class GcCompactionBench extends CQLTester
         int endTombCount = countTombstoneMarkers(cfs);
         int endRowDeletions = countRowDeletions(cfs);
         int endTableCount = cfs.getLiveSSTables().size();
-        long endSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long endSize = AbstractSSTableReader.getTotalBytes(cfs.getLiveSSTables());
 
         System.out.println(cfs.getCompactionParametersJson());
         System.out.println(String.format("%s compactions completed in %.3fs",
@@ -347,12 +347,12 @@ public class GcCompactionBench extends CQLTester
     private int count(ColumnFamilyStore cfs, Predicate<Unfiltered> predicate)
     {
         int count = 0;
-        for (SSTableReader reader : cfs.getLiveSSTables())
+        for (AbstractSSTableReader reader : cfs.getLiveSSTables())
             count += count(reader, predicate);
         return count;
     }
 
-    int count(SSTableReader reader, Predicate<Unfiltered> predicate)
+    int count(AbstractSSTableReader reader, Predicate<Unfiltered> predicate)
     {
         int instances = 0;
         try (ISSTableScanner partitions = reader.getScanner())

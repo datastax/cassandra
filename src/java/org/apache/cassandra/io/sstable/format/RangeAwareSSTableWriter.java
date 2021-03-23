@@ -51,7 +51,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     private int currentIndex = -1;
     public final ColumnFamilyStore cfs;
     private final List<SSTableMultiWriter> finishedWriters = new ArrayList<>();
-    private final List<SSTableReader> finishedReaders = new ArrayList<>();
+    private final List<AbstractSSTableReader> finishedReaders = new ArrayList<>();
     private SSTableMultiWriter currentWriter = null;
 
     public RangeAwareSSTableWriter(ColumnFamilyStore cfs, long estimatedKeys, long repairedAt, UUID pendingRepair, boolean isTransient, SSTableFormat.Type format, int sstableLevel, long totalSize, LifecycleNewTracker lifecycleNewTracker, SerializationHeader header) throws IOException
@@ -108,7 +108,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
+    public Collection<AbstractSSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
     {
         if (currentWriter != null)
             finishedWriters.add(currentWriter);
@@ -124,7 +124,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<AbstractSSTableReader> finish(boolean openResult)
     {
         if (currentWriter != null)
             finishedWriters.add(currentWriter);
@@ -140,7 +140,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finished()
+    public Collection<AbstractSSTableReader> finished()
     {
         return finishedReaders;
     }

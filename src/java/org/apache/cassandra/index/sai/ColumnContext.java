@@ -73,7 +73,7 @@ import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -284,7 +284,7 @@ public class ColumnContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate, boolean rename)
+    public Set<SSTableContext> onSSTableChanged(Collection<AbstractSSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate, boolean rename)
     {
         return viewManager.update(oldSSTables, newSSTables, validate, rename);
     }
@@ -343,7 +343,7 @@ public class ColumnContext
         return viewManager.getView().size() * IndexSearcher.openPerIndexFiles(getValidator());
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    public void drop(Collection<AbstractSSTableReader> sstablesToRebuild)
     {
         viewManager.drop(sstablesToRebuild);
     }

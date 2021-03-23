@@ -49,7 +49,7 @@ import org.apache.cassandra.db.streaming.ComponentContext;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
@@ -99,7 +99,7 @@ public class ZeroCopyStreamingBenchmark
         public static final String CF_INDEXED = "Indexed1";
         public static final String CF_STANDARDLOWINDEXINTERVAL = "StandardLowIndexInterval";
 
-        private static SSTableReader sstable;
+        private static AbstractSSTableReader sstable;
         private static ColumnFamilyStore store;
         private StreamSession session;
         private CassandraEntireSSTableStreamWriter blockStreamWriter;
@@ -247,7 +247,7 @@ public class ZeroCopyStreamingBenchmark
         AsyncStreamingInputPlus in = new AsyncStreamingInputPlus(channel);
         in.append(state.serializedBlockStream.retainedDuplicate());
         SSTableMultiWriter sstableWriter = state.blockStreamReader.read(in);
-        Collection<SSTableReader> newSstables = sstableWriter.finished();
+        Collection<AbstractSSTableReader> newSstables = sstableWriter.finished();
         in.close();
         channel.finishAndReleaseAll();
     }
@@ -271,7 +271,7 @@ public class ZeroCopyStreamingBenchmark
         AsyncStreamingInputPlus in = new AsyncStreamingInputPlus(channel);
         in.append(state.serializedPartialStream.retainedDuplicate());
         SSTableMultiWriter sstableWriter = state.partialStreamReader.read(in);
-        Collection<SSTableReader> newSstables = sstableWriter.finished();
+        Collection<AbstractSSTableReader> newSstables = sstableWriter.finished();
         in.close();
         channel.finishAndReleaseAll();
     }

@@ -28,7 +28,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
@@ -40,19 +40,19 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
     protected static final Logger logger = LoggerFactory.getLogger(DefaultCompactionWriter.class);
     private final int sstableLevel;
 
-    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables)
     {
         this(cfs, directories, txn, nonExpiredSSTables, false, 0);
     }
 
     @Deprecated
-    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean offline, boolean keepOriginals, int sstableLevel)
+    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables, boolean offline, boolean keepOriginals, int sstableLevel)
     {
         this(cfs, directories, txn, nonExpiredSSTables, keepOriginals, sstableLevel);
     }
 
     @SuppressWarnings("resource")
-    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
+    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<AbstractSSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
     {
         super(cfs, directories, txn, nonExpiredSSTables, keepOriginals);
         this.sstableLevel = sstableLevel;

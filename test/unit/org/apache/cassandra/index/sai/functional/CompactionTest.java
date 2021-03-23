@@ -45,7 +45,7 @@ import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -88,9 +88,9 @@ public class CompactionTest extends AbstractNodeLifecycleTest
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         Range<Token> range = new Range<>(DatabaseDescriptor.getPartitioner().getMinimumToken(),
                                          DatabaseDescriptor.getPartitioner().getToken(ByteBufferUtil.bytes("30")));
-        Collection<SSTableReader> sstables = cfs.getLiveSSTables();
+        Collection<AbstractSSTableReader> sstables = cfs.getLiveSSTables();
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
-             Refs<SSTableReader> refs = Refs.ref(sstables))
+             Refs<AbstractSSTableReader> refs = Refs.ref(sstables))
         {
             InetAddressAndPort endpoint = InetAddressAndPort.getByName("10.0.0.1");
             UUID parentRepairSession = UUID.randomUUID();

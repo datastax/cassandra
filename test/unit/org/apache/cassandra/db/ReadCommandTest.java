@@ -49,7 +49,6 @@ import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -57,7 +56,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -670,9 +669,9 @@ public class ReadCommandTest
             .apply();
 
         cfs.forceBlockingFlush();
-        List<SSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
+        List<AbstractSSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
         assertEquals(2, sstables.size());
-        Collections.sort(sstables, SSTableReader.maxTimestampDescending);
+        Collections.sort(sstables, AbstractSSTableReader.maxTimestampDescending);
 
         ReadCommand readCommand = Util.cmd(cfs, Util.dk("key")).includeRow("dd").columns("a").build();
 
@@ -1094,7 +1093,7 @@ public class ReadCommandTest
         assertEquals(EMPTY_BYTE_BUFFER, cmd.getRepairedDataDigest());
     }
 
-    private long readCount(SSTableReader sstable)
+    private long readCount(AbstractSSTableReader sstable)
     {
         return sstable.getReadMeter().count();
     }
@@ -1195,11 +1194,11 @@ public class ReadCommandTest
                 .apply();
 
         cfs.forceBlockingFlush();
-        List<SSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
+        List<AbstractSSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
         assertEquals(2, sstables.size());
         sstables.forEach(sstable -> assertFalse(sstable.isRepaired() || sstable.isPendingRepair()));
-        SSTableReader sstable1 = sstables.get(0);
-        SSTableReader sstable2 = sstables.get(1);
+        AbstractSSTableReader sstable1 = sstables.get(0);
+        AbstractSSTableReader sstable2 = sstables.get(1);
 
         int numPartitions = 1;
         int rowsPerPartition = 2;
@@ -1257,7 +1256,7 @@ public class ReadCommandTest
         }
     }
 
-    private void mutateRepaired(ColumnFamilyStore cfs, SSTableReader sstable, long repairedAt, UUID pendingSession)
+    private void mutateRepaired(ColumnFamilyStore cfs, AbstractSSTableReader sstable, long repairedAt, UUID pendingSession)
     {
         try
         {

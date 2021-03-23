@@ -39,7 +39,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -85,7 +85,7 @@ public class BigTableScanner implements ISSTableScanner
     public static ISSTableScanner getScanner(BigTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
+        List<BigSSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(tokenRanges);
         if (positions.isEmpty())
             return new EmptySSTableScanner(sstable);
 
@@ -115,7 +115,7 @@ public class BigTableScanner implements ISSTableScanner
         this.listener = listener;
     }
 
-    private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
+    private static List<AbstractBounds<PartitionPosition>> makeBounds(AbstractSSTableReader sstable, Collection<Range<Token>> tokenRanges)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(tokenRanges.size());
         for (Range<Token> range : Range.normalize(tokenRanges))
@@ -123,19 +123,19 @@ public class BigTableScanner implements ISSTableScanner
         return boundsList;
     }
 
-    private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, DataRange dataRange)
+    private static List<AbstractBounds<PartitionPosition>> makeBounds(AbstractSSTableReader sstable, DataRange dataRange)
     {
         List<AbstractBounds<PartitionPosition>> boundsList = new ArrayList<>(2);
         addRange(sstable, dataRange.keyRange(), boundsList);
         return boundsList;
     }
 
-    private static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
+    private static AbstractBounds<PartitionPosition> fullRange(AbstractSSTableReader sstable)
     {
         return new Bounds<PartitionPosition>(sstable.first, sstable.last);
     }
 
-    private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
+    private static void addRange(AbstractSSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
     {
         if (requested instanceof Range && ((Range)requested).isWrapAround())
         {
@@ -241,7 +241,7 @@ public class BigTableScanner implements ISSTableScanner
         return sstable.onDiskLength();
     }
 
-    public Set<SSTableReader> getBackingSSTables()
+    public Set<AbstractSSTableReader> getBackingSSTables()
     {
         return ImmutableSet.of(sstable);
     }
@@ -393,9 +393,9 @@ public class BigTableScanner implements ISSTableScanner
 
     public static class EmptySSTableScanner extends AbstractUnfilteredPartitionIterator implements ISSTableScanner
     {
-        private final SSTableReader sstable;
+        private final AbstractSSTableReader sstable;
 
-        public EmptySSTableScanner(SSTableReader sstable)
+        public EmptySSTableScanner(AbstractSSTableReader sstable)
         {
             this.sstable = sstable;
         }
@@ -420,7 +420,7 @@ public class BigTableScanner implements ISSTableScanner
             return 0;
         }
 
-        public Set<SSTableReader> getBackingSSTables()
+        public Set<AbstractSSTableReader> getBackingSSTables()
         {
             return ImmutableSet.of(sstable);
         }

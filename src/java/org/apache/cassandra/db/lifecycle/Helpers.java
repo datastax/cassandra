@@ -23,7 +23,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.base.Predicates.*;
@@ -72,9 +72,10 @@ class Helpers
      * A convenience method for encapsulating this action over multiple SSTableReader with exception-safety
      * @return accumulate if not null (with any thrown exception attached), or any thrown exception otherwise
      */
-    static void setupOnline(Iterable<SSTableReader> readers)
+    static void setupOnline(Iterable<AbstractSSTableReader> readers)
     {
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
+            // TODO STAR-247: pull up to AbstractSSTableReader
             reader.setupOnline();
     }
 
@@ -82,12 +83,13 @@ class Helpers
      * A convenience method for encapsulating this action over multiple SSTableReader with exception-safety
      * @return accumulate if not null (with any thrown exception attached), or any thrown exception otherwise
      */
-    static Throwable setReplaced(Iterable<SSTableReader> readers, Throwable accumulate)
+    static Throwable setReplaced(Iterable<AbstractSSTableReader> readers, Throwable accumulate)
     {
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
         {
             try
             {
+                // TODO STAR-247: pull up to AbstractSSTableReader
                 reader.setReplaced();
             }
             catch (Throwable t)
@@ -101,9 +103,10 @@ class Helpers
     /**
      * assert that none of these readers have been replaced
      */
-    static void checkNotReplaced(Iterable<SSTableReader> readers)
+    static void checkNotReplaced(Iterable<AbstractSSTableReader> readers)
     {
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
+            // TODO STAR-247: pull up to AbstractSSTableReader
             assert !reader.isReplaced();
     }
 
@@ -116,6 +119,7 @@ class Helpers
         {
             try
             {
+                // TODO STAR-247: pull up to AbstractSSTableReader
                 obsoletion.reader.markObsolete(obsoletion.tidier);
             }
             catch (Throwable t)
@@ -126,10 +130,10 @@ class Helpers
         return accumulate;
     }
 
-    static Throwable prepareForObsoletion(Iterable<SSTableReader> readers, LogTransaction txnLogs, List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable prepareForObsoletion(Iterable<AbstractSSTableReader> readers, LogTransaction txnLogs, List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
     {
         Map<SSTable, LogRecord> logRecords = txnLogs.makeRemoveRecords(readers);
-        for (SSTableReader reader : readers)
+        for (AbstractSSTableReader reader : readers)
         {
             try
             {
@@ -226,7 +230,7 @@ class Helpers
         return filter(filter, orIn(inAny));
     }
 
-    static Set<SSTableReader> emptySet()
+    static Set<AbstractSSTableReader> emptySet()
     {
         return Collections.emptySet();
     }

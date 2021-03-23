@@ -43,7 +43,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -451,7 +451,7 @@ public class CompactionIteratorTest extends CQLTester
         }
 
         @Override
-        public Set<SSTableReader> getBackingSSTables()
+        public Set<AbstractSSTableReader> getBackingSSTables()
         {
             return ImmutableSet.of();
         }

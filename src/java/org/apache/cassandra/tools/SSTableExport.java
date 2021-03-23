@@ -38,7 +38,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.KeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -142,7 +142,7 @@ public class SSTableExport
         try
         {
             TableMetadata metadata = Util.metadataFromSSTable(desc);
-            SSTableReader sstable = SSTableReader.openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
+            AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
             IPartitioner partitioner = sstable.getPartitioner();
             if (cmd.hasOption(ENUMERATE_KEYS_OPTION))
             {

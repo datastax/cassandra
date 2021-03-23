@@ -50,7 +50,7 @@ public interface SSTableFlushObserver
      *
      * @param deletionTime the partition-level deletion time being written to the SSTable
      * @param position the position of the written deletion time in the data file,
-     * as required by {@link SSTableReader#partitionLevelDeletionAt(long)}
+     * as required by {@link AbstractSSTableReader#partitionLevelDeletionAt(long)}
      */
     void partitionLevelDeletion(DeletionTime deletionTime, long position);
 
@@ -62,7 +62,7 @@ public interface SSTableFlushObserver
      *
      * @param staticRow the static row being written to the SSTable
      * @param position the position of the written static row in the data file,
-     * as required by {@link SSTableReader#staticRowAt(long, ColumnFilter)}
+     * as required by {@link AbstractSSTableReader#staticRowAt(long, ColumnFilter)}
      */
     void staticRow(Row staticRow, long position);
 
@@ -92,8 +92,8 @@ public interface SSTableFlushObserver
      *
      * @param unfiltered the unfiltered being written to the SSTable
      * @param position the position of the written unfiltered in the data file,
-     * as required by {@link SSTableReader#clusteringAt(long)}
-     * and {@link SSTableReader#unfilteredAt(long, ColumnFilter)}
+     * as required by {@link AbstractSSTableReader#clusteringAt(long)}
+     * and {@link AbstractSSTableReader#unfilteredAt(long, ColumnFilter)}
      */
     default void nextUnfilteredCluster(Unfiltered unfiltered, long position)
     {

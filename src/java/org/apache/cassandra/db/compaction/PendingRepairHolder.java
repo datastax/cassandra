@@ -30,14 +30,13 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -82,7 +81,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public AbstractCompactionStrategy getStrategyFor(SSTableReader sstable)
+    public AbstractCompactionStrategy getStrategyFor(AbstractSSTableReader sstable)
     {
         Preconditions.checkArgument(managesSSTable(sstable), "Attempting to get compaction strategy from wrong holder");
         return managers.get(router.getIndexForSSTable(sstable)).getOrCreate(sstable);
@@ -278,7 +277,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public boolean containsSSTable(SSTableReader sstable)
+    public boolean containsSSTable(AbstractSSTableReader sstable)
     {
         return Iterables.any(managers, prm -> prm.containsSSTable(sstable));
     }

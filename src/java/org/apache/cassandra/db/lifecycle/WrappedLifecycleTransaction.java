@@ -23,7 +23,7 @@ import java.util.Set;
 
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 public class WrappedLifecycleTransaction implements ILifecycleTransaction
 {
@@ -39,22 +39,22 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
         delegate.checkpoint();
     }
 
-    public void update(SSTableReader reader, boolean original)
+    public void update(AbstractSSTableReader reader, boolean original)
     {
         delegate.update(reader, original);
     }
 
-    public void update(Collection<SSTableReader> readers, boolean original)
+    public void update(Collection<AbstractSSTableReader> readers, boolean original)
     {
         delegate.update(readers, original);
     }
 
-    public SSTableReader current(SSTableReader reader)
+    public AbstractSSTableReader current(AbstractSSTableReader reader)
     {
         return delegate.current(reader);
     }
 
-    public void obsolete(SSTableReader reader)
+    public void obsolete(AbstractSSTableReader reader)
     {
         delegate.obsolete(reader);
     }
@@ -64,12 +64,12 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
         delegate.obsoleteOriginals();
     }
 
-    public Set<SSTableReader> originals()
+    public Set<AbstractSSTableReader> originals()
     {
         return delegate.originals();
     }
 
-    public boolean isObsolete(SSTableReader reader)
+    public boolean isObsolete(AbstractSSTableReader reader)
     {
         return delegate.isObsolete(reader);
     }

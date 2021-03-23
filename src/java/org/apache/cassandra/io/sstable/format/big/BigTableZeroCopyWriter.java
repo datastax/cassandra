@@ -39,7 +39,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
@@ -55,7 +55,7 @@ public class BigTableZeroCopyWriter extends SSTable implements SSTableMultiWrite
     private static final Logger logger = LoggerFactory.getLogger(BigTableZeroCopyWriter.class);
 
     private final TableMetadataRef metadata;
-    private volatile SSTableReader finalReader;
+    private volatile AbstractSSTableReader finalReader;
     private final Map<Component.Type, SequentialWriter> componentWriters;
 
     private static final SequentialWriterOption WRITER_OPTION =
@@ -129,23 +129,23 @@ public class BigTableZeroCopyWriter extends SSTable implements SSTableMultiWrite
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
+    public Collection<AbstractSSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
     {
         return finish(openResult);
     }
 
     @Override
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<AbstractSSTableReader> finish(boolean openResult)
     {
         setOpenResult(openResult);
         return finished();
     }
 
     @Override
-    public Collection<SSTableReader> finished()
+    public Collection<AbstractSSTableReader> finished()
     {
         if (finalReader == null)
-            finalReader = SSTableReader.open(descriptor, components, metadata);
+            finalReader = AbstractSSTableReader.open(descriptor, components, metadata);
 
         return ImmutableList.of(finalReader);
     }

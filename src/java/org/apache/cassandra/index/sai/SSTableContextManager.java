@@ -30,7 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -41,7 +41,7 @@ public class SSTableContextManager
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final ConcurrentHashMap<SSTableReader, SSTableContext> sstableContexts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<AbstractSSTableReader, SSTableContext> sstableContexts = new ConcurrentHashMap<>();
 
     /**
      * Initialize {@link SSTableContext}s if they are not already initialized.
@@ -54,14 +54,14 @@ public class SSTableContextManager
      * SSTables with invalid or missing components
      */
     @SuppressWarnings("resource")
-    public Pair<Set<SSTableContext>, Set<SSTableReader>> update(Collection<SSTableReader> removed, Iterable<SSTableReader> added, boolean validate)
+    public Pair<Set<SSTableContext>, Set<AbstractSSTableReader>> update(Collection<AbstractSSTableReader> removed, Iterable<AbstractSSTableReader> added, boolean validate)
     {
         release(removed);
 
         Set<SSTableContext> contexts = new HashSet<>();
-        Set<SSTableReader> invalid = new HashSet<>();
+        Set<AbstractSSTableReader> invalid = new HashSet<>();
 
-        for (SSTableReader sstable : added)
+        for (AbstractSSTableReader sstable : added)
         {
             if (sstable.isMarkedCompacted())
             {
@@ -102,7 +102,7 @@ public class SSTableContextManager
         return Pair.create(contexts, invalid);
     }
 
-    public void release(Collection<SSTableReader> toRelease)
+    public void release(Collection<AbstractSSTableReader> toRelease)
     {
         toRelease.stream().map(sstableContexts::remove).filter(Objects::nonNull).forEach(SSTableContext::close);
     }
@@ -123,7 +123,7 @@ public class SSTableContextManager
         return sstableContexts.values().stream().mapToLong(SSTableContext::diskUsage).sum();
     }
 
-    Set<SSTableReader> sstables()
+    Set<AbstractSSTableReader> sstables()
     {
         return sstableContexts.keySet();
     }

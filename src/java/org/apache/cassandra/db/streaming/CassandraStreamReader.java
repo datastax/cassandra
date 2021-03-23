@@ -29,7 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -60,7 +60,7 @@ public class CassandraStreamReader implements IStreamReader
     private static final Logger logger = LoggerFactory.getLogger(CassandraStreamReader.class);
     protected final TableId tableId;
     protected final long estimatedKeys;
-    protected final Collection<SSTableReader.PartitionPositionBounds> sections;
+    protected final Collection<AbstractBigTableReader.PartitionPositionBounds> sections;
     protected final StreamSession session;
     protected final Version inputVersion;
     protected final long repairedAt;
@@ -165,7 +165,7 @@ public class CassandraStreamReader implements IStreamReader
     protected long totalSize()
     {
         long size = 0;
-        for (SSTableReader.PartitionPositionBounds section : sections)
+        for (AbstractBigTableReader.PartitionPositionBounds section : sections)
             size += section.upperPosition - section.lowerPosition;
         return size;
     }

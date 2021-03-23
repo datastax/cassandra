@@ -24,13 +24,12 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.*;
@@ -41,7 +40,6 @@ import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Set;
@@ -51,14 +49,14 @@ public abstract class SSTableReaderBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReaderBuilder.class);
 
-    protected final SSTableReader.Factory readerFactory;
+    protected final AbstractBigTableReader.Factory readerFactory;
     protected final Descriptor descriptor;
     protected final TableMetadataRef metadataRef;
     protected final TableMetadata metadata;
     protected final long maxDataAge;
     protected final Set<Component> components;
     protected final StatsMetadata statsMetadata;
-    protected final SSTableReader.OpenReason openReason;
+    protected final AbstractBigTableReader.OpenReason openReason;
     protected final SerializationHeader header;
 
     protected IndexSummary summary;
@@ -73,7 +71,7 @@ public abstract class SSTableReaderBuilder
                                 long maxDataAge,
                                 Set<Component> components,
                                 StatsMetadata statsMetadata,
-                                SSTableReader.OpenReason openReason,
+                                AbstractBigTableReader.OpenReason openReason,
                                 SerializationHeader header)
     {
         this.descriptor = descriptor;
@@ -87,7 +85,7 @@ public abstract class SSTableReaderBuilder
         this.readerFactory = descriptor.getFormat().getReaderFactory();
     }
 
-    public abstract SSTableReader build();
+    public abstract AbstractBigTableReader build();
 
     public SSTableReaderBuilder dfile(FileHandle dfile)
     {
@@ -252,16 +250,16 @@ public abstract class SSTableReaderBuilder
                          long maxDataAge,
                          Set<Component> components,
                          StatsMetadata statsMetadata,
-                         SSTableReader.OpenReason openReason,
+                         AbstractBigTableReader.OpenReason openReason,
                          SerializationHeader header)
         {
             super(descriptor, metadataRef, maxDataAge, components, statsMetadata, openReason, header);
         }
 
         @Override
-        public SSTableReader build()
+        public AbstractBigTableReader build()
         {
-            SSTableReader reader = readerFactory.open(this);
+            AbstractBigTableReader reader = readerFactory.open(this);
 
             reader.setup(true);
             return reader;
@@ -276,11 +274,11 @@ public abstract class SSTableReaderBuilder
                         StatsMetadata statsMetadata,
                         SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, AbstractBigTableReader.OpenReason.NORMAL, header);
         }
 
         @Override
-        public SSTableReader build()
+        public AbstractBigTableReader build()
         {
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
@@ -300,7 +298,7 @@ public abstract class SSTableReaderBuilder
                 dfile = dbuilder.bufferSize(dataBufferSize).complete();
                 bf = FilterFactory.AlwaysPresent;
 
-                SSTableReader sstable = readerFactory.open(this);
+                AbstractBigTableReader sstable = new BigTableReader(this);
 
                 sstable.first = first;
                 sstable.last = last;
@@ -340,13 +338,13 @@ public abstract class SSTableReaderBuilder
                        StatsMetadata statsMetadata,
                        SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, AbstractBigTableReader.OpenReason.NORMAL, header);
             this.validationMetadata = validationMetadata;
             this.isOffline = isOffline;
         }
 
         @Override
-        public SSTableReader build()
+        public AbstractBigTableReader build()
         {
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
@@ -364,7 +362,7 @@ public abstract class SSTableReaderBuilder
                 throw new CorruptSSTableException(t, dataFilePath);
             }
 
-            SSTableReader sstable = readerFactory.open(this);
+            AbstractBigTableReader sstable = new BigTableReader(this);
 
             sstable.first = first;
             sstable.last = last;
@@ -445,13 +443,13 @@ public abstract class SSTableReaderBuilder
                 if (buildSummary)
                 {
                     if (saveSummaryIfCreated)
-                        SSTableReader.saveSummary(descriptor, first, last, summary);
+                        AbstractBigTableReader.saveSummary(descriptor, first, last, summary);
                     if (recreateBloomFilter)
-                        SSTableReader.saveBloomFilter(descriptor, bf);
+                        AbstractBigTableReader.saveBloomFilter(descriptor, bf);
                 }
             }
             catch (Throwable t)
-            { // Because the tidier has not been set-up yet in SSTableReader.open(), we must release the files in case of error
+            { // Because the tidier has not been set-up yet in BigSSTableReader.open(), we must release the files in case of error
                 if (ifile != null)
                 {
                     ifile.close();

@@ -35,7 +35,7 @@ import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -153,7 +153,7 @@ public class CleanupTransientTest
             }
         }
 
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, 1, null, false);
         sstable.reloadSSTableMetadata();
 
@@ -188,7 +188,7 @@ public class CleanupTransientTest
     protected List<Long> getMaxTimestampList(ColumnFamilyStore cfs)
     {
         List<Long> list = new LinkedList<Long>();
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             list.add(sstable.getMaxTimestamp());
         return list;
     }

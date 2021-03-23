@@ -53,7 +53,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IndexSummary;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -174,7 +174,7 @@ public class SSTableMetadataViewer
     private void printScannedOverview(Descriptor descriptor, StatsMetadata stats) throws IOException
     {
         TableMetadata cfm = Util.metadataFromSSTable(descriptor);
-        SSTableReader reader = SSTableReader.openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
+        AbstractSSTableReader reader = AbstractSSTableReader.openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
         try (ISSTableScanner scanner = reader.getScanner())
         {
             long bytes = scanner.getLengthInBytes();

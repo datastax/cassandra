@@ -28,7 +28,8 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataComponentSerializer;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -74,7 +75,7 @@ public class SerializationHeader
         return new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), EncodingStats.NO_STATS);
     }
 
-    public static SerializationHeader make(TableMetadata metadata, Collection<SSTableReader> sstables)
+    public static SerializationHeader make(TableMetadata metadata, Collection<AbstractSSTableReader> sstables)
     {
         // The serialization header has to be computed before the start of compaction (since it's used to write)
         // the result. This means that when compacting multiple sources, we won't have perfectly accurate stats
@@ -89,23 +90,27 @@ public class SerializationHeader
         EncodingStats.Collector stats = new EncodingStats.Collector();
         RegularAndStaticColumns.Builder columns = RegularAndStaticColumns.builder();
         // We need to order the SSTables by descending generation to be sure that we use latest column metadata.
-        for (SSTableReader sstable : orderByDescendingGeneration(sstables))
+        for (AbstractSSTableReader sstable : orderByDescendingGeneration(sstables))
         {
+            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateTimestamp(sstable.getMinTimestamp());
+            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
+            // TODO STAR-247: pull up to AbstractSSTableReader
             stats.updateTTL(sstable.getMinTTL());
+            // TODO STAR-247: pull up to AbstractSSTableReader
             columns.addAll(sstable.header.columns());
         }
         return new SerializationHeader(true, metadata, columns.build(), stats.get());
     }
 
-    private static Collection<SSTableReader> orderByDescendingGeneration(Collection<SSTableReader> sstables)
+    private static Collection<AbstractSSTableReader> orderByDescendingGeneration(Collection<AbstractSSTableReader> sstables)
     {
         if (sstables.size() < 2)
             return sstables;
 
-        List<SSTableReader> readers = new ArrayList<>(sstables);
-        readers.sort(SSTableReader.generationReverseComparator);
+        List<AbstractSSTableReader> readers = new ArrayList<>(sstables);
+        readers.sort(AbstractBigTableReader.generationReverseComparator);
         return readers;
     }
 

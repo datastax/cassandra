@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamManager;
@@ -41,13 +41,13 @@ public class CassandraEntireSSTableStreamWriter
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraEntireSSTableStreamWriter.class);
 
-    private final SSTableReader sstable;
+    private final AbstractSSTableReader sstable;
     private final ComponentContext context;
     private final ComponentManifest manifest;
     private final StreamSession session;
     private final StreamRateLimiter limiter;
 
-    public CassandraEntireSSTableStreamWriter(SSTableReader sstable, StreamSession session, ComponentContext context)
+    public CassandraEntireSSTableStreamWriter(AbstractSSTableReader sstable, StreamSession session, ComponentContext context)
     {
         this.session = session;
         this.sstable = sstable;

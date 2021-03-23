@@ -54,7 +54,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
@@ -124,7 +124,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         if (indices.isEmpty())
         {
             Set<Component> toRemove = new HashSet<>(IndexComponents.PER_SSTABLE_COMPONENTS);
-            for (SSTableReader sstable : contextManager.sstables())
+            for (AbstractSSTableReader sstable : contextManager.sstables())
                 sstable.unregisterComponents(toRemove, baseCfs.getTracker());
 
             deletePerSSTableFiles(baseCfs.getLiveSSTables());
@@ -269,13 +269,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         }
     }
 
-    void deletePerSSTableFiles(Collection<SSTableReader> sstables)
+    void deletePerSSTableFiles(Collection<AbstractSSTableReader> sstables)
     {
         contextManager.release(sstables);
         sstables.forEach(sstableReader -> IndexComponents.deletePerSSTableIndexComponents(sstableReader.descriptor));
     }
 
-    void dropIndexSSTables(Collection<SSTableReader> ss, StorageAttachedIndex index)
+    void dropIndexSSTables(Collection<AbstractSSTableReader> ss, StorageAttachedIndex index)
     {
         try
         {
@@ -296,10 +296,10 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      * @return the set of column indexes that were marked as non-queryable as a result of their per-SSTable index
      * files being corrupt or being unable to successfully update their views
      */
-    synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Iterable<SSTableReader> added,
+    synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<AbstractSSTableReader> removed, Iterable<AbstractSSTableReader> added,
                                                             Set<StorageAttachedIndex> indexes, boolean validate, boolean rename)
     {
-        Pair<Set<SSTableContext>, Set<SSTableReader>> results = contextManager.update(removed, added, validate);
+        Pair<Set<SSTableContext>, Set<AbstractSSTableReader>> results = contextManager.update(removed, added, validate);
 
         if (!results.right.isEmpty())
         {

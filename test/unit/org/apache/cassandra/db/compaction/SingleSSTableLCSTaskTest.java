@@ -29,7 +29,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -43,7 +43,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         execute("insert into %s (id, t) values (1, 'meep')");
         cfs.forceBlockingFlush();
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstable, OperationType.COMPACTION))
         {
@@ -124,7 +124,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         execute("insert into %s (id, t) values (1, 'meep')");
         cfs.forceBlockingFlush();
-        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         String filenameToCorrupt = sstable.descriptor.filenameFor(Component.STATS);
         RandomAccessFile file = new RandomAccessFile(filenameToCorrupt, "rw");
@@ -146,7 +146,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         }
         assertTrue(gotException);
         assertEquals(1, cfs.getLiveSSTables().size());
-        for (SSTableReader sst : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sst : cfs.getLiveSSTables())
             assertEquals(0, sst.getSSTableMetadata().sstableLevel);
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getUnrepairedUnsafe().first();
         assertEquals(1, lcs.getLevelSize(0));

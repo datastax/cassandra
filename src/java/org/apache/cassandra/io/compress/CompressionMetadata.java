@@ -26,12 +26,10 @@ import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.SortedSet;
@@ -49,7 +47,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractBigTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Memory;
@@ -266,11 +264,11 @@ public class CompressionMetadata
      * @param sections Collection of sections in uncompressed file. Should not contain sections that overlap each other.
      * @return Total chunk size in bytes for given sections including checksum.
      */
-    public long getTotalSizeForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
+    public long getTotalSizeForSections(Collection<AbstractBigTableReader.PartitionPositionBounds> sections)
     {
         long size = 0;
         long lastOffset = -1;
-        for (SSTableReader.PartitionPositionBounds section : sections)
+        for (AbstractBigTableReader.PartitionPositionBounds section : sections)
         {
             int startIndex = (int) (section.lowerPosition / parameters.chunkLength());
 
@@ -299,12 +297,12 @@ public class CompressionMetadata
      * @param sections Collection of sections in uncompressed file
      * @return Array of chunks which corresponds to given sections of uncompressed file, sorted by chunk offset
      */
-    public Chunk[] getChunksForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
+    public Chunk[] getChunksForSections(Collection<AbstractBigTableReader.PartitionPositionBounds> sections)
     {
         // use SortedSet to eliminate duplicates and sort by chunk offset
         SortedSet<Chunk> offsets = new TreeSet<>((o1, o2) -> Longs.compare(o1.offset, o2.offset));
 
-        for (SSTableReader.PartitionPositionBounds section : sections)
+        for (AbstractBigTableReader.PartitionPositionBounds section : sections)
         {
             int startIndex = (int) (section.lowerPosition / parameters.chunkLength());
 

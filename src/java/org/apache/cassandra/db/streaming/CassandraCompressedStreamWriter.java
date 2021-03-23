@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
@@ -49,7 +49,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
     private final CompressionInfo compressionInfo;
     private final long totalSize;
 
-    public CassandraCompressedStreamWriter(SSTableReader sstable, CassandraStreamHeader header, StreamSession session)
+    public CassandraCompressedStreamWriter(AbstractSSTableReader sstable, CassandraStreamHeader header, StreamSession session)
     {
         super(sstable, header, session);
         this.compressionInfo = header.compressionInfo;

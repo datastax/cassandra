@@ -33,7 +33,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 
 /**
  * During compaction we can drop entire sstables if they only contain expired tombstones and if it is guaranteed
@@ -65,14 +65,14 @@ public class SSTableExpiredBlockers
         Keyspace ks = Keyspace.openWithoutSSTables(keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(columnfamily);
         Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).skipTemporary(true);
-        Set<SSTableReader> sstables = new HashSet<>();
+        Set<AbstractSSTableReader> sstables = new HashSet<>();
         for (Map.Entry<Descriptor, Set<Component>> sstable : lister.list().entrySet())
         {
             if (sstable.getKey() != null)
             {
                 try
                 {
-                    SSTableReader reader = SSTableReader.open(sstable.getKey());
+                    AbstractSSTableReader reader = AbstractSSTableReader.open(sstable.getKey());
                     sstables.add(reader);
                 }
                 catch (Throwable t)
@@ -88,8 +88,8 @@ public class SSTableExpiredBlockers
         }
 
         int gcBefore = (int)(System.currentTimeMillis()/1000) - metadata.params.gcGraceSeconds;
-        Multimap<SSTableReader, SSTableReader> blockers = checkForExpiredSSTableBlockers(sstables, gcBefore);
-        for (SSTableReader blocker : blockers.keySet())
+        Multimap<AbstractSSTableReader, AbstractSSTableReader> blockers = checkForExpiredSSTableBlockers(sstables, gcBefore);
+        for (AbstractSSTableReader blocker : blockers.keySet())
         {
             out.println(String.format("%s blocks %d expired sstables from getting dropped: %s%n",
                                     formatForExpiryTracing(Collections.singleton(blocker)),
@@ -100,14 +100,14 @@ public class SSTableExpiredBlockers
         System.exit(0);
     }
 
-    public static Multimap<SSTableReader, SSTableReader> checkForExpiredSSTableBlockers(Iterable<SSTableReader> sstables, int gcBefore)
+    public static Multimap<AbstractSSTableReader, AbstractSSTableReader> checkForExpiredSSTableBlockers(Iterable<AbstractSSTableReader> sstables, int gcBefore)
     {
-        Multimap<SSTableReader, SSTableReader> blockers = ArrayListMultimap.create();
-        for (SSTableReader sstable : sstables)
+        Multimap<AbstractSSTableReader, AbstractSSTableReader> blockers = ArrayListMultimap.create();
+        for (AbstractSSTableReader sstable : sstables)
         {
             if (sstable.getSSTableMetadata().maxLocalDeletionTime < gcBefore)
             {
-                for (SSTableReader potentialBlocker : sstables)
+                for (AbstractSSTableReader potentialBlocker : sstables)
                 {
                     if (!potentialBlocker.equals(sstable) &&
                         potentialBlocker.getMinTimestamp() <= sstable.getMaxTimestamp() &&
@@ -119,11 +119,11 @@ public class SSTableExpiredBlockers
         return blockers;
     }
 
-    private static String formatForExpiryTracing(Iterable<SSTableReader> sstables)
+    private static String formatForExpiryTracing(Iterable<AbstractSSTableReader> sstables)
     {
         StringBuilder sb = new StringBuilder();
 
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
             sb.append(String.format("[%s (minTS = %d, maxTS = %d, maxLDT = %d)]", sstable, sstable.getMinTimestamp(), sstable.getMaxTimestamp(), sstable.getSSTableMetadata().maxLocalDeletionTime)).append(", ");
 
         return sb.toString();

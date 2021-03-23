@@ -50,7 +50,7 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -109,9 +109,9 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     }
 
     @VisibleForTesting
-    static synchronized Refs<SSTableReader> getSSTablesToValidate(ColumnFamilyStore cfs, Collection<Range<Token>> ranges, UUID parentId, boolean isIncremental)
+    static synchronized Refs<AbstractSSTableReader> getSSTablesToValidate(ColumnFamilyStore cfs, Collection<Range<Token>> ranges, UUID parentId, boolean isIncremental)
     {
-        Refs<SSTableReader> sstables;
+        Refs<AbstractSSTableReader> sstables;
 
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(parentId);
         if (prs == null)
@@ -120,9 +120,9 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
             return new Refs<>();
         }
 
-        Set<SSTableReader> sstablesToValidate = new HashSet<>();
+        Set<AbstractSSTableReader> sstablesToValidate = new HashSet<>();
 
-        com.google.common.base.Predicate<SSTableReader> predicate;
+        com.google.common.base.Predicate<AbstractSSTableReader> predicate;
         if (prs.isPreview())
         {
             predicate = prs.previewKind.predicate();
@@ -141,7 +141,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
 
         try (ColumnFamilyStore.RefViewFragment sstableCandidates = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
-            for (SSTableReader sstable : sstableCandidates.sstables)
+            for (AbstractSSTableReader sstable : sstableCandidates.sstables)
             {
                 if (new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(ranges) && predicate.apply(sstable))
                 {
@@ -161,7 +161,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     }
 
     private final ColumnFamilyStore cfs;
-    private final Refs<SSTableReader> sstables;
+    private final Refs<AbstractSSTableReader> sstables;
     private final String snapshotName;
     private final boolean isGlobalSnapshotValidation;
 
@@ -224,7 +224,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         for (Range<Token> range : ranges)
         {
             long numPartitions = 0;
-            for (SSTableReader sstable : sstables)
+            for (AbstractSSTableReader sstable : sstables)
                 numPartitions += sstable.estimatedKeysForRanges(Collections.singleton(range));
             rangePartitionCounts.put(range, numPartitions);
             allPartitions += numPartitions;
@@ -232,9 +232,9 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         estimatedPartitions = allPartitions;
 
         long estimatedTotalBytes = 0;
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
-            for (SSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges))
+            for (BigSSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges))
                 estimatedTotalBytes += positionsForRanges.upperPosition - positionsForRanges.lowerPosition;
         }
         estimatedBytes = estimatedTotalBytes;

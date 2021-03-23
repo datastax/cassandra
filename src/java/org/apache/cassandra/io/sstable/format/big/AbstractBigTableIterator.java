@@ -27,13 +27,13 @@ import org.apache.cassandra.db.UnfilteredDeserializer;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 
 public abstract class AbstractBigTableIterator extends AbstractSSTableIterator<BigTableRowIndexEntry>
 {
-    protected AbstractBigTableIterator(SSTableReader sstable,
+    protected AbstractBigTableIterator(AbstractSSTableReader sstable,
                                        FileDataInput file,
                                        DecoratedKey key,
                                        BigTableRowIndexEntry indexEntry,

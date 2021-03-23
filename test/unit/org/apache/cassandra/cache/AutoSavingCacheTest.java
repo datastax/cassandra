@@ -23,7 +23,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -81,8 +81,8 @@ public class AutoSavingCacheTest
         Assert.assertEquals(2, cfs.getLiveSSTables().size());
 
         // preheat key cache
-        for (SSTableReader sstable : cfs.getLiveSSTables())
-            sstable.getPosition(Util.dk("key1"), SSTableReader.Operator.EQ);
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
+            sstable.getPosition(Util.dk("key1"), AbstractSSTableReader.Operator.EQ);
 
         AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache = CacheService.instance.keyCache;
 
@@ -94,7 +94,7 @@ public class AutoSavingCacheTest
 
         // then load saved
         keyCache.loadSavedAsync().get();
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getLiveSSTables())
             Assert.assertNotNull(keyCache.get(new KeyCacheKey(cfs.metadata(), sstable.descriptor, ByteBufferUtil.bytes("key1"))));
     }
 }

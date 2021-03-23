@@ -27,15 +27,15 @@ import java.util.List;
 import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
-public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTableReader, Interval<PartitionPosition, SSTableReader>>
+public class SSTableIntervalTree extends IntervalTree<PartitionPosition, AbstractSSTableReader, Interval<PartitionPosition, AbstractSSTableReader>>
 {
     private static final SSTableIntervalTree EMPTY = new SSTableIntervalTree(null);
 
-    SSTableIntervalTree(Collection<Interval<PartitionPosition, SSTableReader>> intervals)
+    SSTableIntervalTree(Collection<Interval<PartitionPosition, AbstractSSTableReader>> intervals)
     {
         super(intervals);
     }
@@ -45,16 +45,16 @@ public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTable
         return EMPTY;
     }
 
-    public static SSTableIntervalTree build(Iterable<SSTableReader> sstables)
+    public static SSTableIntervalTree build(Iterable<AbstractSSTableReader> sstables)
     {
         return new SSTableIntervalTree(buildIntervals(sstables));
     }
 
-    public static List<Interval<PartitionPosition, SSTableReader>> buildIntervals(Iterable<SSTableReader> sstables)
+    public static List<Interval<PartitionPosition, AbstractSSTableReader>> buildIntervals(Iterable<AbstractSSTableReader> sstables)
     {
-        List<Interval<PartitionPosition, SSTableReader>> intervals = new ArrayList<>(Iterables.size(sstables));
-        for (SSTableReader sstable : sstables)
-            intervals.add(Interval.<PartitionPosition, SSTableReader>create(sstable.first, sstable.last, sstable));
+        List<Interval<PartitionPosition, AbstractSSTableReader>> intervals = new ArrayList<>(Iterables.size(sstables));
+        for (AbstractSSTableReader sstable : sstables)
+            intervals.add(Interval.<PartitionPosition, AbstractSSTableReader>create(sstable.first, sstable.last, sstable));
         return intervals;
     }
 }

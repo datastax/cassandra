@@ -33,7 +33,7 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -59,7 +59,7 @@ public class LeveledGenerationsTest extends CQLTester
 
         for (int i = 0; i < 10; i++)
         {
-            SSTableReader sstable = MockSchema.sstable(i, 5, true, i, i, 2, cfs);
+            AbstractSSTableReader sstable = MockSchema.sstable(i, 5, true, i, i, 2, cfs);
             gens.addAll(Collections.singleton(sstable));
         }
         int gen = 10;
@@ -163,21 +163,21 @@ public class LeveledGenerationsTest extends CQLTester
         {}
     }
 
-    private void assertIter(Iterator<SSTableReader> iter, long first, long last, int expectedCount)
+    private void assertIter(Iterator<AbstractSSTableReader> iter, long first, long last, int expectedCount)
     {
-        List<SSTableReader> drained = Lists.newArrayList(iter);
+        List<AbstractSSTableReader> drained = Lists.newArrayList(iter);
         assertEquals(expectedCount, drained.size());
         assertEquals(dk(first).getToken(), first(drained).first.getToken());
         assertEquals(dk(last).getToken(), last(drained).first.getToken()); // we sort by first token, so this is the first token of the last sstable in iter
     }
 
-    private SSTableReader last(Iterable<SSTableReader> iter)
+    private AbstractSSTableReader last(Iterable<AbstractSSTableReader> iter)
     {
         return Iterables.getLast(iter);
     }
-    private SSTableReader first(Iterable<SSTableReader> iter)
+    private AbstractSSTableReader first(Iterable<AbstractSSTableReader> iter)
     {
-        SSTableReader first = Iterables.getFirst(iter, null);
+        AbstractSSTableReader first = Iterables.getFirst(iter, null);
         if (first == null)
             throw new RuntimeException();
         return first;
@@ -187,12 +187,12 @@ public class LeveledGenerationsTest extends CQLTester
     {
         return new BufferDecoratedKey(new Murmur3Partitioner.LongToken(x), ByteBufferUtil.bytes(x));
     }
-    private SSTableReader sst(int gen, ColumnFamilyStore cfs, long first, long last)
+    private AbstractSSTableReader sst(int gen, ColumnFamilyStore cfs, long first, long last)
     {
         return MockSchema.sstable(gen, 5, true, first, last, 2, cfs);
     }
 
-    private void print(SSTableReader sstable)
+    private void print(AbstractSSTableReader sstable)
     {
         System.out.println(String.format("%d %s %s %d", sstable.descriptor.generation, sstable.first, sstable.last, sstable.getSSTableLevel()));
     }

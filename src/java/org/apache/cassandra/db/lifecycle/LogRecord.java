@@ -32,7 +32,7 @@ import java.util.zip.CRC32;
 
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -155,11 +155,11 @@ final class LogRecord
         return make(type, getExistingFiles(absoluteTablePath), table.getAllFilePaths().size(), absoluteTablePath);
     }
 
-    public static Map<SSTable, LogRecord> make(Type type, Iterable<SSTableReader> tables)
+    public static Map<SSTable, LogRecord> make(Type type, Iterable<AbstractSSTableReader> tables)
     {
         // contains a mapping from sstable absolute path (everything up until the 'Data'/'Index'/etc part of the filename) to the sstable
         Map<String, SSTable> absolutePaths = new HashMap<>();
-        for (SSTableReader table : tables)
+        for (AbstractSSTableReader table : tables)
             absolutePaths.put(absolutePath(table.descriptor.baseFilename()), table);
 
         // maps sstable base file name to the actual files on disk

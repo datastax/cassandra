@@ -48,7 +48,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableHeaderFix;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -125,7 +125,7 @@ public class StandaloneScrubber
                 listResult.add(Pair.create(descriptor, components));
 
                 File snapshotDirectory = Directories.getSnapshotDirectory(descriptor, snapshotName);
-                SSTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
+                AbstractSSTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
             }
             System.out.println(String.format("Pre-scrub sstables snapshotted into snapshot %s", snapshotName));
 
@@ -189,7 +189,7 @@ public class StandaloneScrubber
                 }
             }
 
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<AbstractSSTableReader> sstables = new ArrayList<>();
 
             // Open sstables
             for (Pair<Descriptor, Set<Component>> pair : listResult)
@@ -201,7 +201,7 @@ public class StandaloneScrubber
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(descriptor, components, cfs);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(descriptor, components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)
@@ -215,7 +215,7 @@ public class StandaloneScrubber
 
             if (!options.manifestCheckOnly)
             {
-                for (SSTableReader sstable : sstables)
+                for (AbstractSSTableReader sstable : sstables)
                 {
                     try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, sstable))
                     {
@@ -256,7 +256,7 @@ public class StandaloneScrubber
         }
     }
 
-    private static void checkManifest(CompactionStrategyManager strategyManager, ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
+    private static void checkManifest(CompactionStrategyManager strategyManager, ColumnFamilyStore cfs, Collection<AbstractSSTableReader> sstables)
     {
         if (strategyManager.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
         {
@@ -266,7 +266,7 @@ public class StandaloneScrubber
             {
                 for (int i = 0; i < sstableGroup.numGroups(); i++)
                 {
-                    List<SSTableReader> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
+                    List<AbstractSSTableReader> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
                     // creating the manifest makes sure the leveling is sane:
                     LeveledManifest.create(cfs, maxSizeInMB, fanOut, groupSSTables);
                 }

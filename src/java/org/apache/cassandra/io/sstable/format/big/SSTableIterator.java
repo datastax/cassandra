@@ -23,7 +23,7 @@ import java.util.NoSuchElementException;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 
@@ -37,7 +37,7 @@ public class SSTableIterator extends AbstractBigTableIterator
      */
     private int slice;
 
-    public SSTableIterator(SSTableReader sstable,
+    public SSTableIterator(AbstractSSTableReader sstable,
                            FileDataInput file,
                            DecoratedKey key,
                            BigTableRowIndexEntry indexEntry,

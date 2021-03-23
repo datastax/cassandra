@@ -32,7 +32,7 @@ import org.apache.cassandra.db.compaction.Upgrader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
@@ -74,7 +74,7 @@ public class StandaloneUpgrader
             else
                 lister.includeBackups(false);
 
-            Collection<SSTableReader> readers = new ArrayList<>();
+            Collection<AbstractSSTableReader> readers = new ArrayList<>();
 
             // Upgrade sstables
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
@@ -85,7 +85,7 @@ public class StandaloneUpgrader
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    AbstractSSTableReader sstable = AbstractSSTableReader.openNoValidation(entry.getKey(), components, cfs);
                     if (sstable.descriptor.version.equals(SSTableFormat.Type.current().info.getLatestVersion()))
                     {
                         sstable.selfRef().release();
@@ -105,7 +105,7 @@ public class StandaloneUpgrader
             int numSSTables = readers.size();
             handler.output("Found " + numSSTables + " sstables that need upgrading.");
 
-            for (SSTableReader sstable : readers)
+            for (AbstractSSTableReader sstable : readers)
             {
                 try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UPGRADE_SSTABLES, sstable))
                 {

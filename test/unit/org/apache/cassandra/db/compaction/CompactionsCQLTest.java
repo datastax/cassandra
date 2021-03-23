@@ -47,7 +47,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.serializers.MarshalException;
 
 import static org.junit.Assert.assertEquals;
@@ -427,7 +427,7 @@ public class CompactionsCQLTest extends CQLTester
         execute("insert into %s (id, id2, t) values (?, ?, ?)", 1,1,"L1");
         cfs.forceBlockingFlush();
         cfs.forceMajorCompaction();
-        SSTableReader l1sstable = cfs.getLiveSSTables().iterator().next();
+        AbstractSSTableReader l1sstable = cfs.getLiveSSTables().iterator().next();
         assertEquals(1, l1sstable.getSSTableLevel());
         // now we have a single L1 sstable, create many L0 ones:
         byte [] b = new byte[100 * 1024];
@@ -561,17 +561,17 @@ public class CompactionsCQLTest extends CQLTester
         getCurrentColumnFamilyStore().truncateBlocking();
     }
 
-    private void assertSuspectAndReset(Collection<SSTableReader> sstables)
+    private void assertSuspectAndReset(Collection<AbstractSSTableReader> sstables)
     {
         assertFalse(sstables.isEmpty());
-        for (SSTableReader sstable : sstables)
+        for (AbstractSSTableReader sstable : sstables)
         {
             assertTrue(sstable.isMarkedSuspect());
             sstable.unmarkSuspect();
         }
     }
 
-    private void assertTombstones(SSTableReader sstable, boolean expectTS)
+    private void assertTombstones(AbstractSSTableReader sstable, boolean expectTS)
     {
         boolean foundTombstone = false;
         try(ISSTableScanner scanner = sstable.getScanner())

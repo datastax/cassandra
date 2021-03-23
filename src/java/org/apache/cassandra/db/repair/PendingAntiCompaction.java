@@ -49,7 +49,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -72,10 +72,10 @@ public class PendingAntiCompaction
     public static class AcquireResult
     {
         final ColumnFamilyStore cfs;
-        final Refs<SSTableReader> refs;
+        final Refs<AbstractSSTableReader> refs;
         final LifecycleTransaction txn;
 
-        AcquireResult(ColumnFamilyStore cfs, Refs<SSTableReader> refs, LifecycleTransaction txn)
+        AcquireResult(ColumnFamilyStore cfs, Refs<AbstractSSTableReader> refs, LifecycleTransaction txn)
         {
             this.cfs = cfs;
             this.refs = refs;
@@ -101,7 +101,7 @@ public class PendingAntiCompaction
     }
 
     @VisibleForTesting
-    static class AntiCompactionPredicate implements Predicate<SSTableReader>
+    static class AntiCompactionPredicate implements Predicate<AbstractSSTableReader>
     {
         private final Collection<Range<Token>> ranges;
         private final UUID prsid;
@@ -112,7 +112,7 @@ public class PendingAntiCompaction
             this.prsid = prsid;
         }
 
-        public boolean apply(SSTableReader sstable)
+        public boolean apply(AbstractSSTableReader sstable)
         {
             if (!sstable.intersects(ranges))
                 return false;
@@ -194,7 +194,7 @@ public class PendingAntiCompaction
             try
             {
                 // using predicate might throw if there are conflicting ranges
-                Set<SSTableReader> sstables = cfs.getLiveSSTables().stream().filter(predicate).collect(Collectors.toSet());
+                Set<AbstractSSTableReader> sstables = cfs.getLiveSSTables().stream().filter(predicate).collect(Collectors.toSet());
                 if (sstables.isEmpty())
                     return new AcquireResult(cfs, null, null);
 

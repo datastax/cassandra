@@ -36,7 +36,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.IndexSummaryManager;
 import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.AbstractSSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -103,7 +103,7 @@ public class DiskSpaceMetricsTest extends CQLTester
     {
         long liveDiskSpaceUsed = cfs.metric.liveDiskSpaceUsed.getCount();
         long actual = 0;
-        for (SSTableReader sstable : cfs.getTracker().getView().liveSSTables())
+        for (AbstractSSTableReader sstable : cfs.getTracker().getView().liveSSTables())
             actual += sstable.bytesOnDisk();
 
         Assert.assertEquals("bytes on disk does not match current metric liveDiskSpaceUsed", actual, liveDiskSpaceUsed);
@@ -117,7 +117,7 @@ public class DiskSpaceMetricsTest extends CQLTester
 
     private static void indexDownsampleCancelLastSSTable(ColumnFamilyStore cfs)
     {
-        List<SSTableReader> sstables = Lists.newArrayList(cfs.getSSTables(SSTableSet.CANONICAL));
+        List<AbstractSSTableReader> sstables = Lists.newArrayList(cfs.getSSTables(SSTableSet.CANONICAL));
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.UNKNOWN);
         Map<TableId, LifecycleTransaction> txns = ImmutableMap.of(cfs.metadata.id, txn);
         // fail on the last file (* 3 because we call isStopRequested 3 times for each sstable, and we should fail on the last)
