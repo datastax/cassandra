@@ -23,10 +23,6 @@ package org.apache.cassandra.index.sai;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -35,6 +31,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -45,13 +42,14 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
+import com.google.common.collect.Sets;
 import org.junit.After;
+import org.junit.Assert;
 
 import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
-import com.sun.management.UnixOperatingSystemMXBean;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -65,10 +63,10 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -100,6 +98,16 @@ public class SAITester extends CQLTester
                                                                               .add(newInvokePoint().onClass(CompactionManager.class)
                                                                                                    .onMethod("submitIndexBuild", "SecondaryIndexBuilder", "ActiveCompactionsTracker"))
                                                                               .build();
+
+    protected static final Injections.Counter perSSTableValidationCounter = Injections.newCounter("PerSSTableValidationCounter")
+                                                                                      .add(newInvokePoint().onClass(IndexComponents.class)
+                                                                                                           .onMethod("validatePerSSTableComponents"))
+                                                                                      .build();
+
+    protected static final Injections.Counter perColumnValidationCounter = Injections.newCounter("PerColumnValidationCounter")
+                                                                                     .add(newInvokePoint().onClass(IndexComponents.class)
+                                                                                                          .onMethod("validatePerColumnComponents", "boolean"))
+                                                                                     .build();
 
     protected static ColumnIdentifier V1_COLUMN_IDENTIFIER = ColumnIdentifier.getInterned("v1", true);
     protected static ColumnIdentifier V2_COLUMN_IDENTIFIER = ColumnIdentifier.getInterned("v2", true);
@@ -232,16 +240,7 @@ public class SAITester extends CQLTester
 
     protected void waitForAssert(Runnable assertion)
     {
-        waitForAssert(() -> {
-            try
-            {
-                assertion.run();
-            }
-            catch (Throwable ex)
-            {
-                throw new RuntimeException(ex);
-            }
-        }, ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        waitForAssert(() -> assertion.run(), ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     protected boolean indexNeedsFullRebuild(String index)
@@ -269,16 +268,7 @@ public class SAITester extends CQLTester
     protected void verifyInitialIndexFailed(String indexName)
     {
         // Verify that the initial index build fails...
-        waitForAssert(() -> {
-            try
-            {
-                assertTrue(indexNeedsFullRebuild(indexName));
-            }
-            catch (Exception e)
-            {
-                throw Throwables.unchecked(e);
-            }
-        });
+        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
     }
 
     protected boolean verifyChecksum(ColumnContext context)
@@ -306,17 +296,24 @@ public class SAITester extends CQLTester
         return jmxConnection.getAttribute(name, attribute);
     }
 
-    protected Object getMetricValue(ObjectName metricObjectName) throws Exception
+    protected Object getMetricValue(ObjectName metricObjectName)
     {
         // lets workaround the fact that gauges have Value, but counters have Count
         Object metricValue;
         try
         {
-            metricValue = getMBeanAttribute(metricObjectName, "Value");
+            try
+            {
+                metricValue = getMBeanAttribute(metricObjectName, "Value");
+            }
+            catch (AttributeNotFoundException ignored)
+            {
+                metricValue = getMBeanAttribute(metricObjectName, "Count");
+            }
         }
-        catch (AttributeNotFoundException ignored)
+        catch (Exception e)
         {
-            metricValue = getMBeanAttribute(metricObjectName, "Count");
+            throw new RuntimeException(e);
         }
         return metricValue;
     }
@@ -343,65 +340,29 @@ public class SAITester extends CQLTester
 
     public void waitForCompactions()
     {
-        waitForAssert(() -> {
-            try
-            {
-                assertFalse(CompactionManager.instance.isCompacting(ColumnFamilyStore.all(), Predicates.alwaysTrue()));
-            }
-            catch (Throwable ex)
-            {
-                throw Throwables.unchecked(ex);
-            }
-        }, 300, TimeUnit.SECONDS);
-
+        waitForAssert(() -> assertFalse(CompactionManager.instance.isCompacting(ColumnFamilyStore.all(), Predicates.alwaysTrue())), 10, TimeUnit.SECONDS);
     }
 
     protected void waitForCompactionsFinished()
     {
-        waitForAssert(() -> {
-            try
-            {
-                assertEquals(0, getCompactionTasks());
-            }
-            catch (Throwable ex)
-            {
-                throw new RuntimeException(ex);
-            }
-        }, 60, TimeUnit.SECONDS);
+        waitForAssert(() -> assertEquals(0, getCompactionTasks()), 10, TimeUnit.SECONDS);
     }
 
     protected void waitForEquals(ObjectName name, ObjectName name2)
     {
         waitForAssert(() -> {
-            try
-            {
-                long jmxValue = ((Number) getMetricValue(name)).longValue();
-                long jmxValue2 = ((Number) getMetricValue(name2)).longValue();
+            long jmxValue = ((Number) getMetricValue(name)).longValue();
+            long jmxValue2 = ((Number) getMetricValue(name2)).longValue();
 
-                jmxValue2 += 2; // add 2 for the first 2 queries in setupCluster
+            jmxValue2 += 2; // add 2 for the first 2 queries in setupCluster
 
-                assertEquals(jmxValue, jmxValue2);
-            }
-            catch (Throwable ex)
-            {
-                throw Throwables.unchecked(ex);
-            }
-        }, 160, TimeUnit.SECONDS);
+            assertEquals(jmxValue, jmxValue2);
+        }, 10, TimeUnit.SECONDS);
     }
 
     protected void waitForEquals(ObjectName name, long value)
     {
-        waitForAssert(() -> {
-            try
-            {
-                long jmxValue = ((Number) getMetricValue(name)).longValue();
-                assertEquals(value, jmxValue);
-            }
-            catch (Throwable ex)
-            {
-                throw Throwables.unchecked(ex);
-            }
-        }, 160, TimeUnit.SECONDS);
+        waitForAssert(() -> assertEquals(value, ((Number) getMetricValue(name)).longValue()), 10, TimeUnit.SECONDS);
     }
 
     protected ObjectName objectName(String name, String keyspace, String table, String index, String type)
@@ -430,20 +391,6 @@ public class SAITester extends CQLTester
         }
     }
 
-    protected void verifySegments(String indexName, int count) throws Exception
-    {
-        int segments = getSegmentCount(indexName);
-        assertEquals("Expect " + count +" segments, but got " + segments, count, segments);
-    }
-
-    protected int getSegmentCount(String indexName) throws Exception
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);
-        Collection<SSTableIndex> sstableIndexes = sai.getContext().getView().getIndexes();
-        return sstableIndexes.stream().mapToInt(SSTableIndex::getSegmentSize).sum();
-    }
-
     protected void upgradeSSTables()
     {
         try
@@ -456,31 +403,28 @@ public class SAITester extends CQLTester
         }
     }
 
-    protected void releaseIndexFiles()
+    protected long totalDiskSpaceUsed()
     {
-        ColumnFamilyStore cfs = Schema.instance.getKeyspaceInstance(KEYSPACE).getColumnFamilyStore(currentTable());
-        StorageAttachedIndexGroup.getIndexGroup(cfs).sstableContextManager().clear();
-        for (Index index : cfs.indexManager.listIndexes())
-        {
-            StorageAttachedIndex sai = (StorageAttachedIndex) index;
-            sai.getContext().drop(cfs.getLiveSSTables());
-        }
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return cfs.metric.totalDiskSpaceUsed.getCount();
     }
 
-    protected int getOpenIndexFiles() throws Throwable
+    protected long indexDiskSpaceUse()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return Objects.requireNonNull(StorageAttachedIndexGroup.getIndexGroup(cfs)).totalDiskUsage();
+    }
+
+    protected int getOpenIndexFiles()
     {
         ColumnFamilyStore cfs = Schema.instance.getKeyspaceInstance(KEYSPACE).getColumnFamilyStore(currentTable());
         return StorageAttachedIndexGroup.getIndexGroup(cfs).openIndexFiles();
     }
 
-    protected long getOpenVmFiles()
+    protected long getDiskUsage()
     {
-        OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-        if (os instanceof UnixOperatingSystemMXBean)
-        {
-            return ((UnixOperatingSystemMXBean) os).getOpenFileDescriptorCount();
-        }
-        throw new UnsupportedOperationException("getOpenFileDescriptorCount() is not supported on current os: " + os.getName());
+        ColumnFamilyStore cfs = Schema.instance.getKeyspaceInstance(KEYSPACE).getColumnFamilyStore(currentTable());
+        return StorageAttachedIndexGroup.getIndexGroup(cfs).diskUsage();
     }
 
     protected void verifyIndexFiles(int numericFiles, int stringFiles)
@@ -660,13 +604,6 @@ public class SAITester extends CQLTester
         return restore(cfs, lister);
     }
 
-    protected List<String> restoreBackup()
-    {
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.IGNORE).includeBackups(true).onlyBackups(true);
-        return restore(cfs, lister);
-    }
-
     protected List<String> restore(ColumnFamilyStore cfs, Directories.SSTableLister lister)
     {
         File dataDirectory = cfs.getDirectories().getDirectoryForNewSSTables();
@@ -683,20 +620,52 @@ public class SAITester extends CQLTester
         return fileNames;
     }
 
+    protected void assertValidationCount(int perSSTable, int perColumn)
+    {
+        Assert.assertEquals(perSSTable, perSSTableValidationCounter.get());
+        Assert.assertEquals(perColumn, perColumnValidationCounter.get());
+    }
+
+    protected void resetValidationCount()
+    {
+        perSSTableValidationCounter.reset();
+        perColumnValidationCounter.reset();
+    }
+
     protected long indexFilesLastModified()
     {
         return indexFiles().stream().map(File::lastModified).max(Long::compare).orElse(0L);
     }
 
-    protected static void setSegmentWriteBufferSpace(final int segmentSize) throws Exception
+    protected void verifyIndexComponentsIncludedInSSTable() throws Exception
     {
-        NamedMemoryLimiter limiter = (NamedMemoryLimiter) StorageAttachedIndex.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
-        Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
-        limitBytes.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
+        verifySSTableComponents(currentTable(), true);
+    }
+
+    protected void verifyIndexComponentsNotIncludedInSSTable() throws Exception
+    {
+        verifySSTableComponents(currentTable(), false);
+    }
+
+    private void verifySSTableComponents(String table, boolean indexComponentsExist) throws Exception
+    {
+        ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(table);
+        for (SSTable sstable : cfs.getLiveSSTables())
+        {
+            Set<Component> components = sstable.components;
+            StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            Set<Component> ndiComponents = group == null ? Collections.emptySet() : group.getComponents();
+
+            Set<Component> diff = Sets.difference(ndiComponents, components);
+            if (indexComponentsExist)
+                assertTrue("Expect all index components are tracked by SSTable, but " + diff + " are not included.",
+                           !ndiComponents.isEmpty() && diff.isEmpty());
+            else
+                assertFalse("Expect no index components, but got " + components, components.toString().contains(IndexComponents.TYPE_PREFIX));
+
+            Set<Component> tocContents = SSTable.readTOC(sstable.descriptor);
+            assertEquals(components, tocContents);
+        }
     }
 
     private Set<File> componentFiles(Collection<File> indexFiles, Component component)

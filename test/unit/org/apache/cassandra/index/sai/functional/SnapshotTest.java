@@ -17,15 +17,17 @@
  */
 package org.apache.cassandra.index.sai.functional;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.inject.Injections;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
-public class SnapshotTest extends AbstractNodeLifecycleTest
+public class SnapshotTest extends SAITester
 {
     @Before
     public void injectCounters() throws Throwable
@@ -33,6 +35,11 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         Injections.inject(perSSTableValidationCounter, perColumnValidationCounter);
     }
 
+    @After
+    public void resetCounters() throws Throwable
+    {
+        resetValidationCount();
+    }
 
     @Test
     public void shouldTakeAndRestoreSnapshots() throws Throwable
@@ -41,7 +48,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         verifyIndexFiles(0, 0);
 
         // Insert some initial data and create the index over it
-        execute("INSERT INTO %s (id, v1) VALUES ('0', 0);");
+        execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         waitForIndexQueryable();
         flush();
@@ -50,7 +57,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         resetValidationCount();
 
         // Add some data into a second sstable
-        execute("INSERT INTO %s (id, v1) VALUES ('1', 0);");
+        execute("INSERT INTO %s (id1, v1) VALUES ('1', 0);");
         flush();
         verifyIndexFiles(2, 0);
         assertValidationCount(0, 0);
@@ -67,7 +74,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         Thread.sleep(1000);
 
         // Add some data into a third sstable, out of the scope of our snapshot
-        execute("INSERT INTO %s (id, v1) VALUES ('2', 0);");
+        execute("INSERT INTO %s (id1, v1) VALUES ('2', 0);");
         flush();
         verifyIndexFiles(3, 0);
         assertNumRows(3, "SELECT * FROM %%s WHERE v1 >= 0");
@@ -87,7 +94,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         assertValidationCount(2, 2); // newly loaded
 
         // index components are included after restore
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
 
         // Rebuild the index to verify that the index files are overridden
         rebuildIndexes(v1IndexName);
@@ -97,7 +104,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         assertValidationCount(2, 2); // compaction should not validate
 
         // index components are included after rebuild
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
     }
 
     @Test
@@ -107,15 +114,15 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         verifyIndexFiles(0, 0);
 
         // Insert some initial data
-        execute("INSERT INTO %s (id, v1) VALUES ('0', 0);");
+        execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
         flush();
 
         // Add some data into a second sstable
-        execute("INSERT INTO %s (id, v1) VALUES ('1', 0);");
+        execute("INSERT INTO %s (id1, v1) VALUES ('1', 0);");
         flush();
 
         // index components are not included
-        verifyIndexComponentsNotIncludedInSSTable(currentTable());
+        verifyIndexComponentsNotIncludedInSSTable();
 
         // create index
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
@@ -124,7 +131,7 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         assertValidationCount(0, 0);
 
         // index components are included after initial build
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
 
         // Take a snapshot recording the index files last modified date
         String snapshot = "s";
@@ -151,6 +158,6 @@ public class SnapshotTest extends AbstractNodeLifecycleTest
         assertValidationCount(2, 2); // newly loaded
 
         // index components are included after restore snapshot
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
     }
 }

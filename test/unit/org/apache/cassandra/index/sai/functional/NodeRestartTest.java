@@ -23,6 +23,7 @@ package org.apache.cassandra.index.sai.functional;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
@@ -30,7 +31,7 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.junit.Assert.assertFalse;
 
-public class NodeRestartTest extends AbstractNodeLifecycleTest
+public class NodeRestartTest extends SAITester
 {
     // Failure during the pre-join and initialization tasks shouldn't fail node restart.
     @Test
@@ -106,7 +107,7 @@ public class NodeRestartTest extends AbstractNodeLifecycleTest
         createTable(CREATE_TABLE_TEMPLATE);
         verifyIndexFiles(0, 0);
 
-        execute("INSERT INTO %s (id, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
         flush();
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
@@ -127,7 +128,7 @@ public class NodeRestartTest extends AbstractNodeLifecycleTest
         waitForIndexQueryable();
 
         // index components are included after restart
-        verifyIndexComponentsIncludedInSSTable(currentTable());
+        verifyIndexComponentsIncludedInSSTable();
     }
 
     // We skip validation in the pre-join task if the initialization task has already run and made the index queryable.
@@ -136,8 +137,9 @@ public class NodeRestartTest extends AbstractNodeLifecycleTest
     {
         createSingleRowIndex();
 
+        //TODO We should be able to use a latch here to avoid having a pause
         Injection preJoinPause =
-                Injections.newPause("pause_pre_join_task", 10000)
+                Injections.newPause("pause_pre_join_task", 5000)
                           .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class).onMethod("startPreJoinTask"))
                           .build();
 
@@ -160,5 +162,20 @@ public class NodeRestartTest extends AbstractNodeLifecycleTest
         // This will fail if the pre-join task doesn't skip validation (after the init task has already run):
         assertValidationCount(0, 0);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
+    }
+
+    void createSingleRowIndex() throws Throwable
+    {
+        createTable(CREATE_TABLE_TEMPLATE);
+        verifyIndexFiles(0, 0);
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+        flush();
+
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForIndexQueryable();
+        verifyIndexFiles(1, 0);
+        assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
+        assertValidationCount(0, 0);
     }
 }
