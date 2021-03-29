@@ -212,9 +212,8 @@ public class CompactionTask extends AbstractCompactionTask
                         long bytesScanned = scanners.getTotalBytesScanned();
 
                         // Rate limit the scanners, and account for compression
-                        CompactionManager.compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio);
-
-                        lastBytesScanned = bytesScanned;
+                        if (CompactionManager.compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                            lastBytesScanned = bytesScanned;
 
                         if (nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                         {
