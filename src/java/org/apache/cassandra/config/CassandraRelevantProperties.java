@@ -139,6 +139,7 @@ public enum CassandraRelevantProperties
      * If only keyspaces are specified, mutations for all tables in such keyspace will be replayed
      * */
     COMMIT_LOG_REPLAY_LIST("cassandra.replayList"),
+    COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB("compaction_rate_limit_granularity_in_kb"),
     /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
      * then this property and the password and access files, are ignored. Otherwise, the access file must exist and
