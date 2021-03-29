@@ -59,6 +59,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import net.openhft.chronicle.core.util.ThrowingSupplier;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
@@ -121,6 +122,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
 import static java.util.Collections.singleton;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.concurrent.FutureTask.callable;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB;
 import static org.apache.cassandra.config.DatabaseDescriptor.getConcurrentCompactors;
 import static org.apache.cassandra.db.compaction.CompactionManager.CompactionExecutor.compactionThreadGroup;
 import static org.apache.cassandra.db.lifecycle.SSTableIntervalTree.buildSSTableIntervalTree;
@@ -148,6 +150,18 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
     public static final int NO_GC = Integer.MIN_VALUE;
     public static final int GC_ALL = Integer.MAX_VALUE;
+
+    // A thread local that tells us if the current thread is owned by the compaction manager. Used
+    // by CounterContext to figure out if it should log a warning for invalid counter shards.
+    public static final FastThreadLocal<Boolean> isCompactionManager = new FastThreadLocal<Boolean>()
+    {
+        @Override
+        protected Boolean initialValue()
+        {
+            return false;
+        }
+    };
+    private static final int ACQUIRE_GRANULARITY = COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB.getInt(128) * 1024;
 
     static
     {
@@ -1466,9 +1480,8 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
                     long bytesScanned = scanner.getBytesScanned();
 
-                    compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio);
-
-                    lastBytesScanned = bytesScanned;
+                    if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                        lastBytesScanned = bytesScanned;
                 }
             }
 
@@ -1493,9 +1506,21 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
     }
 
-    static void compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
+    static boolean compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
     {
+        if (DatabaseDescriptor.getCompactionThroughputMebibytesPerSecAsInt() == 0)
+            return false;
+
         long lengthRead = (long) ((bytesScanned - lastBytesScanned) * compressionRatio) + 1;
+        // Acquire at 128k granularity. At worst we'll exceed the limit a bit, but acquire is quite expensive.
+        if (lengthRead < ACQUIRE_GRANULARITY)
+            return false;
+
+        return actuallyAcquire(limiter, lengthRead);
+    }
+
+    private static boolean actuallyAcquire(RateLimiter limiter, long lengthRead)
+    {
         while (lengthRead >= Integer.MAX_VALUE)
         {
             limiter.acquire(Integer.MAX_VALUE);
@@ -1505,6 +1530,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         {
             limiter.acquire((int) lengthRead);
         }
+        return true;
     }
 
     private static abstract class CleanupStrategy
@@ -1828,8 +1854,8 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                         ci.setTargetDirectory(unrepairedWriter.currentWriter().getFilename());
                     }
                     long bytesScanned = scanners.getTotalBytesScanned();
-                    compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio);
-                    lastBytesScanned = bytesScanned;
+                    if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                        lastBytesScanned = bytesScanned;
                 }
             }
 
