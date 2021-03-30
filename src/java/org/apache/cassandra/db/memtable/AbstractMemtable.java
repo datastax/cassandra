@@ -125,6 +125,15 @@ public abstract class AbstractMemtable implements Memtable
                 update(r);
         }
 
+        public void update(ColumnsCollector other)
+        {
+            for (Map.Entry<ColumnMetadata, AtomicBoolean> v : other.predefined.entrySet())
+                if (v.getValue().get())
+                    update(v.getKey());
+
+            extra.addAll(other.extra);
+        }
+
         private void update(ColumnMetadata definition)
         {
             AtomicBoolean present = predefined.get(definition);

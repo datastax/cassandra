@@ -151,8 +151,9 @@ public interface Memtable extends Comparable<Memtable>
          * freed by a flush.
          */
         Iterable<Memtable> getIndexMemtables();
-    }
 
+        ShardBoundaries localRangeSplits(int shardCount);
+    }
 
     // Main write and read operations
 

@@ -98,6 +98,11 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             {
                 return Collections.emptyList();
             }
+
+            public ShardBoundaries localRangeSplits(int shardCount)
+            {
+                return null; // not implemented
+            }
         });
     }
 
