@@ -68,13 +68,20 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
     private final long totalBytes;
     private long bytesRead;
-    private long totalSourceCQLRows;
 
-    /*
-     * counters for merged rows frequency(AKA histogram).
-     * array index represents (number of merged rows - 1), so index 0 is counter for no merge (1 row),
-     * index 1 is counter for 2 rows merged, and so on.
+    /**
+     * Counters for the total number of source partitions and rows, before purging.
      */
+    private long totalSourcePartitions;
+    private long totalSourceRows;
+
+    /**
+     * Merged frequency counters for partitions and rows (AKA histograms).
+     * The array index represents the number of sstables containing the row or partition minus one. So index 0 contains
+     * the number of rows or partitions coming from a single sstable (therefore copied rather than merged), index 1 contains
+     * the number of rows or partitions coming from two sstables and so forth.
+     */
+    private final long[] mergedPartitionsHistogram;
     private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
@@ -99,6 +106,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         for (ISSTableScanner scanner : scanners)
             bytes += scanner.getLengthInBytes();
         this.totalBytes = bytes;
+        this.mergedPartitionsHistogram = new long[scanners.size()];
         this.mergedRowsHistogram = new long[scanners.size()];
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
@@ -135,20 +143,14 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return false;
     }
 
-    private void incMergedRowsHistogram(int rows)
+    void updateStatistics(CompactionStatistics statistics)
     {
-        assert rows > 0 && rows - 1 < mergedRowsHistogram.length;
-        mergedRowsHistogram[rows - 1] += 1;
-    }
-
-    public long[] getMergedRowsHistogram()
-    {
-        return mergedRowsHistogram;
-    }
-
-    public long getTotalSourceCQLRows()
-    {
-        return totalSourceCQLRows;
+        statistics.bytesRead = bytesRead;
+        statistics.mergedPartitionCounts = mergedPartitionsHistogram;
+        statistics.mergedRowsCounts = mergedRowsHistogram;
+        statistics.totalSourceRows = totalSourceRows; // includes purged rows
+        statistics.totalSourcePartitions = totalSourcePartitions; // includes purged partitions
+        statistics.stopRequested = isStopRequested();
     }
 
     private UnfilteredPartitionIterators.MergeListener listener()
@@ -157,51 +159,19 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         {
             public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
             {
-                int merged = 0;
+                int numVersions = 0;
                 for (int i=0, isize=versions.size(); i<isize; i++)
                 {
                     @SuppressWarnings("resource")
                     UnfilteredRowIterator iter = versions.get(i);
                     if (iter != null)
-                        merged++;
+                        numVersions++;
                 }
 
-                assert merged > 0;
+                assert numVersions > 0 && numVersions - 1 < mergedPartitionsHistogram.length; // TODO - check if this impacts perf.
+                mergedPartitionsHistogram[numVersions - 1] += 1;
 
-                CompactionIterator.this.incMergedRowsHistogram(merged);
-
-                if (type != OperationType.COMPACTION || !controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION))
-                    return null;
-
-                Columns statics = Columns.NONE;
-                Columns regulars = Columns.NONE;
-                for (int i=0, isize=versions.size(); i<isize; i++)
-                {
-                    @SuppressWarnings("resource")
-                    UnfilteredRowIterator iter = versions.get(i);
-                    if (iter != null)
-                    {
-                        statics = statics.mergeTo(iter.columns().statics);
-                        regulars = regulars.mergeTo(iter.columns().regulars);
-                    }
-                }
-                final RegularAndStaticColumns regularAndStaticColumns = new RegularAndStaticColumns(statics, regulars);
-
-                // If we have a 2ndary index, we must update it with deleted/shadowed cells.
-                // we can reuse a single CleanupTransaction for the duration of a partition.
-                // Currently, it doesn't do any batching of row updates, so every merge event
-                // for a single partition results in a fresh cycle of:
-                // * Get new Indexer instances
-                // * Indexer::start
-                // * Indexer::onRowMerge (for every row being merged by the compaction)
-                // * Indexer::commit
-                // A new OpOrder.Group is opened in an ARM block wrapping the commits
-                // TODO: this should probably be done asynchronously and batched.
-                final CompactionTransaction indexTransaction =
-                    controller.cfs.indexManager.newCompactionTransaction(partitionKey,
-                                                                         regularAndStaticColumns,
-                                                                         versions.size(),
-                                                                         nowInSec);
+                final CompactionTransaction indexTransaction = getIndexTransaction(partitionKey,versions);
 
                 return new UnfilteredRowIterators.MergeListener()
                 {
@@ -211,9 +181,23 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
                     public Row onMergedRows(Row merged, Row[] versions)
                     {
-                        indexTransaction.start();
-                        indexTransaction.onRowMerge(merged, versions);
-                        indexTransaction.commit();
+                        int numVersions = 0;
+                        for (Row v : versions)
+                        {
+                            if (v != null)
+                                numVersions++;
+                        }
+
+                        assert numVersions > 0 && numVersions - 1 < mergedRowsHistogram.length;
+                        mergedRowsHistogram[numVersions - 1] += 1;
+
+                        if (indexTransaction != null)
+                        {
+                            indexTransaction.start();
+                            indexTransaction.onRowMerge(merged, versions);
+                            indexTransaction.commit();
+                        }
+
                         return merged;
                     }
 
@@ -231,6 +215,37 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
             {
             }
         };
+    }
+
+    private CompactionTransaction getIndexTransaction(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
+    {
+        if (type != OperationType.COMPACTION || !controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION))
+            return null;
+
+        Columns statics = Columns.NONE;
+        Columns regulars = Columns.NONE;
+        for (int i=0, isize=versions.size(); i<isize; i++)
+        {
+            @SuppressWarnings("resource")
+            UnfilteredRowIterator iter = versions.get(i);
+            if (iter != null)
+            {
+                statics = statics.mergeTo(iter.columns().statics);
+                regulars = regulars.mergeTo(iter.columns().regulars);
+            }
+        }
+        final RegularAndStaticColumns regularAndStaticColumns = new RegularAndStaticColumns(statics, regulars);
+        // If we have a 2ndary index, we must update it with deleted/shadowed cells.
+        // we can reuse a single CleanupTransaction for the duration of a partition.
+        // Currently, it doesn't do any batching of row updates, so every merge event
+        // for a single partition results in a fresh cycle of:
+        // * Get new Indexer instances
+        // * Indexer::start
+        // * Indexer::onRowMerge (for every row being merged by the compaction)
+        // * Indexer::commit
+        // A new OpOrder.Group is opened in an ARM block wrapping the commits
+        // TODO: this should probably be done asynchronously and batched.
+        return controller.cfs.indexManager.newCompactionTransaction(partitionKey, regularAndStaticColumns, versions.size(), nowInSec);
     }
 
     private void updateBytesRead()
@@ -300,6 +315,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         @Override
         protected void onNewPartition(DecoratedKey key)
         {
+            totalSourcePartitions++;
             currentKey = key;
             purgeEvaluator = null;
         }
@@ -307,7 +323,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         @Override
         protected void updateProgress()
         {
-            totalSourceCQLRows++;
+            totalSourceRows++;
             if ((++compactedUnfiltered) % UNFILTERED_TO_UPDATE_PROGRESS == 0)
                 updateBytesRead();
         }

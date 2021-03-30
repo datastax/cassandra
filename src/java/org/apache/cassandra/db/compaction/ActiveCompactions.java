@@ -24,29 +24,59 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 
 public class ActiveCompactions implements ActiveCompactionsTracker
 {
-    // a synchronized identity set of running tasks to their compaction info
-    private final Set<CompactionInfo.Holder> compactions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    // The compaction statistics ordered by keyspace.table
+    private static final ConcurrentMap<String, TableCompactions> compactionsByTable = new ConcurrentHashMap<>();
 
     public List<CompactionInfo.Holder> getCompactions()
     {
-        return new ArrayList<>(compactions);
+        return compactionsByTable.values()
+                                 .stream()
+                                 .flatMap(compactions -> compactions.getInProgress().stream())
+                                 .collect(Collectors.toList());
     }
 
     public void beginCompaction(CompactionInfo.Holder ci)
     {
-        compactions.add(ci);
+        CompactionInfo compactionInfo = ci.getCompactionInfo();
+        String key = compactionsByTableKey(compactionInfo);
+
+        compactionsByTable.computeIfAbsent(key, k -> new TableCompactions(compactionInfo.getTableMetadata()));
+        compactionsByTable.computeIfPresent(key, (k, tableCompactions) -> tableCompactions.compactionStarted(ci));
     }
 
     public void finishCompaction(CompactionInfo.Holder ci)
     {
-        compactions.remove(ci);
-        CompactionManager.instance.getMetrics().bytesCompacted.inc(ci.getCompactionInfo().getTotal());
-        CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+        CompactionInfo compactionInfo = ci.getCompactionInfo();
+        compactionsByTable.computeIfPresent(compactionsByTableKey(compactionInfo),
+                                            (key, tableCompactions) -> {
+            return tableCompactions.compactionCompleted(ci,
+                                                        compactionInfo,
+                                                        CompactionManager.instance.getMetrics());
+        });
+    }
+
+    public TableCompactions compactionsByMetadata(TableMetadata metadata)
+    {
+        return compactionsByTable.get(compactionsByTableKey(metadata));
+    }
+
+    private String compactionsByTableKey(CompactionInfo compactionInfo)
+    {
+        return compactionsByTableKey(compactionInfo.getTableMetadata());
+    }
+
+    private String compactionsByTableKey(TableMetadata metadata)
+    {
+        return metadata.keyspace + "." + metadata.name;
     }
 
     /**
@@ -57,16 +87,19 @@ public class ActiveCompactions implements ActiveCompactionsTracker
     public Collection<CompactionInfo> getCompactionsForSSTable(SSTableReader sstable, OperationType compactionType)
     {
         List<CompactionInfo> toReturn = null;
-        synchronized (compactions)
+        synchronized (compactionsByTable)
         {
-            for (CompactionInfo.Holder holder : compactions)
+            for (TableCompactions tableCompactions : compactionsByTable.values())
             {
-                CompactionInfo compactionInfo = holder.getCompactionInfo();
-                if (compactionInfo.getSSTables().contains(sstable) && compactionInfo.getTaskType() == compactionType)
+                for (CompactionInfo.Holder holder : tableCompactions.getInProgress())
                 {
-                    if (toReturn == null)
-                        toReturn = new ArrayList<>();
-                    toReturn.add(compactionInfo);
+                    CompactionInfo compactionInfo = holder.getCompactionInfo();
+                    if (compactionInfo.getSSTables().contains(sstable) && compactionInfo.getTaskType() == compactionType)
+                    {
+                        if (toReturn == null)
+                            toReturn = new ArrayList<>();
+                        toReturn.add(compactionInfo);
+                    }
                 }
             }
         }
@@ -78,6 +111,6 @@ public class ActiveCompactions implements ActiveCompactionsTracker
      */
     public boolean isActive(CompactionInfo.Holder ci)
     {
-        return compactions.contains(ci);
+        return getCompactions().contains(ci);
     }
 }

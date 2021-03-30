@@ -29,6 +29,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.ActiveCompactions;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.TableCompactions;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -94,7 +95,12 @@ public class CompactionMetrics
                 {
                     for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
                     {
-                        int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                        TableMetadata metadata = cfs.metadata.get();
+                        TableCompactions tableCompactions = CompactionManager.instance
+                                                                             .active
+                                                                             .compactionsByMetadata(metadata);
+                        int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() +
+                                         Math.toIntExact(tableCompactions != null ? tableCompactions.getInProgress().size() : 0);
                         if (taskNumber > 0)
                         {
                             if (!resultMap.containsKey(keyspaceName))

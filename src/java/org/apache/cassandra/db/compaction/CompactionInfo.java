@@ -225,7 +225,7 @@ public final class CompactionInfo
         }
     }
 
-    public enum Unit
+    public static enum Unit
     {
         BYTES("bytes"), RANGES("token range parts"), KEYS("keys");
 
