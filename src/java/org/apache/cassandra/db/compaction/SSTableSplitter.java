@@ -19,7 +19,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.*;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
@@ -38,7 +37,7 @@ public class SSTableSplitter
 
     public void split()
     {
-        task.execute(ActiveCompactionsTracker.NOOP);
+        task.execute(TableOperationsTracker.NOOP);
     }
 
     public static class SplittingCompactionTask extends CompactionTask

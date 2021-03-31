@@ -35,7 +35,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -82,9 +81,9 @@ public class CancelCompactionsTest extends CQLTester
         {
             tct.start();
 
-            List<CompactionInfo.Holder> activeCompactions = getActiveCompactionsForTable(cfs);
+            List<AbstractTableOperation> activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(1, activeCompactions.size());
-            assertEquals(activeCompactions.get(0).getCompactionInfo().getSSTables(), toMarkCompacting);
+            assertEquals(activeCompactions.get(0).getProgress().getSSTables(), toMarkCompacting);
             // predicate requires the non-compacting sstables, should not cancel the one currently compacting:
             cfs.runWithCompactionsDisabled(() -> null, (sstable) -> !toMarkCompacting.contains(sstable), false, false, true);
             assertEquals(1, activeCompactions.size());
@@ -128,12 +127,12 @@ public class CancelCompactionsTest extends CQLTester
         {
             tcts.forEach(TestCompactionTask::start);
 
-            List<CompactionInfo.Holder> activeCompactions = getActiveCompactionsForTable(cfs);
+            List<AbstractTableOperation> activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(2, activeCompactions.size());
 
             Set<Set<SSTableReader>> compactingSSTables = new HashSet<>();
-            compactingSSTables.add(activeCompactions.get(0).getCompactionInfo().getSSTables());
-            compactingSSTables.add(activeCompactions.get(1).getCompactionInfo().getSSTables());
+            compactingSSTables.add(activeCompactions.get(0).getProgress().getSSTables());
+            compactingSSTables.add(activeCompactions.get(1).getProgress().getSSTables());
             Set<Set<SSTableReader>> expectedSSTables = new HashSet<>();
             expectedSSTables.add(new HashSet<>(sstables.subList(0, 3)));
             expectedSSTables.add(new HashSet<>(sstables.subList(6, 9)));
@@ -141,7 +140,7 @@ public class CancelCompactionsTest extends CQLTester
 
             cfs.runWithCompactionsDisabled(() -> null, (sstable) -> false, false, false, true);
             assertEquals(2, activeCompactions.size());
-            assertTrue(activeCompactions.stream().noneMatch(CompactionInfo.Holder::isStopRequested));
+            assertTrue(activeCompactions.stream().noneMatch(AbstractTableOperation::isStopRequested));
 
             CountDownLatch cdl = new CountDownLatch(1);
             // start a compaction which only needs the sstables where first token is > 50 - these are the sstables compacted by tcts.get(1)
@@ -150,12 +149,12 @@ public class CancelCompactionsTest extends CQLTester
             activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(2, activeCompactions.size());
             Thread.sleep(500);
-            for (CompactionInfo.Holder holder : activeCompactions)
+            for (AbstractTableOperation compaction : activeCompactions)
             {
-                if (holder.getCompactionInfo().getSSTables().containsAll(sstables.subList(6, 9)))
-                    assertTrue(holder.isStopRequested());
+                if (compaction.getProgress().getSSTables().containsAll(sstables.subList(6, 9)))
+                    assertTrue(compaction.isStopRequested());
                 else
-                    assertFalse(holder.isStopRequested());
+                    assertFalse(compaction.isStopRequested());
             }
             tcts.get(1).abort();
             assertEquals(1, CompactionManager.instance.active.getCompactions().size());
@@ -186,7 +185,7 @@ public class CancelCompactionsTest extends CQLTester
         {
             tcts.forEach(TestCompactionTask::start);
 
-            List<CompactionInfo.Holder> activeCompactions = getActiveCompactionsForTable(cfs);
+            List<AbstractTableOperation> activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(4, activeCompactions.size());
             Range<Token> range = new Range<>(token(0), token(49));
             Thread t = new Thread(() -> {
@@ -205,17 +204,17 @@ public class CancelCompactionsTest extends CQLTester
             Thread.sleep(500);
             assertEquals(4, getActiveCompactionsForTable(cfs).size());
             List<TestCompactionTask> toAbort = new ArrayList<>();
-            for (CompactionInfo.Holder holder : getActiveCompactionsForTable(cfs))
+            for (AbstractTableOperation compaction : getActiveCompactionsForTable(cfs))
             {
-                if (holder.getCompactionInfo().getSSTables().stream().anyMatch(sstable -> sstable.intersects(Collections.singleton(range))))
+                if (compaction.getProgress().getSSTables().stream().anyMatch(sstable -> sstable.intersects(Collections.singleton(range))))
                 {
-                    assertTrue(holder.isStopRequested());
+                    assertTrue(compaction.isStopRequested());
                     for (TestCompactionTask tct : tcts)
-                        if (tct.sstables.equals(holder.getCompactionInfo().getSSTables()))
+                        if (tct.sstables.equals(compaction.getProgress().getSSTables()))
                             toAbort.add(tct);
                 }
                 else
-                    assertFalse(holder.isStopRequested());
+                    assertFalse(compaction.isStopRequested());
             }
             assertEquals(2, toAbort.size());
             toAbort.forEach(TestCompactionTask::abort);
@@ -250,7 +249,7 @@ public class CancelCompactionsTest extends CQLTester
         {
             tcts.forEach(TestCompactionTask::start);
             nonAffectedTcts.forEach(TestCompactionTask::start);
-            List<CompactionInfo.Holder> activeCompactions = getActiveCompactionsForTable(cfs);
+            List<AbstractTableOperation> activeCompactions = getActiveCompactionsForTable(cfs);
             assertEquals(5, activeCompactions.size());
             // make sure that sstables are fully contained so that the metadata gets mutated
             Range<Token> range = new Range<>(token(-1), token(49));
@@ -265,17 +264,17 @@ public class CancelCompactionsTest extends CQLTester
             Future<?> fut = pac.run();
             Thread.sleep(600);
             List<TestCompactionTask> toAbort = new ArrayList<>();
-            for (CompactionInfo.Holder holder : getActiveCompactionsForTable(cfs))
+            for (AbstractTableOperation compaction : getActiveCompactionsForTable(cfs))
             {
-                if (holder.getCompactionInfo().getSSTables().stream().anyMatch(sstable -> sstable.intersects(Collections.singleton(range)) && !sstable.isRepaired() && !sstable.isPendingRepair()))
+                if (compaction.getProgress().getSSTables().stream().anyMatch(sstable -> sstable.intersects(Collections.singleton(range)) && !sstable.isRepaired() && !sstable.isPendingRepair()))
                 {
-                    assertTrue(holder.isStopRequested());
+                    assertTrue(compaction.isStopRequested());
                     for (TestCompactionTask tct : tcts)
-                        if (tct.sstables.equals(holder.getCompactionInfo().getSSTables()))
+                        if (tct.sstables.equals(compaction.getProgress().getSSTables()))
                             toAbort.add(tct);
                 }
                 else
-                    assertFalse(holder.isStopRequested());
+                    assertFalse(compaction.isStopRequested());
             }
             assertEquals(2, toAbort.size());
             toAbort.forEach(TestCompactionTask::abort);
@@ -324,11 +323,11 @@ public class CancelCompactionsTest extends CQLTester
         indexBuildStarted.await();
         assertEquals(1, getActiveCompactionsForTable(cfs).size());
         boolean foundCompaction = false;
-        for (CompactionInfo.Holder holder : getActiveCompactionsForTable(cfs))
+        for (AbstractTableOperation compaction : getActiveCompactionsForTable(cfs))
         {
-            if (holder.getCompactionInfo().getSSTables().equals(new HashSet<>(sstables)))
+            if (compaction.getProgress().getSSTables().equals(new HashSet<>(sstables)))
             {
-                assertFalse(holder.isStopRequested());
+                assertFalse(compaction.isStopRequested());
                 foundCompaction = true;
             }
         }
@@ -338,11 +337,11 @@ public class CancelCompactionsTest extends CQLTester
         compactionsStopped.await();
         assertEquals(1, getActiveCompactionsForTable(cfs).size());
         foundCompaction = false;
-        for (CompactionInfo.Holder holder : getActiveCompactionsForTable(cfs))
+        for (AbstractTableOperation compaction : getActiveCompactionsForTable(cfs))
         {
-            if (holder.getCompactionInfo().getSSTables().equals(new HashSet<>(sstables)))
+            if (compaction.getProgress().getSSTables().equals(new HashSet<>(sstables)))
             {
-                assertTrue(holder.isStopRequested());
+                assertTrue(compaction.isStopRequested());
                 foundCompaction = true;
             }
         }
@@ -399,7 +398,7 @@ public class CancelCompactionsTest extends CQLTester
             assertNotNull(txn);
             controller = new CompactionController(cfs, sstables, Integer.MIN_VALUE);
             ci = new CompactionIterator(txn.opType(), scanners, controller, FBUtilities.nowInSeconds(), UUID.randomUUID());
-            CompactionManager.instance.active.beginCompaction(ci);
+            CompactionManager.instance.active.begin(ci);
         }
 
         public void abort()
@@ -412,7 +411,7 @@ public class CancelCompactionsTest extends CQLTester
                 txn.abort();
             if (scanners != null)
                 scanners.forEach(ISSTableScanner::close);
-            CompactionManager.instance.active.finishCompaction(ci);
+            CompactionManager.instance.active.finish(ci);
 
         }
     }
@@ -501,11 +500,11 @@ public class CancelCompactionsTest extends CQLTester
             ct.execute(new ActiveCompactions()
             {
                 @Override
-                public void beginCompaction(CompactionInfo.Holder ci)
+                public void begin(AbstractTableOperation ci)
                 {
                     waitForBeginCompaction.countDown();
                     Uninterruptibles.awaitUninterruptibly(waitForStart);
-                    super.beginCompaction(ci);
+                    super.begin(ci);
                 }
             });
             fail("execute should throw CompactionInterruptedException");
@@ -521,11 +520,11 @@ public class CancelCompactionsTest extends CQLTester
         }
     }
 
-    private List<CompactionInfo.Holder> getActiveCompactionsForTable(ColumnFamilyStore cfs)
+    private List<AbstractTableOperation> getActiveCompactionsForTable(ColumnFamilyStore cfs)
     {
         return CompactionManager.instance.active.getCompactions()
                                                 .stream()
-                                                .filter(holder -> holder.getCompactionInfo().getTable().orElse("unknown").equalsIgnoreCase(cfs.name))
+                                                .filter(operation -> operation.getProgress().getTable().orElse("unknown").equalsIgnoreCase(cfs.name))
                                                 .collect(Collectors.toList());
     }
 }

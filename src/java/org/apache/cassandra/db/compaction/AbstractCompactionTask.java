@@ -93,7 +93,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     /**
      * executes the task and unmarks sstables compacting
      */
-    public int execute(ActiveCompactionsTracker activeCompactions)
+    public int execute(TableOperationsTracker activeCompactions)
     {
         try
         {
@@ -112,7 +112,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     }
     public abstract CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
 
-    protected abstract int executeInternal(ActiveCompactionsTracker activeCompactions);
+    protected abstract int executeInternal(TableOperationsTracker activeCompactions);
 
     public AbstractCompactionTask setUserDefined(boolean isUserDefined)
     {

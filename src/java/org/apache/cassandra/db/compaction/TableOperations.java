@@ -31,19 +31,28 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class TableCompactions
+/**
+ * The operations currently in progress for a table and the number of operations recently completed.
+ * <p/>
+ * Operations include compactions but are not limited to compactions, any operation as defined by {@link OperationType}
+ * is accepted, see also {@link AbstractTableOperation}.
+ */
+public class TableOperations
 {
     private final String keyspaceName;
     private final String tableName;
     private final long numCompleted;
-    private final Set<CompactionInfo.Holder> inProgress;
+    private final Set<AbstractTableOperation> inProgress;
 
-    public TableCompactions(TableMetadata metadata)
+    public TableOperations(TableMetadata metadata)
     {
         this(metadata.keyspace, metadata.name, Collections.emptySet(), 0);
     }
 
-    TableCompactions(String keyspaceName, String tableName, Set<CompactionInfo.Holder> inProgress, long numCompleted)
+    TableOperations(String keyspaceName,
+                    String tableName,
+                    Set<AbstractTableOperation> inProgress,
+                    long numCompleted)
     {
         this.keyspaceName = keyspaceName;
         this.tableName = tableName;
@@ -51,29 +60,31 @@ public class TableCompactions
         this.numCompleted = numCompleted;
     }
 
-    public TableCompactions compactionStarted(CompactionInfo.Holder ci)
+    public TableOperations operationsStarted(AbstractTableOperation op)
     {
-        return new TableCompactions(keyspaceName,
-                                    tableName,
-                                    Sets.newCopyOnWriteArraySet(Iterables.concat(inProgress, Collections.singleton(ci))),
-                                    numCompleted);
+        return new TableOperations(keyspaceName,
+                                   tableName,
+                                   Sets.newCopyOnWriteArraySet(Iterables.concat(inProgress, Collections.singleton(op))),
+                                   numCompleted);
     }
 
-    public TableCompactions compactionCompleted(CompactionInfo.Holder ci, CompactionInfo ciInfo, CompactionMetrics metrics)
+    public TableOperations operationsCompleted(AbstractTableOperation op,
+                                               AbstractTableOperation.Progress progress,
+                                               CompactionMetrics metrics)
     {
         long numCompleted = this.numCompleted;
-        Set<CompactionInfo.Holder> inProgress = this.inProgress;
-        if (inProgress.contains(ci))
+        Set<AbstractTableOperation> inProgress = this.inProgress;
+        if (inProgress.contains(op))
         {
-            metrics.bytesCompacted.inc(ciInfo.getTotal());
+            metrics.bytesCompacted.inc(progress.getTotal());
             metrics.totalCompactionsCompleted.mark();
-            inProgress = Sets.difference(this.inProgress, Collections.singleton(ci));
+            inProgress = Sets.difference(this.inProgress, Collections.singleton(op));
             numCompleted++;
         }
-        return new TableCompactions(keyspaceName, tableName, inProgress, numCompleted);
+        return new TableOperations(keyspaceName, tableName, inProgress, numCompleted);
     }
 
-    public Set<CompactionInfo.Holder> getInProgress()
+    public Set<AbstractTableOperation> getInProgress()
     {
         return inProgress;
     }
@@ -87,9 +98,9 @@ public class TableCompactions
         public final long numLiveSstables;
         public final long numCompactingSstables;
         public final long liveSizeOnDiskBytes;
-        public final List<CompactionInfo> inProgress;
+        public final List<AbstractTableOperation.Progress> inProgress;
 
-        public Snapshot(TableCompactions compactions)
+        public Snapshot(TableOperations compactions)
         {
             ColumnFamilyStore cfs = Keyspace.open(compactions.keyspaceName).getColumnFamilyStore(compactions.tableName);
 
@@ -100,7 +111,7 @@ public class TableCompactions
             this.numLiveSstables = cfs.getTracker().getView().liveSSTables().size();
             this.numCompactingSstables = cfs.getTracker().getCompacting().size();
             this.liveSizeOnDiskBytes = cfs.getTracker().getView().liveSSTables().stream().map(sstable -> sstable.onDiskLength()).reduce(Long::sum).orElse(0L);
-            this.inProgress = compactions.inProgress.stream().map(ci -> ci.getCompactionInfo()).collect(Collectors.toList());
+            this.inProgress = compactions.inProgress.stream().map(op -> op.getProgress()).collect(Collectors.toList());
         }
     }
 }

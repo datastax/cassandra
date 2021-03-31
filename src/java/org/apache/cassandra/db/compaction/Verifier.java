@@ -250,7 +250,7 @@ public class Verifier implements Closeable
             {
 
                 if (verifyInfo.isStopRequested())
-                    throw new CompactionInterruptedException(verifyInfo.getCompactionInfo());
+                    throw new CompactionInterruptedException(verifyInfo.getProgress());
 
                 rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at " + rowStart);
@@ -487,12 +487,12 @@ public class Verifier implements Closeable
             throw new RuntimeException(e);
     }
 
-    public CompactionInfo.Holder getVerifyInfo()
+    public AbstractTableOperation getVerifyInfo()
     {
         return verifyInfo;
     }
 
-    private static class VerifyInfo extends CompactionInfo.Holder
+    private static class VerifyInfo extends AbstractTableOperation
     {
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
@@ -507,17 +507,17 @@ public class Verifier implements Closeable
             verificationCompactionId = UUIDGen.getTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public AbstractTableOperation.Progress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.VERIFY,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          verificationCompactionId,
-                                          ImmutableSet.of(sstable));
+                return new Progress(sstable.metadata(),
+                                    OperationType.VERIFY,
+                                    dataFile.getFilePointer(),
+                                    dataFile.length(),
+                                    verificationCompactionId,
+                                    ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {

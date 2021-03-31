@@ -253,7 +253,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             if (txn != null)
             {
                 logger.debug("Running automatic sstable upgrade for {}", sstable);
-                return getCompactionStrategyFor(sstable).getCompactionTask(txn, Integer.MIN_VALUE, Long.MAX_VALUE);
+                return getCompactionStrategyFor(sstable).createCompactionTask(txn, Integer.MIN_VALUE, Long.MAX_VALUE);
             }
         }
         return null;
@@ -884,7 +884,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         try
         {
             validateForCompaction(txn.originals());
-            return compactionStrategyFor(txn.originals().iterator().next()).getCompactionTask(txn, gcBefore, maxSSTableBytes);
+            return compactionStrategyFor(txn.originals().iterator().next()).createCompactionTask(txn, gcBefore, maxSSTableBytes);
         }
         finally
         {

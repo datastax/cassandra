@@ -55,7 +55,7 @@ import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
  *   <li>keep tracks of the compaction progress.</li>
  * </ul>
  */
-public class CompactionIterator extends CompactionInfo.Holder implements UnfilteredPartitionIterator
+public class CompactionIterator extends AbstractTableOperation implements UnfilteredPartitionIterator
 {
     private static final long UNFILTERED_TO_UPDATE_PROGRESS = 100;
 
@@ -85,15 +85,15 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
-    private final ActiveCompactionsTracker activeCompactions;
+    private final TableOperationsTracker activeCompactions;
 
     public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
     {
-        this(type, scanners, controller, nowInSec, compactionId, ActiveCompactionsTracker.NOOP);
+        this(type, scanners, controller, nowInSec, compactionId, TableOperationsTracker.NOOP);
     }
 
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
-    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId, ActiveCompactionsTracker activeCompactions)
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId, TableOperationsTracker activeCompactions)
     {
         this.controller = controller;
         this.type = type;
@@ -111,8 +111,8 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
-        this.activeCompactions = activeCompactions == null ? ActiveCompactionsTracker.NOOP : activeCompactions;
-        this.activeCompactions.beginCompaction(this); // note that CompactionTask also calls this, but CT only creates CompactionIterator with a NOOP ActiveCompactions
+        this.activeCompactions = activeCompactions == null ? TableOperationsTracker.NOOP : activeCompactions;
+        this.activeCompactions.begin(this); // note that CompactionTask also calls this, but CT only creates CompactionIterator with a NOOP ActiveCompactions
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
@@ -128,14 +128,14 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return controller.cfs.metadata();
     }
 
-    public CompactionInfo getCompactionInfo()
+    public Progress getProgress()
     {
-        return new CompactionInfo(controller.cfs.metadata(),
-                                  type,
-                                  bytesRead,
-                                  totalBytes,
-                                  compactionId,
-                                  sstables);
+        return new Progress(controller.cfs.metadata(),
+                            type,
+                            bytesRead,
+                            totalBytes,
+                            compactionId,
+                            sstables);
     }
 
     public boolean isGlobal()
@@ -279,13 +279,13 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         }
         finally
         {
-            activeCompactions.finishCompaction(this);
+            activeCompactions.finish(this);
         }
     }
 
     public String toString()
     {
-        return this.getCompactionInfo().toString();
+        return this.getProgress().toString();
     }
 
     private class Purger extends PurgeFunction
@@ -585,7 +585,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
             if (abortableIter.iter.isStopRequested())
-                throw new CompactionInterruptedException(abortableIter.iter.getCompactionInfo());
+                throw new CompactionInterruptedException(abortableIter.iter.getProgress());
             return Transformation.apply(partition, abortableIter);
         }
     }
@@ -602,7 +602,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         public Row applyToRow(Row row)
         {
             if (iter.isStopRequested())
-                throw new CompactionInterruptedException(iter.getCompactionInfo());
+                throw new CompactionInterruptedException(iter.getProgress());
             return row;
         }
     }

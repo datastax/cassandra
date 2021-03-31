@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.LongType;
@@ -58,7 +58,7 @@ final class SSTableTasksTable extends AbstractVirtualTable
     {
         SimpleDataSet result = new SimpleDataSet(metadata());
 
-        for (CompactionInfo task : CompactionManager.instance.getSSTableTasks())
+        for (AbstractTableOperation.Progress task : CompactionManager.instance.getSSTableTasks())
         {
             long completed = task.getCompleted();
             long total = task.getTotal();
@@ -67,9 +67,9 @@ final class SSTableTasksTable extends AbstractVirtualTable
 
             result.row(task.getKeyspace().orElse("*"),
                        task.getTable().orElse("*"),
-                       task.getTaskId())
+                       task.getOperationId())
                   .column(COMPLETION_RATIO, completionRatio)
-                  .column(KIND, task.getTaskType().toString().toLowerCase())
+                  .column(KIND, task.getOperationType().toString().toLowerCase())
                   .column(PROGRESS, completed)
                   .column(TOTAL, total)
                   .column(UNIT, task.getUnit().toString().toLowerCase());

@@ -119,12 +119,12 @@ public class ActiveCompactionsTest extends CQLTester
         Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
         SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, false);
 
-        MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+        MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitIndexBuild(builder, mockActiveCompactions).get();
 
         assertTrue(mockActiveCompactions.finished);
-        assertNotNull(mockActiveCompactions.holder);
-        assertEquals(sstables, mockActiveCompactions.holder.getCompactionInfo().getSSTables());
+        assertNotNull(mockActiveCompactions.operation);
+        assertEquals(sstables, mockActiveCompactions.operation.getProgress().getSSTables());
     }
 
     @Test
@@ -142,13 +142,13 @@ public class ActiveCompactionsTest extends CQLTester
         {
             Map<TableId, LifecycleTransaction> transactions = ImmutableMap.<TableId, LifecycleTransaction>builder().put(getCurrentColumnFamilyStore().metadata().id, txn).build();
             IndexSummaryRedistribution isr = new IndexSummaryRedistribution(transactions, 0, 1000);
-            MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+            MockTableOperations mockActiveCompactions = new MockTableOperations();
             CompactionManager.instance.runIndexSummaryRedistribution(isr, mockActiveCompactions);
             assertTrue(mockActiveCompactions.finished);
-            assertNotNull(mockActiveCompactions.holder);
+            assertNotNull(mockActiveCompactions.operation);
             // index redistribution operates over all keyspaces/tables, we always cancel them
-            assertTrue(mockActiveCompactions.holder.getCompactionInfo().getSSTables().isEmpty());
-            assertTrue(mockActiveCompactions.holder.getCompactionInfo().shouldStop((sstable) -> false));
+            assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
+            assertTrue(mockActiveCompactions.operation.shouldStop((sstable) -> false));
         }
     }
 
@@ -168,12 +168,12 @@ public class ActiveCompactionsTest extends CQLTester
         Token token = DatabaseDescriptor.getPartitioner().getMinimumToken();
         ViewBuilderTask vbt = new ViewBuilderTask(getCurrentColumnFamilyStore(), view, new Range<>(token, token), token, 0);
 
-        MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+        MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitViewBuilder(vbt, mockActiveCompactions).get();
         assertTrue(mockActiveCompactions.finished);
-        assertTrue(mockActiveCompactions.holder.getCompactionInfo().getSSTables().isEmpty());
+        assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
         // this should stop for all compactions, even if it doesn't pick any sstables;
-        assertTrue(mockActiveCompactions.holder.getCompactionInfo().shouldStop((sstable) -> false));
+        assertTrue(mockActiveCompactions.operation.shouldStop((sstable) -> false));
     }
 
     @Test
@@ -190,13 +190,13 @@ public class ActiveCompactionsTest extends CQLTester
         SSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
         try (LifecycleTransaction txn = getCurrentColumnFamilyStore().getTracker().tryModify(sstable, OperationType.SCRUB))
         {
-            MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+            MockTableOperations mockActiveCompactions = new MockTableOperations();
             CompactionManager.instance.scrubOne(getCurrentColumnFamilyStore(), txn, true, false, false, mockActiveCompactions);
 
             assertTrue(mockActiveCompactions.finished);
-            assertEquals(mockActiveCompactions.holder.getCompactionInfo().getSSTables(), Sets.newHashSet(sstable));
-            assertFalse(mockActiveCompactions.holder.getCompactionInfo().shouldStop((s) -> false));
-            assertTrue(mockActiveCompactions.holder.getCompactionInfo().shouldStop((s) -> true));
+            assertEquals(mockActiveCompactions.operation.getProgress().getSSTables(), Sets.newHashSet(sstable));
+            assertFalse(mockActiveCompactions.operation.shouldStop((s) -> false));
+            assertTrue(mockActiveCompactions.operation.shouldStop((s) -> true));
         }
 
     }
@@ -213,34 +213,34 @@ public class ActiveCompactionsTest extends CQLTester
         }
 
         SSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
-        MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+        MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.verifyOne(getCurrentColumnFamilyStore(), sstable, new Verifier.Options.Builder().build(), mockActiveCompactions);
         assertTrue(mockActiveCompactions.finished);
-        assertEquals(mockActiveCompactions.holder.getCompactionInfo().getSSTables(), Sets.newHashSet(sstable));
-        assertFalse(mockActiveCompactions.holder.getCompactionInfo().shouldStop((s) -> false));
-        assertTrue(mockActiveCompactions.holder.getCompactionInfo().shouldStop((s) -> true));
+        assertEquals(mockActiveCompactions.operation.getProgress().getSSTables(), Sets.newHashSet(sstable));
+        assertFalse(mockActiveCompactions.operation.shouldStop((s) -> false));
+        assertTrue(mockActiveCompactions.operation.shouldStop((s) -> true));
     }
 
     @Test
     public void testSubmitCacheWrite() throws ExecutionException, InterruptedException
     {
         AutoSavingCache.Writer writer = CacheService.instance.keyCache.getWriter(100);
-        MockActiveCompactions mockActiveCompactions = new MockActiveCompactions();
+        MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitCacheWrite(writer, mockActiveCompactions).get();
         assertTrue(mockActiveCompactions.finished);
-        assertTrue(mockActiveCompactions.holder.getCompactionInfo().getSSTables().isEmpty());
+        assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
     }
 
-    private static class MockActiveCompactions implements ActiveCompactionsTracker
+    private static class MockTableOperations implements TableOperationsTracker
     {
-        public CompactionInfo.Holder holder;
+        public AbstractTableOperation operation;
         public boolean finished = false;
-        public void beginCompaction(CompactionInfo.Holder ci)
+        public void begin(AbstractTableOperation op)
         {
-            holder = ci;
+            this.operation = op;
         }
 
-        public void finishCompaction(CompactionInfo.Holder ci)
+        public void finish(AbstractTableOperation op)
         {
             finished = true;
         }

@@ -49,7 +49,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.compaction.CompactionInfo.Holder;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableIntervalTree;
@@ -236,9 +235,9 @@ public class CompactionManager implements CompactionManagerMBean
         cacheCleanupExecutor.shutdown();
 
         // interrupt compactions and validations
-        for (Holder compactionHolder : active.getCompactions())
+        for (AbstractTableOperation operationSource : active.getCompactions())
         {
-            compactionHolder.stop();
+            operationSource.stop();
         }
 
         // wait for tasks to terminate
@@ -1104,38 +1103,38 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, ActiveCompactionsTracker activeCompactions)
+    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, TableOperationsTracker activeCompactions)
     {
-        CompactionInfo.Holder scrubInfo = null;
+        AbstractTableOperation scrubInfo = null;
 
         try (Scrubber scrubber = new Scrubber(cfs, modifier, skipCorrupted, checkData, reinsertOverflowedTTL))
         {
             scrubInfo = scrubber.getScrubInfo();
-            activeCompactions.beginCompaction(scrubInfo);
+            activeCompactions.begin(scrubInfo);
             scrubber.scrub();
         }
         finally
         {
             if (scrubInfo != null)
-                activeCompactions.finishCompaction(scrubInfo);
+                activeCompactions.finish(scrubInfo);
         }
     }
 
     @VisibleForTesting
-    void verifyOne(ColumnFamilyStore cfs, SSTableReader sstable, Verifier.Options options, ActiveCompactionsTracker activeCompactions)
+    void verifyOne(ColumnFamilyStore cfs, SSTableReader sstable, Verifier.Options options, TableOperationsTracker activeCompactions)
     {
-        CompactionInfo.Holder verifyInfo = null;
+        AbstractTableOperation verifyInfo = null;
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, options))
         {
             verifyInfo = verifier.getVerifyInfo();
-            activeCompactions.beginCompaction(verifyInfo);
+            activeCompactions.begin(verifyInfo);
             verifier.verify();
         }
         finally
         {
             if (verifyInfo != null)
-                activeCompactions.finishCompaction(verifyInfo);
+                activeCompactions.finish(verifyInfo);
         }
     }
 
@@ -1679,7 +1678,7 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, int nowInSec, UUID timeUUID, ActiveCompactionsTracker activeCompactions, BooleanSupplier isCancelled)
+    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, int nowInSec, UUID timeUUID, TableOperationsTracker activeCompactions, BooleanSupplier isCancelled)
     {
         return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID, activeCompactions) {
 
@@ -1691,20 +1690,20 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    ListenableFuture<?> submitIndexBuild(final SecondaryIndexBuilder builder, ActiveCompactionsTracker activeCompactions)
+    ListenableFuture<?> submitIndexBuild(final SecondaryIndexBuilder builder, TableOperationsTracker activeCompactions)
     {
         Runnable runnable = new Runnable()
         {
             public void run()
             {
-                activeCompactions.beginCompaction(builder);
+                activeCompactions.begin(builder);
                 try
                 {
                     builder.build();
                 }
                 finally
                 {
-                    activeCompactions.finishCompaction(builder);
+                    activeCompactions.finish(builder);
                 }
             }
         };
@@ -1725,7 +1724,7 @@ public class CompactionManager implements CompactionManagerMBean
         return submitCacheWrite(writer, active);
     }
 
-    Future<?> submitCacheWrite(final AutoSavingCache.Writer writer, ActiveCompactionsTracker activeCompactions)
+    Future<?> submitCacheWrite(final AutoSavingCache.Writer writer, TableOperationsTracker activeCompactions)
     {
         Runnable runnable = new Runnable()
         {
@@ -1733,19 +1732,19 @@ public class CompactionManager implements CompactionManagerMBean
             {
                 if (!AutoSavingCache.flushInProgress.add(writer.cacheType()))
                 {
-                    logger.trace("Cache flushing was already in progress: skipping {}", writer.getCompactionInfo());
+                    logger.trace("Cache flushing was already in progress: skipping {}", writer.getProgress());
                     return;
                 }
                 try
                 {
-                    activeCompactions.beginCompaction(writer);
+                    activeCompactions.begin(writer);
                     try
                     {
                         writer.saveCache();
                     }
                     finally
                     {
-                        activeCompactions.finishCompaction(writer);
+                        activeCompactions.finish(writer);
                     }
                 }
                 finally
@@ -1764,16 +1763,16 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    List<SSTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, ActiveCompactionsTracker activeCompactions) throws IOException
+    List<SSTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, TableOperationsTracker activeCompactions) throws IOException
     {
-        activeCompactions.beginCompaction(redistribution);
+        activeCompactions.begin(redistribution);
         try
         {
             return redistribution.redistributeSummaries();
         }
         finally
         {
-            activeCompactions.finishCompaction(redistribution);
+            activeCompactions.finish(redistribution);
         }
     }
 
@@ -1790,17 +1789,17 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    ListenableFuture<Long> submitViewBuilder(final ViewBuilderTask task, ActiveCompactionsTracker activeCompactions)
+    ListenableFuture<Long> submitViewBuilder(final ViewBuilderTask task, TableOperationsTracker activeCompactions)
     {
         return viewBuildExecutor.submitIfRunning(() -> {
-            activeCompactions.beginCompaction(task);
+            activeCompactions.begin(task);
             try
             {
                 return task.call();
             }
             finally
             {
-                activeCompactions.finishCompaction(task);
+                activeCompactions.finish(task);
             }
         }, "view build");
     }
@@ -1971,19 +1970,19 @@ public class CompactionManager implements CompactionManagerMBean
 
     public List<Map<String, String>> getCompactions()
     {
-        List<Holder> compactionHolders = active.getCompactions();
-        List<Map<String, String>> out = new ArrayList<Map<String, String>>(compactionHolders.size());
-        for (CompactionInfo.Holder ci : compactionHolders)
-            out.add(ci.getCompactionInfo().asMap());
+        List<AbstractTableOperation> operationSources = active.getCompactions();
+        List<Map<String, String>> out = new ArrayList<Map<String, String>>(operationSources.size());
+        for (AbstractTableOperation op : operationSources)
+            out.add(op.getProgress().asMap());
         return out;
     }
 
     public List<String> getCompactionSummary()
     {
-        List<Holder> compactionHolders = active.getCompactions();
-        List<String> out = new ArrayList<String>(compactionHolders.size());
-        for (CompactionInfo.Holder ci : compactionHolders)
-            out.add(ci.getCompactionInfo().toString());
+        List<AbstractTableOperation> operationSources = active.getCompactions();
+        List<String> out = new ArrayList<String>(operationSources.size());
+        for (AbstractTableOperation ci : operationSources)
+            out.add(ci.getProgress().toString());
         return out;
     }
 
@@ -2022,20 +2021,20 @@ public class CompactionManager implements CompactionManagerMBean
     public void stopCompaction(String type)
     {
         OperationType operation = OperationType.valueOf(type);
-        for (Holder holder : active.getCompactions())
+        for (AbstractTableOperation operationSource : active.getCompactions())
         {
-            if (holder.getCompactionInfo().getTaskType() == operation)
-                holder.stop();
+            if (operationSource.getProgress().getOperationType() == operation)
+                operationSource.stop();
         }
     }
 
     public void stopCompactionById(String compactionId)
     {
-        for (Holder holder : active.getCompactions())
+        for (AbstractTableOperation operationSource : active.getCompactions())
         {
-            UUID holderId = holder.getCompactionInfo().getTaskId();
+            UUID holderId = operationSource.getProgress().getOperationId();
             if (holderId != null && holderId.equals(UUID.fromString(compactionId)))
-                holder.stop();
+                operationSource.stop();
         }
     }
 
@@ -2194,15 +2193,15 @@ public class CompactionManager implements CompactionManagerMBean
         assert tables != null;
 
         // interrupt in-progress compactions
-        Set<Holder> interrupted = new HashSet<>();
-        for (Holder compactionHolder : active.getCompactions())
+        Set<AbstractTableOperation> interrupted = new HashSet<>();
+        for (AbstractTableOperation operationSource : active.getCompactions())
         {
-            CompactionInfo info = compactionHolder.getCompactionInfo();
+            AbstractTableOperation.Progress info = operationSource.getProgress();
 
-            if (Iterables.contains(tables, info.getTableMetadata()) && opPredicate.test(info.getTaskType()))
+            if (Iterables.contains(tables, info.getTableMetadata()) && opPredicate.test(info.getOperationType()))
             {
-                compactionHolder.stop();
-                interrupted.add(compactionHolder);
+                operationSource.stop();
+                interrupted.add(operationSource);
             }
         }
 
@@ -2212,13 +2211,13 @@ public class CompactionManager implements CompactionManagerMBean
             long start = System.nanoTime();
             long wait = TimeUnit.MINUTES.toNanos(2);
 
-            for (Holder operation : interrupted)
+            for (AbstractTableOperation operation : interrupted)
             {
                 while (active.isActive(operation) && System.nanoTime() - start < wait)
                     Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
                 if (active.isActive(operation))
-                    throw new RuntimeException(String.format("Compaction task (%s) didn't finish within 2 minutes", operation.getCompactionInfo()));
+                    throw new RuntimeException(String.format("Compaction task (%s) didn't finish within 2 minutes", operation.getProgress()));
             }
         }
 
@@ -2227,7 +2226,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
     {
-        interruptCompactionFor(columnFamilies, sstablePredicate, interruptValidation, CompactionInfo.StopTrigger.NONE);
+        interruptCompactionFor(columnFamilies, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
     }
     /**
      * Try to stop all of the compactions for given ColumnFamilies.
@@ -2239,31 +2238,31 @@ public class CompactionManager implements CompactionManagerMBean
      * @param sstablePredicate the sstable predicate to match on
      * @param interruptValidation true if validation operations for repair should also be interrupted
      */
-    public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, CompactionInfo.StopTrigger trigger)
+    public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
     {
         assert columnFamilies != null;
 
         // interrupt in-progress compactions
-        for (Holder compactionHolder : active.getCompactions())
+        for (AbstractTableOperation operationSource : active.getCompactions())
         {
-            CompactionInfo info = compactionHolder.getCompactionInfo();
-            if ((info.getTaskType() == OperationType.VALIDATION) && !interruptValidation)
+            AbstractTableOperation.Progress info = operationSource.getProgress();
+            if ((info.getOperationType() == OperationType.VALIDATION) && !interruptValidation)
                 continue;
 
             if (info.getTableMetadata() == null || Iterables.contains(columnFamilies, info.getTableMetadata()))
             {
-                if (info.shouldStop(sstablePredicate))
-                    compactionHolder.stop(trigger);
+                if (operationSource.shouldStop(sstablePredicate))
+                    operationSource.stop(trigger);
             }
         }
     }
 
     public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
     {
-        interruptCompactionForCFs(cfss, sstablePredicate, interruptValidation, CompactionInfo.StopTrigger.NONE);
+        interruptCompactionForCFs(cfss, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
     }
 
-    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, CompactionInfo.StopTrigger trigger)
+    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
     {
         List<TableMetadata> metadata = new ArrayList<>();
         for (ColumnFamilyStore cfs : cfss)
@@ -2287,14 +2286,14 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
 
-    public List<CompactionInfo> getSSTableTasks()
+    public List<AbstractTableOperation.Progress> getSSTableTasks()
     {
         return active.getCompactions()
                      .stream()
-                     .map(CompactionInfo.Holder::getCompactionInfo)
-                     .filter(task -> task.getTaskType() != OperationType.COUNTER_CACHE_SAVE
-                                     && task.getTaskType() != OperationType.KEY_CACHE_SAVE
-                                     && task.getTaskType() != OperationType.ROW_CACHE_SAVE)
+                     .map(AbstractTableOperation::getProgress)
+                     .filter(progress -> progress.getOperationType() != OperationType.COUNTER_CACHE_SAVE
+                                     && progress.getOperationType() != OperationType.KEY_CACHE_SAVE
+                                     && progress.getOperationType() != OperationType.ROW_CACHE_SAVE)
                      .collect(Collectors.toList());
     }
 

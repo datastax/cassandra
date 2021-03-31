@@ -178,7 +178,7 @@ public class Scrubber implements Closeable
             while (!dataFile.isEOF())
             {
                 if (scrubInfo.isStopRequested())
-                    throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
+                    throw new CompactionInterruptedException(scrubInfo.getProgress());
 
                 // position in a data file where the partition starts
                 long dataStart = dataFile.getFilePointer();
@@ -477,12 +477,12 @@ public class Scrubber implements Closeable
         }
     }
 
-    public CompactionInfo.Holder getScrubInfo()
+    public AbstractTableOperation getScrubInfo()
     {
         return scrubInfo;
     }
 
-    private static class ScrubInfo extends CompactionInfo.Holder
+    private static class ScrubInfo extends AbstractTableOperation
     {
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
@@ -497,17 +497,17 @@ public class Scrubber implements Closeable
             scrubCompactionId = UUIDGen.getTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public Progress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.SCRUB,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          scrubCompactionId,
-                                          ImmutableSet.of(sstable));
+                return new Progress(sstable.metadata(),
+                                    OperationType.SCRUB,
+                                    dataFile.getFilePointer(),
+                                    dataFile.length(),
+                                    scrubCompactionId,
+                                    ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {

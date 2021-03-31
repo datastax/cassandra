@@ -26,11 +26,9 @@ import com.codahale.metrics.Meter;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactions;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.TableCompactions;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.db.compaction.TableOperations;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -96,11 +94,11 @@ public class CompactionMetrics
                     for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
                     {
                         TableMetadata metadata = cfs.metadata.get();
-                        TableCompactions tableCompactions = CompactionManager.instance
+                        TableOperations tableOperations = CompactionManager.instance
                                                                              .active
-                                                                             .compactionsByMetadata(metadata);
+                                                                             .operationsByMetadata(metadata);
                         int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() +
-                                         Math.toIntExact(tableCompactions != null ? tableCompactions.getInProgress().size() : 0);
+                                         Math.toIntExact(tableOperations != null ? tableOperations.getInProgress().size() : 0);
                         if (taskNumber > 0)
                         {
                             if (!resultMap.containsKey(keyspaceName))
@@ -113,9 +111,9 @@ public class CompactionMetrics
                 }
 
                 // currently running compactions
-                for (CompactionInfo.Holder compaction : CompactionManager.instance.active.getCompactions())
+                for (AbstractTableOperation op : CompactionManager.instance.active.getCompactions())
                 {
-                    TableMetadata metaData = compaction.getCompactionInfo().getTableMetadata();
+                    TableMetadata metaData = op.getProgress().getTableMetadata();
                     if (metaData == null)
                     {
                         continue;

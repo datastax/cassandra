@@ -420,7 +420,7 @@ public class CompactionsCQLTest extends CQLTester
         AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
         // we should be compacting all 50 sstables:
         assertEquals(50, act.transaction.originals().size());
-        act.execute(ActiveCompactionsTracker.NOOP);
+        act.execute(TableOperationsTracker.NOOP);
     }
 
     @Test
@@ -457,7 +457,7 @@ public class CompactionsCQLTest extends CQLTester
         assertEquals(0, ((LeveledCompactionTask)act).getLevel());
         assertTrue(act.transaction.originals().stream().allMatch(s -> s.getSSTableLevel() == 0));
         txn.abort(); // unmark the l1 sstable compacting
-        act.execute(ActiveCompactionsTracker.NOOP);
+        act.execute(TableOperationsTracker.NOOP);
     }
 
     @Test

@@ -20,10 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
@@ -31,50 +28,50 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class ActiveCompactions implements ActiveCompactionsTracker
+public class ActiveCompactions implements TableOperationsTracker
 {
-    // The compaction statistics ordered by keyspace.table
-    private static final ConcurrentMap<String, TableCompactions> compactionsByTable = new ConcurrentHashMap<>();
+    // The statistics ordered by keyspace.table for all the operations that are currently in progress.
+    private static final ConcurrentMap<String, TableOperations> operationsByTable = new ConcurrentHashMap<>();
 
-    public List<CompactionInfo.Holder> getCompactions()
+    public List<AbstractTableOperation> getCompactions()
     {
-        return compactionsByTable.values()
-                                 .stream()
-                                 .flatMap(compactions -> compactions.getInProgress().stream())
-                                 .collect(Collectors.toList());
+        return operationsByTable.values()
+                                .stream()
+                                .flatMap(compactions -> compactions.getInProgress().stream())
+                                .collect(Collectors.toList());
     }
 
-    public void beginCompaction(CompactionInfo.Holder ci)
+    public void begin(AbstractTableOperation op)
     {
-        CompactionInfo compactionInfo = ci.getCompactionInfo();
-        String key = compactionsByTableKey(compactionInfo);
+        AbstractTableOperation.Progress progress = op.getProgress();
+        String key = operationsByTableKey(progress);
 
-        compactionsByTable.computeIfAbsent(key, k -> new TableCompactions(compactionInfo.getTableMetadata()));
-        compactionsByTable.computeIfPresent(key, (k, tableCompactions) -> tableCompactions.compactionStarted(ci));
+        operationsByTable.computeIfAbsent(key, k -> new TableOperations(progress.getTableMetadata()));
+        operationsByTable.computeIfPresent(key, (k, tableOperations) -> tableOperations.operationsStarted(op));
     }
 
-    public void finishCompaction(CompactionInfo.Holder ci)
+    public void finish(AbstractTableOperation op)
     {
-        CompactionInfo compactionInfo = ci.getCompactionInfo();
-        compactionsByTable.computeIfPresent(compactionsByTableKey(compactionInfo),
-                                            (key, tableCompactions) -> {
-            return tableCompactions.compactionCompleted(ci,
-                                                        compactionInfo,
-                                                        CompactionManager.instance.getMetrics());
+        AbstractTableOperation.Progress progress = op.getProgress();
+        operationsByTable.computeIfPresent(operationsByTableKey(progress),
+                                           (key, tableOperations) -> {
+            return tableOperations.operationsCompleted(op,
+                                                       progress,
+                                                       CompactionManager.instance.getMetrics());
         });
     }
 
-    public TableCompactions compactionsByMetadata(TableMetadata metadata)
+    public TableOperations operationsByMetadata(TableMetadata metadata)
     {
-        return compactionsByTable.get(compactionsByTableKey(metadata));
+        return operationsByTable.get(operationsByTableKey(metadata));
     }
 
-    private String compactionsByTableKey(CompactionInfo compactionInfo)
+    private String operationsByTableKey(AbstractTableOperation.Progress progress)
     {
-        return compactionsByTableKey(compactionInfo.getTableMetadata());
+        return operationsByTableKey(progress.getTableMetadata());
     }
 
-    private String compactionsByTableKey(TableMetadata metadata)
+    private String operationsByTableKey(TableMetadata metadata)
     {
         return metadata.keyspace + "." + metadata.name;
     }
@@ -84,21 +81,21 @@ public class ActiveCompactions implements ActiveCompactionsTracker
      *
      * Number of entries in compactions should be small (< 10) but avoid calling in any time-sensitive context
      */
-    public Collection<CompactionInfo> getCompactionsForSSTable(SSTableReader sstable, OperationType compactionType)
+    public Collection<AbstractTableOperation.Progress> getOperationsForSSTable(SSTableReader sstable, OperationType compactionType)
     {
-        List<CompactionInfo> toReturn = null;
-        synchronized (compactionsByTable)
+        List<AbstractTableOperation.Progress> toReturn = null;
+        synchronized (operationsByTable)
         {
-            for (TableCompactions tableCompactions : compactionsByTable.values())
+            for (TableOperations tableOperations : operationsByTable.values())
             {
-                for (CompactionInfo.Holder holder : tableCompactions.getInProgress())
+                for (AbstractTableOperation op : tableOperations.getInProgress())
                 {
-                    CompactionInfo compactionInfo = holder.getCompactionInfo();
-                    if (compactionInfo.getSSTables().contains(sstable) && compactionInfo.getTaskType() == compactionType)
+                    AbstractTableOperation.Progress progress = op.getProgress();
+                    if (progress.getSSTables().contains(sstable) && progress.getOperationType() == compactionType)
                     {
                         if (toReturn == null)
                             toReturn = new ArrayList<>();
-                        toReturn.add(compactionInfo);
+                        toReturn.add(progress);
                     }
                 }
             }
@@ -109,7 +106,7 @@ public class ActiveCompactions implements ActiveCompactionsTracker
     /**
      * @return true if given compaction is still active
      */
-    public boolean isActive(CompactionInfo.Holder ci)
+    public boolean isActive(AbstractTableOperation ci)
     {
         return getCompactions().contains(ci);
     }

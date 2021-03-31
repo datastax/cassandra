@@ -43,7 +43,7 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.rows.*;
@@ -120,9 +120,9 @@ public class IndexSummaryManagerTest
     @After
     public void afterTest()
     {
-        for (CompactionInfo.Holder holder : CompactionManager.instance.active.getCompactions())
+        for (AbstractTableOperation operation : CompactionManager.instance.active.getCompactions())
         {
-            holder.stop();
+            operation.stop();
         }
 
         String ksname = KEYSPACE1;
@@ -646,11 +646,11 @@ public class IndexSummaryManagerTest
         final AtomicReference<CompactionInterruptedException> exception = new AtomicReference<>();
         // barrier to control when redistribution runs
         final CountDownLatch barrier = new CountDownLatch(1);
-        CompactionInfo.Holder ongoingCompaction = new CompactionInfo.Holder()
+        AbstractTableOperation ongoingCompaction = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public Progress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.UNKNOWN, 0, 0, UUID.randomUUID(), compacting);
+                return new Progress(cfs.metadata(), OperationType.UNKNOWN, 0, 0, UUID.randomUUID(), compacting);
             }
 
             public boolean isGlobal()
@@ -660,7 +660,7 @@ public class IndexSummaryManagerTest
         };
         try (LifecycleTransaction ignored = cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN))
         {
-            CompactionManager.instance.active.beginCompaction(ongoingCompaction);
+            CompactionManager.instance.active.begin(ongoingCompaction);
 
             Thread t = NamedThreadFactory.createThread(new Runnable()
             {
@@ -700,7 +700,7 @@ public class IndexSummaryManagerTest
         }
         finally
         {
-            CompactionManager.instance.active.finishCompaction(ongoingCompaction);
+            CompactionManager.instance.active.finish(ongoingCompaction);
         }
 
         assertNotNull("Expected compaction interrupted exception", exception.get());

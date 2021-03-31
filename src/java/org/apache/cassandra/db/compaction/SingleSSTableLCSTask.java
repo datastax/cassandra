@@ -57,7 +57,7 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     }
 
     @Override
-    protected int executeInternal(ActiveCompactionsTracker activeCompactions)
+    protected int executeInternal(TableOperationsTracker activeCompactions)
     {
         run();
         return 1;

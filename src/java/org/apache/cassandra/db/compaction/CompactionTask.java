@@ -60,7 +60,7 @@ public class CompactionTask extends AbstractCompactionTask
     protected final boolean keepOriginals;
     /** for trace logging purposes only */
     private static final AtomicLong totalBytesCompacted = new AtomicLong();
-    private ActiveCompactionsTracker activeCompactions;
+    private TableOperationsTracker activeCompactions;
 
     public CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
     {
@@ -80,9 +80,9 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     @Override
-    protected int executeInternal(ActiveCompactionsTracker activeCompactions)
+    protected int executeInternal(TableOperationsTracker activeCompactions)
     {
-        this.activeCompactions = activeCompactions == null ? ActiveCompactionsTracker.NOOP : activeCompactions;
+        this.activeCompactions = activeCompactions == null ? TableOperationsTracker.NOOP : activeCompactions;
         run();
         return transaction.originals().size();
     }
@@ -178,7 +178,7 @@ public class CompactionTask extends AbstractCompactionTask
 
                 long lastBytesScanned = 0;
 
-                activeCompactions.beginCompaction(ci);
+                activeCompactions.begin(ci);
                 Directories dirs = getDirectories();
                 try (CompactionAwareWriter writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact))
                 {
@@ -187,7 +187,7 @@ public class CompactionTask extends AbstractCompactionTask
                     // We already have the sstables marked compacting here so CompactionManager#waitForCessation will
                     // block until the below exception is thrown and the transaction is cancelled.
                     if (!controller.cfs.getCompactionStrategyManager().isActive())
-                        throw new CompactionInterruptedException(ci.getCompactionInfo());
+                        throw new CompactionInterruptedException(ci.getProgress());
                     estimatedKeys = writer.estimatedKeys();
                     while (ci.hasNext())
                     {
@@ -217,7 +217,7 @@ public class CompactionTask extends AbstractCompactionTask
                 }
                 finally
                 {
-                    activeCompactions.finishCompaction(ci);
+                    activeCompactions.finish(ci);
                     ci.updateStatistics(statistics);
                     statistics.durationInNanos = System.nanoTime() - start;
                     statistics.setEndSstables(newSStables);

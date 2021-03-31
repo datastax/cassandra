@@ -18,17 +18,17 @@
 
 package org.apache.cassandra.db.compaction;
 
-public interface ActiveCompactionsTracker
+public interface TableOperationsTracker
 {
-    public void beginCompaction(CompactionInfo.Holder ci);
-    public void finishCompaction(CompactionInfo.Holder ci);
+    public void begin(AbstractTableOperation op);
+    public void finish(AbstractTableOperation op);
 
-    public static final ActiveCompactionsTracker NOOP = new ActiveCompactionsTracker()
+    public static final TableOperationsTracker NOOP = new TableOperationsTracker()
     {
-        public void beginCompaction(CompactionInfo.Holder ci)
+        public void begin(AbstractTableOperation op)
         {}
 
-        public void finishCompaction(CompactionInfo.Holder ci)
+        public void finish(AbstractTableOperation op)
         {}
     };
 }
