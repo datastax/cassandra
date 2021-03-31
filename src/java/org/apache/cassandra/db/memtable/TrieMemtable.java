@@ -182,7 +182,10 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     {
         super.discard();
         for (MemtableShard shard : shards)
+        {
             shard.allocator.setDiscarded();
+            shard.data.discardBuffers();
+        }
     }
 
     /**
