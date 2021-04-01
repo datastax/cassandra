@@ -232,7 +232,7 @@ public class WriteTest extends CQLTester
         executorService.shutdown();
         executorService.awaitTermination(15, TimeUnit.SECONDS);
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        Memtable.MemoryUsage usage = memtable.getMemoryUsage();
+        Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
         System.err.format("\n%s in %s mode: %d ops, %s serialized bytes, %s\n",
                           memtable.getClass().getSimpleName(),
                           DatabaseDescriptor.getMemtableAllocationType(),

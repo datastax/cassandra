@@ -893,22 +893,14 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
     /** Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content. */
     public long sizeOffHeap()
     {
-        return bufferType == BufferType.ON_HEAP ? 0 : totalBuffersSize();
+        return bufferType == BufferType.ON_HEAP ? 0 : allocatedPos;
     }
 
     /** Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content. */
     public long sizeOnHeap()
     {
         return contentCount * MemoryLayoutSpecification.SPEC.getReferenceSize() +
-               (bufferType == BufferType.ON_HEAP ? totalBuffersSize() + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP);
-    }
-
-    private int totalBuffersSize()
-    {
-        if (allocatedPos == 0)
-            return 0;
-
-        return getBuffer(allocatedPos - 1).capacity() * 2 - BUF_START_SIZE;
+               (bufferType == BufferType.ON_HEAP ? allocatedPos + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP);
     }
 
     @Override
