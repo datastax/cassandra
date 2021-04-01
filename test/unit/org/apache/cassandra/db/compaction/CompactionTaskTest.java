@@ -81,7 +81,7 @@ public class CompactionTaskTest
 
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         Assert.assertNotNull(txn);
-        CompactionTask task = new CompactionTask(cfs, txn, 0);
+        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
         Assert.assertNotNull(task);
         cfs.getCompactionStrategyManager().pause();
         try
@@ -139,7 +139,7 @@ public class CompactionTaskTest
             {
                 txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
                 Assert.assertNotNull(txn);
-                CompactionTask task = new CompactionTask(cfs, txn, 0);
+                AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
                 Assert.fail("Expected IllegalArgumentException");
             }
             catch (IllegalArgumentException e)

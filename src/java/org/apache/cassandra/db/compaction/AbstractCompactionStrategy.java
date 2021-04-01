@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.io.Closeable;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -54,7 +56,7 @@ import org.apache.cassandra.schema.CompactionParams;
  *    i/o done by compaction, and merging done at read time.
  *  - perform a full (maximum possible) compaction if requested by the user
  */
-public abstract class AbstractCompactionStrategy
+public abstract class AbstractCompactionStrategy implements CompactionObserver
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractCompactionStrategy.class);
 
@@ -94,6 +96,9 @@ public abstract class AbstractCompactionStrategy
      * See CASSANDRA-3430
      */
     protected boolean isActive = false;
+
+    /** The compaction tasks that are in progress */
+    protected ConcurrentLinkedQueue<CompactionProgress> compactionsInProgress = new ConcurrentLinkedQueue<>();
 
     protected AbstractCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {
@@ -197,7 +202,59 @@ public abstract class AbstractCompactionStrategy
 
     public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
     {
-        return new CompactionTask(cfs, txn, gcBefore);
+        return CompactionTask.forCompaction(this, txn, gcBefore);
+    }
+
+    /**
+     * @return statistics about this compaction strategy.
+     */
+    public CompactionStrategyStats getStats()
+    {
+        return new CompactionStrategyStats(cfs.keyspace.getName(),
+                                           cfs.name,
+                                           getClass().getSimpleName(),
+                                           getLevelStats());
+    }
+
+    /**
+     * @return statistics about each level for this compaction strategy. Strategies that are not level aware only return one level, level zero.
+     */
+    protected CompactionLevelStats[] getLevelStats()
+    {
+        Set<SSTableReader> sstables = getSSTables();
+        int numSSTables = sstables.size();
+        double score = 0; // Always zero for non levelled compactions
+        long totRead = 0;
+        long totWritten = 0;
+        int totCompactingSSTables = 0;
+
+        for (CompactionProgress op : compactionsInProgress)
+        {
+            totRead += op.uncompressedBytesRead();
+            totWritten += op.uncompressedBytesWritten();
+            totCompactingSSTables += op.inSSTables().size();
+        }
+
+        return new CompactionLevelStats[] { new CompactionLevelStats(numSSTables,
+                                                                     totCompactingSSTables,
+                                                                     score,
+                                                                     totRead,
+                                                                     totRead,
+                                                                     totWritten)
+        };
+    }
+
+    /**
+     * Called by a compaction operation for this strategy when it starts executing.
+     *
+     * The closeable will be called when the tasks completes.
+     **/
+    @Override
+    public Closeable onCompactionStart(CompactionProgress progress)
+    {
+        compactionsInProgress.offer(progress);
+
+        return () -> compactionsInProgress.remove(progress);
     }
 
     /**

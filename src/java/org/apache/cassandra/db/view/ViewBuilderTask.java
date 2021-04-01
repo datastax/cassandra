@@ -194,7 +194,7 @@ public class ViewBuilderTask extends AbstractTableOperation implements Callable<
     }
 
     @Override
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
         // we don't know the sstables at construction of ViewBuilderTask and we could change this to return once we know the
         // but since we basically only cancel view builds on truncation where we cancel all compactions anyway, this seems reasonable
@@ -203,13 +203,13 @@ public class ViewBuilderTask extends AbstractTableOperation implements Callable<
         if (range.left.getPartitioner().splitter().isPresent())
         {
             long progress = prevToken == null ? 0 : Math.round(prevToken.getPartitioner().splitter().get().positionInRange(prevToken, range) * 1000);
-            return Progress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, progress, 1000, Unit.RANGES, compactionId);
+            return OperationProgress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, progress, 1000, Unit.RANGES, compactionId);
         }
 
         // When there is no splitter, estimate based on number of total keys but
         // take the max with keysBuilt + 1 to avoid having more completed than total
         long keysTotal = Math.max(keysBuilt + 1, baseCfs.estimatedKeysForRange(range));
-        return Progress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, keysBuilt, keysTotal, Unit.KEYS, compactionId);
+        return OperationProgress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, keysBuilt, keysTotal, Unit.KEYS, compactionId);
     }
 
     @Override
@@ -246,7 +246,7 @@ public class ViewBuilderTask extends AbstractTableOperation implements Callable<
     {
         private final String ksName, viewName;
 
-        private StoppedException(String ksName, String viewName, Progress info)
+        private StoppedException(String ksName, String viewName, OperationProgress info)
         {
             super(info);
             this.ksName = ksName;

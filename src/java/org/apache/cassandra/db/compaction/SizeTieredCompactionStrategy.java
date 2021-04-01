@@ -198,7 +198,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
             LifecycleTransaction transaction = cfs.getTracker().tryModify(hottestBucket, OperationType.COMPACTION);
             if (transaction != null)
-                return new CompactionTask(cfs, transaction, gcBefore);
+                return CompactionTask.forCompaction(this, transaction, gcBefore);
             previousCandidate = hottestBucket;
         }
     }
@@ -213,8 +213,8 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         if (txn == null)
             return null;
         if (splitOutput)
-            return Arrays.<AbstractCompactionTask>asList(new SplittingCompactionTask(cfs, txn, gcBefore));
-        return Arrays.<AbstractCompactionTask>asList(new CompactionTask(cfs, txn, gcBefore));
+            return Arrays.asList(SplittingCompactionTask.forSplitting(this, txn, gcBefore));
+        return Arrays.asList(CompactionTask.forCompaction(this, txn, gcBefore));
     }
 
     @SuppressWarnings("resource")
@@ -229,7 +229,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
             return null;
         }
 
-        return new CompactionTask(cfs, transaction, gcBefore).setUserDefined(true);
+        return CompactionTask.forCompaction(this, transaction, gcBefore).setUserDefined(true);
     }
 
     public int getEstimatedRemainingTasks()
@@ -350,9 +350,14 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     private static class SplittingCompactionTask extends CompactionTask
     {
-        public SplittingCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
+        public SplittingCompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
         {
-            super(cfs, txn, gcBefore);
+            super(strategy, txn, gcBefore, false);
+        }
+
+        static AbstractCompactionTask forSplitting(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+        {
+            return new SplittingCompactionTask(strategy, txn, gcBefore);
         }
 
         @Override

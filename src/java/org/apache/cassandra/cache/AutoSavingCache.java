@@ -287,7 +287,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
     public class Writer extends AbstractTableOperation
     {
         private final Iterator<K> keyIterator;
-        private final Progress info;
+        private final OperationProgress info;
         private long keysWritten;
         private final long keysEstimate;
 
@@ -315,12 +315,12 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             else
                 type = OperationType.UNKNOWN;
 
-            info = Progress.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
-                                            type,
-                                            0,
-                                            keysEstimate,
-                                            Unit.KEYS,
-                                            UUIDGen.getTimeUUID());
+            info = OperationProgress.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
+                                                     type,
+                                                     0,
+                                                     keysEstimate,
+                                                     Unit.KEYS,
+                                                     UUIDGen.getTimeUUID());
         }
 
         public CacheService.CacheType cacheType()
@@ -328,7 +328,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             return cacheType;
         }
 
-        public Progress getProgress()
+        public OperationProgress getProgress()
         {
             // keyset can change in size, thus total can too
             // TODO need to check for this one... was: info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));

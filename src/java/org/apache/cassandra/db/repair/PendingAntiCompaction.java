@@ -145,7 +145,7 @@ public class PendingAntiCompaction
                 }
                 return false;
             }
-            Collection<AbstractTableOperation.Progress> ops = CompactionManager.instance.active.getOperationsForSSTable(sstable, OperationType.ANTICOMPACTION);
+            Collection<AbstractTableOperation.OperationProgress> ops = CompactionManager.instance.active.getOperationsForSSTable(sstable, OperationType.ANTICOMPACTION);
             if (ops != null && !ops.isEmpty())
             {
                 // todo: start tracking the parent repair session id that created the anticompaction to be able to give a better error messsage here:
@@ -155,9 +155,9 @@ public class PendingAntiCompaction
                 sb.append(" has failed because it encountered intersecting sstables belonging to another incremental repair session. ");
                 sb.append("This is caused by starting multiple conflicting incremental repairs at the same time. ");
                 sb.append("Conflicting anticompactions: ");
-                for (AbstractTableOperation.Progress op : ops)
+                for (AbstractTableOperation.OperationProgress op : ops)
                 {
-                    sb.append(op.getOperationId() == null ? "no compaction id" : op.getOperationId()).append(':').append(op.getSSTables()).append(',');
+                    sb.append(op.operationId() == null ? "no compaction id" : op.operationId()).append(':').append(op.sstables()).append(',');
                 }
                 throw new SSTableAcquisitionException(sb.toString());
             }

@@ -37,6 +37,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     protected LifecycleTransaction transaction;
     protected boolean isUserDefined;
     protected OperationType compactionType;
+    protected TableOperationObserver opObserver;
+    protected CompactionObserver compObserver;
 
     /**
      * @param cfs
@@ -48,6 +50,8 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         this.transaction = transaction;
         this.isUserDefined = false;
         this.compactionType = OperationType.COMPACTION;
+        this.opObserver = TableOperationObserver.NOOP;
+        this.compObserver = CompactionObserver.NO_OP;
         // enforce contract that caller should mark sstables compacting
         Set<SSTableReader> compacting = transaction.tracker.getCompacting();
         for (SSTableReader sstable : transaction.originals())
@@ -91,13 +95,20 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     }
 
     /**
-     * executes the task and unmarks sstables compacting
+     * Executes the task after setting a new observer, normally the observer is the
+     * compaction manager metrics.
      */
-    public int execute(TableOperationsTracker activeCompactions)
+    public int execute(TableOperationObserver observer)
+    {
+        return setOpObserver(observer).execute();
+    }
+
+    /** Executes the task */
+    public int execute()
     {
         try
         {
-            return executeInternal(activeCompactions);
+            return executeInternal();
         }
         catch(FSDiskFullWriteError e)
         {
@@ -110,9 +121,12 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
             transaction.close();
         }
     }
+
     public abstract CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);
 
-    protected abstract int executeInternal(TableOperationsTracker activeCompactions);
+    protected abstract int executeInternal();
+
+    // TODO Eventually these three setters should be passed in to the constructor.
 
     public AbstractCompactionTask setUserDefined(boolean isUserDefined)
     {
@@ -123,6 +137,15 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     public AbstractCompactionTask setCompactionType(OperationType compactionType)
     {
         this.compactionType = compactionType;
+        return this;
+    }
+
+    /**
+     * Override the NO OP observer, this is normally overridden by the compaction metrics.
+     */
+    AbstractCompactionTask setOpObserver(TableOperationObserver opObserver)
+    {
+        this.opObserver = opObserver;
         return this;
     }
 

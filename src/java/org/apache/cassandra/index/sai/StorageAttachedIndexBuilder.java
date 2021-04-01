@@ -66,7 +66,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-import static org.apache.cassandra.db.compaction.AbstractTableOperation.StopTrigger.TRUNCATE;
+import static org.apache.cassandra.db.compaction.TableOperation.StopTrigger.TRUNCATE;
 
 /**
  * Multiple storage-attached indexes can start building concurrently. We need to make sure:
@@ -262,14 +262,14 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     }
 
     @Override
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
-        return new Progress(metadata,
-                                  OperationType.INDEX_BUILD,
-                                  bytesProcessed,
-                                  totalSizeInBytes,
-                                  compactionId,
-                                  sstables.keySet());
+        return new OperationProgress(metadata,
+                                     OperationType.INDEX_BUILD,
+                                     bytesProcessed,
+                                     totalSizeInBytes,
+                                     compactionId,
+                                     sstables.keySet());
     }
 
     /**

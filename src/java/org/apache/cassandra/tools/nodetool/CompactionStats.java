@@ -28,7 +28,9 @@ import io.airlift.airline.Option;
 
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManagerMBean;
+import org.apache.cassandra.db.compaction.CompactionStrategyStats;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
@@ -57,6 +59,7 @@ public class CompactionStats extends NodeToolCmd
             for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
                 numTotalPendingTask += tableEntry.getValue();
         }
+
         out.println("pending tasks: " + numTotalPendingTask);
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
         {
@@ -71,6 +74,9 @@ public class CompactionStats extends NodeToolCmd
         }
         out.println();
         reportCompactionTable(cm.getCompactions(), probe.getCompactionThroughput(), humanReadable, out);
+
+        System.out.println();
+        reportCompactionStrategies(probe);
     }
 
     public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
@@ -83,17 +89,17 @@ public class CompactionStats extends NodeToolCmd
             table.add("id", "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
             for (Map<String, String> c : compactions)
             {
-                long total = Long.parseLong(c.get(AbstractTableOperation.Progress.TOTAL));
-                long completed = Long.parseLong(c.get(AbstractTableOperation.Progress.COMPLETED));
-                String taskType = c.get(AbstractTableOperation.Progress.OPERATION_TYPE);
-                String keyspace = c.get(AbstractTableOperation.Progress.KEYSPACE);
-                String columnFamily = c.get(AbstractTableOperation.Progress.COLUMNFAMILY);
-                String unit = c.get(AbstractTableOperation.Progress.UNIT);
-                boolean toFileSize = humanReadable && AbstractTableOperation.Unit.isFileSize(unit);
+                long total = Long.parseLong(c.get(TableOperation.Progress.TOTAL));
+                long completed = Long.parseLong(c.get(TableOperation.Progress.COMPLETED));
+                String taskType = c.get(TableOperation.Progress.OPERATION_TYPE);
+                String keyspace = c.get(TableOperation.Progress.KEYSPACE);
+                String columnFamily = c.get(TableOperation.Progress.COLUMNFAMILY);
+                String unit = c.get(TableOperation.Progress.UNIT);
+                boolean toFileSize = humanReadable && TableOperation.Unit.isFileSize(unit);
                 String completedStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
                 String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
                 String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + "%";
-                String id = c.get(AbstractTableOperation.Progress.OPERATION_ID);
+                String id = c.get(TableOperation.Progress.OPERATION_ID);
                 table.add(id, taskType, keyspace, columnFamily, completedStr, totalStr, unit, percentComplete);
                 if (taskType.equals(OperationType.COMPACTION.toString()))
                     remainingBytes += total - completed;
@@ -110,4 +116,13 @@ public class CompactionStats extends NodeToolCmd
         }
     }
 
+    private static void reportCompactionStrategies(NodeProbe probe)
+    {
+        System.out.println("Compaction Strategies:");
+        List<CompactionStrategyStats> strategyInfos = (List<CompactionStrategyStats>) probe.getCompactionMetric("StrategyStats");
+        for (CompactionStrategyStats strategyInfo : strategyInfos)
+        {
+            System.out.println(strategyInfo.toString());
+        }
+    }
 }

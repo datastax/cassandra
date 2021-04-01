@@ -123,14 +123,14 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     }
 
     @Override
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
-        return new Progress(cfs.metadata(),
-                            OperationType.INDEX_BUILD,
-                            bytesProcessed,
-                            totalSizeInBytes,
-                            compactionId,
-                            sstables.keySet());
+        return new OperationProgress(cfs.metadata(),
+                                     OperationType.INDEX_BUILD,
+                                     bytesProcessed,
+                                     totalSizeInBytes,
+                                     compactionId,
+                                     sstables.keySet());
     }
 
     private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)

@@ -95,7 +95,7 @@ public class LongLeveledCompactionStrategyTest
                 {
                     public void run()
                     {
-                        nextTask.execute(TableOperationsTracker.NOOP);
+                        nextTask.execute();
                     }
                 });
             }

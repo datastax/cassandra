@@ -51,14 +51,14 @@ public class CollatedViewIndexBuilder extends SecondaryIndexBuilder
         this.sstables = sstables;
     }
 
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
-        return new Progress(cfs.metadata(),
-                OperationType.INDEX_BUILD,
-                iter.getBytesRead(),
-                iter.getTotalBytes(),
-                compactionId,
-                sstables);
+        return new OperationProgress(cfs.metadata(),
+                                     OperationType.INDEX_BUILD,
+                                     iter.getBytesRead(),
+                                     iter.getTotalBytes(),
+                                     compactionId,
+                                     sstables);
     }
 
     public void build()

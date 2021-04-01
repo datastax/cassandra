@@ -507,17 +507,17 @@ public class Verifier implements Closeable
             verificationCompactionId = UUIDGen.getTimeUUID();
         }
 
-        public AbstractTableOperation.Progress getProgress()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new Progress(sstable.metadata(),
-                                    OperationType.VERIFY,
-                                    dataFile.getFilePointer(),
-                                    dataFile.length(),
-                                    verificationCompactionId,
-                                    ImmutableSet.of(sstable));
+                return new OperationProgress(sstable.metadata(),
+                                             OperationType.VERIFY,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             verificationCompactionId,
+                                             ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {

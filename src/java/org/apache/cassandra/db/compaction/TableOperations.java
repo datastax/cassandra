@@ -42,7 +42,7 @@ public class TableOperations
     private final String keyspaceName;
     private final String tableName;
     private final long numCompleted;
-    private final Set<AbstractTableOperation> inProgress;
+    private final Set<TableOperation> inProgress;
 
     public TableOperations(TableMetadata metadata)
     {
@@ -51,7 +51,7 @@ public class TableOperations
 
     TableOperations(String keyspaceName,
                     String tableName,
-                    Set<AbstractTableOperation> inProgress,
+                    Set<TableOperation> inProgress,
                     long numCompleted)
     {
         this.keyspaceName = keyspaceName;
@@ -60,7 +60,7 @@ public class TableOperations
         this.numCompleted = numCompleted;
     }
 
-    public TableOperations operationsStarted(AbstractTableOperation op)
+    public TableOperations operationsStarted(TableOperation op)
     {
         return new TableOperations(keyspaceName,
                                    tableName,
@@ -68,23 +68,23 @@ public class TableOperations
                                    numCompleted);
     }
 
-    public TableOperations operationsCompleted(AbstractTableOperation op,
-                                               AbstractTableOperation.Progress progress,
+    public TableOperations operationsCompleted(TableOperation operation,
+                                               TableOperation.Progress progress,
                                                CompactionMetrics metrics)
     {
         long numCompleted = this.numCompleted;
-        Set<AbstractTableOperation> inProgress = this.inProgress;
-        if (inProgress.contains(op))
+        Set<TableOperation> inProgress = this.inProgress;
+        if (inProgress.contains(operation))
         {
-            metrics.bytesCompacted.inc(progress.getTotal());
+            metrics.bytesCompacted.inc(progress.total());
             metrics.totalCompactionsCompleted.mark();
-            inProgress = Sets.difference(this.inProgress, Collections.singleton(op));
+            inProgress = Sets.difference(this.inProgress, Collections.singleton(operation));
             numCompleted++;
         }
         return new TableOperations(keyspaceName, tableName, inProgress, numCompleted);
     }
 
-    public Set<AbstractTableOperation> getInProgress()
+    public Set<TableOperation> getInProgress()
     {
         return inProgress;
     }
@@ -98,7 +98,7 @@ public class TableOperations
         public final long numLiveSstables;
         public final long numCompactingSstables;
         public final long liveSizeOnDiskBytes;
-        public final List<AbstractTableOperation.Progress> inProgress;
+        public final List<AbstractTableOperation.OperationProgress> inProgress;
 
         public Snapshot(TableOperations compactions)
         {

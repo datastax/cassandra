@@ -18,25 +18,18 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.Set;
+import java.io.Closeable;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-
-public class TimeWindowCompactionTask extends CompactionTask
+/**
+ * An observer of a compaction operation. It is notified when a compaction operation is started.
+ * <p/>
+ * It returns a closeable that is invoked when the compaction is finished.
+ * <p/>
+ * The progress can be queried at any time to obtain real-time updates of the compaction operation.
+ */
+public interface CompactionObserver
 {
-    private final boolean ignoreOverlaps;
+    CompactionObserver NO_OP = operation -> () -> {};
 
-    public TimeWindowCompactionTask(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean ignoreOverlaps)
-    {
-        super(strategy, txn, gcBefore, false);
-        this.ignoreOverlaps = ignoreOverlaps;
-    }
-
-    @Override
-    public CompactionController getCompactionController(Set<SSTableReader> toCompact)
-    {
-        return new TimeWindowCompactionController(cfs, toCompact, gcBefore, ignoreOverlaps);
-    }
+    Closeable onCompactionStart(CompactionProgress progress);
 }

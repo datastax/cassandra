@@ -1592,6 +1592,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getUncompacting();
     }
 
+    public Iterable<SSTableReader> getCompactingSSTables()
+    {
+        return data.getCompacting();
+    }
+
     public Map<UUID, PendingStat> getPendingRepairStats()
     {
         Map<UUID, PendingStat.Builder> builders = new HashMap<>();

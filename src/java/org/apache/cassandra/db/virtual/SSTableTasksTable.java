@@ -58,21 +58,21 @@ final class SSTableTasksTable extends AbstractVirtualTable
     {
         SimpleDataSet result = new SimpleDataSet(metadata());
 
-        for (AbstractTableOperation.Progress task : CompactionManager.instance.getSSTableTasks())
+        for (AbstractTableOperation.OperationProgress task : CompactionManager.instance.getSSTableTasks())
         {
-            long completed = task.getCompleted();
-            long total = task.getTotal();
+            long completed = task.completed();
+            long total = task.total();
 
             double completionRatio = total == 0L ? 1.0 : (((double) completed) / total);
 
-            result.row(task.getKeyspace().orElse("*"),
-                       task.getTable().orElse("*"),
-                       task.getOperationId())
+            result.row(task.keyspace().orElse("*"),
+                       task.table().orElse("*"),
+                       task.operationId())
                   .column(COMPLETION_RATIO, completionRatio)
-                  .column(KIND, task.getOperationType().toString().toLowerCase())
+                  .column(KIND, task.operationType().toString().toLowerCase())
                   .column(PROGRESS, completed)
                   .column(TOTAL, total)
-                  .column(UNIT, task.getUnit().toString().toLowerCase());
+                  .column(UNIT, task.unit().toString().toLowerCase());
         }
 
         return result;

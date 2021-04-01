@@ -33,26 +33,14 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
- * This is a base abstract class for a table operation. It must be able to report the operation progress and to
- * optionally interrupt the operation when requested.
- * <p/>
- * Any operation defined by {@link OperationType} is valid, for example index building, view building, cache saving,
- * anti-compaction, compaction, scrubbing, verifying, tombstone collection and others.
- * <p/>
- * Basically any operation that can either read or write one or more files and that needs to reach a total number
- * of "items" to be processed. "items" are normally bytes but they could be ranges or keys as defined by {@link Unit}.
+ * This is a base abstract implementing some default methods of {@link TableOperation}.
  * <p/>
  * This class implements serializable to allow structured info to be returned via JMX.
- * */
-public abstract class AbstractTableOperation
+ **/
+public abstract class AbstractTableOperation implements TableOperation
 {
     private volatile boolean stopRequested = false;
     private volatile StopTrigger trigger = StopTrigger.NONE;
-
-    /**
-     * @return the progress of the operation, see {@link Progress}.
-     */
-    public abstract Progress getProgress();
 
     /**
      * Interrupt the current operation if possible.
@@ -88,9 +76,9 @@ public abstract class AbstractTableOperation
         return stopRequested || (isGlobal() && CompactionManager.instance.isGlobalCompactionPaused());
     }
 
-    boolean shouldStop(Predicate<SSTableReader> sstablePredicate)
+    public boolean shouldStop(Predicate<SSTableReader> sstablePredicate)
     {
-        Progress progress = getProgress();
+        OperationProgress progress = getProgress();
         if (progress.sstables.isEmpty())
         {
             return true;
@@ -106,67 +94,12 @@ public abstract class AbstractTableOperation
         return trigger;
     }
 
-    public enum StopTrigger
-    {
-        NONE(false),
-        TRUNCATE(true);
-
-        private final boolean isFinal;
-
-        StopTrigger(boolean isFinal)
-        {
-            this.isFinal = isFinal;
-        }
-
-        // A stop trigger marked as final should not be overwritten. So a table operation that is
-        // marked with a final stop trigger cannot have it's stop trigger changed to another value.
-        public boolean isFinal()
-        {
-            return isFinal;
-        }
-    }
-
-    /**
-     * The unit for the {@link Progress} report.
-     */
-    public enum Unit
-    {
-        BYTES("bytes"), RANGES("token range parts"), KEYS("keys");
-
-        private final String name;
-
-        Unit(String name)
-        {
-            this.name = name;
-        }
-
-        @Override
-        public String toString()
-        {
-            return this.name;
-        }
-
-        public static boolean isFileSize(String unit)
-        {
-            return BYTES.toString().equals(unit);
-        }
-    }
-
     /**
      * The progress information for an operation, refer to the description of the class properties.
      */
-    public static final class Progress implements Serializable
+    public static final class OperationProgress implements Serializable, Progress
     {
         private static final long serialVersionUID = 3695381572726744816L;
-
-        public static final String ID = "id";
-        public static final String KEYSPACE = "keyspace";
-        public static final String COLUMNFAMILY = "columnfamily";
-        public static final String COMPLETED = "completed";
-        public static final String TOTAL = "total";
-        public static final String OPERATION_TYPE = "operationType";
-        public static final String UNIT = "unit";
-        public static final String OPERATION_ID = "operationId";
 
         /**
          * The table metadata
@@ -192,18 +125,17 @@ public abstract class AbstractTableOperation
          * A unique ID for this operation
          */
         private final UUID operationId;
-
         /**
          * A set of SSTables participating in this operation
          */
         private final ImmutableSet<SSTableReader> sstables;
 
-        public Progress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, UUID operationId, Collection<? extends SSTableReader> sstables)
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, UUID operationId, Collection<SSTableReader> sstables)
         {
             this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables);
         }
 
-        public Progress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, UUID operationId,  Collection<? extends SSTableReader> sstables)
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, UUID operationId, Collection<? extends SSTableReader> sstables)
         {
             this.operationType = operationType;
             this.completed = completed;
@@ -215,59 +147,68 @@ public abstract class AbstractTableOperation
         }
 
         /**
-         * @return A copy of this Progress with updated progress.
+         * @return A copy of this OperationProgress with updated progress.
          */
-        public Progress forProgress(long complete, long total)
+        public OperationProgress forProgress(long complete, long total)
         {
-            return new Progress(metadata, operationType, complete, total, unit, operationId, sstables);
+            return new OperationProgress(metadata, operationType, complete, total, unit, operationId, sstables);
         }
 
-        public static Progress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, UUID compactionId)
+        public static OperationProgress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, UUID compactionId)
         {
-            return new Progress(metadata, tasktype, completed, total, unit, compactionId, ImmutableSet.of());
+            return new OperationProgress(metadata, tasktype, completed, total, unit, compactionId, ImmutableSet.of());
         }
 
-        public Optional<String> getKeyspace()
+        @Override
+        public Optional<String> keyspace()
         {
             return metadata != null ? Optional.of(metadata.keyspace) : Optional.empty();
         }
 
-        public Optional<String> getTable()
+        @Override
+        public Optional<String> table()
         {
             return metadata != null ? Optional.of(metadata.name) : Optional.empty();
         }
 
-        public TableMetadata getTableMetadata()
+        @Override
+        public TableMetadata metadata()
         {
             return metadata;
         }
 
-        public long getCompleted()
+        @Override
+        public long completed()
         {
             return completed;
         }
 
-        public long getTotal()
+        @Override
+        public long total()
         {
             return total;
         }
 
-        public OperationType getOperationType()
+        @Override
+        public OperationType operationType()
         {
             return operationType;
         }
 
-        public UUID getOperationId()
+        @Override
+        public UUID operationId()
         {
             return operationId;
         }
 
-        public Unit getUnit()
+        @Override
+        public Unit unit()
         {
             return unit;
         }
 
-        public Set<SSTableReader> getSSTables()
+        @Override
+        public Set<SSTableReader> sstables()
         {
             return sstables;
         }
@@ -275,26 +216,20 @@ public abstract class AbstractTableOperation
         public String toString()
         {
             StringBuilder buff = new StringBuilder();
-            buff.append(getOperationType());
+            buff.append(String.format("%s(%s, %s / %s %s)", operationType, operationId, completed, total, unit));
             if (metadata != null)
             {
-                buff.append('@').append(metadata.id).append('(');
-                buff.append(metadata.keyspace).append(", ").append(metadata.name).append(", ");
+                buff.append(String.format("@%s(%s, %s)", metadata.id, metadata.keyspace, metadata.name));
             }
-            else
-            {
-                buff.append('(');
-            }
-            buff.append(getCompleted()).append('/').append(getTotal());
-            return buff.append(')').append(unit).toString();
+            return buff.toString();
         }
 
         public Map<String, String> asMap()
         {
             Map<String, String> ret = new HashMap<>(8);
             ret.put(ID, metadata != null ? metadata.id.toString() : "");
-            ret.put(KEYSPACE, getKeyspace().orElse(null));
-            ret.put(COLUMNFAMILY, getTable().orElse(null));
+            ret.put(KEYSPACE, keyspace().orElse(null));
+            ret.put(COLUMNFAMILY, table().orElse(null));
             ret.put(COMPLETED, Long.toString(completed));
             ret.put(TOTAL, Long.toString(total));
             ret.put(OPERATION_TYPE, operationType.toString());

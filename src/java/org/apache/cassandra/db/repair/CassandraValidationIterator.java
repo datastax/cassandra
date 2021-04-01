@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
-import org.apache.cassandra.db.compaction.TableOperationsTracker;
+import org.apache.cassandra.db.compaction.TableOperationObserver;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -102,7 +102,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
 
     private static class ValidationCompactionIterator extends CompactionIterator
     {
-        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec, TableOperationsTracker activeCompactions)
+        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec, TableOperationObserver activeCompactions)
         {
             super(OperationType.VALIDATION, scanners, controller, nowInSec, UUIDGen.getTimeUUID(), activeCompactions);
         }

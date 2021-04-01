@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -46,6 +47,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -120,7 +122,7 @@ public class IndexSummaryManagerTest
     @After
     public void afterTest()
     {
-        for (AbstractTableOperation operation : CompactionManager.instance.active.getCompactions())
+        for (TableOperation operation : CompactionManager.instance.active.getCompactions())
         {
             operation.stop();
         }
@@ -648,9 +650,9 @@ public class IndexSummaryManagerTest
         final CountDownLatch barrier = new CountDownLatch(1);
         AbstractTableOperation ongoingCompaction = new AbstractTableOperation()
         {
-            public Progress getProgress()
+            public OperationProgress getProgress()
             {
-                return new Progress(cfs.metadata(), OperationType.UNKNOWN, 0, 0, UUID.randomUUID(), compacting);
+                return new OperationProgress(cfs.metadata(), OperationType.UNKNOWN, 0, 0, UUID.randomUUID(), compacting);
             }
 
             public boolean isGlobal()
@@ -658,10 +660,9 @@ public class IndexSummaryManagerTest
                 return false;
             }
         };
-        try (LifecycleTransaction ignored = cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN))
+        try (LifecycleTransaction ignored = cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN);
+             Closeable c = CompactionManager.instance.active.onOperationStart(ongoingCompaction))
         {
-            CompactionManager.instance.active.begin(ongoingCompaction);
-
             Thread t = NamedThreadFactory.createThread(new Runnable()
             {
                 public void run()
@@ -697,10 +698,6 @@ public class IndexSummaryManagerTest
             // allows the redistribution to proceed
             barrier.countDown();
             t.join();
-        }
-        finally
-        {
-            CompactionManager.instance.active.finish(ongoingCompaction);
         }
 
         assertNotNull("Expected compaction interrupted exception", exception.get());

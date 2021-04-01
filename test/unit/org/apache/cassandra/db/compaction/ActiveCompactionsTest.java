@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Arrays;
+import java.io.Closeable;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -124,7 +125,7 @@ public class ActiveCompactionsTest extends CQLTester
 
         assertTrue(mockActiveCompactions.finished);
         assertNotNull(mockActiveCompactions.operation);
-        assertEquals(sstables, mockActiveCompactions.operation.getProgress().getSSTables());
+        assertEquals(sstables, mockActiveCompactions.operation.getProgress().sstables());
     }
 
     @Test
@@ -147,7 +148,7 @@ public class ActiveCompactionsTest extends CQLTester
             assertTrue(mockActiveCompactions.finished);
             assertNotNull(mockActiveCompactions.operation);
             // index redistribution operates over all keyspaces/tables, we always cancel them
-            assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
+            assertTrue(mockActiveCompactions.operation.getProgress().sstables().isEmpty());
             assertTrue(mockActiveCompactions.operation.shouldStop((sstable) -> false));
         }
     }
@@ -171,7 +172,7 @@ public class ActiveCompactionsTest extends CQLTester
         MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitViewBuilder(vbt, mockActiveCompactions).get();
         assertTrue(mockActiveCompactions.finished);
-        assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
+        assertTrue(mockActiveCompactions.operation.getProgress().sstables().isEmpty());
         // this should stop for all compactions, even if it doesn't pick any sstables;
         assertTrue(mockActiveCompactions.operation.shouldStop((sstable) -> false));
     }
@@ -194,7 +195,7 @@ public class ActiveCompactionsTest extends CQLTester
             CompactionManager.instance.scrubOne(getCurrentColumnFamilyStore(), txn, true, false, false, mockActiveCompactions);
 
             assertTrue(mockActiveCompactions.finished);
-            assertEquals(mockActiveCompactions.operation.getProgress().getSSTables(), Sets.newHashSet(sstable));
+            assertEquals(mockActiveCompactions.operation.getProgress().sstables(), Sets.newHashSet(sstable));
             assertFalse(mockActiveCompactions.operation.shouldStop((s) -> false));
             assertTrue(mockActiveCompactions.operation.shouldStop((s) -> true));
         }
@@ -216,7 +217,7 @@ public class ActiveCompactionsTest extends CQLTester
         MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.verifyOne(getCurrentColumnFamilyStore(), sstable, new Verifier.Options.Builder().build(), mockActiveCompactions);
         assertTrue(mockActiveCompactions.finished);
-        assertEquals(mockActiveCompactions.operation.getProgress().getSSTables(), Sets.newHashSet(sstable));
+        assertEquals(mockActiveCompactions.operation.getProgress().sstables(), Sets.newHashSet(sstable));
         assertFalse(mockActiveCompactions.operation.shouldStop((s) -> false));
         assertTrue(mockActiveCompactions.operation.shouldStop((s) -> true));
     }
@@ -228,21 +229,18 @@ public class ActiveCompactionsTest extends CQLTester
         MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitCacheWrite(writer, mockActiveCompactions).get();
         assertTrue(mockActiveCompactions.finished);
-        assertTrue(mockActiveCompactions.operation.getProgress().getSSTables().isEmpty());
+        assertTrue(mockActiveCompactions.operation.getProgress().sstables().isEmpty());
     }
 
-    private static class MockTableOperations implements TableOperationsTracker
+    private static class MockTableOperations implements TableOperationObserver
     {
-        public AbstractTableOperation operation;
+        public TableOperation operation;
         public boolean finished = false;
-        public void begin(AbstractTableOperation op)
+
+        public Closeable onOperationStart(TableOperation op)
         {
             this.operation = op;
-        }
-
-        public void finish(AbstractTableOperation op)
-        {
-            finished = true;
+            return () -> finished = true;
         }
     }
 }

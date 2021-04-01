@@ -547,7 +547,7 @@ class PendingRepairManager
             throw new UnsupportedOperationException();
         }
 
-        protected int executeInternal(TableOperationsTracker activeCompactions)
+        protected int executeInternal()
         {
             run();
             return transaction.originals().size();

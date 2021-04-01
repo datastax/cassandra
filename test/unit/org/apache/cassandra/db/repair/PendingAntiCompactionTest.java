@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.repair;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -59,6 +61,7 @@ import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionIterator;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -76,6 +79,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -458,12 +462,12 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = CompactionManager.getAntiCompactionIterator(scanners, controller, 0, UUID.randomUUID(), CompactionManager.instance.active, () -> false))
+                 CompactionIterator ci = CompactionManager.getAntiCompactionIterator(scanners, controller, 0, UUID.randomUUID(), CompactionManager.instance.active, () -> false);
+                 Closeable c = CompactionManager.instance.active.onOperationStart(ci))
             {
                 // `ci` is our imaginary ongoing anticompaction which makes no progress until after 30s
                 // now we try to start a new AC, which will try to cancel all ongoing compactions
 
-                CompactionManager.instance.active.begin(ci);
                 PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), 0, 0, es, () -> false);
                 ListenableFuture fut = pac.run();
                 try
@@ -477,8 +481,12 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 }
 
                 assertEquals(1, getCompactionsFor(cfs).size());
-                for (AbstractTableOperation compaction : getCompactionsFor(cfs))
+                for (TableOperation compaction : getCompactionsFor(cfs))
                     assertFalse(compaction.isStopRequested());
+            }
+            catch (IOException ex)
+            {
+                Throwables.maybeFail(ex);
             }
         }
         finally
@@ -488,12 +496,12 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
     }
 
-    private List<AbstractTableOperation> getCompactionsFor(ColumnFamilyStore cfs)
+    private List<TableOperation> getCompactionsFor(ColumnFamilyStore cfs)
     {
-        List<AbstractTableOperation> compactions = new ArrayList<>();
-        for (AbstractTableOperation compaction : CompactionManager.instance.active.getCompactions())
+        List<TableOperation> compactions = new ArrayList<>();
+        for (TableOperation compaction : CompactionManager.instance.active.getCompactions())
         {
-            if (compaction.getProgress().getTableMetadata().equals(cfs.metadata()))
+            if (compaction.getProgress().metadata().equals(cfs.metadata()))
                 compactions.add(compaction);
         }
         return compactions;
@@ -512,12 +520,12 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID()))
+                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID());
+                 Closeable c = CompactionManager.instance.active.onOperationStart(ci))
             {
                 // `ci` is our imaginary ongoing anticompaction which makes no progress until after 5s
                 // now we try to start a new AC, which will try to cancel all ongoing compactions
 
-                CompactionManager.instance.active.begin(ci);
                 PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), es, () -> false);
                 ListenableFuture fut = pac.run();
                 try
@@ -537,7 +545,6 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 }
                 catch (CompactionInterruptedException e)
                 {
-                    CompactionManager.instance.active.finish(ci);
                     txn.abort();
                     // expected
                 }
@@ -554,6 +561,10 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     }
                 }, MoreExecutors.directExecutor());
                 assertTrue(cdl.await(1, TimeUnit.MINUTES));
+            }
+            catch (IOException ex)
+            {
+                Throwables.maybeFail(ex);
             }
         }
         finally
@@ -600,11 +611,11 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
 
     private void tryPredicate(ColumnFamilyStore cfs, List<SSTableReader> compacting, List<SSTableReader> expectedLive, boolean shouldFail)
     {
-        AbstractTableOperation operation = new AbstractTableOperation()
+        TableOperation operation = new AbstractTableOperation()
         {
-            public Progress getProgress()
+            public OperationProgress getProgress()
             {
-                return new Progress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 1000, UUID.randomUUID(), compacting);
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 1000, UUID.randomUUID(), compacting);
             }
 
             public boolean isGlobal()
@@ -612,8 +623,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 return false;
             }
         };
-        CompactionManager.instance.active.begin(operation);
-        try
+        try(Closeable c = CompactionManager.instance.active.onOperationStart(operation))
         {
             PendingAntiCompaction.AntiCompactionPredicate predicate =
             new PendingAntiCompaction.AntiCompactionPredicate(Collections.singleton(new Range<>(new Murmur3Partitioner.LongToken(0), new Murmur3Partitioner.LongToken(100))),
@@ -623,14 +633,10 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 fail("should fail - we try to grab already anticompacting sstables for anticompaction");
             assertEquals(live, new HashSet<>(expectedLive));
         }
-        catch (PendingAntiCompaction.SSTableAcquisitionException e)
+        catch (PendingAntiCompaction.SSTableAcquisitionException | IOException e)
         {
             if (!shouldFail)
                 fail("We should not fail filtering sstables");
-        }
-        finally
-        {
-            CompactionManager.instance.active.finish(operation);
         }
     }
 
@@ -643,9 +649,9 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         ExecutorService es = Executors.newFixedThreadPool(1);
         AbstractTableOperation operation = new AbstractTableOperation()
         {
-            public Progress getProgress()
+            public OperationProgress getProgress()
             {
-                return new Progress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
             }
 
             public boolean isGlobal()
@@ -653,7 +659,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 return false;
             }
         };
-        try
+        try (Closeable c = CompactionManager.instance.active.onOperationStart(operation))
         {
             PendingAntiCompaction.AntiCompactionPredicate acp = new PendingAntiCompaction.AntiCompactionPredicate(FULL_RANGE, UUID.randomUUID())
             {
@@ -666,30 +672,32 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     return true;
                 }
             };
-            CompactionManager.instance.active.begin(operation);
             PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, UUID.randomUUID(), 10, 1, acp);
             Future f = es.submit(acquisitionCallable);
             cdl.await();
             assertNotNull(f.get());
         }
+        catch (IOException ex)
+        {
+            Throwables.maybeFail(ex);
+        }
         finally
         {
             es.shutdown();
-            CompactionManager.instance.active.finish(operation);
         }
     }
 
     @Test
-    public void testRetriesTimeout() throws InterruptedException, ExecutionException
+    public void testRetriesTimeout() throws InterruptedException, ExecutionException, IOException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
         ExecutorService es = Executors.newFixedThreadPool(1);
-        AbstractTableOperation operation = new AbstractTableOperation()
+        TableOperation operation = new AbstractTableOperation()
         {
-            public Progress getProgress()
+            public OperationProgress getProgress()
             {
-                return new Progress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
             }
 
             public boolean isGlobal()
@@ -697,7 +705,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 return false;
             }
         };
-        try
+        try (Closeable c = CompactionManager.instance.active.onOperationStart(operation))
         {
             PendingAntiCompaction.AntiCompactionPredicate acp = new PendingAntiCompaction.AntiCompactionPredicate(FULL_RANGE, UUID.randomUUID())
             {
@@ -707,7 +715,6 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     throw new PendingAntiCompaction.SSTableAcquisitionException("blah");
                 }
             };
-            CompactionManager.instance.active.begin(operation);
             PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, UUID.randomUUID(), 2, 1000, acp);
             Future fut = es.submit(acquisitionCallable);
             assertNull(fut.get());
@@ -715,7 +722,6 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         finally
         {
             es.shutdown();
-            CompactionManager.instance.active.finish(operation);
         }
     }
 

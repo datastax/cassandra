@@ -50,7 +50,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
             if (txn != null)
             {
                 SingleSSTableLCSTask task = new SingleSSTableLCSTask(cfs, txn, 2);
-                task.executeInternal(null);
+                task.executeInternal();
             }
         }
         assertEquals(1, cfs.getLiveSSTables().size());
@@ -100,7 +100,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         // now we have a bunch of data in L0, first compaction will be a normal one, containing all sstables:
         LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) cfs.getCompactionStrategyManager().getUnrepairedUnsafe().first();
         AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
-        act.execute(TableOperationsTracker.NOOP);
+        act.execute();
 
         // now all sstables are laid out non-overlapping in L1, this means that the rest of the compactions
         // will be single sstable ones, make sure that we use SingleSSTableLCSTask if singleSSTUplevel is true:
@@ -108,7 +108,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
         {
             act = lcs.getNextBackgroundTask(0);
             assertEquals(singleSSTUplevel, act instanceof SingleSSTableLCSTask);
-            act.execute(TableOperationsTracker.NOOP);
+            act.execute();
         }
         assertEquals(0, lcs.getLevelSize(0));
         int l1size = lcs.getLevelSize(1);
@@ -137,7 +137,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
             if (txn != null)
             {
                 SingleSSTableLCSTask task = new SingleSSTableLCSTask(cfs, txn, 2);
-                task.executeInternal(null);
+                task.executeInternal();
             }
         }
         catch (Throwable t)

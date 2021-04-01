@@ -56,7 +56,7 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     }
 
     // Called for every unfiltered. Meant for CompactionIterator to update progress
-    protected void updateProgress()
+    protected void updateProgress(boolean isRow)
     {
     }
 
@@ -92,21 +92,21 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     @Override
     protected Row applyToStatic(Row row)
     {
-        updateProgress();
+        updateProgress(!row.isEmpty());
         return row.purge(purger, nowInSec, enforceStrictLiveness);
     }
 
     @Override
     protected Row applyToRow(Row row)
     {
-        updateProgress();
+        updateProgress(true);
         return row.purge(purger, nowInSec, enforceStrictLiveness);
     }
 
     @Override
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
-        updateProgress();
+        updateProgress(false);
         boolean reversed = isReverseOrder;
         if (marker.isBoundary())
         {

@@ -36,7 +36,7 @@ public class AbstractTableOperationTest extends AbstractPendingAntiCompactionTes
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         UUID expectedTaskId = UUID.randomUUID();
-        AbstractTableOperation.Progress task = new AbstractTableOperation.Progress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, expectedTaskId, new ArrayList<>());
+        AbstractTableOperation.OperationProgress task = new AbstractTableOperation.OperationProgress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, expectedTaskId, new ArrayList<>());
         Assertions.assertThat(task.toString())
                   .contains(expectedTaskId.toString());
     }
@@ -47,8 +47,9 @@ public class AbstractTableOperationTest extends AbstractPendingAntiCompactionTes
         UUID tableId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
         ColumnFamilyStore cfs = MockSchema.newCFS(builder -> builder.id(TableId.fromUUID(tableId)));
-        AbstractTableOperation.Progress task = new AbstractTableOperation.Progress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, taskId, new ArrayList<>());
+        AbstractTableOperation.OperationProgress task = new AbstractTableOperation.OperationProgress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, taskId, new ArrayList<>());
         Assertions.assertThat(task.toString())
-                  .isEqualTo("Compaction(%s, 0 / 1000 bytes)@%s(mockks, mockcf1)", taskId, tableId);
+                  .isEqualTo("Compaction(%s, 0 / 1000 bytes)@%s(%s, %s)",
+                             taskId, tableId, cfs.getKeyspaceName(), cfs.getTableName());
     }
 }

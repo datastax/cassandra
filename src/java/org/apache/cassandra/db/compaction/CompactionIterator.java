@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.io.Closeable;
 import java.util.*;
 import java.util.function.LongPredicate;
 
@@ -38,6 +39,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.transactions.CompactionTransaction;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Merge multiple iterators over the content of sstable into a "compacted" iterator.
@@ -85,15 +87,22 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
-    private final TableOperationsTracker activeCompactions;
+
+    /** The observer closeable, closing this will signal to the observer that the operation is finished. */
+    private final Closeable obsCloseable;
 
     public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
     {
-        this(type, scanners, controller, nowInSec, compactionId, TableOperationsTracker.NOOP);
+        this(type, scanners, controller, nowInSec, compactionId, TableOperationObserver.NOOP);
     }
 
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
-    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId, TableOperationsTracker activeCompactions)
+    public CompactionIterator(OperationType type,
+                              List<ISSTableScanner> scanners,
+                              AbstractCompactionController controller,
+                              int nowInSec,
+                              UUID compactionId,
+                              TableOperationObserver activeCompactions)
     {
         this.controller = controller;
         this.type = type;
@@ -111,8 +120,7 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
-        this.activeCompactions = activeCompactions == null ? TableOperationsTracker.NOOP : activeCompactions;
-        this.activeCompactions.begin(this); // note that CompactionTask also calls this, but CT only creates CompactionIterator with a NOOP ActiveCompactions
+        this.obsCloseable =  activeCompactions == null ? null : activeCompactions.onOperationStart(this);
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
@@ -128,14 +136,44 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         return controller.cfs.metadata();
     }
 
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
-        return new Progress(controller.cfs.metadata(),
-                            type,
-                            bytesRead,
-                            totalBytes,
-                            compactionId,
-                            sstables);
+        return new OperationProgress(controller.cfs.metadata(),
+                                     type,
+                                     bytesRead,
+                                     totalBytes,
+                                     compactionId,
+                                     sstables);
+    }
+
+    long bytesRead()
+    {
+        return bytesRead;
+    }
+
+    long totalBytes()
+    {
+        return totalBytes;
+    }
+
+    long totalSourcePartitions()
+    {
+        return totalSourcePartitions;
+    }
+
+    long totalSourceRows()
+    {
+        return totalSourceRows;
+    }
+
+    long[] mergedPartitionsHistogram()
+    {
+        return mergedPartitionsHistogram;
+    }
+
+    long[] mergedRowsHistogram()
+    {
+        return mergedRowsHistogram;
     }
 
     public boolean isGlobal()
@@ -273,14 +311,9 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
 
     public void close()
     {
-        try
-        {
-            compacted.close();
-        }
-        finally
-        {
-            activeCompactions.finish(this);
-        }
+        updateBytesRead();
+
+        Throwables.maybeFail(Throwables.close((Throwable) null, compacted, obsCloseable));
     }
 
     public String toString()
@@ -321,9 +354,10 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         }
 
         @Override
-        protected void updateProgress()
+        protected void updateProgress(boolean isRow)
         {
-            totalSourceRows++;
+            if (isRow)
+                totalSourceRows++;
             if ((++compactedUnfiltered) % UNFILTERED_TO_UPDATE_PROGRESS == 0)
                 updateBytesRead();
         }

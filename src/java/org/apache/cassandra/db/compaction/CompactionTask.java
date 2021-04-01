@@ -17,15 +17,19 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.io.Closeable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+
+import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
@@ -44,8 +48,11 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.db.compaction.CompactionManager.compactionRateLimiterAcquire;
@@ -60,18 +67,93 @@ public class CompactionTask extends AbstractCompactionTask
     protected final boolean keepOriginals;
     /** for trace logging purposes only */
     private static final AtomicLong totalBytesCompacted = new AtomicLong();
-    private TableOperationsTracker activeCompactions;
 
-    public CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
+    // The compaction observer is normally the strategy but we keep it separated for testing
+    private final CompactionObserver compObserver;
+
+    // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
+    @Nullable
+    private final AbstractCompactionStrategy strategy;
+
+    /**
+     * This constructs a compaction tasks that operations that do not normally have a compaction strategy, such as tombstone
+     * collection or table splitting, also tests.
+     */
+    protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
     {
-        this(cfs, txn, gcBefore, false);
+        this(cfs, txn, gcBefore, keepOriginals, CompactionObserver.NO_OP, null);
     }
 
-    public CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
+    /**
+     * This constructs a compaction task that has been created by a compaction strategy.
+     */
+    protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
+    {
+        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy, strategy);
+    }
+
+    private CompactionTask(ColumnFamilyStore cfs,
+                           LifecycleTransaction txn,
+                           int gcBefore,
+                           boolean keepOriginals,
+                           CompactionObserver compObserver,
+                           @Nullable AbstractCompactionStrategy strategy)
     {
         super(cfs, txn);
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
+        this.compObserver = compObserver;
+        this.strategy = strategy;
+    }
+
+    /**
+     * Create a compaction task for a generic compaction strategy.
+     */
+    public static AbstractCompactionTask forCompaction(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+    {
+        return new CompactionTask(strategy, txn, gcBefore, false);
+    }
+
+    /**
+     * Create a compaction task for {@link TimeWindowCompactionStrategy}.
+     */
+    static AbstractCompactionTask forTimeWindowCompaction(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+    {
+        return new TimeWindowCompactionTask(strategy, txn, gcBefore, strategy.ignoreOverlaps());
+    }
+
+    /**
+     * Create a compaction task without a compaction strategy, currently only called by tests.
+     */
+    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
+    {
+        return new CompactionTask(cfs, txn, gcBefore, false);
+    }
+
+    /**
+     * Create a compaction task without a compaction strategy, currently only called by tests.
+     */
+    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionObserver compObserver)
+    {
+        return new CompactionTask(cfs, txn, gcBefore, false, compObserver, null);
+    }
+
+    /**
+     * Create a compaction task for tombstone collection.
+     */
+    public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    {
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false)
+        {
+            @Override
+            protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
+            {
+                return new CompactionController(cfs, toCompact, gcBefore, null, tombstoneOption);
+            }
+        };
+        task.setUserDefined(true);
+        task.setCompactionType(OperationType.GARBAGE_COLLECT);
+        return task;
     }
 
     private static long addToTotalBytesCompacted(long bytesCompacted)
@@ -80,9 +162,8 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     @Override
-    protected int executeInternal(TableOperationsTracker activeCompactions)
+    protected int executeInternal()
     {
-        this.activeCompactions = activeCompactions == null ? TableOperationsTracker.NOOP : activeCompactions;
         run();
         return transaction.originals().size();
     }
@@ -120,17 +201,63 @@ public class CompactionTask extends AbstractCompactionTask
         if (transaction.originals().isEmpty())
             return;
 
-        // Note that the current compaction strategy, is not necessarily the one this task was created under.
-        // This should be harmless; see comments to CFS.maybeReloadCompactionStrategy.
-        CompactionStrategyManager strategy = cfs.getCompactionStrategyManager();
-
         if (DatabaseDescriptor.isSnapshotBeforeCompaction())
             cfs.snapshotWithoutMemtable(System.currentTimeMillis() + "-compact-" + cfs.name);
 
-        try (CompactionController controller = getCompactionController(transaction.originals()))
+        try (CompactionController controller = getCompactionController(transaction.originals());
+             CompactionOperation operation = new CompactionOperation(controller))
         {
+            operation.execute();
+        }
+    }
 
-            final Set<SSTableReader> fullyExpiredSSTables = controller.getFullyExpiredSSTables();
+    /**
+     *  The compaction operation is a special case of an {@link AbstractTableOperation} and takes care of executing the
+     *  actual compaction and releasing any resources when the compaction is finished.
+     *  <p/>
+     *  This class also extends {@link AbstractTableOperation} for reporting compaction-specific progress information.
+     */
+    public final class CompactionOperation extends AbstractTableOperation implements AutoCloseable
+    {
+        private final CompactionController controller;
+        private final CompactionStrategyManager strategyManager;
+        private final Set<SSTableReader> fullyExpiredSSTables;
+        private final UUID taskId;
+        private final RateLimiter limiter;
+        private final long start;
+        private final long startTime;
+        private final Set<SSTableReader> actuallyCompact;
+        private final CompactionProgress progress;
+
+        // resources that are updated and may be read by another thread
+        private volatile Collection<SSTableReader> newSStables;
+        private volatile long totalKeysWritten;
+        private volatile long estimatedKeys;
+
+        // resources that are updated but only read by this thread
+        private boolean completed;
+
+        // resources that need closing
+        private Refs<SSTableReader> sstableRefs;
+        private AbstractCompactionStrategy.ScannerList scanners;
+        private CompactionIterator compactionIterator;
+        private Closeable[] obsCloseables;
+        private CompactionAwareWriter writer;
+
+        /**
+         * Create a new compaction operation.
+         * <p/>
+         * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
+         */
+        private CompactionOperation(CompactionController controller)
+        {
+            this.controller = controller;
+
+            // Note that the current compaction strategy, is not necessarily the one this task was created under.
+            // This should be harmless; see comments to CFS.maybeReloadCompactionStrategy.
+            this.strategyManager = cfs.getCompactionStrategyManager();
+            this.fullyExpiredSSTables = controller.getFullyExpiredSSTables();
+            this.taskId = transaction.opId();
 
             // select SSTables to compact based on available disk space.
             buildCompactionCandidatesForAvailableDiskSpace(fullyExpiredSSTables);
@@ -138,8 +265,52 @@ public class CompactionTask extends AbstractCompactionTask
             // sanity check: all sstables must belong to the same cfs
             assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(cfs.name));
 
-            UUID taskId = transaction.opId();
+            this.limiter = CompactionManager.instance.getRateLimiter();
+            this.start = System.nanoTime();
+            this.startTime = System.currentTimeMillis();
+            this.actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
+            this.progress = new Progress();
+            this.newSStables = Collections.emptyList();
+            this.totalKeysWritten = 0;
+            this.estimatedKeys = 0;
+            this.completed = false;
 
+            Directories dirs = getDirectories();
+
+            try
+            {
+                // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
+                this.sstableRefs = Refs.ref(actuallyCompact);
+                this.scanners = strategyManager.getScanners(actuallyCompact);
+                this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
+                this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
+                this.obsCloseables = new Closeable[2];
+                this.obsCloseables[0] = opObserver.onOperationStart(this); // these are the metrics
+                this.obsCloseables[1] = compObserver.onCompactionStart(progress); // see comment above re. strategy not necessarily being the same that created this op
+            }
+            catch (Throwable t)
+            {
+                t = Throwables.close(t, obsCloseables);
+                t = Throwables.close(t, writer, compactionIterator, scanners, sstableRefs); // ok to close even if null
+
+                Throwables.maybeFail(t);
+            }
+        }
+
+        private void execute()
+        {
+            try
+            {
+                execute0();
+            }
+            catch (Throwable t)
+            {
+                Throwables.maybeFail(onError(t));
+            }
+        }
+
+        private void execute0()
+        {
             // new sstables from flush can be added during a compaction, but only the compaction can remove them,
             // so in our single-threaded compaction world this is a valid way of determining if we're compacting
             // all the sstables (that existed when we started)
@@ -148,104 +319,298 @@ public class CompactionTask extends AbstractCompactionTask
                 debugLogCompactingMessage(taskId);
             }
 
-            RateLimiter limiter = CompactionManager.instance.getRateLimiter();
-            long start = System.nanoTime();
-            long startTime = System.currentTimeMillis();
-            long totalKeysWritten = 0;
-            long estimatedKeys = 0;
+            long lastCheckObsoletion = start;
+            long lastCheckReportProgress = start;
+            double compressionRatio = scanners.getCompressionRatio();
+            if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
+                compressionRatio = 1.0;
 
-            Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
-            Collection<SSTableReader> newSStables = Collections.emptyList();;
+            long lastBytesScanned = 0;
 
-            CompactionStatistics statistics = new CompactionStatistics(cfs, compactionType, taskId, actuallyCompact);
+            if (!controller.cfs.getCompactionStrategyManager().isActive())
+                throw new CompactionInterruptedException(compactionIterator.getProgress());
 
-            // SSTableScanners need to be closed before markCompactedSSTablesReplaced call as scanners contain references
-            // to both ifile and dfile and SSTR will throw deletion errors on Windows if it tries to delete before
-            // scanner is closed.
-            // See CASSANDRA-8019 and CASSANDRA-8399
-            int nowInSec = FBUtilities.nowInSeconds();
-
-            try (Refs<SSTableReader> ignored = Refs.ref(actuallyCompact);
-                 AbstractCompactionStrategy.ScannerList scanners = strategy.getScanners(actuallyCompact);
-                 CompactionIterator ci = new CompactionIterator(compactionType, scanners.scanners, controller, nowInSec, taskId))
+            estimatedKeys = writer.estimatedKeys();
+            while (compactionIterator.hasNext())
             {
-                long lastCheckObsoletion = start;
-                long lastCheckReportProgress = start;
-                statistics.estInputSizeBytes = scanners.getTotalCompressedSize();
-                double compressionRatio = scanners.getCompressionRatio();
-                if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
-                    compressionRatio = 1.0;
+                if (compactionIterator.isStopRequested())
+                    throw new CompactionInterruptedException(compactionIterator.getProgress());
 
-                long lastBytesScanned = 0;
+                UnfilteredRowIterator partition = compactionIterator.next();
+                if (writer.append(partition))
+                    totalKeysWritten++;
 
-                activeCompactions.begin(ci);
-                Directories dirs = getDirectories();
-                try (CompactionAwareWriter writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact))
+                long bytesScanned = scanners.getTotalBytesScanned();
+
+                // Rate limit the scanners, and account for compression
+                if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                    lastBytesScanned = bytesScanned;
+
+                long now = System.nanoTime();
+                if (now - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                 {
-                    // Note that we need to re-check this flag after calling beginCompaction above to avoid a window
-                    // where the compaction does not exist in activeCompactions but the CSM gets paused.
-                    // We already have the sstables marked compacting here so CompactionManager#waitForCessation will
-                    // block until the below exception is thrown and the transaction is cancelled.
-                    if (!controller.cfs.getCompactionStrategyManager().isActive())
-                        throw new CompactionInterruptedException(ci.getProgress());
-                    estimatedKeys = writer.estimatedKeys();
-                    while (ci.hasNext())
-                    {
-                        UnfilteredRowIterator partition = ci.next();
-                        if (writer.append(partition))
-                            totalKeysWritten++;
-
-
-                        long bytesScanned = scanners.getTotalBytesScanned();
-
-                        // Rate limit the scanners, and account for compression
-                        if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
-                            lastBytesScanned = bytesScanned;
-
-                        long now = System.nanoTime();
-                        if (now - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
-                        {
-                            controller.maybeRefreshOverlaps();
-                            lastCheckObsoletion = System.nanoTime();
-                        }
-
-                        statistics.bytesWritten = writer.bytesWritten();
-                    }
-
-                    // point of no return
-                    newSStables = writer.finish();
-                }
-                finally
-                {
-                    activeCompactions.finish(ci);
-                    ci.updateStatistics(statistics);
-                    statistics.durationInNanos = System.nanoTime() - start;
-                    statistics.setEndSstables(newSStables);
+                    controller.maybeRefreshOverlaps();
+                    lastCheckObsoletion = System.nanoTime();
                 }
             }
+
+            // point of no return
+            newSStables = writer.finish();
+
+
+            completed = true;
+        }
+
+        private Throwable onError(Throwable e)
+        {
+            if (e instanceof AssertionError)
+            {
+                // Add additional information to help operators.
+                AssertionError error = new AssertionError(
+                String.format("Illegal input has been generated, most probably due to corruption in the input sstables\n" +
+                              "\t%s\n" +
+                              "Try scrubbing the sstables by running\n" +
+                              "\tnodetool scrub %s %s\n",
+                              transaction.originals(),
+                              cfs.keyspace.getName(),
+                              cfs.getTableName()));
+                error.addSuppressed(e);
+                return error;
+            }
+
+            return e;
+        }
+
+        //
+        // Closeable
+        //
+
+        @Override
+        public void close()
+        {
+            Throwable err = Throwables.close(null, obsCloseables);
+            err = Throwables.close(err, writer, compactionIterator, scanners, sstableRefs);
 
             if (transaction.isOffline())
             {
-                Refs.release(Refs.selfRefs(newSStables));
+                Refs.release(Refs.selfRefs(newSStables)); // this is harmless in case of exception, newSStables will be empty
             }
-            else
+            else if (completed)
             {
-                // log a bunch of statistics about the result and save to system table compaction_history
-                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), statistics);
+                // This code used to execute only if the compaction was successful so we preserve the existing behavior
+                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress);
 
                 if (logger.isDebugEnabled())
                 {
-                    debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, statistics);
+                    debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, progress);
                 }
                 if (logger.isTraceEnabled())
                 {
-                    traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, statistics);
+                    traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
                 }
                 cfs.getCompactionStrategyManager().compactionLogger.
-                        compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+                                                                   compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
 
                 // update the metrics
-                cfs.metric.compactionBytesWritten.inc(statistics.endSizeBytes);
+                cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
+            }
+
+            Throwables.maybeFail(err);
+        }
+
+        //
+        // AbstractTableOperation
+        //
+
+        @Override
+        public OperationProgress getProgress()
+        {
+            return compactionIterator.getProgress();
+        }
+
+        @Override
+        public boolean isGlobal()
+        {
+            return compactionIterator.isGlobal();
+        }
+
+        //
+        // CompactionProgress
+        //
+
+        private final class Progress implements CompactionProgress
+        {
+            //
+            // TableOperation.Progress methods
+            //
+
+            @Override
+            public Optional<String> keyspace()
+            {
+                return Optional.of(metadata().keyspace);
+            }
+
+            @Override
+            public Optional<String> table()
+            {
+                return Optional.of(metadata().name);
+            }
+
+            @Override
+            public TableMetadata metadata()
+            {
+                return cfs.metadata();
+            }
+
+            /**
+             * @return the number of bytes read by the compaction iterator. For compressed or encrypted sstables,
+             *         this is the number of bytes processed by the iterator after decompression, so this is the current
+             *         position in the uncompressed sstable files.
+             */
+            @Override
+            public long completed()
+            {
+                return compactionIterator.bytesRead();
+            }
+
+            /**
+             * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
+             *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
+             */
+            public long total()
+            {
+                return compactionIterator.totalBytes();
+            }
+
+            @Override
+            public OperationType operationType()
+            {
+                return compactionType;
+            }
+
+            @Override
+            public UUID operationId()
+            {
+                return taskId;
+            }
+
+            @Override
+            public Unit unit()
+            {
+                return Unit.BYTES;
+            }
+
+            @Override
+            public Set<SSTableReader> sstables()
+            {
+                return transaction.originals();
+            }
+
+            //
+            // CompactionProgress
+            //
+
+            @Override
+            @Nullable
+            public AbstractCompactionStrategy strategy()
+            {
+                return strategy;
+            }
+
+            @Override
+            public boolean isStopRequested()
+            {
+                return CompactionOperation.this.isStopRequested();
+            }
+
+            @Override
+            public Collection<SSTableReader> inSSTables()
+            {
+                return actuallyCompact;
+            }
+
+            @Override
+            public Collection<SSTableReader> outSSTables()
+            {
+                return newSStables;
+            }
+
+            @Override
+            public long inputDiskSize()
+            {
+                return SSTableReader.getTotalBytes(actuallyCompact);
+            }
+
+            @Override
+            public long inputUncompressedSize()
+            {
+                return compactionIterator.totalBytes();
+            }
+
+            @Override
+            public long adjustedInputDiskSize()
+            {
+                return scanners.getTotalCompressedSize();
+            }
+
+            @Override
+            public long outputDiskSize()
+            {
+                return SSTableReader.getTotalBytes(newSStables);
+            }
+
+            @Override
+            public long uncompressedBytesRead()
+            {
+                return compactionIterator.bytesRead();
+            }
+
+            @Override
+            public long uncompressedBytesWritten()
+            {
+                return writer.bytesWritten();
+            }
+
+            @Override
+            public long durationInNanos()
+            {
+                return System.nanoTime() - start;
+            }
+
+            @Override
+            public long partitionsRead()
+            {
+                return compactionIterator.totalSourcePartitions();
+            }
+
+            @Override
+            public long rowsRead()
+            {
+                return compactionIterator.totalSourceRows();
+            }
+
+            @Override
+            public long[] partitionsHistogram()
+            {
+                return compactionIterator.mergedPartitionsHistogram();
+            }
+
+            @Override
+            public long[] rowsHistogram()
+            {
+                return compactionIterator.mergedRowsHistogram();
+            }
+
+            @Override
+            public double sizeRatio()
+            {
+                long estInputSizeBytes = adjustedInputDiskSize();
+                if (estInputSizeBytes > 0)
+                    return outputDiskSize() / (double) estInputSizeBytes;
+
+                // this is a valid case, when there are no sstables to actually compact
+                // the previous code would return a NaN that would be logged as zero
+                return 0;
             }
         }
     }
@@ -396,18 +761,19 @@ public class CompactionTask extends AbstractCompactionTask
                                                long start,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
-                                               CompactionStatistics statistics)
+                                               CompactionProgress progress)
     {
         // log a bunch of statistics about the result and save to system table compaction_history
         long durationInNano = System.nanoTime() - start;
         long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
 
         long totalMergedPartitions = 0;
-        StringBuilder mergeSummary = new StringBuilder(statistics.mergedPartitionCounts.length * 10);
+        long[] mergedPartitionCounts = progress.partitionsHistogram();
+        StringBuilder mergeSummary = new StringBuilder(mergedPartitionCounts.length * 10);
         mergeSummary.append('{');
-        for (int i = 0; i < statistics.mergedPartitionCounts.length; i++)
+        for (int i = 0; i < mergedPartitionCounts.length; i++)
         {
-            long mergedPartitionCount = statistics.mergedPartitionCounts[i];
+            long mergedPartitionCount = mergedPartitionCounts[i];
             if (mergedPartitionCount != 0)
             {
                 totalMergedPartitions += mergedPartitionCount * (i + 1);
@@ -426,14 +792,14 @@ public class CompactionTask extends AbstractCompactionTask
                      transaction.originals().size(),
                      newSSTableNames.toString(),
                      getLevel(),
-                     prettyPrintMemory(statistics.estInputSizeBytes),
-                     prettyPrintMemory(statistics.endSizeBytes),
-                     (int) (statistics.sizeRatio() * 100),
+                     prettyPrintMemory(progress.adjustedInputDiskSize()),
+                     prettyPrintMemory(progress.outputDiskSize()),
+                     (int) (progress.sizeRatio() * 100),
                      dTime,
-                     prettyPrintMemoryPerSecond(statistics.estInputSizeBytes, durationInNano),
-                     prettyPrintMemoryPerSecond(statistics.endSizeBytes, durationInNano),
-                     statistics.totalSourceRows / (TimeUnit.NANOSECONDS.toSeconds(durationInNano) + 1),
-                     (int) statistics.totalSourcePartitions / (TimeUnit.NANOSECONDS.toSeconds(statistics.durationInNanos) + 1),
+                     prettyPrintMemoryPerSecond(progress.adjustedInputDiskSize(), durationInNano),
+                     prettyPrintMemoryPerSecond(progress.outputDiskSize(), durationInNano),
+                     progress.rowsRead() / (TimeUnit.NANOSECONDS.toSeconds(durationInNano) + 1),
+                     (int) progress.partitionsRead() / (TimeUnit.NANOSECONDS.toSeconds(progress.durationInNanos()) + 1),
                      totalMergedPartitions,
                      totalKeysWritten,
                      mergeSummary.toString());
@@ -460,12 +826,13 @@ public class CompactionTask extends AbstractCompactionTask
     private static void updateCompactionHistory(UUID id,
                                                 String keyspaceName,
                                                 String columnFamilyName,
-                                                CompactionStatistics statistics)
+                                                CompactionProgress progress)
     {
-        Map<Integer, Long> mergedPartitions = new HashMap<>(statistics.mergedPartitionCounts.length);
-        for (int i = 0; i < statistics.mergedPartitionCounts.length; i++)
+        long[] mergedPartitionsHistogram = progress.partitionsHistogram();
+        Map<Integer, Long> mergedPartitions = new HashMap<>(mergedPartitionsHistogram.length);
+        for (int i = 0; i < mergedPartitionsHistogram.length; i++)
         {
-            long count = statistics.mergedPartitionCounts[i];
+            long count = mergedPartitionsHistogram[i];
             if (count == 0)
                 continue;
 
@@ -476,16 +843,16 @@ public class CompactionTask extends AbstractCompactionTask
                                                keyspaceName,
                                                columnFamilyName,
                                                System.currentTimeMillis(),
-                                               statistics.startSizeBytes,
-                                               statistics.endSizeBytes,
+                                               progress.adjustedInputDiskSize(),
+                                               progress.outputDiskSize(),
                                                mergedPartitions);
     }
 
     private void traceLogCompactionSummaryInfo(long totalKeysWritten,
                                                long estimatedKeys,
-                                               CompactionStatistics statistics)
+                                               CompactionProgress progress)
     {
-        logger.trace("CF Total Bytes Compacted: {}", prettyPrintMemory(addToTotalBytesCompacted(statistics.endSizeBytes)));
+        logger.trace("CF Total Bytes Compacted: {}", prettyPrintMemory(addToTotalBytesCompacted(progress.outputDiskSize())));
         logger.trace("Actual #keys: {}, Estimated #keys:{}, Err%: {}",
                      totalKeysWritten,
                      estimatedKeys,

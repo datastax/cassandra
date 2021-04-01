@@ -162,9 +162,9 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             {
                 AbstractCompactionTask newTask;
                 if (!singleSSTableUplevel || op == OperationType.TOMBSTONE_COMPACTION || txn.originals().size() > 1)
-                    newTask = new LeveledCompactionTask(cfs, txn, candidate.level, gcBefore, candidate.maxSSTableBytes, false);
+                    newTask = LeveledCompactionTask.forCompaction(this, txn, candidate.level, gcBefore, candidate.maxSSTableBytes, false);
                 else
-                    newTask = new SingleSSTableLCSTask(cfs, txn, candidate.level);
+                    newTask = SingleSSTableLCSTask.create(this, txn, candidate.level);
 
                 newTask.setCompactionType(op);
                 return newTask;
@@ -184,7 +184,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         LifecycleTransaction txn = cfs.getTracker().tryModify(filteredSSTables, OperationType.COMPACTION);
         if (txn == null)
             return null;
-        return Arrays.<AbstractCompactionTask>asList(new LeveledCompactionTask(cfs, txn, 0, gcBefore, getMaxSSTableBytes(), true));
+        return Arrays.asList(LeveledCompactionTask.forCompaction(this, txn, 0, gcBefore, getMaxSSTableBytes(), true));
 
     }
 
@@ -203,7 +203,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             return null;
         }
         int level = sstables.size() > 1 ? 0 : sstables.iterator().next().getSSTableLevel();
-        return new LeveledCompactionTask(cfs, transaction, level, gcBefore, level == 0 ? Long.MAX_VALUE : getMaxSSTableBytes(), false);
+        return LeveledCompactionTask.forCompaction(this, transaction, level, gcBefore, level == 0 ? Long.MAX_VALUE : getMaxSSTableBytes(), false);
     }
 
     @Override
@@ -219,7 +219,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             if (level != sstable.getSSTableLevel())
                 level = 0;
         }
-        return new LeveledCompactionTask(cfs, txn, level, gcBefore, maxSSTableBytes, false);
+        return LeveledCompactionTask.forCompaction(this, txn, level, gcBefore, maxSSTableBytes, false);
     }
 
     /**

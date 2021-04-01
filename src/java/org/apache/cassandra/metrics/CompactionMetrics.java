@@ -19,6 +19,7 @@ package org.apache.cassandra.metrics;
 
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.stream.Collectors;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -26,8 +27,11 @@ import com.codahale.metrics.Meter;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionStrategyStats;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.TableOperations;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -35,7 +39,10 @@ import org.apache.cassandra.schema.TableMetadata;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
- * Metrics for compaction.
+ * Metrics for the compaction executor. Note that several different operations execute on the compaction
+ * executor, for example index or view building. These operations are abstracted by {@link AbstractTableOperation}
+ * but previously we would refer to these operations as "compactions", so this incorrect name may still be
+ * found in the metrics that are exported to the users.
  */
 public class CompactionMetrics
 {
@@ -46,13 +53,12 @@ public class CompactionMetrics
     /** Estimated number of compactions remaining to perform, group by keyspace and then table name */
     public final Gauge<Map<String, Map<String, Integer>>> pendingTasksByTableName;
 
-    /** Number of completed compactions since server [re]start */
+    /** Number of completed operations since server [re]start */
     public final Gauge<Long> completedTasks;
-    /** Total number of compactions since server [re]start */
+    /** Total number of operations since server [re]start */
     public final Meter totalCompactionsCompleted;
-    /** Total number of bytes compacted since server [re]start */
+    /** Total number of bytes processed by operations since server [re]start */
     public final Counter bytesCompacted;
-
 
     /** Total number of compactions that have had sstables drop out of them */
     public final Counter compactionsReduced;
@@ -62,6 +68,9 @@ public class CompactionMetrics
 
     /** Total number of compactions which have outright failed due to lack of disk space */
     public final Counter compactionsAborted;
+
+    /** The compaction strategy information for each table. */
+    public final Gauge<List<CompactionStrategyStats>> strategyStats;
 
     public CompactionMetrics(final ThreadPoolExecutor... collectors)
     {
@@ -111,9 +120,9 @@ public class CompactionMetrics
                 }
 
                 // currently running compactions
-                for (AbstractTableOperation op : CompactionManager.instance.active.getCompactions())
+                for (TableOperation op : CompactionManager.instance.active.getCompactions())
                 {
-                    TableMetadata metaData = op.getProgress().getTableMetadata();
+                    TableMetadata metaData = op.getProgress().metadata();
                     if (metaData == null)
                     {
                         continue;
@@ -155,5 +164,33 @@ public class CompactionMetrics
         compactionsReduced = Metrics.counter(factory.createMetricName("CompactionsReduced"));
         sstablesDropppedFromCompactions = Metrics.counter(factory.createMetricName("SSTablesDroppedFromCompaction"));
         compactionsAborted = Metrics.counter(factory.createMetricName("CompactionsAborted"));
+
+        strategyStats = Metrics.register(factory.createMetricName("StrategyStats"), () -> {
+            List<CompactionStrategyStats> ret = new ArrayList<>();
+            // estimation of compactions need to be done
+            for (String keyspaceName : Schema.instance.getKeyspaces())
+            {
+                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                {
+                    TableMetadata metadata = cfs.metadata.get();
+                    TableOperations tableOperations = CompactionManager.instance
+                                                      .active
+                                                      .operationsByMetadata(metadata);
+
+                    int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() +
+                                     Math.toIntExact(tableOperations != null ? tableOperations.getInProgress().size() : 0);
+
+                    if (taskNumber > 0)
+                        ret.addAll(cfs.getCompactionStrategyManager()
+                                      .getStrategies()
+                                      .stream()
+                                      .flatMap(list -> list.stream())
+                                      .map(AbstractCompactionStrategy::getStats)
+                                      .collect(Collectors.toList()));
+                }
+            }
+
+            return ret;
+        });
     }
 }

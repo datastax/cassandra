@@ -328,14 +328,14 @@ public class IndexSummaryRedistribution extends AbstractTableOperation
         return Pair.create(willNotDownsample, toDownsample.subList(noDownsampleCutoff, toDownsample.size()));
     }
 
-    public Progress getProgress()
+    public OperationProgress getProgress()
     {
-        return Progress.withoutSSTables(null,
-                                        OperationType.INDEX_SUMMARY,
-                                        (memoryPoolBytes - remainingSpace),
-                                        memoryPoolBytes,
-                                        Unit.BYTES,
-                                        compactionId);
+        return OperationProgress.withoutSSTables(null,
+                                                 OperationType.INDEX_SUMMARY,
+                                                 (memoryPoolBytes - remainingSpace),
+                                                 memoryPoolBytes,
+                                                 Unit.BYTES,
+                                                 compactionId);
     }
 
     public boolean isGlobal()

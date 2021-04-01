@@ -18,17 +18,24 @@
 
 package org.apache.cassandra.db.compaction;
 
-public interface TableOperationsTracker
+import java.io.Closeable;
+
+/**
+ * An observer of {@link AbstractTableOperation}.
+ * <p/>
+ * The observer is notified when an operation is started. It returns a closeable that will be closed
+ * when the operation is finished. The operation can be queried at any time to get the progress information.
+ */
+public interface TableOperationObserver
 {
-    public void begin(AbstractTableOperation op);
-    public void finish(AbstractTableOperation op);
+    TableOperationObserver NOOP = operation -> () -> {};
 
-    public static final TableOperationsTracker NOOP = new TableOperationsTracker()
-    {
-        public void begin(AbstractTableOperation op)
-        {}
-
-        public void finish(AbstractTableOperation op)
-        {}
-    };
+    /**
+     * Signal to the observer that an operation is starting.
+     *
+     * @param operation the operation starting
+     *
+     * @return a closeable that the caller should close when the operation completes
+     */
+    Closeable onOperationStart(TableOperation operation);
 }

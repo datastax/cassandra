@@ -477,7 +477,7 @@ public class Scrubber implements Closeable
         }
     }
 
-    public AbstractTableOperation getScrubInfo()
+    public TableOperation getScrubInfo()
     {
         return scrubInfo;
     }
@@ -497,17 +497,17 @@ public class Scrubber implements Closeable
             scrubCompactionId = UUIDGen.getTimeUUID();
         }
 
-        public Progress getProgress()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new Progress(sstable.metadata(),
-                                    OperationType.SCRUB,
-                                    dataFile.getFilePointer(),
-                                    dataFile.length(),
-                                    scrubCompactionId,
-                                    ImmutableSet.of(sstable));
+                return new OperationProgress(sstable.metadata(),
+                                             OperationType.SCRUB,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             scrubCompactionId,
+                                             ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {
