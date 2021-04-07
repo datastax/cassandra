@@ -26,9 +26,8 @@ import java.util.Map.Entry;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
 
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManagerMBean;
-import org.apache.cassandra.db.compaction.CompactionStrategyStats;
+import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.util.FileUtils;
@@ -45,6 +44,11 @@ public class CompactionStats extends NodeToolCmd
             name = {"-H", "--human-readable"},
             description = "Display bytes in human readable form, i.e. KiB, MiB, GiB, TiB")
     private boolean humanReadable = false;
+
+    @Option(title = "aggregate",
+    name = {"-A", "--aggregate"},
+    description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
+    private boolean aggregate = false;
 
     @Override
     public void execute(NodeProbe probe)
@@ -75,8 +79,10 @@ public class CompactionStats extends NodeToolCmd
         out.println();
         reportCompactionTable(cm.getCompactions(), probe.getCompactionThroughput(), humanReadable, out);
 
-        System.out.println();
-        reportCompactionStrategies(probe);
+        if (aggregate)
+        {
+            reportAggregateCompactions(probe);
+        }
     }
 
     public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
@@ -116,13 +122,14 @@ public class CompactionStats extends NodeToolCmd
         }
     }
 
-    private static void reportCompactionStrategies(NodeProbe probe)
+    private static void reportAggregateCompactions(NodeProbe probe)
     {
-        System.out.println("Compaction Strategies:");
-        List<CompactionStrategyStats> strategyInfos = (List<CompactionStrategyStats>) probe.getCompactionMetric("StrategyStats");
-        for (CompactionStrategyStats strategyInfo : strategyInfos)
-        {
-            System.out.println(strategyInfo.toString());
-        }
+        List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
+        if (statistics.isEmpty())
+            return;
+
+        System.out.println("Aggregated view:");
+        for (CompactionStrategyStatistics stat : statistics)
+            System.out.println(stat.toString());
     }
 }

@@ -69,13 +69,7 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     private final UUID compactionId;
 
     private final long totalBytes;
-    private long bytesRead;
-
-    /**
-     * Counters for the total number of source partitions and rows, before purging.
-     */
-    private long totalSourcePartitions;
-    private long totalSourceRows;
+    private volatile long[] bytesReadByLevel;
 
     /**
      * Merged frequency counters for partitions and rows (AKA histograms).
@@ -109,7 +103,7 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         this.scanners = scanners;
         this.nowInSec = nowInSec;
         this.compactionId = compactionId;
-        this.bytesRead = 0;
+        this.bytesReadByLevel = new long[LeveledGenerations.MAX_LEVEL_COUNT];
 
         long bytes = 0;
         for (ISSTableScanner scanner : scanners)
@@ -140,7 +134,7 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     {
         return new OperationProgress(controller.cfs.metadata(),
                                      type,
-                                     bytesRead,
+                                     bytesRead(),
                                      totalBytes,
                                      compactionId,
                                      sstables);
@@ -148,7 +142,13 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
 
     long bytesRead()
     {
-        return bytesRead;
+        long[] bytesReadByLevel = this.bytesReadByLevel;
+        return Arrays.stream(bytesReadByLevel).reduce(Long::sum).orElse(0L);
+    }
+
+    long bytesRead(int level)
+    {
+        return level >= 0 && level < bytesReadByLevel.length ? bytesReadByLevel[level] : 0;
     }
 
     long totalBytes()
@@ -158,12 +158,12 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
 
     long totalSourcePartitions()
     {
-        return totalSourcePartitions;
+        return Arrays.stream(mergedPartitionsHistogram).reduce(0L, Long::sum);
     }
 
     long totalSourceRows()
     {
-        return totalSourceRows;
+        return Arrays.stream(mergedRowsHistogram).reduce(0L, Long::sum);
     }
 
     long[] mergedPartitionsHistogram()
@@ -181,16 +181,6 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         return false;
     }
 
-    void updateStatistics(CompactionStatistics statistics)
-    {
-        statistics.bytesRead = bytesRead;
-        statistics.mergedPartitionCounts = mergedPartitionsHistogram;
-        statistics.mergedRowsCounts = mergedRowsHistogram;
-        statistics.totalSourceRows = totalSourceRows; // includes purged rows
-        statistics.totalSourcePartitions = totalSourcePartitions; // includes purged partitions
-        statistics.stopRequested = isStopRequested();
-    }
-
     private UnfilteredPartitionIterators.MergeListener listener()
     {
         return new UnfilteredPartitionIterators.MergeListener()
@@ -206,7 +196,6 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
                         numVersions++;
                 }
 
-                assert numVersions > 0 && numVersions - 1 < mergedPartitionsHistogram.length; // TODO - check if this impacts perf.
                 mergedPartitionsHistogram[numVersions - 1] += 1;
 
                 final CompactionTransaction indexTransaction = getIndexTransaction(partitionKey,versions);
@@ -288,10 +277,16 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
 
     private void updateBytesRead()
     {
-        long n = 0;
+        long[] bytesReadByLevel = new long[this.bytesReadByLevel.length];
         for (ISSTableScanner scanner : scanners)
-            n += scanner.getCurrentPosition();
-        bytesRead = n;
+        {
+            int level = scanner.level();
+            long n = scanner.getCurrentPosition();
+
+            if (level >= 0 && level < bytesReadByLevel.length)
+                bytesReadByLevel[level] += n;
+        }
+        this.bytesReadByLevel = bytesReadByLevel;
     }
 
     public boolean hasNext()
@@ -348,16 +343,13 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         @Override
         protected void onNewPartition(DecoratedKey key)
         {
-            totalSourcePartitions++;
             currentKey = key;
             purgeEvaluator = null;
         }
 
         @Override
-        protected void updateProgress(boolean isRow)
+        protected void updateProgress()
         {
-            if (isRow)
-                totalSourceRows++;
             if ((++compactedUnfiltered) % UNFILTERED_TO_UPDATE_PROGRESS == 0)
                 updateBytesRead();
         }

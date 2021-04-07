@@ -19,7 +19,6 @@ package org.apache.cassandra.metrics;
 
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.stream.Collectors;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -27,12 +26,10 @@ import com.codahale.metrics.Meter;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.CompactionStrategyStats;
+import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
 import org.apache.cassandra.db.compaction.TableOperation;
-import org.apache.cassandra.db.compaction.TableOperations;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -70,81 +67,68 @@ public class CompactionMetrics
     public final Counter compactionsAborted;
 
     /** The compaction strategy information for each table. */
-    public final Gauge<List<CompactionStrategyStats>> strategyStats;
+    public final Gauge<List<CompactionStrategyStatistics>> aggregateCompactions;
 
     public CompactionMetrics(final ThreadPoolExecutor... collectors)
     {
-        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
-        {
-            public Integer getValue()
+        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), () -> {
+            int n = 0;
+            // add estimate number of compactions need to be done
+            for (String keyspaceName : Schema.instance.getKeyspaces())
             {
-                int n = 0;
-                // add estimate number of compactions need to be done
-                for (String keyspaceName : Schema.instance.getKeyspaces())
-                {
-                    for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
-                        n += cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
-                }
-                // add number of currently running compactions
-                return n + CompactionManager.instance.active.getCompactions().size();
+                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                    n += cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
             }
+            // add number of currently running compactions
+            return n + CompactionManager.instance.active.getCompactions().size();
         });
 
-        pendingTasksByTableName = Metrics.register(factory.createMetricName("PendingTasksByTableName"),
-            new Gauge<Map<String, Map<String, Integer>>>()
-        {
-            @Override
-            public Map<String, Map<String, Integer>> getValue() 
+        pendingTasksByTableName = Metrics.register(factory.createMetricName("PendingTasksByTableName"), () -> {
+            Map<String, Map<String, Integer>> resultMap = new HashMap<>();
+            // estimation of compactions need to be done
+            for (String keyspaceName : Schema.instance.getKeyspaces())
             {
-                Map<String, Map<String, Integer>> resultMap = new HashMap<>();
-                // estimation of compactions need to be done
-                for (String keyspaceName : Schema.instance.getKeyspaces())
+                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
                 {
-                    for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                    int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                    if (taskNumber > 0)
                     {
-                        TableMetadata metadata = cfs.metadata.get();
-                        TableOperations tableOperations = CompactionManager.instance
-                                                                             .active
-                                                                             .operationsByMetadata(metadata);
-                        int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() +
-                                         Math.toIntExact(tableOperations != null ? tableOperations.getInProgress().size() : 0);
-                        if (taskNumber > 0)
+                        if (!resultMap.containsKey(keyspaceName))
                         {
-                            if (!resultMap.containsKey(keyspaceName))
-                            {
-                                resultMap.put(keyspaceName, new HashMap<>());
-                            }
-                            resultMap.get(keyspaceName).put(cfs.getTableName(), taskNumber);
+                            resultMap.put(keyspaceName, new HashMap<>());
                         }
+                        resultMap.get(keyspaceName).put(cfs.getTableName(), taskNumber);
                     }
                 }
-
-                // currently running compactions
-                for (TableOperation op : CompactionManager.instance.active.getCompactions())
-                {
-                    TableMetadata metaData = op.getProgress().metadata();
-                    if (metaData == null)
-                    {
-                        continue;
-                    }
-                    if (!resultMap.containsKey(metaData.keyspace))
-                    {
-                        resultMap.put(metaData.keyspace, new HashMap<>());
-                    }
-
-                    Map<String, Integer> tableNameToCountMap = resultMap.get(metaData.keyspace);
-                    if (tableNameToCountMap.containsKey(metaData.name))
-                    {
-                        tableNameToCountMap.put(metaData.name,
-                                                tableNameToCountMap.get(metaData.name) + 1);
-                    }
-                    else
-                    {
-                        tableNameToCountMap.put(metaData.name, 1);
-                    }
-                }
-                return resultMap;
             }
+
+            // currently running compactions
+            // TODO DB-2701 - this includes all operations (previous behaviour), if we wanted only real
+            // compactions we could remove this block of code and call getTotalCompactions() from the strategy managers
+            for (TableOperation op : CompactionManager.instance.active.getCompactions())
+            {
+                TableMetadata metaData = op.getProgress().metadata();
+                if (metaData == null)
+                {
+                    continue;
+                }
+                if (!resultMap.containsKey(metaData.keyspace))
+                {
+                    resultMap.put(metaData.keyspace, new HashMap<>());
+                }
+
+                Map<String, Integer> tableNameToCountMap = resultMap.get(metaData.keyspace);
+                if (tableNameToCountMap.containsKey(metaData.name))
+                {
+                    tableNameToCountMap.put(metaData.name,
+                                            tableNameToCountMap.get(metaData.name) + 1);
+                }
+                else
+                {
+                    tableNameToCountMap.put(metaData.name, 1);
+                }
+            }
+            return resultMap;
         });
 
         completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
@@ -165,32 +149,23 @@ public class CompactionMetrics
         sstablesDropppedFromCompactions = Metrics.counter(factory.createMetricName("SSTablesDroppedFromCompaction"));
         compactionsAborted = Metrics.counter(factory.createMetricName("CompactionsAborted"));
 
-        strategyStats = Metrics.register(factory.createMetricName("StrategyStats"), () -> {
-            List<CompactionStrategyStats> ret = new ArrayList<>();
-            // estimation of compactions need to be done
-            for (String keyspaceName : Schema.instance.getKeyspaces())
-            {
-                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
-                {
-                    TableMetadata metadata = cfs.metadata.get();
-                    TableOperations tableOperations = CompactionManager.instance
-                                                      .active
-                                                      .operationsByMetadata(metadata);
+        aggregateCompactions = Metrics.register(factory.createMetricName("AggregateCompactions"), this::getAggregateCompactions);
+    }
 
-                    int taskNumber = cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() +
-                                     Math.toIntExact(tableOperations != null ? tableOperations.getInProgress().size() : 0);
-
-                    if (taskNumber > 0)
-                        ret.addAll(cfs.getCompactionStrategyManager()
-                                      .getStrategies()
-                                      .stream()
-                                      .flatMap(list -> list.stream())
-                                      .map(AbstractCompactionStrategy::getStats)
-                                      .collect(Collectors.toList()));
-                }
-            }
-
-            return ret;
-        });
+    /**
+     * Scan all the compactions strategies of all tables and find those that have compactions in progress.
+     * For those return the statistics.
+     *
+     * @return a list of statistics for the compaction strategies that have compactions in progress
+     */
+    List<CompactionStrategyStatistics> getAggregateCompactions()
+    {
+        List<CompactionStrategyStatistics> ret = new ArrayList<>();
+        for (String keyspaceName : Schema.instance.getKeyspaces())
+        {
+            for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                ret.addAll(cfs.getCompactionStrategyManager().getStrategyStatistics());
+        }
+        return ret;
     }
 }

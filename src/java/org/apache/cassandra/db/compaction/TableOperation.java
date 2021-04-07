@@ -64,9 +64,16 @@ public interface TableOperation
     boolean isStopRequested();
 
     /**
-     * @return true the operation should be stopped based on the passed SSTable predicate
+     * Return true if the predicate for the given sstables holds, or if the operation
+     * does not consider any sstables, in which case it will always return true (the
+     * default behaviour).
+     * <p/>
+     *
+     * @param predicate the predicate to be applied to the operation sstables
+     *
+     * @return true by default, see overrides for different behaviors
      */
-    boolean shouldStop(Predicate<SSTableReader> sstablePredicate);
+    boolean shouldStop(Predicate<SSTableReader> predicate);
 
     /**
      * @return cause of compaction interruption.

@@ -104,12 +104,16 @@ public class SingleSSTableLCSTaskTest extends CQLTester
 
         // now all sstables are laid out non-overlapping in L1, this means that the rest of the compactions
         // will be single sstable ones, make sure that we use SingleSSTableLCSTask if singleSSTUplevel is true:
-        while (lcs.getEstimatedRemainingTasks() > 0)
+        while ((act = lcs.getNextBackgroundTask(0)) != null)
         {
-            act = lcs.getNextBackgroundTask(0);
+            assertTrue(lcs.getTotalCompactions() > 0);
             assertEquals(singleSSTUplevel, act instanceof SingleSSTableLCSTask);
             act.execute();
         }
+
+        assertEquals(0, lcs.getTotalCompactions());
+        assertEquals(0, lcs.getEstimatedRemainingTasks());
+
         assertEquals(0, lcs.getLevelSize(0));
         int l1size = lcs.getLevelSize(1);
         // this should be 10, but it might vary a bit depending on partition sizes etc

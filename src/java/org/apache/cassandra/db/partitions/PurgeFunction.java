@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.partitions;
 
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -56,7 +55,7 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     }
 
     // Called for every unfiltered. Meant for CompactionIterator to update progress
-    protected void updateProgress(boolean isRow)
+    protected void updateProgress()
     {
     }
 
@@ -92,21 +91,21 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     @Override
     protected Row applyToStatic(Row row)
     {
-        updateProgress(!row.isEmpty());
+        updateProgress();
         return row.purge(purger, nowInSec, enforceStrictLiveness);
     }
 
     @Override
     protected Row applyToRow(Row row)
     {
-        updateProgress(true);
+        updateProgress();
         return row.purge(purger, nowInSec, enforceStrictLiveness);
     }
 
     @Override
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
-        updateProgress(false);
+        updateProgress();
         boolean reversed = isReverseOrder;
         if (marker.isBoundary())
         {

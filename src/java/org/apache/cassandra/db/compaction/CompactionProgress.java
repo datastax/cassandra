@@ -83,6 +83,13 @@ public interface CompactionProgress extends TableOperation.Progress
     long uncompressedBytesRead();
 
     /**
+     * @return the number of bytes processed by the compaction iterator for sstables on the specified level.
+     *         For compressed or encrypted sstables, this is the number of bytes processed by the iterator after decompression,
+     *         so this is the current position in the uncompressed sstable files.
+     */
+    long uncompressedBytesRead(int level);
+
+    /**
      * @return the number of bytes that were written before compression is applied (uncompressed size).
      */
     long uncompressedBytesWritten();
@@ -103,12 +110,16 @@ public interface CompactionProgress extends TableOperation.Progress
     long rowsRead();
 
     /**
-     * @return the partition's histogram maps number to sstables to number of partitions that were merged with that number of input sstables.
+     * The partitions histogram maps the number of sstables to the number of partitions that were merged with that number of input sstables.
+     *
+     * @return the partitions histogram
      */
     long[] partitionsHistogram();
 
     /**
-     * @return the rows's histogram maps number to sstables to number of rows that were merged with that number of input sstables.
+     * The rows histogram maps the number of sstables to the number of rows that were merged with that number of input sstables.
+     *
+     * @return the rows histogram
      */
     long[] rowsHistogram();
 

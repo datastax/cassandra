@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -26,13 +25,28 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class ActiveCompactions implements TableOperationObserver
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaChangeListener;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.NonThrowingCloseable;
+
+public class ActiveCompactions extends SchemaChangeListener implements TableOperationObserver
 {
+    private static final Logger logger = LoggerFactory.getLogger(ActiveCompactions.class);
+
     // The operations ordered by keyspace.table for all the operations that are currently in progress.
     private static final ConcurrentMap<String, TableOperations> operationsByTable = new ConcurrentHashMap<>();
+
+    public ActiveCompactions()
+    {
+        Schema.instance.registerListener(this);
+    }
 
     public List<TableOperation> getCompactions()
     {
@@ -43,16 +57,16 @@ public class ActiveCompactions implements TableOperationObserver
     }
 
     @Override
-    public Closeable onOperationStart(TableOperation op)
+    public NonThrowingCloseable onOperationStart(TableOperation op)
     {
         TableOperation.Progress progress = op.getProgress();;
         String key = operationsByTableKey(progress);
         operationsByTable.computeIfAbsent(key, k -> new TableOperations(progress.metadata()));
-        operationsByTable.computeIfPresent(key, (k, ops) -> ops.operationsStarted(op));
+        operationsByTable.computeIfPresent(key, (k, ops) -> ops.operationStarted(op));
         return () -> operationsByTable.computeIfPresent(key,
-                                                        (k, ops) -> ops.operationsCompleted(op,
-                                                                                            op.getProgress(),
-                                                                                            CompactionManager.instance.getMetrics()));
+                                                        (k, ops) -> ops.operationCompleted(op,
+                                                                                           op.getProgress(),
+                                                                                           CompactionManager.instance.getMetrics()));
     }
 
     public TableOperations operationsByMetadata(TableMetadata metadata)
@@ -67,13 +81,32 @@ public class ActiveCompactions implements TableOperationObserver
 
     private String operationsByTableKey(TableMetadata metadata)
     {
-        return metadata.keyspace + "." + metadata.name;
+        return operationsByTableKey(metadata.keyspace, metadata.name);
+    }
+
+    private String operationsByTableKey(String keyspace, String table)
+    {
+        return keyspace + "." + table;
     }
 
     public TableOperations.Snapshot operationsInProgress(TableMetadata metadata)
     {
         TableOperations tableOperations = operationsByTable.get(operationsByTableKey(metadata));
-        return tableOperations == null ? null : new TableOperations.Snapshot(tableOperations);
+        if (tableOperations == null)
+            return null;
+
+        try
+        {
+            ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
+            return new TableOperations.Snapshot(cfs, tableOperations);
+        }
+        catch (IllegalArgumentException ex)
+        {
+            // this happens when the table is dropped
+            logger.debug("Could not return compactions in progress for {}: {}", metadata, ex.getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -109,5 +142,15 @@ public class ActiveCompactions implements TableOperationObserver
     public boolean isActive(TableOperation ci)
     {
         return getCompactions().contains(ci);
+    }
+
+    //
+    // SchemaChangeListener
+    //
+
+    @Override
+    public void onDropTable(String keyspace, String table)
+    {
+        operationsByTable.remove(operationsByTableKey(keyspace, table));
     }
 }

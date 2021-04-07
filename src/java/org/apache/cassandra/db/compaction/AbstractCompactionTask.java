@@ -28,6 +28,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
@@ -52,12 +53,20 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         this.compactionType = OperationType.COMPACTION;
         this.opObserver = TableOperationObserver.NOOP;
         this.compObserver = CompactionObserver.NO_OP;
-        // enforce contract that caller should mark sstables compacting
-        Set<SSTableReader> compacting = transaction.tracker.getCompacting();
-        for (SSTableReader sstable : transaction.originals())
-            assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
 
-        validateSSTables(transaction.originals());
+        try
+        {
+            // enforce contract that caller should mark sstables compacting
+            Set<SSTableReader> compacting = transaction.getCompacting();
+            for (SSTableReader sstable : transaction.originals())
+                assert compacting.contains(sstable) : sstable.getFilename() + " is not correctly marked compacting";
+
+            validateSSTables(transaction.originals());
+        }
+        catch (Throwable err)
+        {
+            Throwables.maybeFail(cleanup(err));
+        }
     }
 
     /**
@@ -118,8 +127,15 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
         finally
         {
-            transaction.close();
+            Throwables.maybeFail(cleanup(null));
         }
+    }
+
+    private Throwable cleanup(Throwable err)
+    {
+        return Throwables.perform(err,
+                                  () -> compObserver.setCompleted(transaction.opId()),
+                                  () -> transaction.close());
     }
 
     public abstract CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables);

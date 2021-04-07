@@ -60,7 +60,7 @@ public class TableOperations
         this.numCompleted = numCompleted;
     }
 
-    public TableOperations operationsStarted(TableOperation op)
+    public TableOperations operationStarted(TableOperation op)
     {
         return new TableOperations(keyspaceName,
                                    tableName,
@@ -68,9 +68,9 @@ public class TableOperations
                                    numCompleted);
     }
 
-    public TableOperations operationsCompleted(TableOperation operation,
-                                               TableOperation.Progress progress,
-                                               CompactionMetrics metrics)
+    public TableOperations operationCompleted(TableOperation operation,
+                                              TableOperation.Progress progress,
+                                              CompactionMetrics metrics)
     {
         long numCompleted = this.numCompleted;
         Set<TableOperation> inProgress = this.inProgress;
@@ -99,11 +99,12 @@ public class TableOperations
         public final long numCompactingSstables;
         public final long liveSizeOnDiskBytes;
         public final List<AbstractTableOperation.OperationProgress> inProgress;
+        public final List<CompactionStrategyStatistics> strategiesStatistics;
 
-        public Snapshot(TableOperations compactions)
+
+
+        public Snapshot(ColumnFamilyStore cfs, TableOperations compactions)
         {
-            ColumnFamilyStore cfs = Keyspace.open(compactions.keyspaceName).getColumnFamilyStore(compactions.tableName);
-
             this.keyspaceName = cfs.keyspace.getName();
             this.tableName = cfs.name;
             this.numCompleted = compactions.numCompleted;
@@ -112,6 +113,7 @@ public class TableOperations
             this.numCompactingSstables = cfs.getTracker().getCompacting().size();
             this.liveSizeOnDiskBytes = cfs.getTracker().getView().liveSSTables().stream().map(sstable -> sstable.onDiskLength()).reduce(Long::sum).orElse(0L);
             this.inProgress = compactions.inProgress.stream().map(op -> op.getProgress()).collect(Collectors.toList());
+            this.strategiesStatistics = cfs.getCompactionStrategyManager().getStrategyStatistics();
         }
     }
 }

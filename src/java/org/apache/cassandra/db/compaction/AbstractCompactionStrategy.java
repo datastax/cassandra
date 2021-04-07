@@ -17,9 +17,7 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.io.Closeable;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -47,6 +45,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * Pluggable compaction strategy determines how SSTables get merged.
@@ -56,7 +55,7 @@ import org.apache.cassandra.schema.CompactionParams;
  *    i/o done by compaction, and merging done at read time.
  *  - perform a full (maximum possible) compaction if requested by the user
  */
-public abstract class AbstractCompactionStrategy implements CompactionObserver
+public abstract class AbstractCompactionStrategy
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractCompactionStrategy.class);
 
@@ -97,14 +96,17 @@ public abstract class AbstractCompactionStrategy implements CompactionObserver
      */
     protected boolean isActive = false;
 
-    /** The compaction tasks that are in progress */
-    protected ConcurrentLinkedQueue<CompactionProgress> compactionsInProgress = new ConcurrentLinkedQueue<>();
+    /**
+     * This class groups all the compaction tasks that are pending, submitted, in progress and completed.
+     */
+    protected final BackgroundCompactions backgroundCompactions;
 
     protected AbstractCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {
         assert cfs != null;
         this.cfs = cfs;
         this.options = ImmutableMap.copyOf(options);
+        this.backgroundCompactions = new BackgroundCompactions(this, cfs);
 
         /* checks must be repeated here, as user supplied strategies might not call validateOptions directly */
 
@@ -129,6 +131,11 @@ public abstract class AbstractCompactionStrategy implements CompactionObserver
         }
 
         directories = cfs.getDirectories();
+    }
+
+    public BackgroundCompactions getBackgroundCompactions()
+    {
+        return backgroundCompactions;
     }
 
     public Directories getDirectories()
@@ -206,61 +213,28 @@ public abstract class AbstractCompactionStrategy implements CompactionObserver
     }
 
     /**
-     * @return statistics about this compaction strategy.
-     */
-    public CompactionStrategyStats getStats()
-    {
-        return new CompactionStrategyStats(cfs.keyspace.getName(),
-                                           cfs.name,
-                                           getClass().getSimpleName(),
-                                           getLevelStats());
-    }
-
-    /**
-     * @return statistics about each level for this compaction strategy. Strategies that are not level aware only return one level, level zero.
-     */
-    protected CompactionLevelStats[] getLevelStats()
-    {
-        Set<SSTableReader> sstables = getSSTables();
-        int numSSTables = sstables.size();
-        double score = 0; // Always zero for non levelled compactions
-        long totRead = 0;
-        long totWritten = 0;
-        int totCompactingSSTables = 0;
-
-        for (CompactionProgress op : compactionsInProgress)
-        {
-            totRead += op.uncompressedBytesRead();
-            totWritten += op.uncompressedBytesWritten();
-            totCompactingSSTables += op.inSSTables().size();
-        }
-
-        return new CompactionLevelStats[] { new CompactionLevelStats(numSSTables,
-                                                                     totCompactingSSTables,
-                                                                     score,
-                                                                     totRead,
-                                                                     totRead,
-                                                                     totWritten)
-        };
-    }
-
-    /**
-     * Called by a compaction operation for this strategy when it starts executing.
-     *
-     * The closeable will be called when the tasks completes.
-     **/
-    @Override
-    public Closeable onCompactionStart(CompactionProgress progress)
-    {
-        compactionsInProgress.offer(progress);
-
-        return () -> compactionsInProgress.remove(progress);
-    }
-
-    /**
      * @return the number of background tasks estimated to still be needed for this columnfamilystore
      */
-    public abstract int getEstimatedRemainingTasks();
+    public int getEstimatedRemainingTasks()
+    {
+        return backgroundCompactions.getEstimatedRemainingTasks();
+    }
+
+    /**
+     * @return the total number of background compactions, pending or in progress
+     */
+    public int getTotalCompactions()
+    {
+        return backgroundCompactions.getTotalCompactions();
+    }
+
+    /**
+     * @return statistics about this compaction picks.
+     */
+    public CompactionStrategyStatistics getStatistics()
+    {
+        return backgroundCompactions.getStatistics();
+    }
 
     /**
      * @return size in bytes of the largest sstables for this strategy
@@ -314,6 +288,11 @@ public abstract class AbstractCompactionStrategy implements CompactionObserver
     public String getName()
     {
         return getClass().getSimpleName();
+    }
+
+    public TableMetadata getMetadata()
+    {
+        return cfs.metadata();
     }
 
     /**

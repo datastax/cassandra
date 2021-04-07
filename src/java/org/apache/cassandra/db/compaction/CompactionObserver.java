@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.io.Closeable;
+import java.util.UUID;
 
 /**
  * An observer of a compaction operation. It is notified when a compaction operation is started.
@@ -29,7 +29,37 @@ import java.io.Closeable;
  */
 public interface CompactionObserver
 {
-    CompactionObserver NO_OP = operation -> () -> {};
+    CompactionObserver NO_OP = new CompactionObserver()
+    {
+        @Override
+        public void setSubmitted(UUID id, CompactionAggregate compaction) { }
 
-    Closeable onCompactionStart(CompactionProgress progress);
+        @Override
+        public void setInProgress(CompactionProgress progress) { }
+
+        @Override
+        public void setCompleted(UUID id) { }
+    };
+
+    /**
+     * Indicates that a compaction with the given id has been submitted for the given aggregate.
+     * <p/>
+     * @param id the id of the compaction
+     * @param compaction the compaction aggregate the compaction is part of
+     */
+    void setSubmitted(UUID id, CompactionAggregate compaction);
+
+    /**
+     * Indicates that a compaction has started.
+     * <p/>
+     * @param progress the compaction progress, it contains the unique id and real-time progress information
+     */
+    void setInProgress(CompactionProgress progress);
+
+    /**
+     * Indicates that a compaction with the given id has completed.
+     * <p/>
+     * @param id  the id of the compaction
+     */
+    void setCompleted(UUID id);
 }

@@ -1101,13 +1101,9 @@ public class CompactionManager implements CompactionManagerMBean
     void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, TableOperationObserver activeCompactions)
     {
         try (Scrubber scrubber = new Scrubber(cfs, modifier, skipCorrupted, checkData, reinsertOverflowedTTL);
-             Closeable c = activeCompactions.onOperationStart(scrubber.getScrubInfo()))
+             NonThrowingCloseable c = activeCompactions.onOperationStart(scrubber.getScrubInfo()))
         {
             scrubber.scrub();
-        }
-        catch (IOException ex)
-        {
-            Throwables.maybeFail(ex);
         }
     }
 
@@ -1115,13 +1111,9 @@ public class CompactionManager implements CompactionManagerMBean
     void verifyOne(ColumnFamilyStore cfs, SSTableReader sstable, Verifier.Options options, TableOperationObserver activeCompactions)
     {
         try (Verifier verifier = new Verifier(cfs, sstable, false, options);
-             Closeable c = activeCompactions.onOperationStart(verifier.getVerifyInfo()))
+             NonThrowingCloseable c = activeCompactions.onOperationStart(verifier.getVerifyInfo()))
         {
             verifier.verify();
-        }
-        catch (IOException ex)
-        {
-            Throwables.maybeFail(ex);
         }
     }
 
@@ -1683,13 +1675,9 @@ public class CompactionManager implements CompactionManagerMBean
         {
             public void run()
             {
-                try(Closeable c = activeCompactions.onOperationStart(builder))
+                try (NonThrowingCloseable c = activeCompactions.onOperationStart(builder))
                 {
                     builder.build();
-                }
-                catch (IOException e)
-                {
-                    Throwables.maybeFail(e);
                 }
             }
         };
@@ -1723,13 +1711,9 @@ public class CompactionManager implements CompactionManagerMBean
                 }
                 try
                 {
-                    try(Closeable c = activeCompactions.onOperationStart(writer))
+                    try (NonThrowingCloseable c = activeCompactions.onOperationStart(writer))
                     {
                         writer.saveCache();
-                    }
-                    catch (IOException e)
-                    {
-                        Throwables.maybeFail(e);
                     }
                 }
                 finally

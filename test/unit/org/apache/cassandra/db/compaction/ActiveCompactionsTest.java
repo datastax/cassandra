@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -237,7 +238,7 @@ public class ActiveCompactionsTest extends CQLTester
         public TableOperation operation;
         public boolean finished = false;
 
-        public Closeable onOperationStart(TableOperation op)
+        public NonThrowingCloseable onOperationStart(TableOperation op)
         {
             this.operation = op;
             return () -> finished = true;

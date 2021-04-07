@@ -50,9 +50,11 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
         this.level = level;
     }
 
-    public static AbstractCompactionTask create(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level)
+    public static AbstractCompactionTask forCompaction(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level)
     {
-        return new SingleSSTableLCSTask(strategy.cfs, txn, level);
+        SingleSSTableLCSTask ret = new SingleSSTableLCSTask(strategy.cfs, txn, level);
+        ret.compObserver = strategy.getBackgroundCompactions();
+        return ret;
     }
 
     @Override

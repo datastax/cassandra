@@ -22,14 +22,20 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import static java.util.concurrent.TimeUnit.HOURS;
+import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getBucketAggregates;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -47,7 +53,6 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getWindowBoundsInMillis;
-import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.newestBucket;
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.validateOptions;
 
 public class TimeWindowCompactionStrategyTest extends SchemaLoader
@@ -133,7 +138,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         Long lowHour = 1451001600000L; // 2015-12-25 @ 00:00:00, in milliseconds
 
         // A 1 hour window should round down to the beginning of the hour
-        assertTrue(getWindowBoundsInMillis(TimeUnit.HOURS, 1, tstamp1).left.compareTo(lowHour) == 0);
+        assertTrue(getWindowBoundsInMillis(HOURS, 1, tstamp1).left.compareTo(lowHour) == 0);
 
         // A 1 minute window should round down to the beginning of the hour
         assertTrue(getWindowBoundsInMillis(TimeUnit.MINUTES, 1, tstamp1).left.compareTo(lowHour) == 0);
@@ -189,23 +194,24 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         // We'll put 3 sstables into the newest bucket
         for (int i = 0 ; i < 3; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(TimeUnit.HOURS, 1, tstamp );
+            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, tstamp);
             buckets.put(bounds.left, sstrs.get(i));
         }
 
-        TimeWindowCompactionStrategy.NewestBucket newBucket = newestBucket(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(TimeUnit.HOURS, 1, System.currentTimeMillis()).left );
-        assertTrue("incoming bucket should not be accepted when it has below the min threshold SSTables", newBucket.sstables.isEmpty());
-        assertEquals("there should be no estimated remaining tasks when bucket is below min threshold SSTables", 0, newBucket.estimatedRemainingTasks);
+        List<CompactionAggregate> aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        Set<CompactionPick> compactions = toCompactions(aggregates);
+        assertTrue("No selected compactions when fewer than min threshold SSTables in the newest bucket", CompactionAggregate.getSelected(aggregates).isEmpty());
+        assertTrue("No compactions when fewer than min threshold SSTables in the newest bucket", compactions.isEmpty());
 
-
-        newBucket = newestBucket(buckets, 2, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(TimeUnit.HOURS, 1, System.currentTimeMillis()).left);
-        assertTrue("incoming bucket should be accepted when it is larger than the min threshold SSTables", !newBucket.sstables.isEmpty());
-        assertEquals("there should be one estimated remaining task when bucket is larger than the min threshold SSTables", 1, newBucket.estimatedRemainingTasks);
+        aggregates = getBucketAggregates(buckets, 2, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        compactions = toCompactions(aggregates);
+        assertFalse("There should be one selected compaction when bucket is larger than the min but smaller than max threshold", CompactionAggregate.getSelected(aggregates).isEmpty());
+        assertEquals("There should be one compaction when bucket is larger than the min but smaller than max threshold", 1,  compactions.size());
 
         // And 2 into the second bucket (1 hour back)
         for (int i = 3 ; i < 5; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(TimeUnit.HOURS, 1, tstamp2 );
+            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, tstamp2);
             buckets.put(bounds.left, sstrs.get(i));
         }
 
@@ -231,15 +237,16 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         sstrs = new ArrayList<>(cfs.getLiveSSTables());
         for (int i = 0 ; i < 40; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(TimeUnit.HOURS, 1, sstrs.get(i).getMaxTimestamp());
+            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, sstrs.get(i).getMaxTimestamp());
             buckets.put(bounds.left, sstrs.get(i));
         }
 
-        newBucket = newestBucket(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(TimeUnit.HOURS, 1, System.currentTimeMillis()).left);
-        assertEquals("new bucket should be trimmed to max threshold of 32", newBucket.sstables.size(),  32);
+        aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        compactions = toCompactions(aggregates);
+        assertEquals("new bucket should be split by max threshold of 32", buckets.keySet().size() + 1, compactions.size());
 
-        // one per bucket because they are all eligible and one more for the sstables that were trimmed
-        assertEquals("there should be one estimated remaining task per eligible bucket", buckets.keySet().size() + 1, newBucket.estimatedRemainingTasks);
+        CompactionPick selected = CompactionAggregate.getSelected(aggregates);
+        assertEquals("first pick should be trimmed to max threshold of 32", 32, selected.sstables.size());
     }
 
 
@@ -350,5 +357,10 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         assertEquals(sstable, expiredSSTable);
         twcs.shutdown();
         t.transaction.abort();
+    }
+
+    private static Set<CompactionPick> toCompactions(List<CompactionAggregate> aggregates)
+    {
+        return aggregates.stream().flatMap(aggr -> aggr.getActive().stream()).collect(Collectors.toSet());
     }
 }

@@ -176,7 +176,11 @@ public class CompactionStrategyManager implements INotificationConsumer
         this.partitionSSTablesByTokenRange = partitionSSTablesByTokenRange;
         params = cfs.metadata().params.compaction;
         enabled = params.isEnabled();
-        reload(cfs.metadata().params.compaction);
+    }
+
+    CompactionLogger compactionLogger()
+    {
+        return compactionLogger;
     }
 
     /**
@@ -506,7 +510,7 @@ public class CompactionStrategyManager implements INotificationConsumer
      * Called after changing configuration and at startup.
      * @param newCompactionParams
      */
-    private void reload(CompactionParams newCompactionParams)
+    public void reload(CompactionParams newCompactionParams)
     {
         boolean enabledWithJMX = enabled && !shouldBeEnabled();
         boolean disabledWithJMX = !enabled && shouldBeEnabled();
@@ -990,6 +994,23 @@ public class CompactionStrategyManager implements INotificationConsumer
         return tasks;
     }
 
+    public int getTotalCompactions()
+    {
+        maybeReloadDiskBoundaries();
+        int tasks = 0;
+        readLock.lock();
+        try
+        {
+            for (AbstractCompactionStrategy strategy : getAllStrategies())
+                tasks += strategy.getTotalCompactions();
+        }
+        finally
+        {
+            readLock.unlock();
+        }
+        return tasks;
+    }
+
     public boolean shouldBeEnabled()
     {
         return params.isEnabled();
@@ -1009,6 +1030,26 @@ public class CompactionStrategyManager implements INotificationConsumer
             return Arrays.asList(Lists.newArrayList(repaired.allStrategies()),
                                  Lists.newArrayList(unrepaired.allStrategies()),
                                  Lists.newArrayList(pendingRepairs.allStrategies()));
+        }
+        finally
+        {
+            readLock.unlock();
+        }
+    }
+
+    /**
+     * @return the statistics for the compaction strategies that have compactions in progress or pending
+     */
+    public List<CompactionStrategyStatistics> getStrategyStatistics()
+    {
+        readLock.lock();
+        try
+        {
+            return getStrategies().stream()
+                                  .flatMap(list -> list.stream())
+                                  .filter(strategy -> strategy.getTotalCompactions() > 0)
+                                  .map(AbstractCompactionStrategy::getStatistics)
+                                  .collect(Collectors.toList());
         }
         finally
         {

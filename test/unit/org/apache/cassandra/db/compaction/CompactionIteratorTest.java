@@ -455,6 +455,12 @@ public class CompactionIteratorTest extends CQLTester
         {
             return ImmutableSet.of();
         }
+
+        @Override
+        public int level()
+        {
+            return 0;
+        }
     }
 
     @Test

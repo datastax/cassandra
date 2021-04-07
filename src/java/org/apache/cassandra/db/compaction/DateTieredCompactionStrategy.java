@@ -365,7 +365,7 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
         int n = 0;
         for (List<SSTableReader> bucket : tasks)
         {
-            for (List<SSTableReader> stcsBucket : getSTCSBuckets(bucket, stcsOptions))
+            for (List<SSTableReader> stcsBucket : getSTCSBuckets(bucket, stcsOptions, cfs.getMinimumCompactionThreshold(), cfs.getMaximumCompactionThreshold()))
                 if (stcsBucket.size() >= cfs.getMinimumCompactionThreshold())
                     n += Math.ceil((double)stcsBucket.size() / cfs.getMaximumCompactionThreshold());
         }
@@ -392,7 +392,7 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
             boolean inFirstWindow = incomingWindow.onTarget(bucket.get(0).getMinTimestamp());
             if (bucket.size() >= minThreshold || (bucket.size() >= 2 && !inFirstWindow))
             {
-                List<SSTableReader> stcsSSTables = getSSTablesForSTCS(bucket, inFirstWindow ? minThreshold : 2, maxThreshold, stcsOptions);
+                List<SSTableReader> stcsSSTables = getSSTablesForSTCS(bucket, stcsOptions, inFirstWindow ? minThreshold : 2, maxThreshold);
                 if (!stcsSSTables.isEmpty())
                     return stcsSSTables;
             }
@@ -400,20 +400,26 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
         return Collections.emptyList();
     }
 
-    private static List<SSTableReader> getSSTablesForSTCS(Collection<SSTableReader> sstables, int minThreshold, int maxThreshold, SizeTieredCompactionStrategyOptions stcsOptions)
+    private static List<SSTableReader> getSSTablesForSTCS(Collection<SSTableReader> sstables, SizeTieredCompactionStrategyOptions stcsOptions, int minThreshold, int maxThreshold)
     {
-        List<SSTableReader> s = SizeTieredCompactionStrategy.mostInterestingBucket(getSTCSBuckets(sstables, stcsOptions), minThreshold, maxThreshold);
+        SizeTieredCompactionStrategy.SizeTieredBuckets sizeTieredBuckets = new SizeTieredCompactionStrategy.SizeTieredBuckets(sstables,
+                                                                                                                              stcsOptions,
+                                                                                                                              minThreshold,
+                                                                                                                              maxThreshold);
+
+        sizeTieredBuckets.aggregate();
+        List<SSTableReader> s = new ArrayList<>(CompactionAggregate.getSelected(sizeTieredBuckets.getAggregates()).sstables);
         logger.debug("Got sstables {} for STCS from {}", s, sstables);
         return s;
     }
 
-    private static List<List<SSTableReader>> getSTCSBuckets(Collection<SSTableReader> sstables, SizeTieredCompactionStrategyOptions stcsOptions)
+    private static List<List<SSTableReader>> getSTCSBuckets(Collection<SSTableReader> sstables, SizeTieredCompactionStrategyOptions stcsOptions, int minThreshold, int maxThreshold)
     {
-        List<Pair<SSTableReader,Long>> pairs = SizeTieredCompactionStrategy.createSSTableAndLengthPairs(AbstractCompactionStrategy.filterSuspectSSTables(sstables));
-        return SizeTieredCompactionStrategy.getBuckets(pairs,
-                                                       stcsOptions.bucketHigh,
-                                                       stcsOptions.bucketLow,
-                                                       stcsOptions.minSSTableSize);
+        SizeTieredCompactionStrategy.SizeTieredBuckets sizeTieredBuckets = new SizeTieredCompactionStrategy.SizeTieredBuckets(sstables,
+                                                                                                                              stcsOptions,
+                                                                                                                              minThreshold,
+                                                                                                                              maxThreshold);
+        return sizeTieredBuckets.buckets();
     }
 
     @Override

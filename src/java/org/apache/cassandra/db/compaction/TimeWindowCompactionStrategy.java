@@ -21,6 +21,7 @@ package org.apache.cassandra.db.compaction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +50,6 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     private static final Logger logger = LoggerFactory.getLogger(TimeWindowCompactionStrategy.class);
 
     private final TimeWindowCompactionStrategyOptions options;
-    protected volatile int estimatedRemainingTasks;
     private final Set<SSTableReader> sstables = new HashSet<>();
     private long lastExpiredCheck;
     private long highestWindowSeen;
@@ -57,7 +57,6 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     public TimeWindowCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {
         super(cfs, options);
-        this.estimatedRemainingTasks = 0;
         this.options = new TimeWindowCompactionStrategyOptions(options);
         if (!options.containsKey(AbstractCompactionStrategy.TOMBSTONE_COMPACTION_INTERVAL_OPTION) && !options.containsKey(AbstractCompactionStrategy.TOMBSTONE_THRESHOLD_OPTION))
         {
@@ -72,28 +71,30 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     @SuppressWarnings("resource") // transaction is closed by AbstractCompactionTask::execute
     public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
     {
-        List<SSTableReader> previousCandidate = null;
+        CompactionPick previousCandidate = null;
         while (true)
         {
-            List<SSTableReader> latestBucket = getNextBackgroundSSTables(gcBefore);
-
-            if (latestBucket.isEmpty())
+            CompactionAggregate compaction = getNextBackgroundCompactions(gcBefore);
+            if (compaction == null || compaction.isEmpty())
                 return null;
 
             // Already tried acquiring references without success. It means there is a race with
             // the tracker but candidate SSTables were not yet replaced in the compaction strategy manager
-            if (latestBucket.equals(previousCandidate))
+            if (compaction.getSelected().equals(previousCandidate))
             {
                 logger.warn("Could not acquire references for compacting SSTables {} which is not a problem per se," +
                             "unless it happens frequently, in which case it must be reported. Will retry later.",
-                            latestBucket);
+                            compaction.getSelected());
                 return null;
             }
 
-            LifecycleTransaction modifier = cfs.getTracker().tryModify(latestBucket, OperationType.COMPACTION);
+            LifecycleTransaction modifier = cfs.getTracker().tryModify(compaction.getSelected().sstables, OperationType.COMPACTION);
             if (modifier != null)
+            {
+                backgroundCompactions.setSubmitted(modifier.opId(), compaction);
                 return CompactionTask.forTimeWindowCompaction(this, modifier, gcBefore);
-            previousCandidate = latestBucket;
+            }
+            previousCandidate = compaction.getSelected();
         }
     }
 
@@ -102,10 +103,10 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
      * @param gcBefore
      * @return
      */
-    private synchronized List<SSTableReader> getNextBackgroundSSTables(final int gcBefore)
+    private synchronized CompactionAggregate getNextBackgroundCompactions(final int gcBefore)
     {
         if (Iterables.isEmpty(cfs.getSSTables(SSTableSet.LIVE)))
-            return Collections.emptyList();
+            return null;
 
         Set<SSTableReader> uncompacting = ImmutableSet.copyOf(filter(cfs.getUncompactingSSTables(), sstables::contains));
 
@@ -126,24 +127,29 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
 
         Set<SSTableReader> candidates = Sets.newHashSet(filterSuspectSSTables(uncompacting));
 
-        List<SSTableReader> compactionCandidates = new ArrayList<>(getNextNonExpiredSSTables(Sets.difference(candidates, expired), gcBefore));
-        if (!expired.isEmpty())
+        CompactionAggregate compactionCandidate = getNextNonExpiredSSTables(Sets.difference(candidates, expired), gcBefore);
+        if (expired.isEmpty())
+            return compactionCandidate;
+
+        logger.debug("Including expired sstables: {}", expired);
+        if (compactionCandidate == null)
         {
-            logger.debug("Including expired sstables: {}", expired);
-            compactionCandidates.addAll(expired);
+            long timestamp = getWindowBoundsInMillis(options.sstableWindowUnit, options.sstableWindowSize,
+                                                     Collections.max(expired, Comparator.comparing(SSTableReader::getMaxTimestamp)).getMaxTimestamp()).left;
+            return CompactionAggregate.createTimeTiered(expired, timestamp);
         }
 
-        return compactionCandidates;
+        return compactionCandidate.withExpired(expired);
     }
 
-    private List<SSTableReader> getNextNonExpiredSSTables(Iterable<SSTableReader> nonExpiringSSTables, final int gcBefore)
+    private CompactionAggregate getNextNonExpiredSSTables(Iterable<SSTableReader> nonExpiringSSTables, final int gcBefore)
     {
-        List<SSTableReader> mostInteresting = getCompactionCandidates(nonExpiringSSTables);
+        List<CompactionAggregate> candidates = getCompactionCandidates(nonExpiringSSTables);
+        backgroundCompactions.setPending(candidates);
 
-        if (mostInteresting != null)
-        {
-            return mostInteresting;
-        }
+        CompactionAggregate ret = candidates.isEmpty() ? null : candidates.get(0);
+        if (ret != null && !ret.isEmpty())
+            return ret;
 
         // if there is no sstable to compact in standard way, try compacting single sstable whose droppable tombstone
         // ratio is greater than threshold.
@@ -154,28 +160,24 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
                 sstablesWithTombstones.add(sstable);
         }
         if (sstablesWithTombstones.isEmpty())
-            return Collections.emptyList();
+            return null;
 
-        return Collections.singletonList(Collections.min(sstablesWithTombstones, SSTableReader.sizeComparator));
+        SSTableReader sstable = Collections.min(sstablesWithTombstones, SSTableReader.sizeComparator);
+        return CompactionAggregate.createForTombstones(sstable);
     }
 
-    private List<SSTableReader> getCompactionCandidates(Iterable<SSTableReader> candidateSSTables)
+    private List<CompactionAggregate> getCompactionCandidates(Iterable<SSTableReader> candidateSSTables)
     {
         Pair<HashMultimap<Long, SSTableReader>, Long> buckets = getBuckets(candidateSSTables, options.sstableWindowUnit, options.sstableWindowSize, options.timestampResolution);
         // Update the highest window seen, if necessary
         if(buckets.right > this.highestWindowSeen)
             this.highestWindowSeen = buckets.right;
 
-        NewestBucket mostInteresting = newestBucket(buckets.left,
-                cfs.getMinimumCompactionThreshold(),
-                cfs.getMaximumCompactionThreshold(),
-                options.stcsOptions,
-                this.highestWindowSeen);
-
-        this.estimatedRemainingTasks = mostInteresting.estimatedRemainingTasks;
-        if (!mostInteresting.sstables.isEmpty())
-            return mostInteresting.sstables;
-        return null;
+        return getBucketAggregates(buckets.left,
+                                   cfs.getMinimumCompactionThreshold(),
+                                   cfs.getMaximumCompactionThreshold(),
+                                   options.stcsOptions,
+                                   this.highestWindowSeen);
     }
 
     @Override
@@ -230,12 +232,18 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
 
     /**
      * Group files with similar max timestamp into buckets.
+     * <p/>
+     * The max timestamp of each sstable is converted into the timestamp resolution and then the window bounds are
+     * calculated by calling {@link #getWindowBoundsInMillis(TimeUnit, int, long)}. The sstable is added to the bucket
+     * with the same lower timestamp bound. If the lower timestamp bound is higher than any other seen, then it is recorded
+     * as the max timestamp seen that will be returned.
      *
-     * @param files pairs consisting of a file and its min timestamp
-     * @param sstableWindowUnit
-     * @param sstableWindowSize
-     * @param timestampResolution
-     * @return A pair, where the left element is the bucket representation (map of timestamp to sstablereader), and the right is the highest timestamp seen
+     * @param files the candidate sstables
+     * @param sstableWindowUnit the time unit for {@code sstableWindowSize}
+     * @param sstableWindowSize the size of the time window by which sstables are grouped
+     * @param timestampResolution the time unit for converting the sstable timestamp
+     * @return A pair, where the left element is the bucket representation (multi-map of lower bound timestamp to sstables),
+     *         and the right is the highest lower bound timestamp seen
      */
     @VisibleForTesting
     static Pair<HashMultimap<Long, SSTableReader>, Long> getBuckets(Iterable<SSTableReader> files, TimeUnit sstableWindowUnit, int sstableWindowSize, TimeUnit timestampResolution)
@@ -260,43 +268,28 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
         return Pair.create(buckets, maxTimestamp);
     }
 
-    static final class NewestBucket
-    {
-        /** The sstables that should be compacted next */
-        final List<SSTableReader> sstables;
-
-        /** The number of tasks estimated */
-        final int estimatedRemainingTasks;
-
-        NewestBucket(List<SSTableReader> sstables, int estimatedRemainingTasks)
-        {
-            this.sstables = sstables;
-            this.estimatedRemainingTasks = estimatedRemainingTasks;
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("sstables: %s, estimated remaining tasks: %d", sstables, estimatedRemainingTasks);
-        }
-    }
-
 
     /**
+     * If the current bucket has at least minThreshold SSTables, choose that one. For any other bucket, at least 2 SSTables is enough.
+     * In any case, limit to maxThreshold SSTables.
+     *
      * @param buckets list of buckets, sorted from newest to oldest, from which to return the newest bucket within thresholds.
      * @param minThreshold minimum number of sstables in a bucket to qualify.
      * @param maxThreshold maximum number of sstables to compact at once (the returned bucket will be trimmed down to this).
-     * @return a bucket (list) of sstables to compact.
+     * @param stcsOptions the options for {@link SizeTieredCompactionStrategy} to be used in the newest bucket
+     * @param now the latest timestamp in milliseconds
+     *
+     * @return a list of compaction aggregates, one per time bucket
      */
     @VisibleForTesting
-    static NewestBucket newestBucket(HashMultimap<Long, SSTableReader> buckets, int minThreshold, int maxThreshold, SizeTieredCompactionStrategyOptions stcsOptions, long now)
+    static List<CompactionAggregate> getBucketAggregates(HashMultimap<Long, SSTableReader> buckets,
+                                                         int minThreshold,
+                                                         int maxThreshold,
+                                                         SizeTieredCompactionStrategyOptions stcsOptions,
+                                                         long now)
     {
-        // If the current bucket has at least minThreshold SSTables, choose that one.
-        // For any other bucket, at least 2 SSTables is enough.
-        // In any case, limit to maxThreshold SSTables.
-
-        List<SSTableReader> sstables = Collections.emptyList();
-        int estimatedRemainingTasks = 0;
+        List<CompactionAggregate> ret = new ArrayList<>(buckets.size());
+        boolean nextCompactionFound = false; // set to true once the first bucket with a compaction is found
 
         TreeSet<Long> allKeys = new TreeSet<>(buckets.keySet());
 
@@ -306,49 +299,95 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
             Long key = it.next();
             Set<SSTableReader> bucket = buckets.get(key);
             logger.trace("Key {}, now {}", key, now);
+
+            CompactionPick selected = CompactionPick.EMPTY;
+            List<CompactionPick> pending = new ArrayList<>(1);
+
             if (bucket.size() >= minThreshold && key >= now)
             {
                 // If we're in the newest bucket, we'll use STCS to prioritize sstables
-                List<Pair<SSTableReader,Long>> pairs = SizeTieredCompactionStrategy.createSSTableAndLengthPairs(bucket);
-                List<List<SSTableReader>> stcsBuckets = SizeTieredCompactionStrategy.getBuckets(pairs, stcsOptions.bucketHigh, stcsOptions.bucketLow, stcsOptions.minSSTableSize);
-                List<SSTableReader> stcsInterestingBucket = SizeTieredCompactionStrategy.mostInterestingBucket(stcsBuckets, minThreshold, maxThreshold);
+                SizeTieredCompactionStrategy.SizeTieredBuckets stcsBuckets = new SizeTieredCompactionStrategy.SizeTieredBuckets(bucket,
+                                                                                                                                stcsOptions,
+                                                                                                                                minThreshold,
+                                                                                                                                maxThreshold);
+                stcsBuckets.aggregate();
 
-                // If the tables in the current bucket aren't eligible in the STCS strategy, we'll skip it and look for other buckets
-                if (!stcsInterestingBucket.isEmpty())
+                for (CompactionAggregate stcsAggregate : stcsBuckets.getAggregates())
                 {
-                    double remaining = bucket.size() - maxThreshold;
-                    estimatedRemainingTasks +=  1 + (remaining > minThreshold ? Math.ceil(remaining / maxThreshold) : 0);
-                    if (sstables.isEmpty())
+                    if (selected.isEmpty())
                     {
-                        logger.debug("Using STCS compaction for first window of bucket: data files {} , options {}", pairs, stcsOptions);
-                        sstables = stcsInterestingBucket;
+                        selected = CompactionPick.create(key, stcsAggregate.getSelected());
+                        for (CompactionPick comp : stcsAggregate.getActive())
+                        {
+                            if (comp != stcsAggregate.getSelected())
+                                pending.add(comp);
+                        }
                     }
                     else
                     {
-                        logger.trace("First window of bucket is eligible but not selected: data files {} , options {}", pairs, stcsOptions);
+                        pending.addAll(stcsAggregate.getActive());
                     }
                 }
+
+                if (!selected.isEmpty())
+                    logger.debug("Newest window has STCS compaction candidates, {}, data files {} , options {}",
+                                 nextCompactionFound ? "eligible but not selected due to prior candidate" : "will be selected for compaction",
+                                 stcsBuckets.pairs(),
+                                 stcsOptions);
+                else
+                    logger.debug("No STCS compactions found for first window, data files {}, options {}", stcsBuckets.pairs(), stcsOptions);
+
+                if (!nextCompactionFound && !selected.isEmpty())
+                {
+                    nextCompactionFound = true;
+                    ret.add(0, CompactionAggregate.createTimeTiered(bucket, selected, pending, key)); // the first one will be submitted for compaction
+                }
+                else
+                {
+                    ret.add(CompactionAggregate.createTimeTiered(bucket, selected, pending, key));
+                }
             }
+
+
+
             else if (bucket.size() >= 2 && key < now)
             {
-                double remaining = bucket.size() - maxThreshold;
-                estimatedRemainingTasks +=  1 + (remaining > minThreshold ? Math.ceil(remaining / maxThreshold) : 0);
-                if (sstables.isEmpty())
+                List<SSTableReader> sstables = new ArrayList<>(bucket);
+
+                // Sort the largest sstables off the end before splitting by maxThreshold
+                Collections.sort(sstables, SSTableReader.sizeComparator);
+
+                int i = 0;
+                while ((bucket.size() - i) >= 2)
+                {
+                    List<SSTableReader> pick = sstables.subList(i, i + Math.min(bucket.size() - i, maxThreshold));
+                    if (selected.isEmpty())
+                        selected = CompactionPick.create(key, pick);
+                    else
+                        pending.add(CompactionPick.create(key, pick));
+
+                    i += pick.size();
+                }
+
+                if (!nextCompactionFound)
                 {
                     logger.debug("bucket size {} >= 2 and not in current bucket, compacting what's here: {}", bucket.size(), bucket);
-                    sstables = trimToThreshold(bucket, maxThreshold);
+                    nextCompactionFound = true;
+                    ret.add(0, CompactionAggregate.createTimeTiered(bucket, selected, pending, key)); // the first one will be submitted for compaction
                 }
                 else
                 {
                     logger.trace("bucket size {} >= 2 and not in current bucket, eligible but not selected: {}", bucket.size(), bucket);
+                    ret.add(CompactionAggregate.createTimeTiered(bucket, selected, pending, key));
                 }
             }
             else
             {
                 logger.trace("No compaction necessary for bucket size {} , key {}, now {}", bucket.size(), key, now);
+                ret.add(CompactionAggregate.createTimeTiered(bucket, selected, pending, key)); // add an empty aggregate anyway so we get a full view
             }
         }
-        return new NewestBucket(sstables, estimatedRemainingTasks);
+        return ret;
     }
 
     /**
@@ -399,11 +438,6 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     boolean ignoreOverlaps()
     {
         return options.ignoreOverlaps;
-    }
-
-    public int getEstimatedRemainingTasks()
-    {
-        return this.estimatedRemainingTasks;
     }
 
     public long getMaxSSTableBytes()

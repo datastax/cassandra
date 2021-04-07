@@ -43,6 +43,16 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Transactional;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 
 public class CompactionTaskTest
 {
@@ -153,5 +163,41 @@ public class CompactionTaskTest
             }
             Collections.rotate(toCompact, 1);
         }
+    }
+
+    @Test
+    public void testCompactionReporting()
+    {
+        cfs.getCompactionStrategyManager().disable();
+        Set<SSTableReader> sstables = generateData(2, 2);
+        LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
+        assertNotNull(txn);
+        TableOperationObserver operationObserver = Mockito.mock(TableOperationObserver.class);
+        CompactionObserver compObserver = Mockito.mock(CompactionObserver.class);
+        final ArgumentCaptor<TableOperation> tableOpCaptor = ArgumentCaptor.forClass(AbstractTableOperation.class);
+        final ArgumentCaptor<CompactionProgress> compactionCaptor = ArgumentCaptor.forClass(CompactionProgress.class);
+        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0, compObserver);
+        assertNotNull(task);
+        task.execute(operationObserver);
+
+        Mockito.verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
+        Mockito.verify(compObserver, times(1)).setInProgress(compactionCaptor.capture());
+        Mockito.verify(compObserver, times(1)).setCompleted(eq(txn.opId()));
+    }
+
+
+    private Set<SSTableReader> generateData(int numSSTables, int numKeys)
+    {
+        for (int i = 0; i < numSSTables; i++)
+        {
+            for (int j = 0; j < numKeys; j++)
+                QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (?, ?);", j + i * numKeys, j + i * numKeys);
+
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+        }
+
+        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        Assert.assertEquals(numSSTables, sstables.size());
+        return sstables;
     }
 }

@@ -103,7 +103,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         }
     }
 
-    public final Tracker tracker;
+    private final Tracker tracker;
     // The transaction logs keep track of new and old sstable files
     private final LogTransaction log;
     // the original readers this transaction was opened over, and that it guards
@@ -190,6 +190,11 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public UUID opId()
     {
         return log.id();
+    }
+
+    public Set<SSTableReader> getCompacting()
+    {
+        return tracker.getCompacting();
     }
 
     public void doPrepare()

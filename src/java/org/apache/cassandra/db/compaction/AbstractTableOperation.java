@@ -35,6 +35,8 @@ import org.apache.cassandra.schema.TableMetadata;
 /**
  * This is a base abstract implementing some default methods of {@link TableOperation}.
  * <p/>
+ * In previous versions it used to be called CompactionInfo and CompactionInfo.Holder.
+ * <p/>
  * This class implements serializable to allow structured info to be returned via JMX.
  **/
 public abstract class AbstractTableOperation implements TableOperation
@@ -76,14 +78,19 @@ public abstract class AbstractTableOperation implements TableOperation
         return stopRequested || (isGlobal() && CompactionManager.instance.isGlobalCompactionPaused());
     }
 
-    public boolean shouldStop(Predicate<SSTableReader> sstablePredicate)
+    /**
+     * Return true if the predicate for the given sstables holds, or if the operation
+     * does not consider any sstables, in which case it will always return true (the
+     * default behaviour).
+     */
+    public boolean shouldStop(Predicate<SSTableReader> predicate)
     {
         OperationProgress progress = getProgress();
         if (progress.sstables.isEmpty())
         {
             return true;
         }
-        return progress.sstables.stream().anyMatch(sstablePredicate);
+        return progress.sstables.stream().anyMatch(predicate);
     }
 
     /**

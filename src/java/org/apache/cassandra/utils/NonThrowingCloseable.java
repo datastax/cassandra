@@ -16,26 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.compaction;
+package org.apache.cassandra.utils;
 
-import org.apache.cassandra.utils.NonThrowingCloseable;
+import java.io.Closeable;
 
 /**
- * An observer of {@link AbstractTableOperation}.
- * <p/>
- * The observer is notified when an operation is started. It returns a closeable that will be closed
- * when the operation is finished. The operation can be queried at any time to get the progress information.
+ * A closeable that will not throw.
  */
-public interface TableOperationObserver
+public interface NonThrowingCloseable extends Closeable
 {
-    TableOperationObserver NOOP = operation -> () -> {};
-
-    /**
-     * Signal to the observer that an operation is starting.
-     *
-     * @param operation the operation starting
-     *
-     * @return a closeable that the caller should close when the operation completes
-     */
-    NonThrowingCloseable onOperationStart(TableOperation operation);
+    void close();
 }

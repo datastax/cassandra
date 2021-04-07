@@ -403,6 +403,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
+        compactionStrategyManager.reload(metadata().params.compaction);
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
@@ -815,6 +816,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public String getTableName()
     {
         return name;
+    }
+
+    public String getKeyspaceName()
+    {
+        return keyspace.getName();
     }
 
     public Descriptor newSSTableDescriptor(File directory)
@@ -1592,7 +1598,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getUncompacting();
     }
 
-    public Iterable<SSTableReader> getCompactingSSTables()
+    public Iterable<? extends SSTableReader> getUncompactingSSTables(Iterable<? extends SSTableReader> candidates)
+    {
+        return data.getUncompacting(candidates);
+    }
+
+    public Set<SSTableReader> getCompactingSSTables()
     {
         return data.getCompacting();
     }
@@ -2584,6 +2595,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public CompactionStrategyManager getCompactionStrategyManager()
     {
         return compactionStrategyManager;
+    }
+
+    public CompactionLogger getCompactionLogger()
+    {
+        return compactionStrategyManager == null ? null : compactionStrategyManager.compactionLogger;
     }
 
     public void setCrcCheckChance(double crcCheckChance)

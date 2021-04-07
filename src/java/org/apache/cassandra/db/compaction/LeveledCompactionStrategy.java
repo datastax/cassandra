@@ -46,9 +46,9 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 {
     private static final Logger logger = LoggerFactory.getLogger(LeveledCompactionStrategy.class);
-    private static final String SSTABLE_SIZE_OPTION = "sstable_size_in_mb";
+    static final String SSTABLE_SIZE_OPTION = "sstable_size_in_mb";
     private static final boolean tolerateSstableSize = Boolean.getBoolean(Config.PROPERTY_PREFIX + "tolerate_sstable_size");
-    private static final String LEVEL_FANOUT_SIZE_OPTION = "fanout_size";
+    static final String LEVEL_FANOUT_SIZE_OPTION = "fanout_size";
     private static final String SINGLE_SSTABLE_UPLEVEL_OPTION = "single_sstable_uplevel";
     public static final int DEFAULT_LEVEL_FANOUT_SIZE = 10;
 
@@ -123,11 +123,17 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
     @SuppressWarnings("resource") // transaction is closed by AbstractCompactionTask::execute
     public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
     {
-        Collection<SSTableReader> previousCandidate = null;
+        CompactionPick previousCandidate = null;
         while (true)
         {
+            CompactionAggregate.Leveled candidate = manifest.getCompactionCandidate();
+            backgroundCompactions.setPending(manifest.getEstimatedTasks(candidate));
+
             OperationType op;
-            LeveledManifest.CompactionCandidate candidate = manifest.getCompactionCandidates();
+            CompactionAggregate compaction;
+            int nextLevel;
+            long maxxSSTableBytes;
+
             if (candidate == null)
             {
                 // if there is no sstable to compact in standard way, try compacting based on droppable tombstone ratio
@@ -137,39 +143,43 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
                     logger.trace("No compaction necessary for {}", this);
                     return null;
                 }
-                candidate = new LeveledManifest.CompactionCandidate(Collections.singleton(sstable),
-                                                                    sstable.getSSTableLevel(),
-                                                                    getMaxSSTableBytes());
+                compaction = CompactionAggregate.createForTombstones(sstable);
                 op = OperationType.TOMBSTONE_COMPACTION;
+                nextLevel = sstable.getSSTableLevel();
+                maxxSSTableBytes = getMaxSSTableBytes();
             }
             else
             {
+                compaction = candidate;
                 op = OperationType.COMPACTION;
+                nextLevel = candidate.nextLevel;
+                maxxSSTableBytes = candidate.maxSSTableBytes;
             }
 
             // Already tried acquiring references without success. It means there is a race with
             // the tracker but candidate SSTables were not yet replaced in the compaction strategy manager
-            if (candidate.sstables.equals(previousCandidate))
+            if (candidate.getSelected().equals(previousCandidate))
             {
                 logger.warn("Could not acquire references for compacting SSTables {} which is not a problem per se," +
                             "unless it happens frequently, in which case it must be reported. Will retry later.",
-                            candidate.sstables);
+                            compaction.getSelected().sstables);
                 return null;
             }
 
-            LifecycleTransaction txn = cfs.getTracker().tryModify(candidate.sstables, OperationType.COMPACTION);
+            LifecycleTransaction txn = cfs.getTracker().tryModify(compaction.getSelected().sstables, OperationType.COMPACTION);
             if (txn != null)
             {
                 AbstractCompactionTask newTask;
                 if (!singleSSTableUplevel || op == OperationType.TOMBSTONE_COMPACTION || txn.originals().size() > 1)
-                    newTask = LeveledCompactionTask.forCompaction(this, txn, candidate.level, gcBefore, candidate.maxSSTableBytes, false);
+                    newTask = LeveledCompactionTask.forCompaction(this, txn, nextLevel, gcBefore, candidate.maxSSTableBytes, false);
                 else
-                    newTask = SingleSSTableLCSTask.create(this, txn, candidate.level);
+                    newTask = SingleSSTableLCSTask.forCompaction(this, txn, nextLevel);
 
+                backgroundCompactions.setSubmitted(txn.opId(), compaction);
                 newTask.setCompactionType(op);
                 return newTask;
             }
-            previousCandidate = candidate.sstables;
+            previousCandidate = compaction.getSelected();
         }
     }
 
@@ -268,11 +278,16 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 
     }
 
+    @Override
     public int getEstimatedRemainingTasks()
     {
-        int n = manifest.getEstimatedTasks();
-        cfs.getCompactionStrategyManager().compactionLogger.pending(this, n);
-        return n;
+        // TODO - there is a difference with existing behavior here, previously
+        // it would recalculate all candidates each time this method was called,
+        // now it does not. IMO this method should not change the pending tasks in the
+        // picks by calling picks.setPending(manifest.getEstimatedTasks(selected));
+        // this IMO should only be done by getNextBackgroundTask(), similarly to what other strategies do,
+        // in which case we should just remove this override which is currently identical
+        return backgroundCompactions.getEstimatedRemainingTasks();
     }
 
     public long getMaxSSTableBytes()
@@ -326,7 +341,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
                     if (!intersecting.isEmpty())
                     {
                         @SuppressWarnings("resource") // The ScannerList will be in charge of closing (and we close properly on errors)
-                        ISSTableScanner scanner = new LeveledScanner(cfs.metadata(), intersecting, ranges);
+                        ISSTableScanner scanner = new LeveledScanner(cfs.metadata(), intersecting, ranges, level);
                         scanners.add(scanner);
                     }
                 }
@@ -384,6 +399,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         private final TableMetadata metadata;
         private final Collection<Range<Token>> ranges;
         private final List<SSTableReader> sstables;
+        private final int level;
         private final Iterator<SSTableReader> sstableIterator;
         private final long totalLength;
         private final long compressedLength;
@@ -392,13 +408,14 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         private long positionOffset;
         private long totalBytesScanned = 0;
 
-        public LeveledScanner(TableMetadata metadata, Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+        public LeveledScanner(TableMetadata metadata, Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, int level)
         {
             this.metadata = metadata;
             this.ranges = ranges;
 
             // add only sstables that intersect our range, and estimate how much data that involves
             this.sstables = new ArrayList<>(sstables.size());
+            this.level = level;
             long length = 0;
             long cLength = 0;
             for (SSTableReader sstable : sstables)
@@ -501,6 +518,11 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         public Set<SSTableReader> getBackingSSTables()
         {
             return ImmutableSet.copyOf(sstables);
+        }
+
+        public int level()
+        {
+            return level;
         }
     }
 

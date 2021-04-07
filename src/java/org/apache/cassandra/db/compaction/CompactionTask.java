@@ -68,9 +68,6 @@ public class CompactionTask extends AbstractCompactionTask
     /** for trace logging purposes only */
     private static final AtomicLong totalBytesCompacted = new AtomicLong();
 
-    // The compaction observer is normally the strategy but we keep it separated for testing
-    private final CompactionObserver compObserver;
-
     // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
     @Nullable
     private final AbstractCompactionStrategy strategy;
@@ -89,7 +86,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
     {
-        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy, strategy);
+        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy.getBackgroundCompactions(), strategy);
     }
 
     private CompactionTask(ColumnFamilyStore cfs,
@@ -104,6 +101,8 @@ public class CompactionTask extends AbstractCompactionTask
         this.keepOriginals = keepOriginals;
         this.compObserver = compObserver;
         this.strategy = strategy;
+
+        logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
     }
 
     /**
@@ -241,7 +240,7 @@ public class CompactionTask extends AbstractCompactionTask
         private Refs<SSTableReader> sstableRefs;
         private AbstractCompactionStrategy.ScannerList scanners;
         private CompactionIterator compactionIterator;
-        private Closeable[] obsCloseables;
+        private Closeable obsCloseable;
         private CompactionAwareWriter writer;
 
         /**
@@ -284,14 +283,13 @@ public class CompactionTask extends AbstractCompactionTask
                 this.scanners = strategyManager.getScanners(actuallyCompact);
                 this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
                 this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
-                this.obsCloseables = new Closeable[2];
-                this.obsCloseables[0] = opObserver.onOperationStart(this); // these are the metrics
-                this.obsCloseables[1] = compObserver.onCompactionStart(progress); // see comment above re. strategy not necessarily being the same that created this op
+                this.obsCloseable = opObserver.onOperationStart(this); // these are the metrics
+
+                compObserver.setInProgress(progress);
             }
             catch (Throwable t)
             {
-                t = Throwables.close(t, obsCloseables);
-                t = Throwables.close(t, writer, compactionIterator, scanners, sstableRefs); // ok to close even if null
+                t = Throwables.close(t, obsCloseable, writer, compactionIterator, scanners, sstableRefs); // ok to close even if null
 
                 Throwables.maybeFail(t);
             }
@@ -320,7 +318,6 @@ public class CompactionTask extends AbstractCompactionTask
             }
 
             long lastCheckObsoletion = start;
-            long lastCheckReportProgress = start;
             double compressionRatio = scanners.getCompressionRatio();
             if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
                 compressionRatio = 1.0;
@@ -350,7 +347,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (now - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                 {
                     controller.maybeRefreshOverlaps();
-                    lastCheckObsoletion = System.nanoTime();
+                    lastCheckObsoletion = now;
                 }
             }
 
@@ -388,8 +385,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public void close()
         {
-            Throwable err = Throwables.close(null, obsCloseables);
-            err = Throwables.close(err, writer, compactionIterator, scanners, sstableRefs);
+            Throwable err = Throwables.close((Throwable) null, obsCloseable, writer, compactionIterator, scanners, sstableRefs);
 
             if (transaction.isOffline())
             {
@@ -408,8 +404,7 @@ public class CompactionTask extends AbstractCompactionTask
                 {
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
                 }
-                cfs.getCompactionStrategyManager().compactionLogger.
-                                                                   compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+                cfs.getCompactionLogger().compaction(startTime, transaction.originals(),  System.currentTimeMillis(), newSStables);
 
                 // update the metrics
                 cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
@@ -526,6 +521,8 @@ public class CompactionTask extends AbstractCompactionTask
             @Override
             public Collection<SSTableReader> inSSTables()
             {
+                // TODO should we use transaction.originals() and include the expired sstables?
+                // This would be more correct but all the metrics we get from CompactionIterator will not be compatible
                 return actuallyCompact;
             }
 
@@ -563,6 +560,12 @@ public class CompactionTask extends AbstractCompactionTask
             public long uncompressedBytesRead()
             {
                 return compactionIterator.bytesRead();
+            }
+
+            @Override
+            public long uncompressedBytesRead(int level)
+            {
+                return compactionIterator.bytesRead(level);
             }
 
             @Override

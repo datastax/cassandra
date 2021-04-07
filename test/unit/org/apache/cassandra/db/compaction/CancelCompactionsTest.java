@@ -58,6 +58,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.junit.Assert.assertEquals;
@@ -503,7 +504,7 @@ public class CancelCompactionsTest extends CQLTester
             ct.execute(new ActiveCompactions()
             {
                 @Override
-                public Closeable onOperationStart(TableOperation op)
+                public NonThrowingCloseable onOperationStart(TableOperation op)
                 {
                     waitForBeginCompaction.countDown();
                     Uninterruptibles.awaitUninterruptibly(waitForStart);
