@@ -156,7 +156,7 @@ public class LeveledManifest
         if (logger.isTraceEnabled())
             logger.trace("Adding [{}]", toString(added));
         generations.addAll(added);
-        lastCompactedSSTables[minLevel] = SSTableReader.sstableOrdering.max(added);
+        lastCompactedSSTables[minLevel] = SSTableReader.firstKeyOrdering.max(added);
     }
 
     private String toString(Collection<SSTableReader> sstables)
@@ -321,7 +321,7 @@ public class LeveledManifest
 
     private CompactionPick getSSTablesForSTCS(Collection<SSTableReader> sstables)
     {
-        Iterable<? extends SSTableReader> candidates = cfs.getUncompactingSSTables(sstables);
+        Iterable<? extends SSTableReader> candidates = cfs.getNoncompactingSSTables(sstables);
 
         SizeTieredCompactionStrategy.SizeTieredBuckets sizeTieredBuckets;
         sizeTieredBuckets = new SizeTieredCompactionStrategy.SizeTieredBuckets(candidates,

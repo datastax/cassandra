@@ -43,7 +43,7 @@ import static com.google.common.collect.Iterables.filter;
  * @deprecated in favour of {@link TimeWindowCompactionStrategy}
  */
 @Deprecated
-public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
+public class DateTieredCompactionStrategy extends AbstractCompactionStrategy.WithSSTableList
 {
     private static final Logger logger = LoggerFactory.getLogger(DateTieredCompactionStrategy.class);
 
@@ -69,41 +69,12 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
         this.stcsOptions = new SizeTieredCompactionStrategyOptions(options);
     }
 
-    @Override
-    @SuppressWarnings("resource")
-    public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
-    {
-        List<SSTableReader> previousCandidate = null;
-        while (true)
-        {
-            List<SSTableReader> latestBucket = getNextBackgroundSSTables(gcBefore);
-
-            if (latestBucket.isEmpty())
-                return null;
-
-            // Already tried acquiring references without success. It means there is a race with
-            // the tracker but candidate SSTables were not yet replaced in the compaction strategy manager
-            if (latestBucket.equals(previousCandidate))
-            {
-                logger.warn("Could not acquire references for compacting SSTables {} which is not a problem per se," +
-                            "unless it happens frequently, in which case it must be reported. Will retry later.",
-                            latestBucket);
-                return null;
-            }
-
-            LifecycleTransaction modifier = cfs.getTracker().tryModify(latestBucket, OperationType.COMPACTION);
-            if (modifier != null)
-                return CompactionTask.forCompaction(this, modifier, gcBefore);
-            previousCandidate = latestBucket;
-        }
-    }
-
     /**
      *
      * @param gcBefore
      * @return
      */
-    private synchronized List<SSTableReader> getNextBackgroundSSTables(final int gcBefore)
+    protected synchronized List<SSTableReader> getNextBackgroundSSTables(final int gcBefore)
     {
         Set<SSTableReader> uncompacting;
         synchronized (sstables)
@@ -111,7 +82,7 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
             if (sstables.isEmpty())
                 return Collections.emptyList();
 
-            uncompacting = ImmutableSet.copyOf(filter(cfs.getUncompactingSSTables(), sstables::contains));
+            uncompacting = ImmutableSet.copyOf(filter(cfs.getNoncompactingSSTables(), sstables::contains));
         }
 
         Set<SSTableReader> expired = Collections.emptySet();
@@ -420,35 +391,6 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
                                                                                                                               minThreshold,
                                                                                                                               maxThreshold);
         return sizeTieredBuckets.buckets();
-    }
-
-    @Override
-    @SuppressWarnings("resource")
-    public synchronized Collection<AbstractCompactionTask> getMaximalTask(int gcBefore, boolean splitOutput)
-    {
-        Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(sstables);
-        if (Iterables.isEmpty(filteredSSTables))
-            return null;
-        LifecycleTransaction txn = cfs.getTracker().tryModify(filteredSSTables, OperationType.COMPACTION);
-        if (txn == null)
-            return null;
-        return Collections.singleton(CompactionTask.forCompaction(this, txn, gcBefore));
-    }
-
-    @Override
-    @SuppressWarnings("resource")
-    public synchronized AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, int gcBefore)
-    {
-        assert !sstables.isEmpty(); // checked for by CM.submitUserDefined
-
-        LifecycleTransaction modifier = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
-        if (modifier == null)
-        {
-            logger.trace("Unable to mark {} for compaction; probably a background compaction got to it first.  You can disable background compactions temporarily if this is a problem", sstables);
-            return null;
-        }
-
-        return CompactionTask.forCompaction(this, modifier, gcBefore).setUserDefined(true);
     }
 
     public int getEstimatedRemainingTasks()

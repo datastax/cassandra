@@ -708,8 +708,8 @@ public class CompactionStrategyStatisticsTest
         });
 
         when(cfs.getSSTables(eq(SSTableSet.LIVE))).thenReturn(live);
-        when(cfs.getUncompactingSSTables()).thenAnswer(invocation -> Sets.difference(live, txn.get() == null ? compacting : Sets.union(compacting, candidates)));
-        when(cfs.getUncompactingSSTables(anyIterable())).thenAnswer(invocation -> Sets.difference(Sets.newHashSet((Iterable<SSTableReader>)invocation.getArguments()[0]),
+        when(cfs.getNoncompactingSSTables()).thenAnswer(invocation -> Sets.difference(live, txn.get() == null ? compacting : Sets.union(compacting, candidates)));
+        when(cfs.getNoncompactingSSTables(anyIterable())).thenAnswer(invocation -> Sets.difference(Sets.newHashSet((Iterable<SSTableReader>)invocation.getArguments()[0]),
                                                                                                   txn.get() == null ? compacting : Sets.union(compacting, candidates)));
         when(cfs.getCompactingSSTables()).thenAnswer(invocation -> txn.get() == null ? compacting : Sets.union(compacting, candidates));
 

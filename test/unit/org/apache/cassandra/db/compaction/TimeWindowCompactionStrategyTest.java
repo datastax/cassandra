@@ -23,10 +23,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 
 import org.junit.BeforeClass;
@@ -50,7 +50,6 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getWindowBoundsInMillis;
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.validateOptions;
@@ -133,21 +132,21 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
     @Test
     public void testTimeWindows()
     {
-        Long tstamp1 = 1451001601000L; // 2015-12-25 @ 00:00:01, in milliseconds
-        Long tstamp2 = 1451088001000L; // 2015-12-26 @ 00:00:01, in milliseconds
-        Long lowHour = 1451001600000L; // 2015-12-25 @ 00:00:00, in milliseconds
+        long tstamp1 = 1451001601000L; // 2015-12-25 @ 00:00:01, in milliseconds
+        long tstamp2 = 1451088001000L; // 2015-12-26 @ 00:00:01, in milliseconds
+        long lowHour = 1451001600000L; // 2015-12-25 @ 00:00:00, in milliseconds
 
         // A 1 hour window should round down to the beginning of the hour
-        assertTrue(getWindowBoundsInMillis(HOURS, 1, tstamp1).left.compareTo(lowHour) == 0);
+        assertTrue(getWindowBoundsInMillis(HOURS, 1, tstamp1) == lowHour);
 
         // A 1 minute window should round down to the beginning of the hour
-        assertTrue(getWindowBoundsInMillis(TimeUnit.MINUTES, 1, tstamp1).left.compareTo(lowHour) == 0);
+        assertTrue(getWindowBoundsInMillis(TimeUnit.MINUTES, 1, tstamp1) == lowHour);
 
         // A 1 day window should round down to the beginning of the hour
-        assertTrue(getWindowBoundsInMillis(TimeUnit.DAYS, 1, tstamp1).left.compareTo(lowHour) == 0 );
+        assertTrue(getWindowBoundsInMillis(TimeUnit.DAYS, 1, tstamp1) == lowHour);
 
         // The 2 day window of 2015-12-25 + 2015-12-26 should round down to the beginning of 2015-12-25
-        assertTrue(getWindowBoundsInMillis(TimeUnit.DAYS, 2, tstamp2).left.compareTo(lowHour) == 0);
+        assertTrue(getWindowBoundsInMillis(TimeUnit.DAYS, 2, tstamp2) == lowHour);
 
 
         return;
@@ -188,22 +187,21 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        HashMultimap<Long, SSTableReader> buckets = HashMultimap.create();
+        TreeMap<Long, List<SSTableReader>> buckets = new TreeMap<>(Long::compare);
         List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
 
         // We'll put 3 sstables into the newest bucket
         for (int i = 0 ; i < 3; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, tstamp);
-            buckets.put(bounds.left, sstrs.get(i));
+            TimeWindowCompactionStrategy.addToBuckets(buckets, sstrs.get(i), tstamp, TimeUnit.HOURS, 1);
         }
 
-        List<CompactionAggregate> aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        List<CompactionAggregate> aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()));
         Set<CompactionPick> compactions = toCompactions(aggregates);
         assertTrue("No selected compactions when fewer than min threshold SSTables in the newest bucket", CompactionAggregate.getSelected(aggregates).isEmpty());
         assertTrue("No compactions when fewer than min threshold SSTables in the newest bucket", compactions.isEmpty());
 
-        aggregates = getBucketAggregates(buckets, 2, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        aggregates = getBucketAggregates(buckets, 2, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()));
         compactions = toCompactions(aggregates);
         assertFalse("There should be one selected compaction when bucket is larger than the min but smaller than max threshold", CompactionAggregate.getSelected(aggregates).isEmpty());
         assertEquals("There should be one compaction when bucket is larger than the min but smaller than max threshold", 1,  compactions.size());
@@ -211,8 +209,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         // And 2 into the second bucket (1 hour back)
         for (int i = 3 ; i < 5; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, tstamp2);
-            buckets.put(bounds.left, sstrs.get(i));
+            TimeWindowCompactionStrategy.addToBuckets(buckets, sstrs.get(i), tstamp2, TimeUnit.HOURS, 1);
         }
 
         assertEquals("an sstable with a single value should have equal min/max timestamps", sstrs.get(0).getMinTimestamp(), sstrs.get(0).getMaxTimestamp());
@@ -237,11 +234,10 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         sstrs = new ArrayList<>(cfs.getLiveSSTables());
         for (int i = 0 ; i < 40; i++)
         {
-            Pair<Long,Long> bounds = getWindowBoundsInMillis(HOURS, 1, sstrs.get(i).getMaxTimestamp());
-            buckets.put(bounds.left, sstrs.get(i));
+            TimeWindowCompactionStrategy.addToBuckets(buckets, sstrs.get(i), sstrs.get(i).getMaxTimestamp(), TimeUnit.HOURS, 1);
         }
 
-        aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()).left);
+        aggregates = getBucketAggregates(buckets, 4, 32, new SizeTieredCompactionStrategyOptions(), getWindowBoundsInMillis(HOURS, 1, System.currentTimeMillis()));
         compactions = toCompactions(aggregates);
         assertEquals("new bucket should be split by max threshold of 32", buckets.keySet().size() + 1, compactions.size());
 

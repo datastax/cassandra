@@ -193,7 +193,7 @@ public class CompactionTaskTest
             for (int j = 0; j < numKeys; j++)
                 QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (?, ?);", j + i * numKeys, j + i * numKeys);
 
-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
 
         Set<SSTableReader> sstables = cfs.getLiveSSTables();

@@ -1593,14 +1593,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getView().select(sstableSet);
     }
 
-    public Iterable<SSTableReader> getUncompactingSSTables()
+    public Iterable<SSTableReader> getNoncompactingSSTables()
     {
-        return data.getUncompacting();
+        return data.getNoncompacting();
     }
 
-    public Iterable<? extends SSTableReader> getUncompactingSSTables(Iterable<? extends SSTableReader> candidates)
+    public Iterable<? extends SSTableReader> getNoncompactingSSTables(Iterable<? extends SSTableReader> candidates)
     {
-        return data.getUncompacting(candidates);
+        return data.getNoncompacting(candidates);
     }
 
     public Set<SSTableReader> getCompactingSSTables()
@@ -2312,6 +2312,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             cfs.runWithCompactionsDisabled((Callable<Void>) () -> {
                 cfs.data.reset(memtableFactory.create(new AtomicReference<>(CommitLogPosition.NONE), cfs.metadata, cfs));
+                cfs.compactionStrategyManager.forceReload();
                 return null;
             }, true, false);
         }

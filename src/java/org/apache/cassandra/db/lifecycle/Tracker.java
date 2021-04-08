@@ -402,14 +402,14 @@ public class Tracker
         return view.get().compacting;
     }
 
-    public Iterable<SSTableReader> getUncompacting()
+    public Iterable<SSTableReader> getNoncompacting()
     {
         return view.get().select(SSTableSet.NONCOMPACTING);
     }
 
-    public Iterable<? extends SSTableReader> getUncompacting(Iterable<? extends SSTableReader> candidates)
+    public Iterable<? extends SSTableReader> getNoncompacting(Iterable<? extends SSTableReader> candidates)
     {
-        return view.get().getUncompacting(candidates);
+        return view.get().getNoncompacting(candidates);
     }
 
     public void maybeIncrementallyBackup(final Iterable<SSTableReader> sstables)

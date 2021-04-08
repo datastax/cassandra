@@ -231,11 +231,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // it's just an object, which we use regular Object equality on; we introduce a special class just for easy recognition
     public static final class UniqueIdentifier {}
 
-    public static final Comparator<SSTableReader> sstableComparator = (o1, o2) -> o1.getFirst().compareTo(o2.getFirst());
+    public static final Comparator<SSTableReader> firstKeyComparator = (o1, o2) -> o1.getFirst().compareTo(o2.getFirst());
 
     public static final Comparator<SSTableReader> generationReverseComparator = (o1, o2) -> -Integer.compare(o1.descriptor.generation, o2.descriptor.generation);
 
-    public static final Ordering<SSTableReader> sstableOrdering = Ordering.from(sstableComparator);
+    public static final Ordering<SSTableReader> firstKeyOrdering = Ordering.from(firstKeyComparator);
 
     public static final Comparator<? super SSTableReader> sizeComparator = (o1, o2) -> Longs.compare(o1.onDiskLength(), o2.onDiskLength());
 
