@@ -135,7 +135,7 @@ public class CompactionManager implements CompactionManagerMBean
     @VisibleForTesting
     final Multiset<ColumnFamilyStore> compactingCF = ConcurrentHashMultiset.create();
 
-    public final ActiveCompactions active = new ActiveCompactions();
+    public final ActiveOperations active = new ActiveOperations();
 
     // used to temporarily pause non-strategy managed compactions (like index summary redistribution)
     private final AtomicInteger globalCompactionPauseCount = new AtomicInteger(0);
@@ -236,7 +236,7 @@ public class CompactionManager implements CompactionManagerMBean
         cacheCleanupExecutor.shutdown();
 
         // interrupt compactions and validations
-        for (TableOperation operationSource : active.getCompactions())
+        for (TableOperation operationSource : active.getTableOperations())
         {
             operationSource.stop();
         }
@@ -1765,7 +1765,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public int getActiveCompactions()
     {
-        return active.getCompactions().size();
+        return active.getTableOperations().size();
     }
 
     static class CompactionExecutor extends JMXEnabledThreadPoolExecutor
@@ -1929,7 +1929,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public List<Map<String, String>> getCompactions()
     {
-        List<TableOperation> operationSources = active.getCompactions();
+        List<TableOperation> operationSources = active.getTableOperations();
         List<Map<String, String>> out = new ArrayList<Map<String, String>>(operationSources.size());
         for (TableOperation op : operationSources)
             out.add(op.getProgress().asMap());
@@ -1938,7 +1938,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public List<String> getCompactionSummary()
     {
-        List<TableOperation> operationSources = active.getCompactions();
+        List<TableOperation> operationSources = active.getTableOperations();
         List<String> out = new ArrayList<String>(operationSources.size());
         for (TableOperation ci : operationSources)
             out.add(ci.getProgress().toString());
@@ -1980,7 +1980,7 @@ public class CompactionManager implements CompactionManagerMBean
     public void stopCompaction(String type)
     {
         OperationType operation = OperationType.valueOf(type);
-        for (TableOperation operationSource : active.getCompactions())
+        for (TableOperation operationSource : active.getTableOperations())
         {
             if (operationSource.getProgress().operationType() == operation)
                 operationSource.stop();
@@ -1989,7 +1989,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public void stopCompactionById(String compactionId)
     {
-        for (TableOperation operationSource : active.getCompactions())
+        for (TableOperation operationSource : active.getTableOperations())
         {
             UUID holderId = operationSource.getProgress().operationId();
             if (holderId != null && holderId.equals(UUID.fromString(compactionId)))
@@ -2153,7 +2153,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         // interrupt in-progress compactions
         Set<TableOperation> interrupted = new HashSet<>();
-        for (TableOperation operationSource : active.getCompactions())
+        for (TableOperation operationSource : active.getTableOperations())
         {
             AbstractTableOperation.OperationProgress info = operationSource.getProgress();
 
@@ -2202,7 +2202,7 @@ public class CompactionManager implements CompactionManagerMBean
         assert columnFamilies != null;
 
         // interrupt in-progress compactions
-        for (TableOperation operationSource : active.getCompactions())
+        for (TableOperation operationSource : active.getTableOperations())
         {
             AbstractTableOperation.OperationProgress info = operationSource.getProgress();
             if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation)
@@ -2247,7 +2247,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     public List<AbstractTableOperation.OperationProgress> getSSTableTasks()
     {
-        return active.getCompactions()
+        return active.getTableOperations()
                      .stream()
                      .map(TableOperation::getProgress)
                      .filter(progress -> progress.operationType() != OperationType.COUNTER_CACHE_SAVE

@@ -499,7 +499,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
     private List<TableOperation> getCompactionsFor(ColumnFamilyStore cfs)
     {
         List<TableOperation> compactions = new ArrayList<>();
-        for (TableOperation compaction : CompactionManager.instance.active.getCompactions())
+        for (TableOperation compaction : CompactionManager.instance.active.getTableOperations())
         {
             if (compaction.getProgress().metadata().equals(cfs.metadata()))
                 compactions.add(compaction);

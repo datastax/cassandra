@@ -242,6 +242,12 @@ public abstract class AbstractCompactionStrategy
         {
             return CompactionTask.forCompaction(this, txn, gcBefore);
         }
+
+        @Override
+        public int getEstimatedRemainingTasks()
+        {
+            return backgroundCompactions.getEstimatedRemainingTasks();
+        }
     }
 
     /**
@@ -279,7 +285,7 @@ public abstract class AbstractCompactionStrategy
 
                 LifecycleTransaction modifier = cfs.getTracker().tryModify(latestBucket, OperationType.COMPACTION);
                 if (modifier != null)
-                    return createCompactionTask(gcBefore, modifier, false);
+                    return createCompactionTask(gcBefore, modifier, false, false);
                 previousCandidate = latestBucket;
             }
         }
@@ -307,7 +313,7 @@ public abstract class AbstractCompactionStrategy
         LifecycleTransaction txn = cfs.getTracker().tryModify(filteredSSTables, OperationType.COMPACTION);
         if (txn == null)
             return null;
-        return Collections.singleton(createCompactionTask(gcBefore, txn, true));
+        return Collections.singleton(createCompactionTask(gcBefore, txn, true, splitOutput));
     }
 
     /**
@@ -331,36 +337,62 @@ public abstract class AbstractCompactionStrategy
             return null;
         }
 
-        return createCompactionTask(gcBefore, modifier, false).setUserDefined(true);
+        return createCompactionTask(gcBefore, modifier, false, false).setUserDefined(true);
     }
 
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal)
+    /**
+     * Create a compaction task for a maximal, user defined or background compaction without aggregates (legacy strategies).
+     * Background compactions for strategies that extend {@link WithAggregates} will use
+     * {@link WithAggregates#createCompactionTask(int, LifecycleTransaction, boolean, boolean)} instead.
+     *
+     * @param gcBefore tombstone threshold, older tombstones can be discarded
+     * @param txn the transaction containing the files to be compacted
+     * @param isMaximal set to true only when it's a maximal compaction
+     * @param splitOutput false except for maximal compactions and passed in by the user to indicate to SizeTieredCompactionStrategy to split the out,
+     *                    ignored otherwise
+     *
+     * @return a compaction task, see {@link AbstractCompactionTask} and sub-classes
+     */
+    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return CompactionTask.forCompaction(this, txn, gcBefore);
     }
 
+    /**
+     * Create a compaction task for operations that are not driven by the strategies.
+     *
+     * @param txn the transaction containing the files to be compacted
+     * @param gcBefore tombstone threshold, older tombstones can be discarded
+     * @param maxSSTableBytes the maximum size in bytes for an output sstables
+     *
+     * @return a compaction task, see {@link AbstractCompactionTask} and sub-classes
+     */
     public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
     {
         return CompactionTask.forCompaction(this, txn, gcBefore);
     }
 
     /**
-     * @return the number of background tasks estimated to still be needed for this columnfamilystore
+     * Get the estimated remaining compactions. Strategies that implement {@link WithAggregates} can delegate this
+     * to {@link BackgroundCompactions} because they set the pending aggregates as background compactions but legacy
+     * strategies that do not support aggregates must implement this method.
+     * <p/>
+     * @return the number of background tasks estimated to still be needed for this strategy
      */
-    public int getEstimatedRemainingTasks()
-    {
-        return backgroundCompactions.getEstimatedRemainingTasks();
-    }
+    public abstract int getEstimatedRemainingTasks();
 
     /**
      * @return the total number of background compactions, pending or in progress
      */
     public int getTotalCompactions()
     {
-        return backgroundCompactions.getTotalCompactions();
+        return getEstimatedRemainingTasks() + backgroundCompactions.getCompactionsInProgress();
     }
 
     /**
+     * Return the statistics. Only strategies that implement {@link WithAggregates} will provide non-empty statistics,
+     * the legacy strategies will always have empty statistics.
+     * <p/>
      * @return statistics about this compaction picks.
      */
     public CompactionStrategyStatistics getStatistics()

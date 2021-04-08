@@ -155,13 +155,13 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public static LifecycleTransaction offline(OperationType operationType)
     {
         Tracker dummy = Tracker.newDummyTracker();
-        return new LifecycleTransaction(dummy, new LogTransaction(operationType, dummy), Collections.emptyList());
+        return new LifecycleTransaction(dummy, new LogTransaction(operationType), Collections.emptyList());
     }
 
     @SuppressWarnings("resource") // log closed during postCleanup
     LifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<? extends SSTableReader> readers)
     {
-        this(tracker, new LogTransaction(operationType, tracker), readers);
+        this(tracker, new LogTransaction(operationType), readers);
     }
 
     LifecycleTransaction(Tracker tracker, LogTransaction log, Iterable<? extends SSTableReader> readers)
@@ -207,7 +207,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
         // prepare for compaction obsolete readers as long as they were part of the original set
         // since those that are not original are early readers that share the same desc with the finals
-        maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), null));
+        maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), tracker, null));
         log.prepareToCommit();
     }
 
@@ -258,7 +258,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         Iterable<SSTableReader> obsolete = filterOut(concatUniq(staged.update, logged.update), originals);
         logger.trace("Obsoleting {}", obsolete);
 
-        accumulate = prepareForObsoletion(obsolete, log, obsoletions = new ArrayList<>(), accumulate);
+        accumulate = prepareForObsoletion(obsolete, log, obsoletions = new ArrayList<>(), tracker, accumulate);
         // it's safe to abort even if committed, see maybeFail in doCommit() above, in this case it will just report
         // a failure to abort, which is useful information to have for debug
         accumulate = log.abort(accumulate);

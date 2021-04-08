@@ -80,7 +80,7 @@ public class CompactionMetrics
                     n += cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
             }
             // add number of currently running compactions
-            return n + CompactionManager.instance.active.getCompactions().size();
+            return n + CompactionManager.instance.active.getTableOperations().size();
         });
 
         pendingTasksByTableName = Metrics.register(factory.createMetricName("PendingTasksByTableName"), () -> {
@@ -105,7 +105,7 @@ public class CompactionMetrics
             // currently running compactions
             // TODO DB-2701 - this includes all operations (previous behaviour), if we wanted only real
             // compactions we could remove this block of code and call getTotalCompactions() from the strategy managers
-            for (TableOperation op : CompactionManager.instance.active.getCompactions())
+            for (TableOperation op : CompactionManager.instance.active.getTableOperations())
             {
                 TableMetadata metaData = op.getProgress().metadata();
                 if (metaData == null)

@@ -163,7 +163,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
 
 
     @Override
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal)
+    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         Collection<SSTableReader> sstables = txn.originals();
         int level = sstables.size() > 1 ? 0 : sstables.iterator().next().getSSTableLevel();
@@ -231,18 +231,6 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
         }
         return groupedSSTables;
 
-    }
-
-    @Override
-    public int getEstimatedRemainingTasks()
-    {
-        // TODO - there is a difference with existing behavior here, previously
-        // it would recalculate all candidates each time this method was called,
-        // now it does not. IMO this method should not change the pending tasks in the
-        // picks by calling picks.setPending(manifest.getEstimatedTasks(selected));
-        // this IMO should only be done by getNextBackgroundTask(), similarly to what other strategies do,
-        // in which case we should just remove this override which is currently identical
-        return backgroundCompactions.getEstimatedRemainingTasks();
     }
 
     public long getMaxSSTableBytes()

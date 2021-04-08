@@ -232,7 +232,7 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     /**
-     * @return the number of background tasks estimated to still be needed for this strategy
+     * @return the number of background compactions estimated to still be needed
      */
     public int getEstimatedRemainingTasks()
     {
@@ -240,11 +240,19 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     /**
+     * @return the number of compactions currently in progress
+     */
+    public int getCompactionsInProgress()
+    {
+        return compactions.size();
+    }
+
+    /**
      * @return the total number of background compactions, pending or in progress
      */
     public int getTotalCompactions()
     {
-        return compactions.size() + getEstimatedRemainingTasks();
+        return getCompactionsInProgress() + getEstimatedRemainingTasks();
     }
 
     /**

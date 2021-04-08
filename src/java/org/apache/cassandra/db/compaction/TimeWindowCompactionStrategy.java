@@ -66,7 +66,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    public AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal)
+    public AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return CompactionTask.forTimeWindowCompaction(this, txn, gcBefore);
     }
@@ -169,10 +169,10 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     /**
-     * Find the lowest and highest timestamps in a given timestamp/unit pair
-     * Returns milliseconds, caller should adjust accordingly
+     * Find the lowest timestamp in a given window/unit pair and
+     * return it expressed as milliseconds, the caller should adjust accordingly
      */
-    public static long getWindowBoundsInMillis(TimeUnit windowTimeUnit, int windowTimeSize, long timestampInMillis)
+    static long getWindowBoundsInMillis(TimeUnit windowTimeUnit, int windowTimeSize, long timestampInMillis)
     {
 
         long sizeInMillis = TimeUnit.MILLISECONDS.convert(windowTimeSize, windowTimeUnit);

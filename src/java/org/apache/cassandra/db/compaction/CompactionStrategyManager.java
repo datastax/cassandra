@@ -1010,23 +1010,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         return tasks;
     }
 
-    public int getTotalCompactions()
-    {
-        maybeReloadDiskBoundaries();
-        int tasks = 0;
-        readLock.lock();
-        try
-        {
-            for (AbstractCompactionStrategy strategy : getAllStrategies())
-                tasks += strategy.getTotalCompactions();
-        }
-        finally
-        {
-            readLock.unlock();
-        }
-        return tasks;
-    }
-
     public boolean shouldBeEnabled()
     {
         return params.isEnabled();
@@ -1039,6 +1022,14 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     public List<List<AbstractCompactionStrategy>> getStrategies()
     {
+        return getStrategies(true);
+    }
+
+    private List<List<AbstractCompactionStrategy>> getStrategies(boolean checkBoundaries)
+    {
+        if (checkBoundaries)
+            maybeReloadDiskBoundaries();
+
         maybeReloadDiskBoundaries();
         readLock.lock();
         try
@@ -1058,19 +1049,11 @@ public class CompactionStrategyManager implements INotificationConsumer
      */
     public List<CompactionStrategyStatistics> getStrategyStatistics()
     {
-        readLock.lock();
-        try
-        {
-            return getStrategies().stream()
-                                  .flatMap(list -> list.stream())
-                                  .filter(strategy -> strategy.getTotalCompactions() > 0)
-                                  .map(AbstractCompactionStrategy::getStatistics)
-                                  .collect(Collectors.toList());
-        }
-        finally
-        {
-            readLock.unlock();
-        }
+        return getStrategies(false).stream()
+                                   .flatMap(list -> list.stream())
+                                   .filter(strategy -> strategy.getTotalCompactions() > 0)
+                                   .map(AbstractCompactionStrategy::getStatistics)
+                                   .collect(Collectors.toList());
     }
 
     public void setNewLocalCompactionStrategy(CompactionParams params)

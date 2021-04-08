@@ -328,18 +328,12 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
         return hotness;
     }
 
-    @SuppressWarnings("resource")
-    public synchronized Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore, boolean splitOutput)
+    @Override
+    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
-        Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(sstables);
-        if (Iterables.isEmpty(filteredSSTables))
-            return null;
-        LifecycleTransaction txn = cfs.getTracker().tryModify(filteredSSTables, OperationType.COMPACTION);
-        if (txn == null)
-            return null;
-        if (splitOutput)
-            return Arrays.asList(SplittingCompactionTask.forSplitting(this, txn, gcBefore));
-        return Arrays.asList(CompactionTask.forCompaction(this, txn, gcBefore));
+        return isMaximal && splitOutput
+               ? SplittingCompactionTask.forSplitting(this, txn, gcBefore)
+               : CompactionTask.forCompaction(this, txn, gcBefore);
     }
 
     public long getMaxSSTableBytes()

@@ -122,7 +122,7 @@ public class IndexSummaryManagerTest
     @After
     public void afterTest()
     {
-        for (TableOperation operation : CompactionManager.instance.active.getCompactions())
+        for (TableOperation operation : CompactionManager.instance.active.getTableOperations())
         {
             operation.stop();
         }
@@ -701,7 +701,7 @@ public class IndexSummaryManagerTest
         }
 
         assertNotNull("Expected compaction interrupted exception", exception.get());
-        assertTrue("Expected no active compactions", CompactionManager.instance.active.getCompactions().isEmpty());
+        assertTrue("Expected no active compactions", CompactionManager.instance.active.getTableOperations().isEmpty());
 
         Set<SSTableReader> beforeRedistributionSSTables = new HashSet<>(allSSTables);
         Set<SSTableReader> afterCancelSSTables = selectOnlyBigTableReaders(cfs.getLiveSSTables(), Collectors.toSet());

@@ -160,7 +160,7 @@ public class CancelCompactionsTest extends CQLTester
                     assertFalse(compaction.isStopRequested());
             }
             tcts.get(1).abort();
-            assertEquals(1, CompactionManager.instance.active.getCompactions().size());
+            assertEquals(1, CompactionManager.instance.active.getTableOperations().size());
             cdl.await();
             t.join();
         }
@@ -501,7 +501,7 @@ public class CancelCompactionsTest extends CQLTester
 
         try
         {
-            ct.execute(new ActiveCompactions()
+            ct.execute(new ActiveOperations()
             {
                 @Override
                 public NonThrowingCloseable onOperationStart(TableOperation op)
@@ -526,7 +526,7 @@ public class CancelCompactionsTest extends CQLTester
 
     private List<TableOperation> getActiveCompactionsForTable(ColumnFamilyStore cfs)
     {
-        return CompactionManager.instance.active.getCompactions()
+        return CompactionManager.instance.active.getTableOperations()
                                                 .stream()
                                                 .filter(operation -> operation.getProgress().table().orElse("unknown").equalsIgnoreCase(cfs.name))
                                                 .collect(Collectors.toList());

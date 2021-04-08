@@ -36,23 +36,27 @@ import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
-public class ActiveCompactions extends SchemaChangeListener implements TableOperationObserver
+public class ActiveOperations extends SchemaChangeListener implements TableOperationObserver
 {
-    private static final Logger logger = LoggerFactory.getLogger(ActiveCompactions.class);
+    private static final Logger logger = LoggerFactory.getLogger(ActiveOperations.class);
 
     // The operations ordered by keyspace.table for all the operations that are currently in progress.
     private static final ConcurrentMap<String, TableOperations> operationsByTable = new ConcurrentHashMap<>();
 
-    public ActiveCompactions()
+    public ActiveOperations()
     {
         Schema.instance.registerListener(this);
     }
 
-    public List<TableOperation> getCompactions()
+    /**
+     * @return all the table operations currently in progress. This is mostly compactions but it can include other
+     *         operations too, basically any operation that calls {@link this#onOperationStart(TableOperation).}
+     */
+    public List<TableOperation> getTableOperations()
     {
         return operationsByTable.values()
                                 .stream()
-                                .flatMap(compactions -> compactions.getInProgress().stream())
+                                .flatMap(ops -> ops.getInProgress().stream())
                                 .collect(Collectors.toList());
     }
 
@@ -103,18 +107,18 @@ public class ActiveCompactions extends SchemaChangeListener implements TableOper
         catch (IllegalArgumentException ex)
         {
             // this happens when the table is dropped
-            logger.debug("Could not return compactions in progress for {}: {}", metadata, ex.getMessage());
+            logger.debug("Could not return operations in progress for {}: {}", metadata, ex.getMessage());
         }
 
         return null;
     }
 
     /**
-     * Iterates over the active compactions and tries to find CompactionInfos with the given compactionType for the given sstable
+     * Iterates over the active operations and tries to find OperationProgresses with the given operation type for the given sstable
      *
-     * Number of entries in compactions should be small (< 10) but avoid calling in any time-sensitive context
+     * Number of entries in operations should be small (< 10) but avoid calling in any time-sensitive context
      */
-    public Collection<AbstractTableOperation.OperationProgress> getOperationsForSSTable(SSTableReader sstable, OperationType compactionType)
+    public Collection<AbstractTableOperation.OperationProgress> getOperationsForSSTable(SSTableReader sstable, OperationType operationType)
     {
         List<AbstractTableOperation.OperationProgress> toReturn = null;
         synchronized (operationsByTable)
@@ -124,7 +128,7 @@ public class ActiveCompactions extends SchemaChangeListener implements TableOper
                 for (TableOperation op : tableOperations.getInProgress())
                 {
                     AbstractTableOperation.OperationProgress progress = op.getProgress();
-                    if (progress.sstables().contains(sstable) && progress.operationType() == compactionType)
+                    if (progress.sstables().contains(sstable) && progress.operationType() == operationType)
                     {
                         if (toReturn == null)
                             toReturn = new ArrayList<>();
@@ -137,11 +141,11 @@ public class ActiveCompactions extends SchemaChangeListener implements TableOper
     }
 
     /**
-     * @return true if given compaction is still active
+     * @return true if given table operation is still active
      */
-    public boolean isActive(TableOperation ci)
+    public boolean isActive(TableOperation op)
     {
-        return getCompactions().contains(ci);
+        return getTableOperations().contains(op);
     }
 
     //
