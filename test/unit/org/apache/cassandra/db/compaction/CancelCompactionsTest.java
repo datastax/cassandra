@@ -402,7 +402,8 @@ public class CancelCompactionsTest extends CQLTester
             assertNotNull(txn);
             controller = new CompactionController(cfs, sstables, Integer.MIN_VALUE);
             ci = new CompactionIterator(txn.opType(), scanners, controller, FBUtilities.nowInSeconds(), UUID.randomUUID());
-            closeable = CompactionManager.instance.active.onOperationStart(ci);
+            TableOperation op = ci.getOperation();
+            closeable = CompactionManager.instance.active.onOperationStart(op);
         }
 
         public void abort()

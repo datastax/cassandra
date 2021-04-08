@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.io.Closeable;
 import java.util.*;
 import java.util.function.LongPredicate;
 
@@ -57,7 +56,7 @@ import org.apache.cassandra.utils.Throwables;
  *   <li>keep tracks of the compaction progress.</li>
  * </ul>
  */
-public class CompactionIterator extends AbstractTableOperation implements UnfilteredPartitionIterator
+public class CompactionIterator implements UnfilteredPartitionIterator
 {
     private static final long UNFILTERED_TO_UPDATE_PROGRESS = 100;
 
@@ -81,22 +80,10 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
-
-    /** The observer closeable, closing this will signal to the observer that the operation is finished. */
-    private final Closeable obsCloseable;
-
-    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
-    {
-        this(type, scanners, controller, nowInSec, compactionId, TableOperationObserver.NOOP);
-    }
+    private final TableOperation op;
 
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
-    public CompactionIterator(OperationType type,
-                              List<ISSTableScanner> scanners,
-                              AbstractCompactionController controller,
-                              int nowInSec,
-                              UUID compactionId,
-                              TableOperationObserver activeCompactions)
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
     {
         this.controller = controller;
         this.type = type;
@@ -114,7 +101,7 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
-        this.obsCloseable =  activeCompactions == null ? null : activeCompactions.onOperationStart(this);
+        op = createOperation();
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
@@ -122,22 +109,41 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
         merged = Transformation.apply(merged, new GarbageSkipper(controller));
         merged = Transformation.apply(merged, new Purger(controller, nowInSec));
         merged = DuplicateRowChecker.duringCompaction(merged, type);
-        compacted = Transformation.apply(merged, new AbortableUnfilteredPartitionTransformation(this));
+        compacted = Transformation.apply(merged, new AbortableUnfilteredPartitionTransformation(op));
+    }
+
+    protected TableOperation createOperation()
+    {
+        return new AbstractTableOperation() {
+
+            @Override
+            public OperationProgress getProgress()
+            {
+                return new AbstractTableOperation.OperationProgress(controller.cfs.metadata(), type, bytesRead(), totalBytes, compactionId, sstables);
+            }
+
+            @Override
+            public boolean isGlobal()
+            {
+                return false;
+            }
+        };
+    }
+
+    /**
+     * @return A {@link TableOperation} backed by this iterator. This operation can be observed for progress
+     * and for interrupting provided that it is registered with a {@link TableOperationObserver}, normally the
+     * metrics in the compaction manager. The caller is responsible for registering the operation and checking
+     * {@link TableOperation#isStopRequested()}.
+     */
+    public TableOperation getOperation()
+    {
+        return op;
     }
 
     public TableMetadata metadata()
     {
         return controller.cfs.metadata();
-    }
-
-    public OperationProgress getProgress()
-    {
-        return new OperationProgress(controller.cfs.metadata(),
-                                     type,
-                                     bytesRead(),
-                                     totalBytes,
-                                     compactionId,
-                                     sstables);
     }
 
     long bytesRead()
@@ -308,12 +314,12 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     {
         updateBytesRead();
 
-        Throwables.maybeFail(Throwables.close((Throwable) null, compacted, obsCloseable));
+        Throwables.maybeFail(Throwables.close(null, compacted));
     }
 
     public String toString()
     {
-        return this.getProgress().toString();
+        return String.format("%s: %s, (%d/%d)", type, metadata(), bytesRead(), totalBytes());
     }
 
     private class Purger extends PurgeFunction
@@ -601,34 +607,36 @@ public class CompactionIterator extends AbstractTableOperation implements Unfilt
     private static class AbortableUnfilteredPartitionTransformation extends Transformation<UnfilteredRowIterator>
     {
         private final AbortableUnfilteredRowTransformation abortableIter;
+        private final TableOperation op;
 
-        private AbortableUnfilteredPartitionTransformation(CompactionIterator iter)
+        private AbortableUnfilteredPartitionTransformation(TableOperation op)
         {
-            this.abortableIter = new AbortableUnfilteredRowTransformation(iter);
+            this.op = op;
+            this.abortableIter = new AbortableUnfilteredRowTransformation(op);
         }
 
         @Override
         protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
-            if (abortableIter.iter.isStopRequested())
-                throw new CompactionInterruptedException(abortableIter.iter.getProgress());
+            if (op.isStopRequested())
+                throw new CompactionInterruptedException(op.getProgress());
             return Transformation.apply(partition, abortableIter);
         }
     }
 
     private static class AbortableUnfilteredRowTransformation extends Transformation
     {
-        private final CompactionIterator iter;
+        private final TableOperation op;
 
-        private AbortableUnfilteredRowTransformation(CompactionIterator iter)
+        private AbortableUnfilteredRowTransformation(TableOperation op)
         {
-            this.iter = iter;
+            this.op = op;
         }
 
         public Row applyToRow(Row row)
         {
-            if (iter.isStopRequested())
-                throw new CompactionInterruptedException(iter.getProgress());
+            if (op.isStopRequested())
+                throw new CompactionInterruptedException(op.getProgress());
             return row;
         }
     }

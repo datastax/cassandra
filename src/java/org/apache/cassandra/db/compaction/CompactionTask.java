@@ -216,7 +216,7 @@ public class CompactionTask extends AbstractCompactionTask
      *  <p/>
      *  This class also extends {@link AbstractTableOperation} for reporting compaction-specific progress information.
      */
-    public final class CompactionOperation extends AbstractTableOperation implements AutoCloseable
+    public final class CompactionOperation implements AutoCloseable
     {
         private final CompactionController controller;
         private final CompactionStrategyManager strategyManager;
@@ -240,6 +240,7 @@ public class CompactionTask extends AbstractCompactionTask
         private Refs<SSTableReader> sstableRefs;
         private AbstractCompactionStrategy.ScannerList scanners;
         private CompactionIterator compactionIterator;
+        private TableOperation op;
         private Closeable obsCloseable;
         private CompactionAwareWriter writer;
 
@@ -282,8 +283,9 @@ public class CompactionTask extends AbstractCompactionTask
                 this.sstableRefs = Refs.ref(actuallyCompact);
                 this.scanners = strategyManager.getScanners(actuallyCompact);
                 this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
+                this.op = compactionIterator.getOperation();
                 this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
-                this.obsCloseable = opObserver.onOperationStart(this); // these are the metrics
+                this.obsCloseable = opObserver.onOperationStart(op);
 
                 compObserver.setInProgress(progress);
             }
@@ -325,13 +327,13 @@ public class CompactionTask extends AbstractCompactionTask
             long lastBytesScanned = 0;
 
             if (!controller.cfs.getCompactionStrategyManager().isActive())
-                throw new CompactionInterruptedException(compactionIterator.getProgress());
+                throw new CompactionInterruptedException(op.getProgress());
 
             estimatedKeys = writer.estimatedKeys();
             while (compactionIterator.hasNext())
             {
-                if (compactionIterator.isStopRequested())
-                    throw new CompactionInterruptedException(compactionIterator.getProgress());
+                if (op.isStopRequested())
+                    throw new CompactionInterruptedException(op.getProgress());
 
                 UnfilteredRowIterator partition = compactionIterator.next();
                 if (writer.append(partition))
@@ -414,22 +416,6 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         //
-        // AbstractTableOperation
-        //
-
-        @Override
-        public OperationProgress getProgress()
-        {
-            return compactionIterator.getProgress();
-        }
-
-        @Override
-        public boolean isGlobal()
-        {
-            return compactionIterator.isGlobal();
-        }
-
-        //
         // CompactionProgress
         //
 
@@ -490,9 +476,9 @@ public class CompactionTask extends AbstractCompactionTask
             }
 
             @Override
-            public Unit unit()
+            public TableOperation.Unit unit()
             {
-                return Unit.BYTES;
+                return TableOperation.Unit.BYTES;
             }
 
             @Override
@@ -515,7 +501,7 @@ public class CompactionTask extends AbstractCompactionTask
             @Override
             public boolean isStopRequested()
             {
-                return CompactionOperation.this.isStopRequested();
+                return op.isStopRequested();
             }
 
             @Override

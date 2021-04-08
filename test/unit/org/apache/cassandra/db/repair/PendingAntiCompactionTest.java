@@ -79,6 +79,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.WrappedRunnable;
@@ -462,31 +463,30 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = CompactionManager.getAntiCompactionIterator(scanners, controller, 0, UUID.randomUUID(), CompactionManager.instance.active, () -> false);
-                 Closeable c = CompactionManager.instance.active.onOperationStart(ci))
+                 CompactionIterator ci = new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, 0, UUIDGen.getTimeUUID()))
             {
-                // `ci` is our imaginary ongoing anticompaction which makes no progress until after 30s
-                // now we try to start a new AC, which will try to cancel all ongoing compactions
-
-                PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), 0, 0, es, () -> false);
-                ListenableFuture fut = pac.run();
-                try
+                TableOperation op = ci.getOperation();
+                try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
                 {
-                    fut.get(30, TimeUnit.SECONDS);
-                    fail("the future should throw exception since we try to start a new anticompaction when one is already running");
-                }
-                catch (ExecutionException e)
-                {
-                    assertTrue(e.getCause() instanceof PendingAntiCompaction.SSTableAcquisitionException);
-                }
+                    // `ci` is our imaginary ongoing anticompaction which makes no progress until after 30s
+                    // now we try to start a new AC, which will try to cancel all ongoing compactions
 
-                assertEquals(1, getCompactionsFor(cfs).size());
-                for (TableOperation compaction : getCompactionsFor(cfs))
-                    assertFalse(compaction.isStopRequested());
-            }
-            catch (IOException ex)
-            {
-                Throwables.maybeFail(ex);
+                    PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), 0, 0, es, () -> false);
+                    ListenableFuture fut = pac.run();
+                    try
+                    {
+                        fut.get(30, TimeUnit.SECONDS);
+                        fail("the future should throw exception since we try to start a new anticompaction when one is already running");
+                    }
+                    catch (ExecutionException e)
+                    {
+                        assertTrue(e.getCause() instanceof PendingAntiCompaction.SSTableAcquisitionException);
+                    }
+
+                    assertEquals(1, getCompactionsFor(cfs).size());
+                    for (TableOperation compaction : getCompactionsFor(cfs))
+                        assertFalse(compaction.isStopRequested());
+                }
             }
         }
         finally
@@ -520,51 +520,50 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID());
-                 Closeable c = CompactionManager.instance.active.onOperationStart(ci))
+                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID());)
             {
-                // `ci` is our imaginary ongoing anticompaction which makes no progress until after 5s
-                // now we try to start a new AC, which will try to cancel all ongoing compactions
+                TableOperation op = ci.getOperation();
+                try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
+                {
+                    // `ci` is our imaginary ongoing anticompaction which makes no progress until after 5s
+                    // now we try to start a new AC, which will try to cancel all ongoing compactions
 
-                PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), es, () -> false);
-                ListenableFuture fut = pac.run();
-                try
-                {
-                    fut.get(5, TimeUnit.SECONDS);
-                }
-                catch (TimeoutException e)
-                {
-                    // expected, we wait 1 minute for compactions to get cancelled in runWithCompactionsDisabled, but we are not iterating
-                    // CompactionIterator so the compaction is not actually cancelled
-                }
-                try
-                {
-                    assertTrue(ci.hasNext());
-                    ci.next();
-                    fail("CompactionIterator should be abortable");
-                }
-                catch (CompactionInterruptedException e)
-                {
-                    txn.abort();
-                    // expected
-                }
-                CountDownLatch cdl = new CountDownLatch(1);
-                Futures.addCallback(fut, new FutureCallback<Object>()
-                {
-                    public void onSuccess(@Nullable Object o)
+                    PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs), atEndpoint(FULL_RANGE, NO_RANGES), es, () -> false);
+                    ListenableFuture fut = pac.run();
+                    try
                     {
-                        cdl.countDown();
+                        fut.get(5, TimeUnit.SECONDS);
                     }
+                    catch (TimeoutException e)
+                    {
+                        // expected, we wait 1 minute for compactions to get cancelled in runWithCompactionsDisabled, but we are not iterating
+                        // CompactionIterator so the compaction is not actually cancelled
+                    }
+                    try
+                    {
+                        assertTrue(ci.hasNext());
+                        ci.next();
+                        fail("CompactionIterator should be abortable");
+                    }
+                    catch (CompactionInterruptedException e)
+                    {
+                        txn.abort();
+                        // expected
+                    }
+                    CountDownLatch cdl = new CountDownLatch(1);
+                    Futures.addCallback(fut, new FutureCallback<Object>()
+                    {
+                        public void onSuccess(@Nullable Object o)
+                        {
+                            cdl.countDown();
+                        }
 
-                    public void onFailure(Throwable throwable)
-                    {
-                    }
-                }, MoreExecutors.directExecutor());
-                assertTrue(cdl.await(1, TimeUnit.MINUTES));
-            }
-            catch (IOException ex)
-            {
-                Throwables.maybeFail(ex);
+                        public void onFailure(Throwable throwable)
+                        {
+                        }
+                    }, MoreExecutors.directExecutor());
+                    assertTrue(cdl.await(1, TimeUnit.MINUTES));
+                }
             }
         }
         finally

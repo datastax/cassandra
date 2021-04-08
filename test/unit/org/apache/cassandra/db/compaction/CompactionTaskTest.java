@@ -41,6 +41,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.ArgumentCaptor;
@@ -51,8 +52,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class CompactionTaskTest
 {
@@ -76,7 +80,7 @@ public class CompactionTaskTest
     }
 
     @Test
-    public void compactionInterruption() throws Exception
+    public void compactionDisabled() throws Exception
     {
         cfs.getCompactionStrategyManager().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
@@ -91,6 +95,7 @@ public class CompactionTaskTest
 
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         Assert.assertNotNull(txn);
+
         AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
         Assert.assertNotNull(task);
         cfs.getCompactionStrategyManager().pause();
@@ -104,6 +109,41 @@ public class CompactionTaskTest
             // expected
         }
         Assert.assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
+    }
+
+    @Test
+    public void compactionInterruption()
+    {
+        cfs.getCompactionStrategyManager().disable();
+        Set<SSTableReader> sstables = generateData(2, 2);
+
+        LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
+        assertNotNull(txn);
+
+        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        assertNotNull(task);
+
+        TableOperationObserver obs = Mockito.mock(TableOperationObserver.class);
+        NonThrowingCloseable cls = Mockito.mock(NonThrowingCloseable.class);
+
+        when(obs.onOperationStart(any(TableOperation.class))).thenAnswer(invocation -> {
+            TableOperation op = invocation.getArgument(0);
+            op.stop();
+            return cls;
+        });
+
+        try
+        {
+            task.execute(obs);
+            Assert.fail("Expected CompactionInterruptedException");
+        }
+        catch (CompactionInterruptedException e)
+        {
+            // pass
+        }
+
+        verify(cls, times(1)).close();
+        assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
     }
 
     private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
@@ -180,9 +220,9 @@ public class CompactionTaskTest
         assertNotNull(task);
         task.execute(operationObserver);
 
-        Mockito.verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
-        Mockito.verify(compObserver, times(1)).setInProgress(compactionCaptor.capture());
-        Mockito.verify(compObserver, times(1)).setCompleted(eq(txn.opId()));
+        verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
+        verify(compObserver, times(1)).setInProgress(compactionCaptor.capture());
+        verify(compObserver, times(1)).setCompleted(eq(txn.opId()));
     }
 
 

@@ -31,6 +31,7 @@ import javax.management.openmbean.TabularData;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicates;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
@@ -843,8 +844,14 @@ public class CompactionManager implements CompactionManagerMBean
         FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput));
     }
 
-    @SuppressWarnings("resource") // the tasks are executed in parallel on the executor, making sure that they get closed
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput)
+    {
+        return submitMaximal(cfStore, gcBefore, splitOutput, active);
+    }
+
+    @VisibleForTesting
+    @SuppressWarnings("resource") // the tasks are executed in parallel on the executor, making sure that they get closed
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput, TableOperationObserver obs)
     {
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
@@ -866,7 +873,7 @@ public class CompactionManager implements CompactionManagerMBean
             {
                 protected void runMayThrow()
                 {
-                    task.execute(active);
+                    task.execute(obs);
                 }
             };
 
@@ -1225,7 +1232,7 @@ public class CompactionManager implements CompactionManagerMBean
              ISSTableScanner scanner = cleanupStrategy.getScanner(sstable);
              CompactionController controller = new CompactionController(cfs, txn.originals(), getDefaultGcBefore(cfs, nowInSec));
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable));
-             CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, UUIDGen.getTimeUUID(), active))
+             CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, UUIDGen.getTimeUUID()))
         {
             StatsMetadata metadata = sstable.getSSTableMetadata();
             writer.switchWriter(createWriter(cfs, compactionFileLocation, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, txn));
@@ -1574,44 +1581,47 @@ public class CompactionManager implements CompactionManagerMBean
 
              AbstractCompactionStrategy.ScannerList scanners = strategy.getScanners(txn.originals());
              CompactionController controller = new CompactionController(cfs, sstableAsSet, getDefaultGcBefore(cfs, nowInSec));
-             CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID(), active, isCancelled))
+             CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID(), isCancelled))
         {
-            int expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval, (int)(SSTableReader.getApproximateKeyCount(sstableAsSet)));
-
-            fullWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, false, sstableAsSet, txn));
-            transWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, true, sstableAsSet, txn));
-            unrepairedWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, NO_PENDING_REPAIR, false, sstableAsSet, txn));
-
-            Predicate<Token> fullChecker = !ranges.onlyFull().isEmpty() ? new Range.OrderedRangeContainmentChecker(ranges.onlyFull().ranges()) : t -> false;
-            Predicate<Token> transChecker = !ranges.onlyTransient().isEmpty() ? new Range.OrderedRangeContainmentChecker(ranges.onlyTransient().ranges()) : t -> false;
-            double compressionRatio = scanners.getCompressionRatio();
-            if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
-                compressionRatio = 1.0;
-
-            long lastBytesScanned = 0;
-
-            while (ci.hasNext())
+            TableOperation op = ci.getOperation();
+            try (NonThrowingCloseable cls = active.onOperationStart(op))
             {
-                try (UnfilteredRowIterator partition = ci.next())
+                int expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval, (int)(SSTableReader.getApproximateKeyCount(sstableAsSet)));
+
+                fullWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, false, sstableAsSet, txn));
+                transWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, pendingRepair, true, sstableAsSet, txn));
+                unrepairedWriter.switchWriter(CompactionManager.createWriterForAntiCompaction(cfs, destination, expectedBloomFilterSize, UNREPAIRED_SSTABLE, NO_PENDING_REPAIR, false, sstableAsSet, txn));
+
+                Predicate<Token> fullChecker = !ranges.onlyFull().isEmpty() ? new Range.OrderedRangeContainmentChecker(ranges.onlyFull().ranges()) : t -> false;
+                Predicate<Token> transChecker = !ranges.onlyTransient().isEmpty() ? new Range.OrderedRangeContainmentChecker(ranges.onlyTransient().ranges()) : t -> false;
+                double compressionRatio = scanners.getCompressionRatio();
+                if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
+                    compressionRatio = 1.0;
+
+                long lastBytesScanned = 0;
+                while (ci.hasNext())
                 {
-                    Token token = partition.partitionKey().getToken();
-                    // if this row is contained in the full or transient ranges, append it to the appropriate sstable
-                    if (fullChecker.test(token))
+                    try (UnfilteredRowIterator partition = ci.next())
                     {
-                        fullWriter.append(partition);
+                        Token token = partition.partitionKey().getToken();
+                        // if this row is contained in the full or transient ranges, append it to the appropriate sstable
+                        if (fullChecker.test(token))
+                        {
+                            fullWriter.append(partition);
+                        }
+                        else if (transChecker.test(token))
+                        {
+                            transWriter.append(partition);
+                        }
+                        else
+                        {
+                            // otherwise, append it to the unrepaired sstable
+                            unrepairedWriter.append(partition);
+                        }
+                        long bytesScanned = scanners.getTotalBytesScanned();
+                        if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
+                            lastBytesScanned = bytesScanned;
                     }
-                    else if (transChecker.test(token))
-                    {
-                        transWriter.append(partition);
-                    }
-                    else
-                    {
-                        // otherwise, append it to the unrepaired sstable
-                        unrepairedWriter.append(partition);
-                    }
-                    long bytesScanned = scanners.getTotalBytesScanned();
-                    if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
-                        lastBytesScanned = bytesScanned;
                 }
             }
 
@@ -1657,13 +1667,38 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     @VisibleForTesting
-    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, int nowInSec, UUID timeUUID, TableOperationObserver activeCompactions, BooleanSupplier isCancelled)
+    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, int nowInSec, UUID timeUUID, BooleanSupplier isCancelled)
     {
-        return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID, activeCompactions) {
+        return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID) {
+            @Override
+            public TableOperation createOperation()
+            {
+                return getAntiCompactionOperation(super.createOperation(), isCancelled);
+            }
+        };
+    }
 
+    @VisibleForTesting
+    public static TableOperation getAntiCompactionOperation(TableOperation compaction, BooleanSupplier isCancelled)
+    {
+        return new AbstractTableOperation()
+        {
+            @Override
+            public boolean isGlobal()
+            {
+                return false;
+            }
+
+            @Override
+            public OperationProgress getProgress()
+            {
+                return compaction.getProgress();
+            }
+
+            @Override
             public boolean isStopRequested()
             {
-                return super.isStopRequested() || isCancelled.getAsBoolean();
+                return compaction.isStopRequested() || isCancelled.getAsBoolean();
             }
         };
     }
@@ -2183,9 +2218,9 @@ public class CompactionManager implements CompactionManagerMBean
         return !interrupted.isEmpty();
     }
 
-    public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
+    public boolean interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
     {
-        interruptCompactionFor(columnFamilies, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
+        return interruptCompactionFor(columnFamilies, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
     }
     /**
      * Try to stop all of the compactions for given ColumnFamilies.
@@ -2196,12 +2231,14 @@ public class CompactionManager implements CompactionManagerMBean
      * @param columnFamilies The ColumnFamilies to try to stop compaction upon.
      * @param sstablePredicate the sstable predicate to match on
      * @param interruptValidation true if validation operations for repair should also be interrupted
+     * @return True if any compaction has been interrupted false otherwise.
      */
-    public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
+    public boolean interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
     {
         assert columnFamilies != null;
 
         // interrupt in-progress compactions
+        boolean interrupted = false;
         for (TableOperation operationSource : active.getTableOperations())
         {
             AbstractTableOperation.OperationProgress info = operationSource.getProgress();
@@ -2211,9 +2248,18 @@ public class CompactionManager implements CompactionManagerMBean
             if (info.metadata() == null || Iterables.contains(columnFamilies, info.metadata()))
             {
                 if (operationSource.shouldStop(sstablePredicate))
+                {
                     operationSource.stop(trigger);
+                    interrupted = true;
+                }
             }
         }
+        return interrupted;
+    }
+
+    public boolean interruptCompactionFor(Iterable<TableMetadata> tables)
+    {
+        return interruptCompactionFor(tables, Predicates.alwaysTrue(), true);
     }
 
     public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
