@@ -33,7 +33,6 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -63,6 +62,8 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     // is only used when a user update the CF comparator, to know if the
     // memtable was created with the new or old comparator.
     public final ClusteringComparator initialComparator;
+
+    private final long creationNano = System.nanoTime();
 
     private static MemtablePool createMemtableAllocatorPool()
     {
@@ -183,26 +184,40 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     {
         int period = metadata().params.memtableFlushPeriodInMs;
         if (period > 0)
+            scheduleFlush(owner, period);
+    }
+
+    private static void scheduleFlush(Owner owner, int period)
+    {
+        logger.trace("scheduling flush in {} ms", period);
+        WrappedRunnable runnable = new WrappedRunnable()
         {
-            logger.trace("scheduling flush in {} ms", period);
-            WrappedRunnable runnable = new WrappedRunnable()
+            protected void runMayThrow()
             {
-                protected void runMayThrow()
-                {
-                    if (isClean())
-                    {
-                        // if we're still clean, instead of swapping just reschedule a flush for later
-                        scheduleFlush();
-                    }
-                    else
-                    {
-                        // we'll be rescheduled by the constructor of the Memtable.
-                        owner.signalFlushRequired(AbstractAllocatorMemtable.this,
-                                                  ColumnFamilyStore.FlushReason.MEMTABLE_PERIOD_EXPIRED);
-                    }
-                }
-            };
-            ScheduledExecutors.scheduledTasks.schedule(runnable, period, TimeUnit.MILLISECONDS);
+                Memtable current = owner.getCurrentMemtable();
+                if (current instanceof AbstractAllocatorMemtable)
+                    ((AbstractAllocatorMemtable) current).flushIfPeriodExpired();
+            }
+        };
+        ScheduledExecutors.scheduledTasks.schedule(runnable, period, TimeUnit.MILLISECONDS);
+    }
+
+    private void flushIfPeriodExpired()
+    {
+        int period = metadata().params.memtableFlushPeriodInMs;
+        if (period > 0 && (System.nanoTime() - creationNano >= TimeUnit.MILLISECONDS.toNanos(period)))
+        {
+            if (isClean())
+            {
+                // if we're still clean, instead of swapping just reschedule a flush for later
+                scheduleFlush(owner, period);
+            }
+            else
+            {
+                // we'll be rescheduled by the constructor of the Memtable.
+                owner.signalFlushRequired(AbstractAllocatorMemtable.this,
+                                          ColumnFamilyStore.FlushReason.MEMTABLE_PERIOD_EXPIRED);
+            }
         }
     }
 

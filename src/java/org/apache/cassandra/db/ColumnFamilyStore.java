@@ -1260,6 +1260,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return switchMemtableIfCurrent(memtable, reason);
     }
 
+    @Override
+    public Memtable getCurrentMemtable()
+    {
+        return data.getView().getCurrentMemtable();
+    }
+
     public static Iterable<Memtable> activeMemtables()
     {
         return Iterables.transform(ColumnFamilyStore.all(),

@@ -146,6 +146,9 @@ public interface Memtable extends Comparable<Memtable>
         /** Signal to the owner that a flush is required (e.g. in response to hitting space limits) */
         ListenableFuture<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason);
 
+        /** Get the current memtable for this owner. Used to avoid capturing memtable in scheduled flush tasks. */
+        Memtable getCurrentMemtable();
+
         /**
          * Collect the index memtables flushed together with this. Used to accurately calculate memory that would be
          * freed by a flush.

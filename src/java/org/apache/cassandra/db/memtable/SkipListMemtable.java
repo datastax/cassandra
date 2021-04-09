@@ -88,6 +88,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             }
 
             @Override
+            public Memtable getCurrentMemtable()
+            {
+                return null;
+            }
+
+            @Override
             public Iterable<Memtable> getIndexMemtables()
             {
                 return Collections.emptyList();
