@@ -446,3 +446,4 @@ refactor is, the easier it will be for you to get it reviewed and committed.
 Start with smaller pieces, refactor and test them, and work outwards, iteratively. Preferably in several jiras. Ideally, each patch should add some value
 to the project on it's own in terms of test coverage. Patches that are heavy on refactoring, and light on tests are not likely to get committed. People come and go
 from projects, and having a many small improvements is better for the project than several unfinished or ongoing refactors that don't add much test coverage.
+dupa
