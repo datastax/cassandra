@@ -406,7 +406,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public interface SSTableSizeParameters
     {
-        int partitionKeyCount();
+        long partitionCount();
         long partitionKeySize();
         long dataSize();
     }

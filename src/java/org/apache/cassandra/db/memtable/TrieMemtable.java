@@ -251,7 +251,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                 return to;
             }
 
-            public int size()
+            public long partitionCount()
             {
                 return partitionCount;
             }

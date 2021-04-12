@@ -273,7 +273,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
                 return to;
             }
 
-            public int size()
+            public long partitionCount()
             {
                 return toFlush.size();
             }

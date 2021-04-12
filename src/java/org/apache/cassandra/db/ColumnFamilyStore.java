@@ -2234,7 +2234,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             Memtable.FlushCollection<?> dataSet = current.getFlushSet(range.left, range.right);
             dataSets.add(dataSet);
-            keys += dataSet.partitionKeyCount();
+            keys += dataSet.partitionCount();
         }
         if (keys == 0)
             return null;

@@ -109,7 +109,7 @@ public class Flushing
                                                       flushSet,
                                                       txn,
                                                       descriptor,
-                                                      flushSet.partitionKeyCount());
+                                                      flushSet.partitionCount());
 
         return new FlushRunnable(flushSet, writer, cfs.metric, true);
     }
@@ -193,7 +193,7 @@ public class Flushing
                                                        Memtable.FlushCollection<?> flushSet,
                                                        LifecycleTransaction txn,
                                                        Descriptor descriptor,
-                                                       int partitionCount)
+                                                       long partitionCount)
     {
         MetadataCollector sstableMetadataCollector = new MetadataCollector(flushSet.metadata().comparator)
                                                      .commitLogIntervals(new IntervalSet<>(flushSet.commitLogLowerBound(),

@@ -29,7 +29,6 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -41,8 +40,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.MemtablePool;
-import org.psjava.ds.Collection;
 
 /**
  * Memtable interface. This defines the operations the ColumnFamilyStore can perform with memtables.
@@ -309,7 +306,7 @@ public interface Memtable extends Comparable<Memtable>
      * being written to, care must be taken to not list newer items as they may violate the bounds collected by the
      * encoding stats or refer to columns that don't exist in the collected columns set.
      */
-    interface FlushCollection<P extends Partition> extends Collection<P>, SSTableWriter.SSTableSizeParameters
+    interface FlushCollection<P extends Partition> extends Iterable<P>, SSTableWriter.SSTableSizeParameters
     {
         Memtable memtable();
 
@@ -331,14 +328,10 @@ public interface Memtable extends Comparable<Memtable>
             return memtable().metadata();
         }
 
-        default int partitionKeyCount()
-        {
-            return size();
-        }
-
+        long partitionCount();
         default boolean isEmpty()
         {
-            return size() > 0;
+            return partitionCount() > 0;
         }
     }
 
