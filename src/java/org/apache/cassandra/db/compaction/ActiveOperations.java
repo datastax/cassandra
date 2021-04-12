@@ -20,33 +20,20 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
+import java.util.Set;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaChangeListener;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
-public class ActiveOperations extends SchemaChangeListener implements TableOperationObserver
+public class ActiveOperations implements TableOperationObserver
 {
-    private static final Logger logger = LoggerFactory.getLogger(ActiveOperations.class);
-
     // The operations ordered by keyspace.table for all the operations that are currently in progress.
-    private static final ConcurrentMap<String, TableOperations> operationsByTable = new ConcurrentHashMap<>();
-
-    public ActiveOperations()
-    {
-        Schema.instance.registerListener(this);
-    }
+    private static final Set<TableOperation> operations = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
     /**
      * @return all the table operations currently in progress. This is mostly compactions but it can include other
@@ -54,63 +41,21 @@ public class ActiveOperations extends SchemaChangeListener implements TableOpera
      */
     public List<TableOperation> getTableOperations()
     {
-        return operationsByTable.values()
-                                .stream()
-                                .flatMap(ops -> ops.getInProgress().stream())
-                                .collect(Collectors.toList());
+        ImmutableList.Builder<TableOperation> builder = ImmutableList.builder();
+        builder.addAll(operations);
+        return builder.build();
     }
 
     @Override
     public NonThrowingCloseable onOperationStart(TableOperation op)
     {
-        TableOperation.Progress progress = op.getProgress();;
-        String key = operationsByTableKey(progress);
-        operationsByTable.computeIfAbsent(key, k -> new TableOperations(progress.metadata()));
-        operationsByTable.computeIfPresent(key, (k, ops) -> ops.operationStarted(op));
-        return () -> operationsByTable.computeIfPresent(key,
-                                                        (k, ops) -> ops.operationCompleted(op,
-                                                                                           op.getProgress(),
-                                                                                           CompactionManager.instance.getMetrics()));
-    }
-
-    public TableOperations operationsByMetadata(TableMetadata metadata)
-    {
-        return operationsByTable.get(operationsByTableKey(metadata));
-    }
-
-    private String operationsByTableKey(TableOperation.Progress progress)
-    {
-        return operationsByTableKey(progress.metadata());
-    }
-
-    private String operationsByTableKey(TableMetadata metadata)
-    {
-        return operationsByTableKey(metadata.keyspace, metadata.name);
-    }
-
-    private String operationsByTableKey(String keyspace, String table)
-    {
-        return keyspace + "." + table;
-    }
-
-    public TableOperations.Snapshot operationsInProgress(TableMetadata metadata)
-    {
-        TableOperations tableOperations = operationsByTable.get(operationsByTableKey(metadata));
-        if (tableOperations == null)
-            return null;
-
-        try
-        {
-            ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
-            return new TableOperations.Snapshot(cfs, tableOperations);
-        }
-        catch (IllegalArgumentException ex)
-        {
-            // this happens when the table is dropped
-            logger.debug("Could not return operations in progress for {}: {}", metadata, ex.getMessage());
-        }
-
-        return null;
+            operations.add(op);
+            return () -> {
+                operations.remove(op);
+                TableOperation.Progress progress = op.getProgress();
+                CompactionManager.instance.getMetrics().bytesCompacted.inc(progress.total());
+                CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+            };
     }
 
     /**
@@ -121,19 +66,17 @@ public class ActiveOperations extends SchemaChangeListener implements TableOpera
     public Collection<AbstractTableOperation.OperationProgress> getOperationsForSSTable(SSTableReader sstable, OperationType operationType)
     {
         List<AbstractTableOperation.OperationProgress> toReturn = null;
-        synchronized (operationsByTable)
+
+        synchronized (operations)
         {
-            for (TableOperations tableOperations : operationsByTable.values())
+            for (TableOperation op : operations)
             {
-                for (TableOperation op : tableOperations.getInProgress())
+                AbstractTableOperation.OperationProgress progress = op.getProgress();
+                if (progress.sstables().contains(sstable) && progress.operationType() == operationType)
                 {
-                    AbstractTableOperation.OperationProgress progress = op.getProgress();
-                    if (progress.sstables().contains(sstable) && progress.operationType() == operationType)
-                    {
-                        if (toReturn == null)
-                            toReturn = new ArrayList<>();
-                        toReturn.add(progress);
-                    }
+                    if (toReturn == null)
+                        toReturn = new ArrayList<>();
+                    toReturn.add(progress);
                 }
             }
         }
@@ -146,15 +89,5 @@ public class ActiveOperations extends SchemaChangeListener implements TableOpera
     public boolean isActive(TableOperation op)
     {
         return getTableOperations().contains(op);
-    }
-
-    //
-    // SchemaChangeListener
-    //
-
-    @Override
-    public void onDropTable(String keyspace, String table)
-    {
-        operationsByTable.remove(operationsByTableKey(keyspace, table));
     }
 }

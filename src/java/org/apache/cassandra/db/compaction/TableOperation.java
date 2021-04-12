@@ -81,6 +81,12 @@ public interface TableOperation
     public StopTrigger trigger();
 
     /**
+     * if this compaction involves several/all tables we can safely check globalCompactionsPaused
+     * in isStopRequested() below
+     */
+    public abstract boolean isGlobal();
+
+    /**
      * The unit for the {@link Progress} report.
      */
     enum Unit

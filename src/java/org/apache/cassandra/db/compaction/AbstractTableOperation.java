@@ -65,12 +65,6 @@ public abstract class AbstractTableOperation implements TableOperation
     }
 
     /**
-     * if this compaction involves several/all tables we can safely check globalCompactionsPaused
-     * in isStopRequested() below
-     */
-    public abstract boolean isGlobal();
-
-    /**
      * @return true if the operation has received a request to be interrupted.
      */
     public boolean isStopRequested()
