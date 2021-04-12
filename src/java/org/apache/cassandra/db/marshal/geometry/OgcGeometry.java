@@ -25,7 +25,6 @@ import com.esri.core.geometry.GeometryException;
 import com.esri.core.geometry.SpatialReference;
 import com.esri.core.geometry.ogc.OGCGeometry;
 import org.apache.cassandra.serializers.MarshalException;
-import org.json.JSONException;
 
 public abstract class OgcGeometry
 {
@@ -165,7 +164,7 @@ public abstract class OgcGeometry
         {
             geometry = OGCGeometry.fromGeoJson(source);
         }
-        catch (IllegalArgumentException | JSONException e)
+        catch (IllegalArgumentException e)
         {
             throw new MarshalException(e.getMessage());
         }
