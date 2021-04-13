@@ -21,15 +21,13 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.text.ParseException;
+import java.util.Arrays;
+import java.util.Collection;
 
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-import com.datastax.bdp.test.categories.UnitTest;
-import junitparams.JUnitParamsRunner;
-import junitparams.Parameters;
 import org.apache.cassandra.db.marshal.datetime.DateRange;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound.Precision;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -37,34 +35,38 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import static org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBuilder.dateRange;
 import static org.junit.Assert.assertEquals;
 
-@RunWith(JUnitParamsRunner.class)
-@Category(UnitTest.class)
+@RunWith(Parameterized.class)
 public class DateRangeTypeTest
 {
     private final DateRangeType dateRangeType = DateRangeType.instance;
 
+    @Parameterized.Parameter(0)
+    public DateRange dataRange;
+
+    @Parameterized.Parameter(1)
+    public String source;
+
     @Test
-    @Parameters(method = "testData")
-    public void shouldFormatDateRangeAsJson(DateRange source, String expected) throws ParseException
+    public void shouldFormatDateRangeAsJson()
     {
-        ByteBuffer bytes = dateRangeType.decompose(source);
+        ByteBuffer bytes = dateRangeType.decompose(dataRange);
         String actualJson = dateRangeType.toJSONString(bytes, ProtocolVersion.CURRENT);
-        assertEquals('"' + expected + '"', actualJson);
+        assertEquals('"' + source + '"', actualJson);
     }
 
     @Test
-    @Parameters(method = "testData")
-    public void shouldCreateProperDateRangeFromString(DateRange expected, String source)
+    public void shouldCreateProperDateRangeFromString()
     {
         ByteBuffer dateRangeBytes = dateRangeType.fromString(source);
         DateRange actual = dateRangeType.getSerializer().deserialize(dateRangeBytes);
-        assertEquals(expected, actual);
+        assertEquals(dataRange, actual);
     }
 
     @SuppressWarnings("unused")
-    private Object[] testData()
+    @Parameterized.Parameters(name = "dataRange = {0}, source = {1}")
+    public static Collection<Object[]> testData()
     {
-        return new Object[]{
+        return Arrays.asList(
                 new Object[]{
                         dateRange()
                                 .withLowerBound("1950-01-01T00:00:00.000Z", Precision.YEAR)
@@ -117,7 +119,7 @@ public class DateRangeTypeTest
                                 .withLowerBound("-0009-01-01T00:00:00.000Z", Precision.YEAR)
                                 .build(),
                         "-0009"
-                },
-        };
+                }
+        );
     }
 }
