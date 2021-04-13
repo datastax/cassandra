@@ -21,15 +21,12 @@
 package org.apache.cassandra.db.marshal.datetime;
 
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 
-import com.datastax.bdp.test.categories.UnitTest;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
-@Category(UnitTest.class)
 public class DateRangeTest
 {
     @Test
