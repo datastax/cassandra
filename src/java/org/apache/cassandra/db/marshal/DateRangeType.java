@@ -30,12 +30,10 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.solr.schema.DateRangeField;
 
 
 /**
  * Date range C* type with lower and upper bounds represented as timestamps with a millisecond precision.
- * Backing C* type for Solr type {@link DateRangeField}. CQL input must be a valid {@link DateRangeField} string.
  */
 public class DateRangeType extends AbstractType<DateRange>
 {

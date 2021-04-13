@@ -24,11 +24,12 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoField;
 import java.util.Calendar;
+import java.util.Locale;
+import java.util.TimeZone;
 
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound;
-import org.apache.lucene.spatial.prefix.tree.DateRangePrefixTree;
 
 import static java.time.temporal.TemporalAdjusters.firstDayOfMonth;
 import static java.time.temporal.TemporalAdjusters.firstDayOfYear;
@@ -37,7 +38,18 @@ import static java.time.temporal.TemporalAdjusters.lastDayOfYear;
 
 public class DateRangeUtil
 {
-    private static final DateRangePrefixTree prefixTree = DateRangePrefixTree.INSTANCE;
+    private static final int YEAR_LEVEL = 3;
+    private static final int[] FIELD_BY_LEVEL =
+    {
+        -1/*unused*/, -1, -1, Calendar.YEAR, Calendar.MONTH, Calendar.DAY_OF_MONTH,
+        Calendar.HOUR_OF_DAY, Calendar.MINUTE, Calendar.SECOND, Calendar.MILLISECOND
+    };
+    private static final Calendar CLEAN_CALENDAR;
+    static
+    {
+        CLEAN_CALENDAR = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT);
+        CLEAN_CALENDAR.clear();
+    }
 
     public static DateRange parseDateRange(String source) throws ParseException
     {
@@ -116,8 +128,8 @@ public class DateRangeUtil
 
     private static DateRangeBound parseLowerBound(String source) throws ParseException
     {
-        Calendar lowerBoundCalendar = prefixTree.parseCalendar(source);
-        int calPrecisionField = prefixTree.getCalPrecisionField(lowerBoundCalendar);
+        Calendar lowerBoundCalendar = parseCalendar(source);
+        int calPrecisionField = getCalPrecisionField(lowerBoundCalendar);
         if (calPrecisionField < 0)
         {
             return DateRangeBound.UNBOUNDED;
@@ -127,8 +139,8 @@ public class DateRangeUtil
 
     private static DateRangeBound parseUpperBound(String source) throws ParseException
     {
-        Calendar upperBoundCalendar = prefixTree.parseCalendar(source);
-        int calPrecisionField = prefixTree.getCalPrecisionField(upperBoundCalendar);
+        Calendar upperBoundCalendar = parseCalendar(source);
+        int calPrecisionField = getCalPrecisionField(upperBoundCalendar);
         if (calPrecisionField < 0)
         {
             return DateRangeBound.UNBOUNDED;
@@ -136,6 +148,99 @@ public class DateRangeUtil
         ZonedDateTime upperBoundDateTime = toZonedDateTime(upperBoundCalendar);
         DateRangeBound.Precision precision = getCalendarPrecision(calPrecisionField);
         return DateRangeBound.upperBound(upperBoundDateTime, precision);
+    }
+
+    /**
+     * This method was extracted from org.apache.lucene.spatial.prefix.tree.DateRangePrefixTree
+     * (Apache Lucene™) for compatibility with DSE.
+     * The class is distributed under Apache-2.0 License attached to this release.
+     *
+     * Calendar utility method:
+     * Gets the Calendar field code of the last field that is set prior to an unset field. It only
+     * examines fields relevant to the prefix tree. If no fields are set, it returns -1. */
+    private static int getCalPrecisionField(Calendar cal) {
+        int lastField = -1;
+        for (int level = YEAR_LEVEL; level < FIELD_BY_LEVEL.length; level++) {
+            int field = FIELD_BY_LEVEL[level];
+            if (!cal.isSet(field))
+                break;
+            lastField = field;
+        }
+        return lastField;
+    }
+
+    /**
+     * This method was extracted from org.apache.lucene.spatial.prefix.tree.DateRangePrefixTree
+     * (Apache Lucene™) for compatibility with DSE.
+     * The class is distributed under Apache-2.0 License attached to this release.
+     *
+     * Calendar utility method:
+     * It will only set the fields found, leaving
+     * the remainder in an un-set state. A leading '-' or '+' is optional (positive assumed), and a
+     * trailing 'Z' is also optional.
+     * @param str not null and not empty
+     * @return not null
+     */
+    private static Calendar parseCalendar(String str) throws ParseException {
+        // example: +2014-10-23T21:22:33.159Z
+        if (str == null || str.isEmpty())
+            throw new IllegalArgumentException("str is null or blank");
+        Calendar cal = (Calendar) CLEAN_CALENDAR.clone();
+        if (str.equals("*"))
+            return cal;
+        int offset = 0;//a pointer
+        try {
+            //year & era:
+            int lastOffset = str.charAt(str.length()-1) == 'Z' ? str.length() - 1 : str.length();
+            int hyphenIdx = str.indexOf('-', 1);//look past possible leading hyphen
+            if (hyphenIdx < 0)
+                hyphenIdx = lastOffset;
+            int year = Integer.parseInt(str.substring(offset, hyphenIdx));
+            cal.set(Calendar.ERA, year <= 0 ? 0 : 1);
+            cal.set(Calendar.YEAR, year <= 0 ? -1*year + 1 : year);
+            offset = hyphenIdx + 1;
+            if (lastOffset < offset)
+                return cal;
+
+            //NOTE: We aren't validating separator chars, and we unintentionally accept leading +/-.
+            // The str.substring()'s hopefully get optimized to be stack-allocated.
+
+            //month:
+            cal.set(Calendar.MONTH, Integer.parseInt(str.substring(offset, offset+2)) - 1);//starts at 0
+            offset += 3;
+            if (lastOffset < offset)
+                return cal;
+            //day:
+            cal.set(Calendar.DAY_OF_MONTH, Integer.parseInt(str.substring(offset, offset+2)));
+            offset += 3;
+            if (lastOffset < offset)
+                return cal;
+            //hour:
+            cal.set(Calendar.HOUR_OF_DAY, Integer.parseInt(str.substring(offset, offset+2)));
+            offset += 3;
+            if (lastOffset < offset)
+                return cal;
+            //minute:
+            cal.set(Calendar.MINUTE, Integer.parseInt(str.substring(offset, offset+2)));
+            offset += 3;
+            if (lastOffset < offset)
+                return cal;
+            //second:
+            cal.set(Calendar.SECOND, Integer.parseInt(str.substring(offset, offset+2)));
+            offset += 3;
+            if (lastOffset < offset)
+                return cal;
+            //ms:
+            cal.set(Calendar.MILLISECOND, Integer.parseInt(str.substring(offset, offset+3)));
+            offset += 3;//last one, move to next char
+            if (lastOffset == offset)
+                return cal;
+        } catch (Exception e) {
+            ParseException pe = new ParseException("Improperly formatted date: "+str, offset);
+            pe.initCause(e);
+            throw pe;
+        }
+        throw new ParseException("Improperly formatted date: "+str, offset);
     }
 
     private static DateRangeBound.Precision getCalendarPrecision(int calendarPrecision)
