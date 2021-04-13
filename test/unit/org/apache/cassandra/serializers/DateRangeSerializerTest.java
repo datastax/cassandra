@@ -42,12 +42,8 @@ public class DateRangeSerializerTest
     @RunWith(Parameterized.class)
     public static class ValidCases
     {
-        private DateRange dateRange;
-
-        public ValidCases(DateRange dateRange)
-        {
-            this.dateRange = dateRange;
-        }
+        @Parameterized.Parameter
+        public DateRange dateRange;
 
         @Test
         public void testSerializeRoundTrip()

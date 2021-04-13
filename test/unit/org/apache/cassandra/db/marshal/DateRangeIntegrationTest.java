@@ -30,10 +30,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import com.datastax.bdp.test.ng.DseNode;
-import com.datastax.bdp.test.ng.DseTestRunner;
 import com.datastax.driver.core.CodecRegistry;
-import com.datastax.driver.core.DateRangeCodec;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
@@ -41,37 +38,39 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.TupleValue;
 import com.datastax.driver.core.UDTValue;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.datetime.DateRange;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound.Precision;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBuilder;
+import org.apache.cassandra.db.marshal.datetime.DateRangeCodec;
 import org.hamcrest.Matchers;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 
-public class DateRangeIntegrationTest extends DseTestRunner
+public class DateRangeIntegrationTest extends CQLTester
 {
-    @Rule
-    public ExpectedException expectedException = ExpectedException.none();
-
     @BeforeClass
-    public static void startNode() throws Exception
+    public static void setup()
     {
-        startNode(1, DseNode.Type.CASSANDRA);
         CodecRegistry.DEFAULT_INSTANCE.register(DateRangeCodec.instance);
     }
 
+    @Rule
+    public ExpectedException expectedException = ExpectedException.none();
+
     @Test
-    public void testDateRangeAsPrimaryKey() throws Exception
+    public void testDateRangeAsPrimaryKey() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k 'DateRangeType' PRIMARY KEY, v int)");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES ('[2010-12-03 TO 2010-12-04]', 1)");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES ('[2015-12-03T10:15:30.001Z TO 2016-01-01T00:05:11.967Z]', 2)");
+        executeNet(String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k 'DateRangeType' PRIMARY KEY, v int)");
+        executeNet("INSERT INTO dr (k, v) VALUES ('[2010-12-03 TO 2010-12-04]', 1)");
+        executeNet("INSERT INTO dr (k, v) VALUES ('[2015-12-03T10:15:30.001Z TO 2016-01-01T00:05:11.967Z]', 2)");
 
-        ResultSet results = sendCql3Native(1, null, String.format("SELECT * FROM %s.dr", keyspace));
+        ResultSet results = executeNet(String.format("SELECT * FROM %s.dr", keyspace));
         List<Row> rows = results.all();
 
         assertEquals(2, rows.size());
@@ -80,15 +79,16 @@ public class DateRangeIntegrationTest extends DseTestRunner
         expected = dateRange("2015-12-03T10:15:30.001Z", Precision.MILLISECOND, "2016-01-01T00:05:11.967Z", Precision.MILLISECOND);
         assertEquals(expected, rows.get(1).get("k", DateRange.class));
 
-        results = sendCql3Native(1, keyspace, "SELECT * FROM dr WHERE k = '[2015-12-03T10:15:30.001Z TO 2016-01-01T00:05:11.967]'");
+        results = executeNet("SELECT * FROM dr WHERE k = '[2015-12-03T10:15:30.001Z TO 2016-01-01T00:05:11.967]'");
         rows = results.all();
 
         assertEquals(1, rows.size());
         assertEquals(2, rows.get(0).getInt("v"));
 
-        flushMemtable(1, keyspace, "dr");
 
-        results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        flush(keyspace, "dr");
+
+        results = executeNet("SELECT * FROM dr");
         rows = results.all();
 
         assertEquals(2, rows.size());
@@ -97,18 +97,19 @@ public class DateRangeIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void testCreateDateRange() throws Exception
+    public void testCreateDateRange() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES (1, '[2000-01-01T10:15:30.301Z TO *]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES (2, '[2000-02 TO 2000-03]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES (3, '[* TO 2020]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES (4, null)");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k) VALUES (5)");
+        executeNet(String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
+        executeNet("INSERT INTO dr (k, v) VALUES (1, '[2000-01-01T10:15:30.301Z TO *]')");
+        executeNet("INSERT INTO dr (k, v) VALUES (2, '[2000-02 TO 2000-03]')");
+        executeNet("INSERT INTO dr (k, v) VALUES (3, '[* TO 2020]')");
+        executeNet("INSERT INTO dr (k, v) VALUES (4, null)");
+        executeNet("INSERT INTO dr (k) VALUES (5)");
 
-        ResultSet results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        ResultSet results = executeNet("SELECT * FROM dr");
         List<Row> rows = results.all();
         assertEquals(5, rows.size());
         DateRange dateRange = rows.get(4).get("v", DateRange.class);
@@ -121,27 +122,29 @@ public class DateRangeIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void testInvalidDateRangeOrder() throws Exception
+    public void testInvalidDateRangeOrder() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
+        executeNet(String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
 
         expectedException.expect(InvalidQueryException.class);
         expectedException.expectMessage("Wrong order: 2020-01-01T10:15:30.009Z TO 2010-01-01T00:05:11.031Z");
         expectedException.expectMessage("Could not parse date range: [2020-01-01T10:15:30.009Z TO 2010-01-01T00:05:11.031Z]");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, v) VALUES (1, '[2020-01-01T10:15:30.009Z TO 2010-01-01T00:05:11.031Z]')");
+        executeNet("INSERT INTO dr (k, v) VALUES (1, '[2020-01-01T10:15:30.009Z TO 2010-01-01T00:05:11.031Z]')");
     }
 
     @Test
-    public void testDateRangeInTuples() throws Exception
+    public void testDateRangeInTuples() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy' , 'replication_factor': '1'}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TYPE IF NOT EXISTS test_udt (i int, range 'DateRangeType')");
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int PRIMARY KEY, u test_udt, uf frozen<test_udt>, t tuple<'DateRangeType', int>, tf frozen<tuple<'DateRangeType', int>>)");
+        executeNet(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy' , 'replication_factor': '1'}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TYPE IF NOT EXISTS test_udt (i int, range 'DateRangeType')");
+        executeNet("CREATE TABLE dr (k int PRIMARY KEY, u test_udt, uf frozen<test_udt>, t tuple<'DateRangeType', int>, tf frozen<tuple<'DateRangeType', int>>)");
 
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, u, uf, t, tf) VALUES (" +
+        executeNet("INSERT INTO dr (k, u, uf, t, tf) VALUES (" +
                 "1, " +
                 "{i: 10, range: '[2000-01-01T10:15:30.003Z TO 2020-01-01T10:15:30.001Z]'}, " +
                 "{i: 20, range: '[2000-01-01T10:15:30.003Z TO 2020-01-01T10:15:30.001Z]'}, " +
@@ -149,7 +152,7 @@ public class DateRangeIntegrationTest extends DseTestRunner
                 "('[2000-01-01T10:15:30.003Z TO 2020-01-01T10:15:30.001Z]', 40))");
 
         DateRange expected = dateRange("2000-01-01T10:15:30.003Z", Precision.MILLISECOND, "2020-01-01T10:15:30.001Z", Precision.MILLISECOND);
-        ResultSet results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        ResultSet results = executeNet("SELECT * FROM dr");
         List<Row> rows = results.all();
         assertEquals(1, rows.size());
 
@@ -175,20 +178,21 @@ public class DateRangeIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void testDateRangeInCollections() throws Exception
+    public void testDateRangeInCollections() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy' , 'replication_factor': '1'}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int PRIMARY KEY, l list<'DateRangeType'>, s set<'DateRangeType'>, dr2i map<'DateRangeType', int>, i2dr map<int, 'DateRangeType'>)");
+        executeNet(String.format("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy' , 'replication_factor': '1'}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k int PRIMARY KEY, l list<'DateRangeType'>, s set<'DateRangeType'>, dr2i map<'DateRangeType', int>, i2dr map<int, 'DateRangeType'>)");
 
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, l, s, i2dr, dr2i) VALUES (" +
+        executeNet("INSERT INTO dr (k, l, s, i2dr, dr2i) VALUES (" +
                 "1, " +
                 "['[2000-01-01T10:15:30.001Z TO 2020]', '[2010-01-01T10:15:30.001Z TO 2020]', '2001-01-02'], " +
                 "{'[2000-01-01T10:15:30.001Z TO 2020]', '[2000-01-01T10:15:30.001Z TO 2020]', '[2010-01-01T10:15:30.001Z TO 2020]'}, " +
                 "{1: '[2000-01-01T10:15:30.001Z TO 2020]', 2: '[2010-01-01T10:15:30.001Z TO 2020]'}, " +
                 "{'[2000-01-01T10:15:30.001Z TO 2020]': 1, '[2010-01-01T10:15:30.001Z TO 2020]': 2})");
 
-        ResultSet results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        ResultSet results = executeNet("SELECT * FROM dr");
         List<Row> rows = results.all();
         assertEquals(1, rows.size());
 
@@ -218,19 +222,20 @@ public class DateRangeIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void testPreparedStatementsWithDateRange() throws Exception
+    public void testPreparedStatementsWithDateRange() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
+        executeNet(String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k int PRIMARY KEY, v 'DateRangeType')");
 
-        Session session = prepareNativeSession(1, keyspace);
+        Session session = sessionNet();
         PreparedStatement statement = session.prepare(String.format("INSERT INTO %s.dr (k,v) VALUES(?,?)", keyspace));
 
         DateRange dateRange = dateRange("2007-12-03T00:00:00.000Z", Precision.DAY, "2007-12-17T00:00:00.000Z", Precision.MONTH);
         session.execute(statement.bind(1, dateRange));
 
-        ResultSet results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        ResultSet results = executeNet("SELECT * FROM dr");
         List<Row> rows = results.all();
         assertEquals(1, rows.size());
 
@@ -239,30 +244,31 @@ public class DateRangeIntegrationTest extends DseTestRunner
         assertEquals(Precision.MONTH, actual.getUpperBound().getPrecision());
         assertEquals("[2007-12-03 TO 2007-12]", actual.formatToSolrString());
 
-        results = sendCql3Native(1, keyspace, "SELECT JSON * FROM dr");
+        results = executeNet("SELECT JSON * FROM dr");
         assertThat(results.all().get(0).toString(), Matchers.containsString("\"v\": \"[2007-12-03 TO 2007-12]\""));
     }
 
     @Test
-    public void testSemanticallyEquivalentDateRanges() throws Exception
+    public void testSemanticallyEquivalentDateRanges() throws Throwable
     {
         String keyspace = randomKeyspace();
-        sendCql3Native(1, null, String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
-        sendCql3Native(1, keyspace, "CREATE TABLE dr (k int, c0 'DateRangeType', PRIMARY KEY (k, c0))");
+        executeNet(String.format("CREATE KEYSPACE %s WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}", keyspace));
+        executeNet("USE " + keyspace);
+        executeNet("CREATE TABLE dr (k int, c0 'DateRangeType', PRIMARY KEY (k, c0))");
 
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, c0) VALUES (1, '2016-01-01')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01 TO 2016-01-01]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01T00:00:00.000Z TO 2016-01-01]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01T00:00:00.000Z TO 2016-01-01:23:59:59.999Z]')");
-        sendCql3Native(1, keyspace, "INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01 TO 2016-01-01:23:59:59.999Z]')");
+        executeNet("INSERT INTO dr (k, c0) VALUES (1, '2016-01-01')");
+        executeNet("INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01 TO 2016-01-01]')");
+        executeNet("INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01T00:00:00.000Z TO 2016-01-01]')");
+        executeNet("INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01T00:00:00.000Z TO 2016-01-01:23:59:59.999Z]')");
+        executeNet("INSERT INTO dr (k, c0) VALUES (1, '[2016-01-01 TO 2016-01-01:23:59:59.999Z]')");
 
-        ResultSet results = sendCql3Native(1, keyspace, "SELECT * FROM dr");
+        ResultSet results = executeNet("SELECT * FROM dr");
         assertEquals(5, results.all().size());
 
-        results = sendCql3Native(1, keyspace, "SELECT * FROM dr WHERE c0 = '2016-01-01' ALLOW FILTERING");
+        results = executeNet("SELECT * FROM dr WHERE c0 = '2016-01-01' ALLOW FILTERING");
         assertEquals(1, results.all().size());
 
-        results = sendCql3Native(1, keyspace, "SELECT * FROM dr WHERE k = 1 AND c0 = '[2016-01-01T00:00:00.000Z TO 2016-01-01:23:59:59.999Z]'");
+        results = executeNet("SELECT * FROM dr WHERE k = 1 AND c0 = '[2016-01-01T00:00:00.000Z TO 2016-01-01:23:59:59.999Z]'");
         assertEquals(1, results.all().size());
     }
 

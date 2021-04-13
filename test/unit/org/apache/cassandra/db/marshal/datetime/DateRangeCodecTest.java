@@ -21,15 +21,12 @@ package org.apache.cassandra.db.marshal.datetime;
 import java.nio.ByteBuffer;
 
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 
-import com.datastax.bdp.test.categories.UnitTest;
 import com.datastax.driver.core.ProtocolVersion;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound.Precision;
 
 import static org.junit.Assert.assertEquals;
 
-@Category(UnitTest.class)
 public class DateRangeCodecTest
 {
     private final DateRangeCodec codec = DateRangeCodec.instance;
