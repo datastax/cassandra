@@ -24,9 +24,11 @@ import java.net.InetAddress;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.After;
@@ -41,6 +43,7 @@ import org.apache.cassandra.concurrent.SEPExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -716,10 +719,13 @@ public class ViewSchemaTest extends CQLTester
     public void testGuardrails() throws Throwable
     {
         // we don't know if it's already enabled and what's the current configured threshold..
-        boolean defaultGuardrailsEnabled = DatabaseDescriptor.getGuardrailsConfig().enabled;
-        long defaultMVPerTableFailureThreshold = DatabaseDescriptor.getGuardrailsConfig().materialized_view_per_table_failure_threshold;
-        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
-        DatabaseDescriptor.getGuardrailsConfig().materialized_view_per_table_failure_threshold = 1;
+        GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
+        boolean defaultGuardrailsEnabled = config.enabled;
+        long defaultMVPerTableFailureThreshold = config.materialized_view_per_table_failure_threshold;
+        Set<String> defaultTablePropertiesDisallowed = config.table_properties_disallowed;
+        config.enabled = true;
+        config.materialized_view_per_table_failure_threshold = 1;
+        config.table_properties_disallowed = Collections.emptySet();
 
         String createViewCql = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k is NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)";
         try
@@ -749,8 +755,9 @@ public class ViewSchemaTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.getGuardrailsConfig().enabled = defaultGuardrailsEnabled;
-            DatabaseDescriptor.getGuardrailsConfig().materialized_view_per_table_failure_threshold = defaultMVPerTableFailureThreshold;
+            config.enabled = defaultGuardrailsEnabled;
+            config.materialized_view_per_table_failure_threshold = defaultMVPerTableFailureThreshold;
+            config.table_properties_disallowed = defaultTablePropertiesDisallowed;
         }
     }
 

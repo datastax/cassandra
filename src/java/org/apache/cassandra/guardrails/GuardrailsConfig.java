@@ -21,7 +21,11 @@ package org.apache.cassandra.guardrails;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.Sets;
+
+import org.apache.cassandra.cql3.statements.schema.TableAttributes;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
@@ -62,6 +66,8 @@ public class GuardrailsConfig
 
     public long tables_warn_threshold = 100;
     public long tables_failure_threshold = 200;
+    public Set<String> table_properties_disallowed = new LinkedHashSet<>(TableAttributes.validKeywords.stream().sorted().filter(p -> !p.equals("default_time_to_live")).collect(Collectors.toList()));
+
 
     public boolean user_timestamps_enabled = false;
 
@@ -90,6 +96,8 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(tables_failure_threshold, "tables_failure_threshold");
         validateWarnLowerThanFail(tables_warn_threshold, tables_failure_threshold, "tables");
 
+        validateDisallowedTableProperties();
+
         for (String rawCL : consistency_level_disallowed)
         {
             try
@@ -102,6 +110,16 @@ public class GuardrailsConfig
                                                         + "'%s' does not parse as a Consistency Level", rawCL));
             }
         }
+    }
+
+    private void validateDisallowedTableProperties()
+    {
+        Set<String> diff = Sets.difference(table_properties_disallowed.stream().map(String::toLowerCase).collect(Collectors.toSet()),
+                                           TableAttributes.validKeywords);
+
+        if (!diff.isEmpty())
+            throw new ConfigurationException(format("Invalid value for table_properties_disallowed guardrail: "
+                                                    + "'%s' do not parse as valid table properties", diff.toString()));
     }
 
     private void validateStrictlyPositiveInteger(long value, String name)
