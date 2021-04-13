@@ -56,6 +56,7 @@ import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerCDC;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileUtils;
@@ -362,6 +363,13 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContext();
+
+        applyGuardrailsConfig();
+    }
+
+    private static void applyGuardrailsConfig()
+    {
+        conf.guardrails.validate();
     }
 
     private static void applySimpleConfig()
@@ -3389,5 +3397,10 @@ public class DatabaseDescriptor
     public static void setSAIZeroCopyUsedThreshold(double threshold)
     {
         conf.sai_options.zerocopy_used_threshold = threshold;
+    }
+    
+    public static GuardrailsConfig getGuardrailsConfig()
+    {
+        return conf.guardrails;
     }
 }
