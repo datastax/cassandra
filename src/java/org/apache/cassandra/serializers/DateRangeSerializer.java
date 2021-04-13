@@ -25,9 +25,10 @@ import java.util.List;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.marshal.datetime.DateRange;
 import org.apache.cassandra.db.marshal.datetime.DateRange.DateRangeBound.Precision;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -65,7 +66,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * <precision1> is an optional [byte] and represents the precision of field <time1>. Only present if <type> = 1. Values
  * are the same as for <precision0>.
  */
-public final class DateRangeSerializer implements TypeSerializer<DateRange>
+public final class DateRangeSerializer extends TypeSerializer<DateRange>
 {
     public static final DateRangeSerializer instance = new DateRangeSerializer();
 
@@ -82,6 +83,13 @@ public final class DateRangeSerializer implements TypeSerializer<DateRange>
     // *
     private final static byte DATE_RANGE_TYPE_SINGLE_DATE_OPEN = 0x05;
 
+    /**
+     * Size of the single serialized DateRange boundary. As specified in @{@link DateRangeSerializer}.
+     *
+     * Tightly coupled with {@link #deserializeDateRangeLowerBound(int, Object, ValueAccessor)} and
+     * {@link #deserializeDateRangeUpperBound(int, Object, ValueAccessor)}.
+     */
+    private final static int SERIALIZED_DATE_RANGE_BOUND_SIZE = TypeSizes.LONG_SIZE + TypeSizes.BYTE_SIZE;
 
     private static final List<Integer> VALID_SERIALIZED_LENGTHS = ImmutableList.of(
             // types: 0x04, 0x05
@@ -141,26 +149,30 @@ public final class DateRangeSerializer implements TypeSerializer<DateRange>
     }
 
     @Override
-    public DateRange deserialize(ByteBuffer bytes)
+    public <V> DateRange deserialize(V value, ValueAccessor<V> accessor)
     {
-        if (bytes.remaining() == 0)
+        if (accessor.isEmpty(value))
         {
             return null;
         }
 
-        try (DataInputBuffer input = new DataInputBuffer(bytes, true))
+        try
         {
-            byte type = input.readByte();
+            byte type = accessor.toByte(value);
+            int offset = TypeSizes.BYTE_SIZE;
             switch (type)
             {
                 case DATE_RANGE_TYPE_SINGLE_DATE:
-                    return new DateRange(deserializeDateRangeLowerBound(input));
+                    return new DateRange(deserializeDateRangeLowerBound(offset, value, accessor));
                 case DATE_RANGE_TYPE_CLOSED_RANGE:
-                    return new DateRange(deserializeDateRangeLowerBound(input), deserializeDateRangeUpperBound(input));
+                    DateRange.DateRangeBound lowerBound = deserializeDateRangeLowerBound(offset, value, accessor);
+                    offset += SERIALIZED_DATE_RANGE_BOUND_SIZE;
+                    DateRange.DateRangeBound upperBound = deserializeDateRangeUpperBound(offset, value, accessor);
+                    return new DateRange(lowerBound, upperBound);
                 case DATE_RANGE_TYPE_OPEN_RANGE_HIGH:
-                    return new DateRange(deserializeDateRangeLowerBound(input), DateRange.DateRangeBound.UNBOUNDED);
+                    return new DateRange(deserializeDateRangeLowerBound(offset, value, accessor), DateRange.DateRangeBound.UNBOUNDED);
                 case DATE_RANGE_TYPE_OPEN_RANGE_LOW:
-                    return new DateRange(DateRange.DateRangeBound.UNBOUNDED, deserializeDateRangeUpperBound(input));
+                    return new DateRange(DateRange.DateRangeBound.UNBOUNDED, deserializeDateRangeUpperBound(offset, value, accessor));
                 case DATE_RANGE_TYPE_BOTH_OPEN_RANGE:
                     return new DateRange(DateRange.DateRangeBound.UNBOUNDED, DateRange.DateRangeBound.UNBOUNDED);
                 case DATE_RANGE_TYPE_SINGLE_DATE_OPEN:
@@ -176,17 +188,17 @@ public final class DateRangeSerializer implements TypeSerializer<DateRange>
     }
 
     @Override
-    public void validate(ByteBuffer bytes) throws MarshalException
+    public <V> void validate(V value, ValueAccessor<V> accessor) throws MarshalException
     {
-        if (bytes.remaining() == 0)
+        if (accessor.isEmpty(value))
         {
             return;
         }
-        else if (!VALID_SERIALIZED_LENGTHS.contains(bytes.remaining()))
+        else if (!VALID_SERIALIZED_LENGTHS.contains(accessor.size(value)))
         {
-            throw new MarshalException(String.format("Date range should be have %s bytes, got %d instead.", VALID_SERIALIZED_LENGTHS, bytes.remaining()));
+            throw new MarshalException(String.format("Date range should be have %s bytes, got %d instead.", VALID_SERIALIZED_LENGTHS, accessor.size(value)));
         }
-        DateRange dateRange = deserialize(bytes);
+        DateRange dateRange = deserialize(value, accessor);
         validateDateRange(dateRange);
     }
 
@@ -221,17 +233,19 @@ public final class DateRangeSerializer implements TypeSerializer<DateRange>
         }
     }
 
-    private DateRange.DateRangeBound deserializeDateRangeLowerBound(DataInputBuffer input) throws IOException
+    private <V> DateRange.DateRangeBound deserializeDateRangeLowerBound(int offset, V value, ValueAccessor<V> accessor) throws IOException
     {
-        long epochMillis = input.readLong();
-        Precision precision = Precision.fromEncoded(input.readByte());
+        long epochMillis = accessor.getLong(value, offset);
+        offset += TypeSizes.LONG_SIZE;
+        Precision precision = Precision.fromEncoded(accessor.getByte(value, offset));
         return DateRange.DateRangeBound.lowerBound(Instant.ofEpochMilli(epochMillis), precision);
     }
 
-    private DateRange.DateRangeBound deserializeDateRangeUpperBound(DataInputBuffer input) throws IOException
+    private <V> DateRange.DateRangeBound deserializeDateRangeUpperBound(int offset, V value, ValueAccessor<V> accessor) throws IOException
     {
-        long epochMillis = input.readLong();
-        Precision precision = Precision.fromEncoded(input.readByte());
+        long epochMillis = accessor.getLong(value, offset);
+        offset += TypeSizes.LONG_SIZE;
+        Precision precision = Precision.fromEncoded(accessor.getByte(value, offset));
         return DateRange.DateRangeBound.upperBound(Instant.ofEpochMilli(epochMillis), precision);
     }
 

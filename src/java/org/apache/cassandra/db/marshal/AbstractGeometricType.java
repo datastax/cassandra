@@ -41,15 +41,17 @@ public abstract class AbstractGeometricType<T extends OgcGeometry> extends Abstr
         }
 
         @Override
-        public T deserialize(ByteBuffer byteBuffer)
+        public <V> T deserialize(V value, ValueAccessor<V> accessor)
         {
             // OGCGeometry does not respect the current position of the buffer, so you need to use slice()
+            ByteBuffer byteBuffer = accessor.toBuffer(value);
             return geoSerializer.fromWellKnownBinary(byteBuffer.slice());
         }
 
         @Override
-        public void validate(ByteBuffer byteBuffer) throws MarshalException
+        public <V> void validate(V value, ValueAccessor<V> accessor) throws MarshalException
         {
+            ByteBuffer byteBuffer = accessor.toBuffer(value);
             int pos = byteBuffer.position();
             // OGCGeometry does not respect the current position of the buffer, so you need to use slice()
             geoSerializer.fromWellKnownBinary(byteBuffer.slice()).validate();
