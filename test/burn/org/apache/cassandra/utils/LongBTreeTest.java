@@ -27,10 +27,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
@@ -38,7 +37,11 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Snapshot;
@@ -56,6 +59,10 @@ import static org.junit.Assert.assertTrue;
 
 public class LongBTreeTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(LongBTreeTest.class);
+
+    private final static long seed = System.currentTimeMillis();
+    private Random rnd;
 
     private static final boolean DEBUG = false;
     private static int perThreadTrees = 100;
@@ -71,11 +78,28 @@ public class LongBTreeTest
     private static final Timer TREE_TIMER = metrics.timer(MetricRegistry.name(BTree.class, "TREE"));
     private static final ExecutorService MODIFY = Executors.newFixedThreadPool(threads, new NamedThreadFactory("MODIFY"));
     private static final ExecutorService COMPARE = DEBUG ? MODIFY : Executors.newFixedThreadPool(threads, new NamedThreadFactory("COMPARE"));
-    private static final RandomAbort<Integer> SPORADIC_ABORT = new RandomAbort<>(new Random(), 0.0001f);
+    private static final RandomAbort<Integer> SPORADIC_ABORT = new RandomAbort<>(new Random(seed), 0.0001f);
 
     static
     {
         System.setProperty("cassandra.btree.fanfactor", "4");
+    }
+
+    @Before
+    public void before()
+    {
+        logger.info("Using random with seed: {}", seed);
+        rnd = new Random(seed);
+    }
+
+    private int nextInt(int min, int max)
+    {
+        return min + rnd.nextInt(max - min);
+    }
+
+    private static int nextInt(Random rnd, int min, int max)
+    {
+        return min + rnd.nextInt(max - min);
     }
 
     /************************** TEST ACCESS ********************************************/
@@ -89,7 +113,7 @@ public class LongBTreeTest
 
     private BTreeTestFactory testSearchIteratorFactory()
     {
-        return (test) -> {
+        return (rnd, test) -> {
             IndexedSearchIterator<Integer, Integer> iter1 = test.testAsSet.iterator();
             IndexedSearchIterator<Integer, Integer> iter2 = test.testAsList.iterator();
             return (key) ->
@@ -113,7 +137,7 @@ public class LongBTreeTest
 
                 // check that by advancing the same key again we get null, but only do it on one of the two iterators
                 // to ensure they both advance differently
-                if (ThreadLocalRandom.current().nextBoolean())
+                if (rnd.nextBoolean())
                     Assert.assertNull(iter1.next(key));
                 else
                     Assert.assertNull(iter2.next(key));
@@ -170,7 +194,7 @@ public class LongBTreeTest
     public void testToArray() throws InterruptedException
     {
         testRandomSelection(perThreadTrees, 4,
-                            (selection) ->
+                            (rnd, selection) ->
                             {
                                 Integer[] array = new Integer[selection.canonicalList.size() + 1];
                                 selection.testAsList.toArray(array, 1);
@@ -199,7 +223,7 @@ public class LongBTreeTest
     public void testTransformAndFilter() throws InterruptedException
     {
         testRandomSelection(perThreadTrees, 4, false, false, false,
-                            (selection) ->
+                            (rnd, selection) ->
                             {
                                 Map<Integer, Integer> update = new LinkedHashMap<>();
                                 for (Integer i : selection.testKeys)
@@ -250,13 +274,13 @@ public class LongBTreeTest
     private void testRandomSelectionOfList(int perThreadTrees, int perTreeSelections, BTreeListTestFactory testRun) throws InterruptedException
     {
         testRandomSelection(perThreadTrees, perTreeSelections,
-                            (BTreeTestFactory) (selection) -> testRun.get(selection.testAsList, selection.canonicalList, selection.comparator));
+                            (BTreeTestFactory) (rnd, selection) -> testRun.get(selection.testAsList, selection.canonicalList, selection.comparator));
     }
 
     private void testRandomSelectionOfSet(int perThreadTrees, int perTreeSelections, BTreeSetTestFactory testRun) throws InterruptedException
     {
         testRandomSelection(perThreadTrees, perTreeSelections,
-                            (BTreeTestFactory) (selection) -> testRun.get(selection.testAsSet, selection.canonicalSet));
+                            (BTreeTestFactory) (rnd, selection) -> testRun.get(selection.testAsSet, selection.canonicalSet));
     }
 
     static interface BTreeSetTestFactory
@@ -271,7 +295,7 @@ public class LongBTreeTest
 
     static interface BTreeTestFactory
     {
-        TestEachKey get(RandomSelection test);
+        TestEachKey get(Random rnd, RandomSelection test);
     }
 
     static interface TestEachKey
@@ -279,9 +303,9 @@ public class LongBTreeTest
         void testOne(Integer value);
     }
 
-    private void run(BTreeTestFactory testRun, RandomSelection selection)
+    private void run(Random rnd, BTreeTestFactory testRun, RandomSelection selection)
     {
-        TestEachKey testEachKey = testRun.get(selection);
+        TestEachKey testEachKey = testRun.get(rnd, selection);
         for (Integer key : selection.testKeys)
             testEachKey.testOne(key);
     }
@@ -295,15 +319,15 @@ public class LongBTreeTest
 
     private void testRandomSelection(int perThreadTrees, int perTreeSelections, BTreeTestFactory testRun) throws InterruptedException
     {
-        testRandomSelection(perThreadTrees, perTreeSelections, (RandomSelection selection) -> run(testRun, selection));
+        testRandomSelection(perThreadTrees, perTreeSelections, (Random rnd, RandomSelection selection) -> run(rnd, testRun, selection));
     }
 
-    private void testRandomSelection(int perThreadTrees, int perTreeSelections, Consumer<RandomSelection> testRun) throws InterruptedException
+    private void testRandomSelection(int perThreadTrees, int perTreeSelections, BiConsumer<Random, RandomSelection> testRun) throws InterruptedException
     {
         testRandomSelection(perThreadTrees, perTreeSelections, true, true, true, testRun);
     }
 
-    private void testRandomSelection(int perThreadTrees, int perTreeSelections, boolean narrow, boolean mixInNotPresentItems, boolean permitReversal, Consumer<RandomSelection> testRun) throws InterruptedException
+    private void testRandomSelection(int perThreadTrees, int perTreeSelections, boolean narrow, boolean mixInNotPresentItems, boolean permitReversal, BiConsumer<Random, RandomSelection> testRun) throws InterruptedException
     {
         int threads = Runtime.getRuntime().availableProcessors();
         final CountDownLatch latch = new CountDownLatch(threads);
@@ -319,12 +343,11 @@ public class LongBTreeTest
                     for (int i = 0 ; i < perThreadTrees ; i++)
                     {
                         // not easy to usefully log seed, as run tests in parallel; need to really pass through to exceptions
-                        long seed = ThreadLocalRandom.current().nextLong();
-                        Random random = new Random(seed);
+                        Random random = new Random(seed + i);
                         RandomTree tree = randomTree(minTreeSize, maxTreeSize, random);
                         for (int j = 0 ; j < perTreeSelections ; j++)
                         {
-                            testRun.accept(tree.select(narrow, mixInNotPresentItems, permitReversal));
+                            testRun.accept(rnd, tree.select(narrow, mixInNotPresentItems, permitReversal));
                             count.incrementAndGet();
                         }
                     }
@@ -716,10 +739,9 @@ public class LongBTreeTest
     @Test
     public void testRandomRangeAndBatches() throws ExecutionException, InterruptedException
     {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        int treeSize = random.nextInt(maxTreeSize / 10, maxTreeSize * 10);
+        int treeSize = nextInt(maxTreeSize / 10, maxTreeSize * 10);
         for (int i = 0 ; i < perThreadTrees / 10 ; i++)
-            testInsertions(threads * 10, treeSize, random.nextInt(1, 100) / 10f, treeSize / 100, true);
+            testInsertions(threads * 10, treeSize, nextInt(1, 100) / 10f, treeSize / 100, true);
     }
 
     @Test
@@ -728,13 +750,13 @@ public class LongBTreeTest
         testInsertions(50, 10, 10, false);
     }
 
-    private static void testInsertions(int perTestCount, float testKeyRatio, int modificationBatchSize, boolean quickEquality) throws ExecutionException, InterruptedException
+    private void testInsertions(int perTestCount, float testKeyRatio, int modificationBatchSize, boolean quickEquality) throws ExecutionException, InterruptedException
     {
         int tests = perThreadTrees * threads;
         testInsertions(tests, perTestCount, testKeyRatio, modificationBatchSize, quickEquality);
     }
 
-    private static void testInsertions(int tests, int perTestCount, float testKeyRatio, int modificationBatchSize, boolean quickEquality) throws ExecutionException, InterruptedException
+    private void testInsertions(int tests, int perTestCount, float testKeyRatio, int modificationBatchSize, boolean quickEquality) throws ExecutionException, InterruptedException
     {
         int batchesPerTest = perTestCount / modificationBatchSize;
         int testKeyRange = (int) (perTestCount * testKeyRatio);
@@ -749,13 +771,13 @@ public class LongBTreeTest
             final List<ListenableFutureTask<List<ListenableFuture<?>>>> outer = new ArrayList<>();
             for (int i = 0 ; i < chunkSize ; i++)
             {
-                int maxRunLength = modificationBatchSize == 1 ? 1 : ThreadLocalRandom.current().nextInt(1, modificationBatchSize);
+                int maxRunLength = modificationBatchSize == 1 ? 1 : nextInt(1, modificationBatchSize);
                 outer.add(doOneTestInsertions(testKeyRange, maxRunLength, modificationBatchSize, batchesPerTest, quickEquality));
             }
 
             final List<ListenableFuture<?>> inner = new ArrayList<>();
             long complete = 0;
-            int reportInterval = Math.max(1000, (int) (totalCount / 10000));
+            int reportInterval = Math.max(1000, (int) (totalCount / 100));
             long lastReportAt = 0;
             for (ListenableFutureTask<List<ListenableFuture<?>>> f : outer)
             {
@@ -782,6 +804,8 @@ public class LongBTreeTest
     {
         ListenableFutureTask<List<ListenableFuture<?>>> f = ListenableFutureTask.create(new Callable<List<ListenableFuture<?>>>()
         {
+            final Random rnd = new Random(seed);
+
             @Override
             public List<ListenableFuture<?>> call()
             {
@@ -789,11 +813,10 @@ public class LongBTreeTest
                 NavigableMap<Integer, Integer> canon = new TreeMap<>();
                 Object[] btree = BTree.empty();
                 final TreeMap<Integer, Integer> buffer = new TreeMap<>();
-                ThreadLocalRandom rnd = ThreadLocalRandom.current();
                 for (int i = 0 ; i < iterations ; i++)
                 {
                     buffer.clear();
-                    int mods = rnd.nextInt(1, averageModsPerIteration * 2);
+                    int mods = nextInt(rnd, 1, averageModsPerIteration * 2);
                     while (mods > 0)
                     {
                         int v = rnd.nextInt(upperBound);
@@ -1071,9 +1094,6 @@ public class LongBTreeTest
 
     private static void log(String formatstr, Object ... args)
     {
-        args = Arrays.copyOf(args, args.length + 1);
-        System.arraycopy(args, 0, args, 1, args.length - 1);
-        args[0] = System.currentTimeMillis();
-        System.out.printf("%tT: " + formatstr + "\n", args);
+        logger.info(String.format(formatstr, args));
     }
 }
