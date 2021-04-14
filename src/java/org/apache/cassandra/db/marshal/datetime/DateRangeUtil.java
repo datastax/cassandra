@@ -44,12 +44,7 @@ public class DateRangeUtil
         -1/*unused*/, -1, -1, Calendar.YEAR, Calendar.MONTH, Calendar.DAY_OF_MONTH,
         Calendar.HOUR_OF_DAY, Calendar.MINUTE, Calendar.SECOND, Calendar.MILLISECOND
     };
-    private static final Calendar CLEAN_CALENDAR;
-    static
-    {
-        CLEAN_CALENDAR = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT);
-        CLEAN_CALENDAR.clear();
-    }
+    private static final TimeZone UTC_TIME_ZONE = TimeZone.getTimeZone("UTC");
 
     public static DateRange parseDateRange(String source) throws ParseException
     {
@@ -185,7 +180,8 @@ public class DateRangeUtil
         // example: +2014-10-23T21:22:33.159Z
         if (str == null || str.isEmpty())
             throw new IllegalArgumentException("str is null or blank");
-        Calendar cal = (Calendar) CLEAN_CALENDAR.clone();
+        Calendar cal = Calendar.getInstance(UTC_TIME_ZONE, Locale.ROOT);
+        cal.clear();
         if (str.equals("*"))
             return cal;
         int offset = 0;//a pointer

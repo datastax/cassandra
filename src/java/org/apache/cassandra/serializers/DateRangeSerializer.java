@@ -251,7 +251,7 @@ public final class DateRangeSerializer extends TypeSerializer<DateRange>
 
     private void validateDateRange(DateRange dateRange)
     {
-        if (!dateRange.getLowerBound().isUnbounded() && dateRange.isUpperBoundDefined() && !dateRange.getUpperBound().isUnbounded())
+        if (dateRange != null && !dateRange.getLowerBound().isUnbounded() && dateRange.isUpperBoundDefined() && !dateRange.getUpperBound().isUnbounded())
         {
             if (dateRange.getLowerBound().getTimestamp().isAfter(dateRange.getUpperBound().getTimestamp()))
             {
