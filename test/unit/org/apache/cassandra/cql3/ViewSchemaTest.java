@@ -724,7 +724,7 @@ public class ViewSchemaTest extends CQLTester
         long defaultMVPerTableFailureThreshold = config.materialized_view_per_table_failure_threshold;
         Set<String> defaultTablePropertiesDisallowed = config.table_properties_disallowed;
         config.enabled = true;
-        config.materialized_view_per_table_failure_threshold = 1;
+        config.materialized_view_per_table_failure_threshold = 1L;
         config.table_properties_disallowed = Collections.emptySet();
 
         String createViewCql = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k is NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)";

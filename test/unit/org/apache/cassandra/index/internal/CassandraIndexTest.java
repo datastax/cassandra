@@ -916,7 +916,7 @@ public class CassandraIndexTest extends CQLTester
         Set<String> defaultTablePropertiesDisallowed = config.table_properties_disallowed;
         config.enabled = true;
         config.table_properties_disallowed = Collections.emptySet();
-        config.secondary_index_per_table_failure_threshold = 1;
+        config.secondary_index_per_table_failure_threshold = 1L;
 
         try
         {

@@ -289,6 +289,8 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+            consistencyForPaxos.validateForCas(keyspaceName);
+            consistencyForCommit.validateForCasCommit(keyspaceName);
 
             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
             {
@@ -433,7 +435,7 @@ public class StorageProxy implements StorageProxyMBean
         Keyspace keyspace = Keyspace.open(metadata.keyspace);
         try
         {
-            consistencyForPaxos.validateForCas();
+            consistencyForPaxos.validateForCas(metadata.keyspace);
             consistencyForReplayCommits.validateForCasCommit(metadata.keyspace);
             consistencyForCommit.validateForCasCommit(metadata.keyspace);
 

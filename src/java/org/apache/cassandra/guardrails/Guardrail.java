@@ -54,7 +54,7 @@ public abstract class Guardrail
     private static final NoSpamLogger logger = NoSpamLogger.getLogger(LoggerFactory.getLogger(Guardrail.class),
                                                                       10, TimeUnit.MINUTES);
 
-    private final String name;
+    public final String name;
 
     protected Guardrail(String name)
     {
