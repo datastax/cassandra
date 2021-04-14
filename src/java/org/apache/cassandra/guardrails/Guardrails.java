@@ -98,6 +98,12 @@ public abstract class Guardrails
                                 (x, what, v, t) -> format("Detected partition %s of size %s is greater than the maximum recommended size (%s)",
                                                 what, v, t));
 
+    public static final Threshold partitionKeysInSelectQuery =
+    new Threshold("partition_keys_in_select_query",
+                  () -> -1L,
+                  () -> config.partition_keys_in_select_failure_threshold,
+                  (x, what, v, t) -> format("%s cannot be completed because it selects %s partitions keys - more than the maximum allowed %s", what, v, t));
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()
