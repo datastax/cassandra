@@ -104,6 +104,27 @@ public abstract class Guardrails
                   () -> config.partition_keys_in_select_failure_threshold,
                   (x, what, v, t) -> format("%s cannot be completed because it selects %s partitions keys - more than the maximum allowed %s", what, v, t));
 
+    public static final Threshold fieldsPerUDT =
+    new Threshold("fields_per_udt",
+                  () -> -1L, // not needed so far
+                  () -> config.fields_per_udt_failure_threshold,
+                  (x, what, v, t) -> format("User types cannot have more than %s columns, but %s provided for type %s",
+                                            t, v, what));
+
+    public static final Threshold collectionSize =
+    new SizeThreshold("collection_size",
+                      () -> config.collection_size_warn_threshold_in_kb * 1024L,
+                      () -> -1L, // not needed so far
+                      (x, what, v, t) -> format("Detected collection %s of size %s, greater than the maximum recommended size (%s)",
+                                                what, v, t));
+
+    public static final Threshold itemsPerCollection =
+    new Threshold("items_per_collection",
+                  () -> config.items_per_collection_warn_threshold,
+                  () -> -1L, // not needed so far
+                  (x, what, v, t) -> format("Detected collection %s with %s items, greater than the maximum recommended (%s)",
+                                            what, v, t));
+
     static final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private Guardrails()

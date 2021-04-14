@@ -26,11 +26,13 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.units.SizeUnit;
@@ -77,6 +79,20 @@ public abstract class Guardrail
         for (Guardrails.Listener listener : Guardrails.listeners)
             listener.onFailureTriggered(name, message);
         throw new InvalidRequestException(message);
+    }
+
+    /**
+     * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
+     * ({@link Guardrails#enabled()}) and if the keyspace (if specified) is not an internal one.
+     *
+     * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
+     *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
+     *                 keyspace, or that the check should be done regardless of the keyspace.
+     * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
+     */
+    public boolean enabled(@Nullable String keyspace)
+    {
+        return Guardrails.enabled() && (keyspace == null || !SchemaConstants.isInternalKeyspace(keyspace));
     }
 
     /**
@@ -153,6 +169,32 @@ public abstract class Guardrail
         }
 
         /**
+         * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
+         * ({@link Guardrails#enabled()}), and if any of the thresholds is positive.
+         *
+         * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
+         */
+        public boolean enabled()
+        {
+            return super.enabled(null) && (failThreshold.getAsLong() >= 0 || warnThreshold.getAsLong() >= 0);
+        }
+
+        /**
+         * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
+         * ({@link Guardrails#enabled()}), the keyspace (if specified) is not an internal one, and if any of the
+         * thresholds is positive.
+         *
+         * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
+         *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
+         *                 keyspace, or that the check should be done regardless of the keyspace.
+         * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
+         */
+        public boolean enabled(@Nullable String keyspace)
+        {
+            return super.enabled(keyspace) && (failThreshold.getAsLong() >= 0 || warnThreshold.getAsLong() >= 0);
+        }
+
+        /**
          * Checks whether the provided value would trigger a warning or failure if passed to {@link #guard}.
          *
          * <p>This method is optional (does not have to be called) but can be used in the case where the "what"
@@ -160,12 +202,29 @@ public abstract class Guardrail
          * not being triggered).
          *
          * @param value the value to test.
-         * @return {@code true} if {@code value} is above the warning or failure thresholds of this guardrail,
-         * {@code false otherwise}.
+         * @return {@code true} if {@code value} is above the warning or failure thresholds of this guardrail, {@code false} otherwise.
          */
         public boolean triggersOn(long value)
         {
-            return Guardrails.enabled() && (value > Math.min(failValue(), warnValue()));
+            return enabled() && (value > Math.min(failValue(), warnValue()));
+        }
+
+        /**
+         * Checks whether the provided value would trigger a warning or failure if passed to {@link #guard}.
+         *
+         * <p>This method is optional (does not have to be called) but can be used in the case where the "what"
+         * argument to {@link #guard} is expensive to build to save doing so in the common case (of the guardrail
+         * not being triggered).
+         *
+         * @param value    the value to test.
+         * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
+         *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
+         *                 keyspace, or that the check should be done regardless of the keyspace.
+         * @return {@code true} if {@code value} is above the warning or failure thresholds of this guardrail, {@code false} otherwise.
+         */
+        public boolean triggersOn(long value, @Nullable String keyspace)
+        {
+            return enabled(keyspace) && (value > Math.min(failValue(), warnValue()));
         }
 
         /**
@@ -180,7 +239,48 @@ public abstract class Guardrail
          */
         public void guard(long value, String what)
         {
-            if (!Guardrails.enabled())
+            guard(value, what, false);
+        }
+
+        /**
+         * Apply the guardrail to the provided value, triggering a warning or failure if appropriate.
+         *
+         * @param value            the value to check.
+         * @param what             a string describing what {@code value} is a value of used in the error message if the
+         *                         guardrail is triggered (for instance, say the guardrail guards the size of column values, then this
+         *                         argument must describe which column of which row is triggering the guardrail for convenience). Note that
+         *                         this is only used if the guardrail triggers, so if it is expensive to build, you can put the call to
+         *                         this method behind a {@link #triggersOn} call.
+         * @param containsUserData a boolean describing if {@code what} contains user data. If this is the case,
+         *                         {@code what} will only be included in the log messages and client warning. It will not be included in the
+         *                         error messages that are passed to listeners and exceptions. We have to exclude the user data from exceptions
+         *                         because they will be sent as Diagnostic Events in the future.
+         */
+        public void guard(long value, String what, boolean containsUserData)
+        {
+            guard(value, what, containsUserData, null);
+        }
+
+        /**
+         * Apply the guardrail to the provided value, triggering a warning or failure if appropriate.
+         *
+         * @param value            the value to check.
+         * @param what             a string describing what {@code value} is a value of used in the error message if the
+         *                         guardrail is triggered (for instance, say the guardrail guards the size of column values, then this
+         *                         argument must describe which column of which row is triggering the guardrail for convenience). Note that
+         *                         this is only used if the guardrail triggers, so if it is expensive to build, you can put the call to
+         *                         this method behind a {@link #triggersOn} call.
+         * @param containsUserData a boolean describing if {@code what} contains user data. If this is the case,
+         *                         {@code what} will only be included in the log messages and client warning. It will not be included in the
+         *                         error messages that are passed to listeners and exceptions. We have to exclude the user data from exceptions
+         *                         because they are sent to Insights.
+         * @param keyspace         the name of the keyspace which the checked value belongs to, so the check will be skipped
+         *                         if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner keyspace,
+         *                         or that the check should be done regardless of the keyspace.
+         */
+        public void guard(long value, String what, boolean containsUserData, @Nullable String keyspace)
+        {
+            if (!enabled(keyspace))
                 return;
 
             long failValue = failValue();
@@ -254,7 +354,7 @@ public abstract class Guardrail
          */
         public void ensureEnabled()
         {
-            if (Guardrails.enabled() && disabled.getAsBoolean())
+            if (enabled(null) && disabled.getAsBoolean())
                 fail(what + " is not allowed");
         }
     }
@@ -363,7 +463,7 @@ public abstract class Guardrail
          */
         public void ensureAllowed(Set<T> values)
         {
-            if (!Guardrails.enabled())
+            if (!enabled(null))
                 return;
 
             ensureUpToDate();

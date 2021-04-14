@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -30,8 +31,12 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
@@ -44,6 +49,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -422,6 +428,48 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         long partitionCount();
         long partitionKeySize();
         long dataSize();
+    }
+
+    public static void guardCollectionSize(UnfilteredRowIterator partition, Unfiltered unfiltered)
+    {
+        if (!unfiltered.isRow())
+            return;
+
+        String keyspace = partition.metadata().keyspace;
+        if (!Guardrails.collectionSize.enabled(keyspace) && !Guardrails.itemsPerCollection.enabled(keyspace))
+            return;
+
+        Row row = (Row) unfiltered;
+        for (ColumnMetadata column : row.columns())
+        {
+            if (!column.type.isCollection() || !column.type.isMultiCell())
+                continue;
+
+            ComplexColumnData cells = row.getComplexColumnData(column);
+            if (cells == null)
+                continue;
+
+            ComplexColumnData liveCells = cells.purge(DeletionPurger.PURGE_ALL, FBUtilities.nowInSeconds());
+            if (liveCells == null)
+                continue;
+
+            int cellsSize = liveCells.dataSize();
+            int cellsCount = liveCells.cellsCount();
+
+            if (!Guardrails.collectionSize.triggersOn(cellsSize) &&
+                !Guardrails.itemsPerCollection.triggersOn(cellsCount))
+                continue;
+
+            TableMetadata metadata = partition.metadata();
+            ByteBuffer key = partition.partitionKey().getKey();
+            String keyString = metadata.primaryKeyAsCQLLiteral(key, row.clustering());
+            String msg = String.format("%s in row %s in table %s",
+                                       column.name.toString(),
+                                       keyString,
+                                       metadata);
+            Guardrails.collectionSize.guard(cellsSize, msg, true, keyspace);
+            Guardrails.itemsPerCollection.guard(cellsCount, msg, true, keyspace);
+        }
     }
 
     public static abstract class Factory

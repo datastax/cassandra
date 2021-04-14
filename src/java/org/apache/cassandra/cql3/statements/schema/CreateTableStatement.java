@@ -132,7 +132,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
             Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
 
 
-        if (!SchemaConstants.isInternalKeyspace(keyspaceName))
+        if (!Guardrails.tablesLimit.enabled(keyspaceName))
         {
             // guardrails on number of tables
             int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
@@ -285,6 +285,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (params.defaultTimeToLive > 0)
                 throw ire("Cannot set %s on a table with counters", TableParams.Option.DEFAULT_TIME_TO_LIVE);
         }
+
+        Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, false, keyspaceName);
 
         /*
          * Create the builder

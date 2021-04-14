@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -138,20 +139,29 @@ public class UpdateParameters
 
     public void addTombstone(ColumnMetadata column, CellPath path) throws InvalidRequestException
     {
+        if (path != null && column.type.isMultiCell())
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString());
+
         builder.addCell(BufferCell.tombstone(column, timestamp, nowInSec, path));
     }
 
-    public void addCell(ColumnMetadata column, ByteBuffer value) throws InvalidRequestException
+    public Cell addCell(ColumnMetadata column, ByteBuffer value) throws InvalidRequestException
     {
-        addCell(column, null, value);
+        return addCell(column, null, value);
     }
 
-    public void addCell(ColumnMetadata column, CellPath path, ByteBuffer value) throws InvalidRequestException
+    public Cell addCell(ColumnMetadata column, CellPath path, ByteBuffer value) throws InvalidRequestException
     {
+        Guardrails.columnValueSize.guard(value.remaining(), column.name.toString());
+
+        if (path != null && column.type.isMultiCell())
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString());
+
         Cell<?> cell = ttl == LivenessInfo.NO_TTL
                        ? BufferCell.live(column, timestamp, value, path)
                        : BufferCell.expiring(column, timestamp, ttl, nowInSec, value, path);
         builder.addCell(cell);
+        return cell;
     }
 
     public void addCounter(ColumnMetadata column, long increment) throws InvalidRequestException

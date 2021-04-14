@@ -69,7 +69,7 @@ public class GuardrailsTest
         return collector;
     }
 
-    private void assertWarn(Runnable runnable, String message)
+    private void assertWarn(Runnable runnable, String fullMessage, String redactedMessage)
     {
         // We use client warnings and listeners to check we properly warn as this is the most convenient. Technically,
         // this doesn't validate we also log the warning, but that's probably fine ...
@@ -84,12 +84,14 @@ public class GuardrailsTest
             assertThat(warnings.isEmpty()).isFalse();
             assertThat(warnings.size()).isEqualTo(1);
             String warning = warnings.get(0);
-            assertThat(warning).contains(message);
+            assertThat(warning).contains(fullMessage);
 
             // Listeners
             assertThat(collector.failuresTriggered).isEmpty();
             assertThat(collector.warningsTriggered).isNotEmpty();
             assertThat(collector.warningsTriggered.size()).isEqualTo(1);
+
+            assertThat(collector.warningsTriggered.containsValue(redactedMessage)).isTrue();
         }
         finally
         {
@@ -98,7 +100,22 @@ public class GuardrailsTest
         }
     }
 
-    private void assertFails(Runnable runnable, String message)
+    private void assertWarn(Runnable runnable, String message)
+    {
+        assertWarn(runnable, message, message);
+    }
+
+    private void assertFails(Runnable runnable, String fullMessage)
+    {
+        assertFails(runnable, fullMessage, fullMessage, true);
+    }
+
+    private void assertFails(Runnable runnable, String fullMessage, String redactedMessage)
+    {
+        assertFails(runnable, fullMessage, redactedMessage, true);
+    }
+
+    private void assertFails(Runnable runnable, String fullMessage, String redactedMessage, boolean notified)
     {
         TriggerCollector collector = createAndAddCollector();
 
@@ -106,12 +123,21 @@ public class GuardrailsTest
         {
             assertThatThrownBy(runnable::run)
             .isInstanceOf(InvalidRequestException.class)
-            .hasMessageContaining(message);
+            .hasMessageContaining(fullMessage);
 
             // Listeners
-            assertThat(collector.failuresTriggered).isNotEmpty();
-            assertThat(collector.warningsTriggered).isEmpty();
-            assertThat(collector.failuresTriggered.size()).isEqualTo(1);
+            if (notified)
+            {
+
+                assertThat(collector.failuresTriggered).isNotEmpty();
+                assertThat(collector.warningsTriggered).isEmpty();
+                assertThat(collector.failuresTriggered.size()).isEqualTo(1);
+                assertThat(collector.failuresTriggered.containsValue(redactedMessage)).isTrue();
+            }
+            else
+            {
+                assertThat(collector.failuresTriggered).isEmpty();
+            }
         }
         finally
         {
@@ -145,7 +171,20 @@ public class GuardrailsTest
     {
         DatabaseDescriptor.getGuardrailsConfig().enabled = false;
 
-        Threshold guard = new Threshold("x", () -> 10, () -> 100, (isWarn, what, v, t) -> "Should never trigger");
+        Threshold.ErrorMessageProvider errorMessageProvider = (isWarn, what, v, t) -> "Should never trigger";
+        testDisabledThreshold(new Threshold("a", () -> 10, () -> 100, errorMessageProvider));
+        testDisabledThreshold(new Threshold("b", () -> 10, () -> -1, errorMessageProvider));
+        testDisabledThreshold(new Threshold("c", () -> -1, () -> 100, errorMessageProvider));
+        testDisabledThreshold(new Threshold("d", () -> -1, () -> -1, errorMessageProvider));
+        testDisabledThreshold(new Threshold("e", () -> -1, () -> -1, errorMessageProvider));
+
+        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
+        testDisabledThreshold(new Threshold("e", () -> -1, () -> -1, errorMessageProvider));
+    }
+
+    private void testDisabledThreshold(Threshold guard)
+    {
+        assertThat(guard.enabled()).isFalse();
 
         assertThat(guard.triggersOn(1)).isFalse();
         assertThat(guard.triggersOn(10)).isFalse();
@@ -171,6 +210,7 @@ public class GuardrailsTest
                                         (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
                                                                        isWarn ? "Warning" : "Failure", what, v, t));
 
+        assertThat(guard.enabled()).isTrue();
         assertThat(guard.triggersOn(1)).isFalse();
         assertThat(guard.triggersOn(10)).isFalse();
         assertThat(guard.triggersOn(11)).isTrue();
@@ -197,6 +237,7 @@ public class GuardrailsTest
                                         (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
                                                                        isWarn ? "Warning" : "Failure", what, v, t));
 
+        assertThat(guard.enabled()).isTrue();
         assertThat(guard.triggersOn(10)).isFalse();
         assertThat(guard.triggersOn(11)).isTrue();
 
@@ -215,6 +256,7 @@ public class GuardrailsTest
                                         (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
                                                                        isWarn ? "Warning" : "Failure", what, v, t));
 
+        assertThat(guard.enabled()).isTrue();
         assertThat(guard.triggersOn(10)).isFalse();
         assertThat(guard.triggersOn(11)).isTrue();
 
