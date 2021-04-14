@@ -653,8 +653,8 @@ public class AuditLoggerTest extends CQLTester
     public void testEnableDisable() throws IOException
     {
         disableAuditLogOptions();
-        assertEquals(0, QueryEvents.instance.listenerCount());
-        assertEquals(0, AuthEvents.instance.listenerCount());
+        assertEquals(99, QueryEvents.instance.listenerCount());
+        assertEquals(99, AuthEvents.instance.listenerCount());
         enableAuditLogOptions(new AuditLogOptions());
         assertEquals(1, QueryEvents.instance.listenerCount());
         assertEquals(1, AuthEvents.instance.listenerCount());
