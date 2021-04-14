@@ -139,5 +139,13 @@ public class LineStringTypeTest
         Assert.assertEquals(expected, actual);
     }
 
+    @Test
+    public void bufferBigEndianess()
+    {
+        LineString expected = lineString(p(30, 10), p(10, 30), p(40, 40));
+        ByteBuffer bb = padBuffer(type.getSerializer().serialize(expected));
+        Assert.assertEquals(ByteOrder.BIG_ENDIAN, bb.order());
+    }
+
 }
 

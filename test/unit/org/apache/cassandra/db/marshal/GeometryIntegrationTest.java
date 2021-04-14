@@ -20,22 +20,19 @@
 
 package org.apache.cassandra.db.marshal;
 
-import java.util.Arrays;
-import java.util.Collection;
+import java.io.IOException;
 import java.util.List;
 
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import com.datastax.driver.core.CodecRegistry;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
-import com.datastax.dse.framework.CassandraYamlBuilder;
-import com.datastax.dse.framework.DseTestRunner;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.geometry.LineString;
 import org.apache.cassandra.db.marshal.geometry.OgcGeometry;
 import org.apache.cassandra.db.marshal.geometry.Point;
@@ -46,61 +43,41 @@ import static org.apache.cassandra.db.marshal.GeometricTypeTests.lineString;
 import static org.apache.cassandra.db.marshal.GeometricTypeTests.p;
 import static org.apache.cassandra.db.marshal.GeometricTypeTests.polygon;
 
-@RunWith(Parameterized.class)
-public class GeometryIntegrationTest extends DseTestRunner
+public class GeometryIntegrationTest extends CQLTester
 {
-    private static boolean initialized = false;
 
-    @Parameterized.Parameters(name = "memtable_allocation_type={0}")
-    public static Collection<Object> generateData()
+    @BeforeClass
+    public static void setupCluster() throws IOException
     {
-        return Arrays.asList("heap_buffers", "offheap_buffers", "offheap_objects");
-    }
-
-    private String memtableAllocationType;
-
-    public GeometryIntegrationTest(String memtableAllocationType)
-    {
-        this.memtableAllocationType = memtableAllocationType;
+        CodecRegistry.DEFAULT_INSTANCE.register(GeometryCodec.pointCodec,
+                                                GeometryCodec.lineStringCodec,
+                                                GeometryCodec.polygonCodec);
     }
 
     @Before
-    public void setUp() throws Exception
+    public void setUpKeyspace() throws Throwable
     {
-        super.setUp();
-        if (!initialized)
-        {
-            CassandraYamlBuilder cassandraYamlBuilder = CassandraYamlBuilder.newInstance().withMemtableAllocationType(memtableAllocationType);
-
-            DseTestRunner.startNode(1, cassandraYamlBuilder, false);
-
-
-            CodecRegistry.DEFAULT_INSTANCE.register(GeometryCodec.pointCodec,
-                                                    GeometryCodec.lineStringCodec,
-                                                    GeometryCodec.polygonCodec);
-            initialized = true;
-        }
-        sendCql3Native(1, null, "CREATE KEYSPACE ks WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}");
+        executeNet("CREATE KEYSPACE ks WITH REPLICATION={'class':'SimpleStrategy', 'replication_factor': 1}");
     }
 
     @After
-    public void teardown() throws Exception
+    public void teardown() throws Throwable
     {
-        sendCql3Native(1, null, "DROP KEYSPACE ks;");
+        executeNet("DROP KEYSPACE ks;");
     }
 
-    private <T extends OgcGeometry> void testType(T expected, Class<T> klass, AbstractGeometricType<T> type, String tableName, String wkt, String columnType) throws Exception
+    private <T extends OgcGeometry> void testType(T expected, Class<T> klass, AbstractGeometricType<T> type, String tableName, String wkt, String columnType) throws Throwable
     {
-        sendCql3Native(1, null, String.format("CREATE TABLE ks.%s (k INT PRIMARY KEY, g '%s')", tableName, columnType));
-        sendCql3Native(1, null, String.format("INSERT INTO ks.%s (k, g) VALUES (1, '%s')", tableName, wkt));
+        executeNet(String.format("CREATE TABLE ks.%s (k INT PRIMARY KEY, g '%s')", tableName, columnType));
+        executeNet(String.format("INSERT INTO ks.%s (k, g) VALUES (1, '%s')", tableName, wkt));
 
-        ResultSet results = sendCql3Native(1, null, String.format("SELECT * FROM ks.%s", tableName));
+        ResultSet results = executeNet(String.format("SELECT * FROM ks.%s", tableName));
         List<Row> rows = results.all();
         Assert.assertEquals(1, rows.size());
         Row row = rows.get(0);
         T actual = row.get("g", klass);
         Assert.assertEquals(expected, actual);
-        results = sendCql3Native(1, null, String.format("SELECT toJson(g) FROM ks.%s", tableName));
+        results = executeNet(String.format("SELECT toJson(g) FROM ks.%s", tableName));
         rows = results.all();
         Assert.assertEquals(1, rows.size());
         row = rows.get(0);
@@ -110,13 +87,13 @@ public class GeometryIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void pointTest() throws Exception
+    public void pointTest() throws Throwable
     {
-        sendCql3Native(1, null, "CREATE TABLE ks.point (k INT PRIMARY KEY, g 'PointType')");
+        executeNet("CREATE TABLE ks.point (k INT PRIMARY KEY, g 'PointType')");
         String wkt = "POINT(1.1 2.2)";
-        sendCql3Native(1, null, String.format("INSERT INTO ks.point (k, g) VALUES (1, '%s')", wkt));
+        executeNet(String.format("INSERT INTO ks.point (k, g) VALUES (1, '%s')", wkt));
 
-        ResultSet results = sendCql3Native(1, null, "SELECT * FROM ks.point");
+        ResultSet results = executeNet("SELECT * FROM ks.point");
         List<Row> rows = results.all();
         Assert.assertEquals(1, rows.size());
         Row row = rows.get(0);
@@ -125,7 +102,7 @@ public class GeometryIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void lineStringTest() throws Exception
+    public void lineStringTest() throws Throwable
     {
         LineString expected = lineString(p(30, 10), p(10, 30), p(40, 40));
         String wkt = "linestring(30 10, 10 30, 40 40)";
@@ -133,7 +110,7 @@ public class GeometryIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void polygonTest() throws Exception
+    public void polygonTest() throws Throwable
     {
         Polygon expected = polygon(p(30, 10), p(10, 20), p(20, 40), p(40, 40));
         String wkt = "polygon((30 10, 40 40, 20 40, 10 20, 30 10))";
@@ -141,11 +118,11 @@ public class GeometryIntegrationTest extends DseTestRunner
     }
 
     @Test
-    public void primaryKeyTest() throws Exception
+    public void primaryKeyTest() throws Throwable
     {
-        sendCql3Native(1, null, "CREATE TABLE ks.geo (k 'PointType', c 'LineStringType', g 'PointType', PRIMARY KEY (k, c))");
-        sendCql3Native(1, null, "INSERT INTO ks.geo (k, c, g) VALUES ('POINT(1 2)', 'linestring(30 10, 10 30, 40 40)', 'POINT(1.1 2.2)')");
-        ResultSet results = sendCql3Native(1, null, "SELECT * FROM ks.geo");
+        executeNet("CREATE TABLE ks.geo (k 'PointType', c 'LineStringType', g 'PointType', PRIMARY KEY (k, c))");
+        executeNet("INSERT INTO ks.geo (k, c, g) VALUES ('POINT(1 2)', 'linestring(30 10, 10 30, 40 40)', 'POINT(1.1 2.2)')");
+        ResultSet results = executeNet("SELECT * FROM ks.geo");
         List<Row> rows = results.all();
         Assert.assertEquals(1, rows.size());
         Row row = rows.get(0);

@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import com.esri.core.geometry.ogc.OGCGeometry;
 import com.esri.core.geometry.ogc.OGCPolygon;
 import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.db.marshal.geometry.Point;
 import org.apache.cassandra.db.marshal.geometry.Polygon;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -221,4 +222,11 @@ public class PolygonTypeTest
         type.getSerializer().validate(bb);
     }
 
+    @Test
+    public void bufferBigEndianess()
+    {
+        Polygon expected = polygon(p(30, 10), p(10, 20), p(20, 40), p(40, 40));
+        ByteBuffer bb = padBuffer(type.getSerializer().serialize(expected));
+        Assert.assertEquals(ByteOrder.BIG_ENDIAN, bb.order());
+    }
 }

@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.db.marshal.geometry.LineString;
 import org.apache.cassandra.db.marshal.geometry.Point;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -118,5 +119,13 @@ public class PointTypeTest
         expected.putDouble(point.getOgcPoint().Y()); // y
         expected.flip();
         return expected;
+    }
+
+    @Test
+    public void bufferBigEndianess()
+    {
+        Point expected = p(1, 2);
+        ByteBuffer bb = padBuffer(type.getSerializer().serialize(expected));
+        Assert.assertEquals(ByteOrder.BIG_ENDIAN, bb.order());
     }
 }

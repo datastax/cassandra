@@ -31,8 +31,6 @@ public abstract class OgcGeometry
 
     // default spatial reference for wkt/wkb
     public static final SpatialReference SPATIAL_REFERENCE_4326 = SpatialReference.create(4326);
-    public static final String SERIALIZE_NATIVE_ORDER_SYS_PROP = "dse.test.geotype.serialize_native_order";
-    private static final boolean SERIALIZE_NATIVE_ORDER = Boolean.getBoolean(SERIALIZE_NATIVE_ORDER_SYS_PROP);
 
     public interface Serializer<T extends OgcGeometry>
     {
@@ -40,19 +38,11 @@ public abstract class OgcGeometry
 
         // We need to return a Big Endian ByteBuffer as that's required by org.apache.cassandra.db.NativeDecoratedKey
         // when the memtable allocation type is "offheap_objects". See https://datastax.jira.com/browse/DSP-16302
+        // Note that the order set here may not match the actual endianess. OGC serialization encodes actual endianess
+        // and discards BB order set here.
         default ByteBuffer toWellKnownBinary(T geometry)
         {
-            ByteBuffer wkbNativeOrder = toWellKnownBinaryNativeOrder(geometry);
-
-            if (SERIALIZE_NATIVE_ORDER)
-            {
-                return wkbNativeOrder;
-            }
-
-            ByteBuffer wkbBigEndianOrder = wkbNativeOrder.duplicate();
-            wkbBigEndianOrder.order(ByteOrder.BIG_ENDIAN);
-
-            return wkbBigEndianOrder;
+            return toWellKnownBinaryNativeOrder(geometry).order(ByteOrder.BIG_ENDIAN);
         }
 
         ByteBuffer toWellKnownBinaryNativeOrder(T geometry);
