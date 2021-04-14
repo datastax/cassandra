@@ -494,7 +494,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         if (Guardrails.partitionSize.triggersOn(rowSize))
         {
             String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
-            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata));
+            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true);
         }
 
         if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())

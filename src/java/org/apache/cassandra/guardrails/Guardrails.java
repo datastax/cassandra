@@ -20,13 +20,18 @@ package org.apache.cassandra.guardrails;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.guardrails.Guardrail.DisableFlag;
 import org.apache.cassandra.guardrails.Guardrail.DisallowedValues;
+import org.apache.cassandra.guardrails.Guardrail.PercentageThreshold;
+import org.apache.cassandra.guardrails.Guardrail.Predicates;
 import org.apache.cassandra.guardrails.Guardrail.SizeThreshold;
 import org.apache.cassandra.guardrails.Guardrail.Threshold;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 
 import static java.lang.String.format;
 
@@ -37,18 +42,11 @@ public abstract class Guardrails
 {
     private static final GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
 
-    // TODO: The guardrails whose name follows are provided for example sake, but are not
-    //  yet implemented. Please remove the names from the list implemented and remove this message once empty:
-    //  - columnValueSize
-    //  - columnsPerTable
-    //  - userTimestampsEnabled
-    //  - disallowedConsistencies
-
     public static final Threshold columnValueSize = new SizeThreshold("column_value_size",
-                                                                                () -> -1L, // not needed so far
-                                                                                () -> config.column_value_size_failure_threshold_in_kb * 1024L,
-                                                                                (x, what, v, t) -> format("Value of %s of size %s is greater than the maximum allowed (%s)",
-                                                                                                          what, v, t));
+                                                                      () -> -1L, // not needed so far
+                                                                      () -> config.column_value_size_failure_threshold_in_kb * 1024L,
+                                                                      (x, what, v, t) -> format("Value of %s of size %s is greater than the maximum allowed (%s)",
+                                                                                                what, v, t));
 
     public static final Threshold columnsPerTable = new Threshold("columns_per_table",
                                                                   () -> -1L, // not needed so far
@@ -91,11 +89,32 @@ public abstract class Guardrails
                                                                                                     String::toLowerCase,
                                                                                                     "Table Properties");
 
+    @SuppressWarnings("unchecked")
+    public static final Predicates<InetAddressAndPort> replicaDiskUsage =
+    (Predicates<InetAddressAndPort>) new Predicates<>("replica_disk_usage",
+                                                      DiskUsageBroadcaster.instance::isStuffed,
+                                                      DiskUsageBroadcaster.instance::isFull,
+                                                      // not using `what` because it represents replica address which should be hidden from client.
+                                                      (isWarning, what) -> isWarning
+                                                                           ? "Replica disk usage exceeds warn threshold"
+                                                                           : "Write request failed because disk usage exceeds failure threshold")
+                                     .minNotifyIntervalInMs(TimeUnit.MINUTES.toMillis(30));
+
+    public static final PercentageThreshold localDiskUsage =
+    (PercentageThreshold) new PercentageThreshold("local_disk_usage",
+                                                  () -> config.disk_usage_percentage_warn_threshold,
+                                                  () -> config.disk_usage_percentage_failure_threshold,
+                                                  (isWarning, what, v, t) -> isWarning
+                                                                             ? format("Local disk usage %s(%s) exceeds warn threshold of %s", v, what, t)
+                                                                             : format("Local disk usage %s(%s) exceeds failure threshold of %s, will stop accepting writes", v, what, t))
+                          .noExceptionOnFailure()
+                          .minNotifyIntervalInMs(TimeUnit.MINUTES.toMillis(30));
+
     public static final Threshold partitionSize =
     new SizeThreshold("partition_size",
-                                () -> config.partition_size_warn_threshold_in_mb * 1024L * 1024L,
-                                () -> -1L,
-                                (x, what, v, t) -> format("Detected partition %s of size %s is greater than the maximum recommended size (%s)",
+                      () -> config.partition_size_warn_threshold_in_mb * 1024L * 1024L,
+                      () -> -1L,
+                      (x, what, v, t) -> format("Detected partition %s of size %s is greater than the maximum recommended size (%s)",
                                                 what, v, t));
 
     public static final Threshold partitionKeysInSelectQuery =
@@ -140,6 +159,17 @@ public abstract class Guardrails
     public static boolean enabled()
     {
         return config.enabled;
+    }
+
+    /**
+     * Whether guardrails are ready.
+     *
+     * @return {@code true} if daemon is initialized (applies based on their individual setting), {@code false}
+     * otherwise (in which case no guardrail will trigger).
+     */
+    public static boolean ready()
+    {
+        return DatabaseDescriptor.isDaemonInitialized();
     }
 
     /**

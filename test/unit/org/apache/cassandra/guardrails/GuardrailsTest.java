@@ -26,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -42,6 +43,7 @@ import static org.apache.cassandra.guardrails.Guardrail.DisallowedValues;
 import static org.apache.cassandra.guardrails.Guardrail.Threshold;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertTrue;
 
 public class GuardrailsTest
 {
@@ -107,23 +109,31 @@ public class GuardrailsTest
 
     private void assertFails(Runnable runnable, String fullMessage)
     {
-        assertFails(runnable, fullMessage, fullMessage, true);
+        assertFails(runnable, fullMessage, fullMessage, true, true);
     }
 
     private void assertFails(Runnable runnable, String fullMessage, String redactedMessage)
     {
-        assertFails(runnable, fullMessage, redactedMessage, true);
+        assertFails(runnable, fullMessage, redactedMessage, true, true);
     }
 
-    private void assertFails(Runnable runnable, String fullMessage, String redactedMessage, boolean notified)
+    private void assertFails(Runnable runnable, String fullMessage, String redactedMessage, boolean notified, boolean thrown)
     {
+        ClientWarn.instance.captureWarnings();
         TriggerCollector collector = createAndAddCollector();
 
         try
         {
-            assertThatThrownBy(runnable::run)
-            .isInstanceOf(InvalidRequestException.class)
-            .hasMessageContaining(fullMessage);
+            if (thrown)
+            {
+                assertThatThrownBy(runnable::run)
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining(fullMessage);
+            }
+            else
+            {
+                runnable.run();
+            }
 
             // Listeners
             if (notified)
@@ -143,11 +153,27 @@ public class GuardrailsTest
         {
             Guardrails.unregister(collector);
         }
+
+        try
+        {
+
+            List<String> warnings = ClientWarn.instance.getWarnings();
+            if (warnings == null) // will always be the case in practice currently, but being defensive if this change
+                warnings = Collections.emptyList();
+
+            assertThat(warnings).isEmpty();
+        }
+        finally
+        {
+            ClientWarn.instance.resetWarnings();
+        }
     }
 
     private void assertNoWarnOrFails(Runnable runnable)
     {
         ClientWarn.instance.captureWarnings();
+        TriggerCollector collector = createAndAddCollector();
+
         try
         {
             runnable.run();
@@ -155,6 +181,9 @@ public class GuardrailsTest
             if (warnings == null) // will always be the case in practice currently, but being defensive if this change
                 warnings = Collections.emptyList();
             assertThat(warnings).isEmpty();
+
+            assertThat(collector.warningsTriggered).isEmpty();
+            assertThat(collector.failuresTriggered).isEmpty();
         }
         catch (InvalidRequestException e)
         {
@@ -163,6 +192,7 @@ public class GuardrailsTest
         finally
         {
             ClientWarn.instance.resetWarnings();
+            Guardrails.unregister(collector);
         }
     }
 
@@ -192,11 +222,14 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(50)).isFalse();
         assertThat(guard.triggersOn(110)).isFalse();
 
-        assertNoWarnOrFails(() -> guard.guard(5, "Z"));
-        assertNoWarnOrFails(() -> guard.guard(25, "A"));
-        assertNoWarnOrFails(() -> guard.guard(100, "B"));
-        assertNoWarnOrFails(() -> guard.guard(101, "X"));
-        assertNoWarnOrFails(() -> guard.guard(200, "Y"));
+        for (Boolean containsUserData : Arrays.asList(true, false))
+        {
+            assertNoWarnOrFails(() -> guard.guard(5, "Z", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(25, "A", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(100, "B", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(101, "X", containsUserData));
+            assertNoWarnOrFails(() -> guard.guard(200, "Y", containsUserData));
+        }
     }
 
     @Test
@@ -218,12 +251,23 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(110)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
 
         assertWarn(() -> guard.guard(25, "A"), "Warning: for A, 25 > 10");
+        assertWarn(() -> guard.guard(25, "A", true),
+                   "Warning: for A, 25 > 10", "Warning: for <redacted>, 25 > 10");
+
         assertWarn(() -> guard.guard(100, "B"), "Warning: for B, 100 > 10");
+        assertWarn(() -> guard.guard(100, "B", true),
+                   "Warning: for B, 100 > 10", "Warning: for <redacted>, 100 > 10");
 
         assertFails(() -> guard.guard(101, "X"), "Failure: for X, 101 > 100");
+        assertFails(() -> guard.guard(101, "X", true),
+                    "Failure: for X, 101 > 100", "Failure: for <redacted>, 101 > 100");
+
         assertFails(() -> guard.guard(200, "Y"), "Failure: for Y, 200 > 100");
+        assertFails(() -> guard.guard(200, "Y", true),
+                    "Failure: for Y, 200 > 100", "Failure: for <redacted>, 200 > 100");
     }
 
     @Test
@@ -242,7 +286,10 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(11)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
+
         assertWarn(() -> guard.guard(11, "A"), "Warning: for A, 11 > 10");
+        assertWarn(() -> guard.guard(11, "A", true), "Warning: for A, 11 > 10", "Warning: for <redacted>, 11 > 10");
     }
 
     @Test
@@ -261,7 +308,10 @@ public class GuardrailsTest
         assertThat(guard.triggersOn(11)).isTrue();
 
         assertNoWarnOrFails(() -> guard.guard(5, "Z"));
+        assertNoWarnOrFails(() -> guard.guard(5, "Z", true));
+
         assertFails(() -> guard.guard(11, "A"), "Failure: for A, 11 > 10");
+        assertFails(() -> guard.guard(11, "A", true), "Failure: for A, 11 > 10", "Failure: for <redacted>, 11 > 10");
     }
 
     @Test
@@ -324,6 +374,47 @@ public class GuardrailsTest
                     "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
         assertFails(() -> disallowed.ensureAllowed(set(4, 5, 6, 7)),
                     "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
+    }
+
+    @Test
+    public void testNotThrowOnFailure()
+    {
+        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
+
+        Threshold guard = new Threshold("x",
+                                        () -> 5L,
+                                        () -> 10,
+                                        (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
+                                                                       isWarn ? "Warning" : "Failure", what, v, t));
+        guard.noExceptionOnFailure();
+
+        assertTrue(guard.triggersOn(11));
+        assertFails(() -> guard.guard(11, "A", true),
+                    "Failure: for A, 11 > 10", "Failure: for <redacted>, 11 > 10", true, false);
+    }
+
+    @Test
+    public void testMinLogInterval()
+    {
+        DatabaseDescriptor.getGuardrailsConfig().enabled = true;
+
+        Threshold guard = new Threshold("x",
+                                        () -> 5,
+                                        () -> 10,
+                                        (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
+                                                                       isWarn ? "Warning" : "Failure", what, v, t));
+
+        guard.minNotifyIntervalInMs(TimeUnit.MINUTES.toMillis(30));
+
+        // should trigger on first warn and error
+        assertWarn(() -> guard.guard(6, "A", true), "Warning: for A, 6 > 5", "Warning: for <redacted>, 6 > 5");
+        assertFails(() -> guard.guard(11, "B", true),
+                    "Failure: for B, 11 > 10", "Failure: for <redacted>, 11 > 10", true, true);
+
+        // should not trigger on second warn and error within minimum notify interval
+        assertNoWarnOrFails(() -> guard.guard(6, "A", true));
+        assertFails(() -> guard.guard(11, "B", true),
+                    "Failure: for B, 11 > 10", "Failure: for <redacted>, 11 > 10", false, true);
     }
 
     private Set<Integer> set(Integer... values)

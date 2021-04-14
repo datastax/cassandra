@@ -24,10 +24,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +58,29 @@ public abstract class Guardrail
     private static final NoSpamLogger logger = NoSpamLogger.getLogger(LoggerFactory.getLogger(Guardrail.class),
                                                                       10, TimeUnit.MINUTES);
 
+    private static final String REDACTED = "<redacted>";
+
     public final String name;
+
+    /**
+     * whether to throw {@link InvalidRequestException} on {@link this#fail(String)}
+     */
+    private boolean throwOnFailure = true;
+
+    /**
+     * minimum logging and triggering interval to avoid spamming downstream
+     */
+    private long minNotifyIntervalInMs = 0;
+
+    /**
+     * time of last warning in milliseconds
+     */
+    private volatile long lastWarnInMs = 0;
+
+    /**
+     * time of last failure in milliseconds
+     */
+    private volatile long lastFailInMs = 0;
 
     protected Guardrail(String name)
     {
@@ -65,20 +89,118 @@ public abstract class Guardrail
 
     protected void warn(String message)
     {
-        logger.warn(message);
+        warn(message, message);
+    }
+
+    protected void warn(String fullMessage, String redactedMessage)
+    {
+        if (skipNotifyingOnWarning())
+            return;
+
+        logger.warn(fullMessage);
         // Note that ClientWarn will simply ignore the message if we're not running this as part of a user query
         // (the internal "state" will be null)
-        ClientWarn.instance.warn(message);
+        ClientWarn.instance.warn(fullMessage);
         for (Guardrails.Listener listener : Guardrails.listeners)
-            listener.onWarningTriggered(name, message);
+            listener.onWarningTriggered(name, redactedMessage);
     }
 
     protected void fail(String message)
     {
-        logger.error(message);
-        for (Guardrails.Listener listener : Guardrails.listeners)
-            listener.onFailureTriggered(name, message);
-        throw new InvalidRequestException(message);
+        fail(message, message);
+    }
+
+    protected void fail(String fullMessage, String redactedMessage)
+    {
+        if (!skipNotifyingOnFailure())
+        {
+            logger.error(fullMessage);
+            for (Guardrails.Listener listener : Guardrails.listeners)
+                listener.onFailureTriggered(name, redactedMessage);
+        }
+
+        if (throwOnFailure)
+            throw new InvalidRequestException(fullMessage);
+    }
+
+    /**
+     * do no throw {@link InvalidRequestException} if guardrail failure is triggered.
+     * <p>
+     * Note: this method is not thread safe and should only be used during guardrail initialization
+     *
+     * @return current guardrail
+     */
+    Guardrail noExceptionOnFailure()
+    {
+        this.throwOnFailure = false;
+        return this;
+    }
+
+    /**
+     * Note: this method is not thread safe and should only be used during guardrail initialization
+     *
+     * @param minNotifyIntervalInMs frequency of logging and triggering listener to avoid spamming,
+     *                              default 0 means always log and trigger listeners.
+     * @return current guardrail
+     */
+    Guardrail minNotifyIntervalInMs(long minNotifyIntervalInMs)
+    {
+        assert minNotifyIntervalInMs >= 0;
+        this.minNotifyIntervalInMs = minNotifyIntervalInMs;
+        return this;
+    }
+
+    /**
+     * reset last notify time to make sure it will notify downstream when {@link this#warn(String, String)}
+     * or {@link this#fail(String)} is called next time.
+     */
+    @VisibleForTesting
+    public void resetLastNotifyTime()
+    {
+        lastFailInMs = 0;
+        lastWarnInMs = 0;
+    }
+
+    /**
+     * @return true if guardrail should not log message and trigger listeners; otherwise, update lastFailInMs respectively.
+     */
+    private boolean skipNotifyingOnFailure()
+    {
+        if (minNotifyIntervalInMs == 0)
+            return false;
+
+        long nowInMs = System.currentTimeMillis();
+        long timeElapsedInMs = nowInMs - lastFailInMs;
+
+        boolean skip = timeElapsedInMs < minNotifyIntervalInMs;
+
+        if (!skip)
+        {
+            lastFailInMs = nowInMs;
+        }
+
+        return skip;
+    }
+
+    /**
+     * @return true if guardrail should not log message and trigger listeners; otherwise, update lastWarnInMs respectively.
+     */
+    private boolean skipNotifyingOnWarning()
+    {
+        if (minNotifyIntervalInMs == 0)
+            return false;
+
+        long nowInMs = System.currentTimeMillis();
+        long timeElapsedInMs = nowInMs - lastWarnInMs;
+
+        boolean skip = timeElapsedInMs < minNotifyIntervalInMs;
+
+        if (!skip)
+        {
+            lastWarnInMs = nowInMs;
+        }
+
+        return skip;
     }
 
     /**
@@ -92,7 +214,7 @@ public abstract class Guardrail
      */
     public boolean enabled(@Nullable String keyspace)
     {
-        return Guardrails.enabled() && (keyspace == null || !SchemaConstants.isInternalKeyspace(keyspace));
+        return Guardrails.enabled() && Guardrails.ready() && (keyspace == null || !SchemaConstants.isInternalKeyspace(keyspace));
     }
 
     /**
@@ -152,6 +274,14 @@ public abstract class Guardrail
         {
             return errorMessageProvider.createMessage(isWarning,
                                                       what,
+                                                      Long.toString(value),
+                                                      Long.toString(thresholdValue));
+        }
+
+        protected String redactedErrMsg(boolean isWarning, long value, long thresholdValue)
+        {
+            return errorMessageProvider.createMessage(isWarning,
+                                                      REDACTED,
                                                       Long.toString(value),
                                                       Long.toString(thresholdValue));
         }
@@ -272,8 +402,7 @@ public abstract class Guardrail
          *                         this method behind a {@link #triggersOn} call.
          * @param containsUserData a boolean describing if {@code what} contains user data. If this is the case,
          *                         {@code what} will only be included in the log messages and client warning. It will not be included in the
-         *                         error messages that are passed to listeners and exceptions. We have to exclude the user data from exceptions
-         *                         because they are sent to Insights.
+         *                         error messages that are passed to listeners and exceptions.
          * @param keyspace         the name of the keyspace which the checked value belongs to, so the check will be skipped
          *                         if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner keyspace,
          *                         or that the check should be done regardless of the keyspace.
@@ -285,11 +414,19 @@ public abstract class Guardrail
 
             long failValue = failValue();
             if (value > failValue)
-                fail(errMsg(false, what, value, failValue));
-
-            long warnValue = warnValue();
-            if (value > warnValue)
-                warn(errMsg(true, what, value, warnValue));
+            {
+                String fullMsg = errMsg(false, what, value, failValue);
+                fail(fullMsg, containsUserData ? redactedErrMsg(false, value, failValue) : fullMsg);
+            }
+            else
+            {
+                long warnValue = warnValue();
+                if (value > warnValue)
+                {
+                    String fullMsg = errMsg(true, what, value, warnValue);
+                    warn(fullMsg, containsUserData ? redactedErrMsg(true, value, warnValue) : fullMsg);
+                }
+            }
         }
     }
 
@@ -316,6 +453,40 @@ public abstract class Guardrail
                                                       what,
                                                       Units.toString(value, SizeUnit.BYTES),
                                                       Units.toString(thresholdValue, SizeUnit.BYTES));
+        }
+
+        @Override
+        protected String redactedErrMsg(boolean isWarning, long value, long thresholdValue)
+        {
+            return errorMessageProvider.createMessage(isWarning,
+                                                      REDACTED,
+                                                      Units.toString(value, SizeUnit.BYTES),
+                                                      Units.toString(thresholdValue, SizeUnit.BYTES));
+        }
+    }
+
+    /**
+     * A {@link Threshold} guardrail whose values represent a percentage
+     *
+     * <p>This work exactly as a {@link Threshold}, but provides slightly more convenient error messages for percentage
+     */
+    public static class PercentageThreshold extends Threshold
+    {
+        PercentageThreshold(String name,
+                            LongSupplier warnThreshold,
+                            LongSupplier failThreshold,
+                            ErrorMessageProvider errorMessageProvider)
+        {
+            super(name, warnThreshold, failThreshold, errorMessageProvider);
+        }
+
+        @Override
+        protected String errMsg(boolean isWarning, String what, long value, long thresholdValue)
+        {
+            return errorMessageProvider.createMessage(isWarning,
+                                                      what,
+                                                      String.format("%d%%", value),
+                                                      String.format("%d%%", thresholdValue));
         }
     }
 
@@ -401,7 +572,8 @@ public abstract class Guardrail
             this.parser = parser;
             this.what = what;
 
-            ensureUpToDate();
+            if (Guardrails.ready())
+                ensureUpToDate();
         }
 
         private void ensureUpToDate()
@@ -472,6 +644,71 @@ public abstract class Guardrail
             if (!intersection.isEmpty())
                 fail(format("Provided values %s are not allowed for %s (disallowed values are: %s)",
                             intersection.stream().sorted().collect(Collectors.toList()), what, cachedRaw));
+        }
+    }
+
+    /**
+     * A guardrail based on two predicates.
+     *
+     * <p>A {@link Predicates} guardrail defines (up to) 2 predicates, one at which a warning is issued, and another one
+     * at which a failure is triggered. If failure is triggered, warning is skipped.
+     *
+     * @param <T> the type of the values to be tested against predicates.
+     */
+    public static class Predicates<T> extends Guardrail
+    {
+        private final Predicate<T> warnPredicate;
+        private final Predicate<T> failurePredicate;
+        private final MessageProvider<T> messageProvider;
+
+        /**
+         * A function used to build the warning or error message of a triggered {@link Predicates} guardrail.
+         */
+        public interface MessageProvider<T>
+        {
+            /**
+             * Called when the guardrail is triggered to build the corresponding message.
+             *
+             * @param isWarning whether the trigger is a warning one; otherwise it is failure one.
+             * @param value     the value that triggers guardrail.
+             */
+            String createMessage(boolean isWarning, T value);
+        }
+
+        /**
+         * Creates a new {@link Predicates} guardrail.
+         *
+         * @param name             the name of the guardrail (for identification in {@link Guardrails.Listener} events).
+         * @param warnPredicate    a predicate that is used to check if given value should trigger a warning.
+         * @param failurePredicate a predicate that is used to check if given value should trigger a failure.
+         * @param messageProvider  a function to generate the warning or error message if the guardrail is triggered
+         */
+        Predicates(String name, Predicate<T> warnPredicate, Predicate<T> failurePredicate, MessageProvider<T> messageProvider)
+        {
+            super(name);
+            this.warnPredicate = warnPredicate;
+            this.failurePredicate = failurePredicate;
+            this.messageProvider = messageProvider;
+        }
+
+        /**
+         * Apply the guardrail to the provided value, triggering a warning or failure if appropriate.
+         *
+         * @param value the value to check.
+         */
+        public void guard(T value)
+        {
+            if (!Guardrails.enabled())
+                return;
+
+            if (failurePredicate.test(value))
+            {
+                fail(messageProvider.createMessage(false, value));
+            }
+            else if (warnPredicate.test(value))
+            {
+                warn(messageProvider.createMessage(true, value));
+            }
         }
     }
 }

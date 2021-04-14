@@ -132,7 +132,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
             Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
 
 
-        if (!Guardrails.tablesLimit.enabled(keyspaceName))
+        if (Guardrails.tablesLimit.enabled(keyspaceName))
         {
             // guardrails on number of tables
             int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
