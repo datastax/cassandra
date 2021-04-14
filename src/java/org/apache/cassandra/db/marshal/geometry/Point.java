@@ -20,6 +20,10 @@ package org.apache.cassandra.db.marshal.geometry;
 
 import java.nio.ByteBuffer;
 
+import com.esri.core.geometry.GeoJsonExportFlags;
+import com.esri.core.geometry.Operator;
+import com.esri.core.geometry.OperatorExportToGeoJson;
+import com.esri.core.geometry.OperatorFactoryLocal;
 import com.esri.core.geometry.ogc.OGCGeometry;
 import com.esri.core.geometry.ogc.OGCPoint;
 import org.apache.cassandra.serializers.MarshalException;
@@ -43,7 +47,8 @@ public class Point extends OgcGeometry
         @Override
         public String toGeoJson(Point geometry)
         {
-            return geometry.point.asGeoJson();
+            OperatorExportToGeoJson op = (OperatorExportToGeoJson) OperatorFactoryLocal.getInstance().getOperator(Operator.Type.ExportToGeoJson);
+            return op.execute(GeoJsonExportFlags.geoJsonExportSkipCRS, geometry.point.esriSR, geometry.point.getEsriGeometry());
         }
 
         @Override

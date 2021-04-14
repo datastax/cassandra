@@ -125,11 +125,19 @@ public class PolygonTypeTest
     }
 
     @Test
+    public void geoJsonInputNoPrecision()
+    {
+        String json = "{\"type\":\"Polygon\",\"coordinates\":[[[30,10],[10,20],[20,40],[40,40],[30,10]]]}";
+        Constants.Value value = (Constants.Value) type.fromJSONObject(json);
+        Assert.assertEquals(polygon(p(30, 10), p(10, 20), p(20, 40), p(40, 40)), type.getSerializer().deserialize(value.bytes));
+    }
+
+    @Test
     public void geoJsonOutput()
     {
         String json = type.toJSONString(type.getSerializer().serialize(polygon(p(30, 10), p(10, 20), p(20, 40), p(40, 40))), ProtocolVersion.CURRENT);
         logger.debug(json);
-        Assert.assertEquals("{\"type\":\"Polygon\",\"coordinates\":[[[30.0,10.0],[10.0,20.0],[20.0,40.0],[40.0,40.0],[30.0,10.0]]]}", json);
+        Assert.assertEquals("{\"type\":\"Polygon\",\"coordinates\":[[[30,10],[40,40],[20,40],[10,20],[30,10]]]}", json);
     }
 
     /**

@@ -90,10 +90,18 @@ public class PointTypeTest
     }
 
     @Test
+    public void geoJsonInputWithoutPrecision()
+    {
+        String json = "{\"type\":\"Point\",\"coordinates\":[1,2]}";
+        Constants.Value value = (Constants.Value) type.fromJSONObject(json);
+        Assert.assertEquals(p(1, 2), type.getSerializer().deserialize(value.bytes));
+    }
+
+    @Test
     public void geoJsonOutput()
     {
         String json = type.toJSONString(type.getSerializer().serialize(p(1, 2)), ProtocolVersion.CURRENT);
-        Assert.assertEquals("{\"type\":\"Point\",\"coordinates\":[1.0,2.0]}", json);
+        Assert.assertEquals("{\"type\":\"Point\",\"coordinates\":[1,2]}", json);
         logger.debug(json);
     }
 

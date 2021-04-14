@@ -20,6 +20,10 @@ package org.apache.cassandra.db.marshal.geometry;
 
 import java.nio.ByteBuffer;
 
+import com.esri.core.geometry.GeoJsonExportFlags;
+import com.esri.core.geometry.Operator;
+import com.esri.core.geometry.OperatorExportToGeoJson;
+import com.esri.core.geometry.OperatorFactoryLocal;
 import com.esri.core.geometry.ogc.OGCGeometry;
 import com.esri.core.geometry.ogc.OGCLineString;
 import org.apache.cassandra.serializers.MarshalException;
@@ -43,7 +47,8 @@ public class LineString extends OgcGeometry
         @Override
         public String toGeoJson(LineString geometry)
         {
-            return geometry.lineString.asGeoJson();
+            OperatorExportToGeoJson op = (OperatorExportToGeoJson) OperatorFactoryLocal.getInstance().getOperator(Operator.Type.ExportToGeoJson);
+            return op.execute(GeoJsonExportFlags.geoJsonExportSkipCRS, geometry.lineString.esriSR, geometry.lineString.getEsriGeometry());
         }
 
         @Override

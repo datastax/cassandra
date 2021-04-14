@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.esri.core.geometry.GeometryException;
+import com.esri.core.geometry.JsonGeometryException;
 import com.esri.core.geometry.SpatialReference;
 import com.esri.core.geometry.ogc.OGCGeometry;
 import org.apache.cassandra.serializers.MarshalException;
@@ -154,7 +155,7 @@ public abstract class OgcGeometry
         {
             geometry = OGCGeometry.fromGeoJson(source);
         }
-        catch (IllegalArgumentException e)
+        catch (IllegalArgumentException | JsonGeometryException e)
         {
             throw new MarshalException(e.getMessage());
         }

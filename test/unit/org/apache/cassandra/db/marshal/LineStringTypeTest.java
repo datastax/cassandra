@@ -34,7 +34,6 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static org.apache.cassandra.db.marshal.GeometricTypeTests.*;
 import static org.apache.cassandra.db.marshal.GeometricTypeTests.lineString;
 import static org.apache.cassandra.db.marshal.GeometricTypeTests.p;
 import static org.apache.cassandra.db.marshal.GeometricTypeTests.padBuffer;
@@ -122,7 +121,7 @@ public class LineStringTypeTest
     public void geoJsonOutput()
     {
         String json = type.toJSONString(type.getSerializer().serialize(lineString(p(30, 10), p(10, 30), p(40, 40))), ProtocolVersion.CURRENT);
-        Assert.assertEquals("{\"type\":\"LineString\",\"coordinates\":[[30.0,10.0],[10.0,30.0],[40.0,40.0]]}", json);
+        Assert.assertEquals("{\"type\":\"LineString\",\"coordinates\":[[30,10],[10,30],[40,40]]}", json);
         logger.debug(json);
     }
 
