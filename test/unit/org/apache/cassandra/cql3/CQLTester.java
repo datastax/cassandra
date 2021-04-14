@@ -584,6 +584,13 @@ public abstract class CQLTester
             store.forceMajorCompaction();
     }
 
+    public void compact(String keyspace)
+    {
+        ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
+        if (store != null)
+            store.forceMajorCompaction();
+    }
+
     public void disableCompaction()
     {
         disableCompaction(KEYSPACE);

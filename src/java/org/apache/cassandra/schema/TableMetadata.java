@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +39,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.github.jamm.Unmetered;
 
@@ -696,6 +696,33 @@ public class TableMetadata implements SchemaElement
                           .add("indexes", indexes)
                           .add("triggers", triggers)
                           .toString();
+    }
+
+    /**
+     * Returns a string representation of a partition in a CQL-friendly format.
+     *
+     * For non-composite types it returns the result of {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral}
+     * applied to the partition key.
+     * For composite types it applies {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral} to each subkey and combines
+     * the results into a tuple.
+     *
+     * @param partitionKey
+     * @return CQL-like string representation of a partition key
+     */
+    public String partitionKeyAsCQLLiteral(ByteBuffer partitionKey)
+    {
+        if (partitionKeyType instanceof CompositeType)
+        {
+            ByteBuffer[] keys = ((CompositeType) partitionKeyType).split(partitionKey);
+            String[] strkeys = new String[keys.length];
+            for (int i = 0; i < ((CompositeType) partitionKeyType).types.size(); i++)
+            {
+                strkeys[i] = ((CompositeType) partitionKeyType).types.get(i).asCQL3Type().toCQLLiteral(keys[i], ProtocolVersion.CURRENT);
+            }
+
+            return "(" + String.join(", ", strkeys) + ")";
+        }
+        return partitionKeyType.asCQL3Type().toCQLLiteral(partitionKey, ProtocolVersion.CURRENT);
     }
 
     public static final class Builder

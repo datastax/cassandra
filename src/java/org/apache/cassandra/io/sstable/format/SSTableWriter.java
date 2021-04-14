@@ -33,6 +33,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
@@ -442,6 +443,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     protected void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
     {
+        if (Guardrails.partitionSize.triggersOn(rowSize))
+        {
+            String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
+            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata));
+        }
+
         if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
         {
             String keyString = metadata().partitionKeyType.getString(key.getKey());
