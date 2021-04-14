@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -82,6 +83,9 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
 
             if (builder.hasMissingElements())
                 break;
+
+            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled())
+                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false);
         }
         return builder.buildSerializedPartitionKeys();
     }
