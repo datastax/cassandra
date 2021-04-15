@@ -29,6 +29,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.index.Index;
@@ -105,12 +106,13 @@ public class RangeCommands
         }
 
         ReplicaPlanMerger mergedReplicaPlans = new ReplicaPlanMerger(replicaPlans, keyspace, consistencyLevel);
-        return new RangeCommandIterator(mergedReplicaPlans,
-                                        command,
-                                        concurrencyFactor,
-                                        maxConcurrencyFactor,
-                                        replicaPlans.size(),
-                                        queryStartNanoTime);
+
+        return RangeCommandIterator.create(mergedReplicaPlans,
+                                           command,
+                                           concurrencyFactor,
+                                           maxConcurrencyFactor,
+                                           replicaPlans.size(),
+                                           queryStartNanoTime);
     }
 
     /**
