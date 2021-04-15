@@ -95,6 +95,11 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         return replicaPlan.get();
     }
 
+    public ReadCommand command()
+    {
+        return command;
+    }
+
     public boolean await(long commandTimeout, TimeUnit unit)
     {
         return awaitUntil(requestTime.computeDeadline(unit.toNanos(commandTimeout)));
