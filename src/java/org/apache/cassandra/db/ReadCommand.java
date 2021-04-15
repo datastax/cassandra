@@ -111,7 +111,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     protected final DataRange dataRange;
 
     @Nullable
-    private final Index.QueryPlan indexQueryPlan;
+    protected final Index.QueryPlan indexQueryPlan;
 
     protected static abstract class SelectionDeserializer
     {
@@ -131,7 +131,8 @@ public abstract class ReadCommand extends AbstractReadQuery
     protected enum Kind
     {
         SINGLE_PARTITION (SinglePartitionReadCommand.selectionDeserializer),
-        PARTITION_RANGE  (PartitionRangeReadCommand.selectionDeserializer);
+        PARTITION_RANGE  (PartitionRangeReadCommand.selectionDeserializer),
+        MULTI_RANGE      (MultiRangeReadCommand.selectionDeserializer);
 
         private final SelectionDeserializer selectionDeserializer;
 
@@ -371,10 +372,20 @@ public abstract class ReadCommand extends AbstractReadQuery
     public ReadResponse createEmptyResponse()
     {
         UnfilteredPartitionIterator iterator = EmptyIterators.unfilteredPartition(metadata());
-        
+
         return isDigestQuery()
-               ? ReadResponse.createDigestResponse(iterator, this)
-               : ReadResponse.createDataResponse(iterator, this, RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+                ? ReadResponse.createDigestResponse(iterator, this)
+                : ReadResponse.createDataResponse(iterator, this, RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+    }
+    
+    public DataLimits.Counter createLimitedCounter(boolean assumeLiveData)
+    {
+        return limits().newCounter(nowInSec(), assumeLiveData, selectsFullPartition(), metadata().enforceStrictLiveness()).onlyCount();
+    }
+
+    public DataLimits.Counter createUnlimitedCounter(boolean assumeLiveData)
+    {
+        return DataLimits.NONE.newCounter(nowInSec(), assumeLiveData, selectsFullPartition(), metadata().enforceStrictLiveness());
     }
 
     long indexSerializedSize(int version)
@@ -505,6 +516,11 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             COMMAND.set(null);
         }
+    }
+
+    public UnfilteredPartitionIterator searchStorage(Index.Searcher searcher, ReadExecutionController executionController)
+    {
+        return searcher.search(executionController);
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
