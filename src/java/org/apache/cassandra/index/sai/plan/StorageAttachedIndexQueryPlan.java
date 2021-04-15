@@ -149,4 +149,10 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     {
         return postIndexFilter;
     }
+
+    @Override
+    public boolean supportsMultiRangeReadCommand()
+    {
+        return true;
+    }
 }

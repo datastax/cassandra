@@ -211,7 +211,7 @@ public class ReadResponseTest
         return new StubReadCommand(key, metadata, false);
     }
 
-    private static class StubRepairedDataInfo extends RepairedDataInfo
+    public static class StubRepairedDataInfo extends RepairedDataInfo
     {
         private final ByteBuffer repairedDigest;
         private final boolean conclusive;
