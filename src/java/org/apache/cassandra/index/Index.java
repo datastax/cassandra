@@ -994,6 +994,14 @@ public interface Index
         {
             return true;
         }
+        
+        /**
+         * @return true if the indexes in this plan support querying multiple vnode ranges at once.
+         */
+        default boolean supportsMultiRangeReadCommand()
+        {
+            return false;
+        }
     }
 
     /*
