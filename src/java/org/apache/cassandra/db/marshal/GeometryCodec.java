@@ -31,9 +31,9 @@ import org.apache.cassandra.db.marshal.geometry.Polygon;
 
 public class GeometryCodec<T extends OgcGeometry> extends TypeCodec<T>
 {
-    public static TypeCodec<Point> pointCodec = new GeometryCodec<>(PointType.instance);
-    public static TypeCodec<LineString> lineStringCodec = new GeometryCodec<>(LineStringType.instance);
-    public static TypeCodec<Polygon> polygonCodec = new GeometryCodec<>(PolygonType.instance);
+    public static final TypeCodec<Point> pointCodec = new GeometryCodec<>(PointType.instance);
+    public static final TypeCodec<LineString> lineStringCodec = new GeometryCodec<>(LineStringType.instance);
+    public static final TypeCodec<Polygon> polygonCodec = new GeometryCodec<>(PolygonType.instance);
 
     private final OgcGeometry.Serializer<T> serializer;
 

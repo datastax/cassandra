@@ -22,8 +22,6 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 
-import org.junit.Assert;
-
 import com.esri.core.geometry.Polyline;
 import com.esri.core.geometry.ogc.OGCLineString;
 import com.esri.core.geometry.ogc.OGCPolygon;
@@ -31,23 +29,9 @@ import org.apache.cassandra.db.marshal.geometry.LineString;
 import org.apache.cassandra.db.marshal.geometry.OgcGeometry;
 import org.apache.cassandra.db.marshal.geometry.Point;
 import org.apache.cassandra.db.marshal.geometry.Polygon;
-import org.apache.cassandra.serializers.MarshalException;
 
 public class GeometricTypeTests
 {
-    public static void assertMarshalException(Runnable r)
-    {
-        try
-        {
-            r.run();
-            Assert.fail("Expected MarshalException");
-        }
-        catch (MarshalException e)
-        {
-            // ok
-        }
-    }
-
     public static Point p(double x, double y)
     {
         return new Point(x, y);
