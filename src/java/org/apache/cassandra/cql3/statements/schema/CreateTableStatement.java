@@ -109,11 +109,14 @@ public final class CreateTableStatement extends AlterSchemaStatement
             // Guardrail on columns per table
             Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, state);
 
-            // guardrails on number of tables
-            int totalUserTables = Schema.instance.getNonInternalKeyspaces().stream().map(Keyspace::open)
-                                                 .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
-                                                 .sum();
-            Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
+            if (Guardrails.tablesLimit.enabled(state))
+            {
+                // guardrails on number of tables
+                int totalUserTables = Schema.instance.getNonInternalKeyspaces().stream().map(Keyspace::open)
+                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                     .sum();
+                Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
+            }
         }
     }
 
