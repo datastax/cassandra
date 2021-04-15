@@ -32,9 +32,12 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryState;
 import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
@@ -51,11 +54,16 @@ public class GuardrailsTest
     // the tests here mess with this value.
     private static boolean guardrailEnabledInitialState;
 
+    private static QueryState userQueryState, systemQueryState, superQueryState;
+
     @BeforeClass
     public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
         guardrailEnabledInitialState = DatabaseDescriptor.getGuardrailsConfig().enabled;
+        systemQueryState = QueryState.forInternalCalls();
+        userQueryState = new QueryState(ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
+        superQueryState = new QueryState(ClientState.forExternalCalls(new AuthenticatedUser("cassandra")));
     }
 
     @AfterClass
@@ -214,7 +222,7 @@ public class GuardrailsTest
 
     private void testDisabledThreshold(Threshold guard)
     {
-        assertThat(guard.enabled()).isFalse();
+        assertThat(guard.enabled(userQueryState)).isFalse();
 
         assertThat(guard.triggersOn(1)).isFalse();
         assertThat(guard.triggersOn(10)).isFalse();
@@ -243,7 +251,7 @@ public class GuardrailsTest
                                         (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
                                                                        isWarn ? "Warning" : "Failure", what, v, t));
 
-        assertThat(guard.enabled()).isTrue();
+        assertThat(guard.enabled(userQueryState)).isTrue();
         assertThat(guard.triggersOn(1)).isFalse();
         assertThat(guard.triggersOn(10)).isFalse();
         assertThat(guard.triggersOn(11)).isTrue();
@@ -281,7 +289,7 @@ public class GuardrailsTest
                                         (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
                                                                        isWarn ? "Warning" : "Failure", what, v, t));
 
-        assertThat(guard.enabled()).isTrue();
+        assertThat(guard.enabled(userQueryState)).isTrue();
         assertThat(guard.triggersOn(10)).isFalse();
         assertThat(guard.triggersOn(11)).isTrue();
 
@@ -315,6 +323,54 @@ public class GuardrailsTest
     }
 
     @Test
+    public void testThresholdUsers()
+    {
+        Threshold guard = new Threshold("x",
+                                        () -> 10,
+                                        () -> 100,
+                                        (isWarn, what, v, t) -> format("%s: for %s, %s > %s",
+                                                                       isWarn ? "Warning" : "Failure", what, v, t));
+
+        // value under both thresholds
+        assertNoWarnOrFails(() -> guard.guard(5, "x", true, null));
+        assertNoWarnOrFails(() -> guard.guard(5, "x", true, userQueryState));
+        assertNoWarnOrFails(() -> guard.guard(5, "x", true, systemQueryState));
+        assertNoWarnOrFails(() -> guard.guard(5, "x", true, superQueryState));
+
+        // value over warning threshold
+        assertWarn(() -> guard.guard(100, "y", true, null),
+                   "Warning: for y, 100 > 10", "Warning: for <redacted>, 100 > 10");
+        assertWarn(() -> guard.guard(100, "y", true, userQueryState),
+                   "Warning: for y, 100 > 10", "Warning: for <redacted>, 100 > 10");
+        assertNoWarnOrFails(() -> guard.guard(100, "y", true, systemQueryState));
+        assertNoWarnOrFails(() -> guard.guard(100, "y", true, superQueryState));
+
+        // value over failure threshold
+        assertFails(() -> guard.guard(101, "z", true, null),
+                    "Failure: for z, 101 > 100", "Failure: for <redacted>, 101 > 100");
+        assertFails(() -> guard.guard(101, "z", true, userQueryState),
+                    "Failure: for z, 101 > 100", "Failure: for <redacted>, 101 > 100");
+        assertNoWarnOrFails(() -> guard.guard(101, "z", true, systemQueryState));
+        assertNoWarnOrFails(() -> guard.guard(101, "z", true, superQueryState));
+    }
+
+    @Test
+    public void testDisableFlagUsers()
+    {
+        DisableFlag enabled = new DisableFlag("x", () -> false, "X");
+        assertNoWarnOrFails(() -> enabled.ensureEnabled(null));
+        assertNoWarnOrFails(() -> enabled.ensureEnabled(userQueryState));
+        assertNoWarnOrFails(() -> enabled.ensureEnabled(systemQueryState));
+        assertNoWarnOrFails(() -> enabled.ensureEnabled(superQueryState));
+
+        DisableFlag disabled = new DisableFlag("x", () -> true, "X");
+        assertFails(() -> disabled.ensureEnabled(null), "X is not allowed");
+        assertFails(() -> disabled.ensureEnabled(userQueryState), "X is not allowed");
+        assertNoWarnOrFails(() -> disabled.ensureEnabled(systemQueryState));
+        assertNoWarnOrFails(() -> disabled.ensureEnabled(superQueryState));
+    }
+
+    @Test
     public void testDisabledDisableFlag()
     {
         DatabaseDescriptor.getGuardrailsConfig().enabled = false;
@@ -330,6 +386,9 @@ public class GuardrailsTest
 
         assertFails(new DisableFlag("x", () -> true, "X")::ensureEnabled, "X is not allowed");
         assertNoWarnOrFails(new DisableFlag("x", () -> false, "X")::ensureEnabled);
+
+        assertFails(() -> new DisableFlag("x", () -> true, "X").ensureEnabled("Y", QueryState.forInternalCalls()), "Y is not allowed");
+        assertNoWarnOrFails(() -> new DisableFlag("x", () -> false, "X").ensureEnabled("Y", QueryState.forInternalCalls()));
     }
 
     @Test
@@ -374,6 +433,40 @@ public class GuardrailsTest
                     "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
         assertFails(() -> disallowed.ensureAllowed(set(4, 5, 6, 7)),
                     "Provided values [4, 6] are not allowed for integer (disallowed values are: [4, 6, 20])");
+    }
+
+    @Test
+    public void testDisallowedValuesUsers()
+    {
+        DisallowedValues<Integer> disallowed = new DisallowedValues<>(
+        "x",
+        () -> Collections.singleton("2"),
+        Integer::valueOf,
+        "integer");
+
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(1, null));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(1, userQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(1, systemQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(1, superQueryState));
+
+        String message = "Provided value 2 is not allowed for integer (disallowed values are: [2])";
+        assertFails(() -> disallowed.ensureAllowed(2, null), message);
+        assertFails(() -> disallowed.ensureAllowed(2, userQueryState), message);
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(2, systemQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(2, superQueryState));
+
+        Set<Integer> allowedValues = set(1);
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(allowedValues, null));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(allowedValues, userQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(allowedValues, systemQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(allowedValues, superQueryState));
+
+        Set<Integer> disallowedValues = set(2);
+        message = "Provided values [2] are not allowed for integer (disallowed values are: [2])";
+        assertFails(() -> disallowed.ensureAllowed(disallowedValues, null), message);
+        assertFails(() -> disallowed.ensureAllowed(disallowedValues, userQueryState), message);
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(disallowedValues, systemQueryState));
+        assertNoWarnOrFails(() -> disallowed.ensureAllowed(disallowedValues, superQueryState));
     }
 
     @Test

@@ -28,7 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
@@ -46,7 +45,6 @@ import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
-import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static com.google.common.collect.Iterables.concat;
 import static java.util.Comparator.comparing;
@@ -96,6 +94,29 @@ public final class CreateTableStatement extends AlterSchemaStatement
         this.useCompactStorage = useCompactStorage;
     }
 
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
+        // require the server to be initialized, so skipping them if it isn't.
+        if (Guardrails.ready())
+        {
+            // Guardrail on table properties
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+
+            // Guardrail on columns per table
+            Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, state);
+
+            // guardrails on number of tables
+            int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
+                                                 .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                 .sum();
+            Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
+        }
+    }
+
     public Keyspaces apply(Keyspaces schema)
     {
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
@@ -120,28 +141,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
         }
 
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.tables.with(table)));
-    }
-
-    public ResultMessage execute(QueryState state, boolean locally)
-    {
-        ResultMessage resultMessage = super.execute(state, locally);
-        AuthenticatedUser user = state.getClientState().getUser();
-
-        // guardrails on table properties / skip super user
-        if (null != user && !user.isSuper())
-            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties());
-
-
-        if (Guardrails.tablesLimit.enabled(keyspaceName))
-        {
-            // guardrails on number of tables
-            int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(Keyspace::open)
-                                                 .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
-                                                 .sum();
-            Guardrails.tablesLimit.guard(totalUserTables + 1, tableName);
-        }
-
-        return resultMessage;
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
@@ -285,8 +284,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (params.defaultTimeToLive > 0)
                 throw ire("Cannot set %s on a table with counters", TableParams.Option.DEFAULT_TIME_TO_LIVE);
         }
-
-        Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, false, keyspaceName);
 
         /*
          * Create the builder

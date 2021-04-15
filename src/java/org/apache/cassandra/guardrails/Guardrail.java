@@ -34,8 +34,8 @@ import com.google.common.collect.Sets;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.units.SizeUnit;
 import org.apache.cassandra.utils.units.Units;
@@ -204,17 +204,16 @@ public abstract class Guardrail
     }
 
     /**
-     * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
-     * ({@link Guardrails#enabled()}) and if the keyspace (if specified) is not an internal one.
+     * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled and
+     * {@link Guardrails#ready()} and if the authenticated user (if specified) is not a system nor superuser.
      *
-     * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
-     *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
-     *                 keyspace, or that the check should be done regardless of the keyspace.
-     * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
+     * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+     *                   A {@code null} value means that the check should be done regardless of the query.
+     * @return {@code true} if this guardrail is enabled & ready, {@code false} otherwise.
      */
-    public boolean enabled(@Nullable String keyspace)
+    public boolean enabled(@Nullable QueryState queryState)
     {
-        return Guardrails.enabled() && Guardrails.ready() && (keyspace == null || !SchemaConstants.isInternalKeyspace(keyspace));
+        return Guardrails.enabled() && Guardrails.ready() && (null == queryState || queryState.isOrdinaryUser());
     }
 
     /**
@@ -310,18 +309,17 @@ public abstract class Guardrail
         }
 
         /**
-         * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are globally enabled
-         * ({@link Guardrails#enabled()}), the keyspace (if specified) is not an internal one, and if any of the
+         * Checks whether this guardrail is enabled or not. This will be enabled if guardrails are
+         * ({@link Guardrails#ready()} ()}), the keyspace (if specified) is not an internal one, and if any of the
          * thresholds is positive.
          *
-         * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
-         *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
-         *                 keyspace, or that the check should be done regardless of the keyspace.
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
          * @return {@code true} if this guardrail is enabled, {@code false} otherwise.
          */
-        public boolean enabled(@Nullable String keyspace)
+        public boolean enabled(@Nullable QueryState queryState)
         {
-            return super.enabled(keyspace) && (failThreshold.getAsLong() >= 0 || warnThreshold.getAsLong() >= 0);
+            return super.enabled(queryState) && (failThreshold.getAsLong() >= 0 || warnThreshold.getAsLong() >= 0);
         }
 
         /**
@@ -336,7 +334,7 @@ public abstract class Guardrail
          */
         public boolean triggersOn(long value)
         {
-            return enabled() && (value > Math.min(failValue(), warnValue()));
+            return enabled(null) && (value > Math.min(failValue(), warnValue()));
         }
 
         /**
@@ -346,15 +344,14 @@ public abstract class Guardrail
          * argument to {@link #guard} is expensive to build to save doing so in the common case (of the guardrail
          * not being triggered).
          *
-         * @param value    the value to test.
-         * @param keyspace the name of the keyspace which the value to be checked belongs to, so the check will be
-         *                 skipped if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner
-         *                 keyspace, or that the check should be done regardless of the keyspace.
+         * @param value      the value to test.
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
          * @return {@code true} if {@code value} is above the warning or failure thresholds of this guardrail, {@code false} otherwise.
          */
-        public boolean triggersOn(long value, @Nullable String keyspace)
+        public boolean triggersOn(long value, @Nullable QueryState queryState)
         {
-            return enabled(keyspace) && (value > Math.min(failValue(), warnValue()));
+            return enabled(queryState) && (value > Math.min(failValue(), warnValue()));
         }
 
         /**
@@ -400,16 +397,30 @@ public abstract class Guardrail
          *                         argument must describe which column of which row is triggering the guardrail for convenience). Note that
          *                         this is only used if the guardrail triggers, so if it is expensive to build, you can put the call to
          *                         this method behind a {@link #triggersOn} call.
+         * @param queryState       the queryState, used to skip the check if the query is internal or is done by a superuser.
+         */
+        public void guard(long value, String what, @Nullable QueryState queryState)
+        {
+            guard(value, what, false, queryState);
+        }
+
+        /**
+         * Apply the guardrail to the provided value, triggering a warning or failure if appropriate.
+         *
+         * @param value            the value to check.
+         * @param what             a string describing what {@code value} is a value of used in the error message if the
+         *                         guardrail is triggered (for instance, say the guardrail guards the size of column values, then this
+         *                         argument must describe which column of which row is triggering the guardrail for convenience). Note that
+         *                         this is only used if the guardrail triggers, so if it is expensive to build, you can put the call to
+         *                         this method behind a {@link #triggersOn} call.
          * @param containsUserData a boolean describing if {@code what} contains user data. If this is the case,
          *                         {@code what} will only be included in the log messages and client warning. It will not be included in the
          *                         error messages that are passed to listeners and exceptions.
-         * @param keyspace         the name of the keyspace which the checked value belongs to, so the check will be skipped
-         *                         if it's an internal keyspace. A {@code null} keyspace name means that either there is no an owner keyspace,
-         *                         or that the check should be done regardless of the keyspace.
+         * @param queryState       the queryState, used to skip the check if the query is internal or is done by a superuser.
          */
-        public void guard(long value, String what, boolean containsUserData, @Nullable String keyspace)
+        public void guard(long value, String what, boolean containsUserData, @Nullable QueryState queryState)
         {
-            if (!enabled(keyspace))
+            if (!enabled(queryState))
                 return;
 
             long failValue = failValue();
@@ -508,7 +519,8 @@ public abstract class Guardrail
          * @param name     the name of the guardrail (for identification in {@link Guardrails.Listener} events).
          * @param disabled a supplier of boolean indicating whether the feature guarded by this guardrail must be
          *                 disabled.
-         * @param what     the feature that is guarded by this guardrail (for reporting in error messages).
+         * @param what     the feature that is guarded by this guardrail (for reporting in error messages),
+         *                 {@link #ensureEnabled(String, QueryState)}}} can specify a different {@code what}.
          */
         DisableFlag(String name, BooleanSupplier disabled, String what)
         {
@@ -525,7 +537,36 @@ public abstract class Guardrail
          */
         public void ensureEnabled()
         {
-            if (enabled(null) && disabled.getAsBoolean())
+            ensureEnabled(what, QueryState.forInternalCalls());
+        }
+
+        /**
+         * Triggers a failure if this guardrail is disabled.
+         *
+         * <p>This must be called when the feature guarded by this guardrail is used to ensure such use is in fact
+         * allowed.
+         *
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
+         */
+        public void ensureEnabled(@Nullable QueryState queryState)
+        {
+            ensureEnabled(what, queryState);
+        }
+
+        /**
+         * Triggers a failure if this guardrail is disabled.
+         *
+         * <p>This must be called when the feature guarded by this guardrail is used to ensure such use is in fact
+         * allowed.
+         *
+         * @param what       the feature that is guarded by this guardrail (for reporting in error messages).
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
+         */
+        public void ensureEnabled(String what, @Nullable QueryState queryState)
+        {
+            if (enabled(queryState) && disabled.getAsBoolean())
                 fail(what + " is not allowed");
         }
     }
@@ -617,15 +658,7 @@ public abstract class Guardrail
          */
         public void ensureAllowed(T value)
         {
-            if (!Guardrails.enabled())
-                return;
-
-            ensureUpToDate();
-            if (cachedDisallowed.contains(value))
-            {
-                fail(format("Provided value %s is not allowed for %s (disallowed values are: %s)",
-                            value, what, cachedRaw));
-            }
+            ensureAllowed(value, null);
         }
 
         /**
@@ -635,7 +668,37 @@ public abstract class Guardrail
          */
         public void ensureAllowed(Set<T> values)
         {
-            if (!enabled(null))
+            ensureAllowed(values, null);
+        }
+
+        /**
+         * Triggers a failure if the provided value is disallowed by this guardrail.
+         *
+         * @param value      the value to check.
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
+         */
+        public void ensureAllowed(T value, @Nullable QueryState queryState)
+        {
+            if (!enabled(queryState))
+                return;
+
+            ensureUpToDate();
+            if (cachedDisallowed.contains(value))
+                fail(format("Provided value %s is not allowed for %s (disallowed values are: %s)",
+                            value, what, cachedRaw));
+        }
+
+        /**
+         * Triggers a failure if any of the provided values is disallowed by this guardrail.
+         *
+         * @param values     the values to check.
+         * @param queryState the queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
+         */
+        public void ensureAllowed(Set<T> values, @Nullable QueryState queryState)
+        {
+            if (!enabled(queryState))
                 return;
 
             ensureUpToDate();
@@ -694,11 +757,13 @@ public abstract class Guardrail
         /**
          * Apply the guardrail to the provided value, triggering a warning or failure if appropriate.
          *
-         * @param value the value to check.
+         * @param value      the value to check.
+         * @param queryState the query queryState, used to skip the check if the query is internal or is done by a superuser.
+         *                   A {@code null} value means that the check should be done regardless of the query.
          */
-        public void guard(T value)
+        public void guard(T value, @Nullable QueryState queryState)
         {
-            if (!Guardrails.enabled())
+            if (!enabled(queryState))
                 return;
 
             if (failurePredicate.test(value))

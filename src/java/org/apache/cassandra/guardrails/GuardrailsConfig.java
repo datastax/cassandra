@@ -94,6 +94,8 @@ public class GuardrailsConfig
     public Integer disk_usage_percentage_warn_threshold;
     public Integer disk_usage_percentage_failure_threshold;
 
+    public Boolean read_before_write_list_operations_enabled;
+
     /**
      * Validate that the value provided for each guardrail setting is valid.
      *
@@ -176,6 +178,7 @@ public class GuardrailsConfig
         enforceDefault(disk_usage_percentage_failure_threshold, v -> disk_usage_percentage_failure_threshold = v, NO_LIMIT.intValue(), 80);
 
         enforceDefault(in_select_cartesian_product_failure_threshold, v -> in_select_cartesian_product_failure_threshold = v, NO_LIMIT.intValue(), 25);
+        enforceDefault(read_before_write_list_operations_enabled, v -> read_before_write_list_operations_enabled = v, true, false);
     }
 
     private void validateDisallowedTableProperties()

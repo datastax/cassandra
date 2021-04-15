@@ -29,6 +29,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.assertj.core.api.Assertions;
 
 public class GuardrailInSelectTest extends GuardrailTester
 {
@@ -140,8 +142,10 @@ public class GuardrailInSelectTest extends GuardrailTester
         if (failed)
         {
             String errorMessage = cartesianProductErrorMessage;
-//            assertInvalidMessageNet(errorMessage, query);
-//            assertInvalidMessageNet(errorMessage, queryWithBindVariables, bindValues(pk1, pk2, ck1, ck2));
+            Assertions.assertThatThrownBy(() -> executeNet(query))
+                      .hasMessage(errorMessage);
+            Assertions.assertThatThrownBy(() -> executeNet(queryWithBindVariables, bindValues(pk1, pk2, ck1, ck2)))
+                      .hasMessage(errorMessage);
         }
         else
         {

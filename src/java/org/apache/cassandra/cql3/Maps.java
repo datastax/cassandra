@@ -352,6 +352,7 @@ public abstract class Maps
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
@@ -382,6 +383,7 @@ public abstract class Maps
             k.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to set a value for a single key on a frozen map";
@@ -412,6 +414,7 @@ public abstract class Maps
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to add items to a frozen map";
@@ -438,7 +441,7 @@ public abstract class Maps
                 // Guardrails about collection size are only checked for the added elements without considering
                 // already existent elements. This is done so to avoid read-before-write, having additional checks
                 // during SSTable write.
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
 
                 int dataSize = 0;
                 for (Map.Entry<ByteBuffer, ByteBuffer> entry : elements.entrySet())
@@ -446,13 +449,13 @@ public abstract class Maps
                     Cell cell = params.addCell(column, CellPath.create(entry.getKey()), entry.getValue());
                     dataSize += cell.dataSize();
                 }
-                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
             }
             else
             {
-                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, column.ksName);
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.state);
                 Cell cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
-                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, column.ksName);
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, params.state);
             }
         }
     }
@@ -464,6 +467,7 @@ public abstract class Maps
             super(column, k);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete a single key in a frozen map";

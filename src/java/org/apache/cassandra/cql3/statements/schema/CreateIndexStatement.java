@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -54,6 +55,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private final List<IndexTarget.Raw> rawIndexTargets;
     private final IndexAttributes attrs;
     private final boolean ifNotExists;
+    private QueryState state;
 
     private static final String DSE_INDEX_WARNING = "Index %s was not created. DSE custom index (%s) is not " +
                                                     "supported. Consult the docs on alternatives (SAI indexes, " +
@@ -81,6 +83,15 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         this.rawIndexTargets = rawIndexTargets;
         this.attrs = attrs;
         this.ifNotExists = ifNotExists;
+    }
+
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // save the query state to use it for guardrails validation in #apply
+        this.state = state;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -129,7 +140,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             Guardrails.secondaryIndexesPerTable.guard(existingSecondaryIndexes + 1,
                                                       Strings.isNullOrEmpty(indexName)
                                                       ? String.format("on table %s", table.name)
-                                                      : String.format("%s on table %s", indexName, table.name));
+                                                      : String.format("%s on table %s", indexName, table.name),
+                                                      state);
         }
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));

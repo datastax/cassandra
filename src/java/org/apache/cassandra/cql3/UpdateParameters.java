@@ -28,6 +28,7 @@ import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.service.QueryState;
 
 /**
  * Groups the parameters of an update query, and make building updates easier.
@@ -37,6 +38,7 @@ public class UpdateParameters
     public final TableMetadata metadata;
     public final RegularAndStaticColumns updatedColumns;
     public final QueryOptions options;
+    public final QueryState state;
 
     private final int nowInSec;
     private final long timestamp;
@@ -55,6 +57,7 @@ public class UpdateParameters
 
     public UpdateParameters(TableMetadata metadata,
                             RegularAndStaticColumns updatedColumns,
+                            QueryState state,
                             QueryOptions options,
                             long timestamp,
                             int nowInSec,
@@ -65,6 +68,7 @@ public class UpdateParameters
         this.metadata = metadata;
         this.updatedColumns = updatedColumns;
         this.options = options;
+        this.state = state;
 
         this.nowInSec = nowInSec;
         this.timestamp = timestamp;
@@ -140,7 +144,7 @@ public class UpdateParameters
     public void addTombstone(ColumnMetadata column, CellPath path) throws InvalidRequestException
     {
         if (path != null && column.type.isMultiCell())
-            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString());
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), state);
 
         builder.addCell(BufferCell.tombstone(column, timestamp, nowInSec, path));
     }
@@ -152,10 +156,10 @@ public class UpdateParameters
 
     public Cell addCell(ColumnMetadata column, CellPath path, ByteBuffer value) throws InvalidRequestException
     {
-        Guardrails.columnValueSize.guard(value.remaining(), column.name.toString());
+        Guardrails.columnValueSize.guard(value.remaining(), column.name.toString(), state);
 
         if (path != null && column.type.isMultiCell())
-            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString());
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), state);
 
         Cell<?> cell = ttl == LivenessInfo.NO_TTL
                        ? BufferCell.live(column, timestamp, value, path)

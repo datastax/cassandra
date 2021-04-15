@@ -29,6 +29,7 @@ import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.service.QueryState;
 
 /**
  * A set of single restrictions on the partition key.
@@ -72,7 +73,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     }
 
     @Override
-    public List<ByteBuffer> values(QueryOptions options)
+    public List<ByteBuffer> values(QueryOptions options, QueryState queryState)
     {
         MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
         List<SingleRestriction> restrictions = restrictions();
@@ -84,8 +85,8 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (builder.hasMissingElements())
                 break;
 
-            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled())
-                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false);
+            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
+                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", queryState);
         }
         return builder.buildSerializedPartitionKeys();
     }
