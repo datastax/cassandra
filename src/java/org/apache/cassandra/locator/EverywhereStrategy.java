@@ -18,24 +18,16 @@
 
 package org.apache.cassandra.locator;
 
-import java.net.InetAddress;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.utils.UnmodifiableArrayList;
 
 /**
  * Strategy that replicate data on every {@code live} node.
@@ -48,7 +40,7 @@ import org.apache.cassandra.utils.UnmodifiableArrayList;
  * autobootstrap=false on a seed node, there will be no data locally until rebuild is run.</p>
  *
  */
-public class EverywhereStrategy extends AbstractReplicationStrategy implements MultiDatacentersStrategy
+public class EverywhereStrategy extends AbstractReplicationStrategy
 {
     public EverywhereStrategy(String keyspaceName,
                               TokenMetadata tokenMetadata,
@@ -59,102 +51,54 @@ public class EverywhereStrategy extends AbstractReplicationStrategy implements M
     }
 
     @Override
-    public List<InetAddress> calculateNaturalEndpoints(Token token, TokenMetadata tokenMetadata)
+    public EndpointsForRange calculateNaturalReplicas(Token searchToken, TokenMetadata tokenMetadata)
     {
         // Even if primary range repairs do not make a lot of sense for this strategy we want the behavior to be
         // correct if somebody use it.
         // Primary range repair expect the first endpoint of the list to be the primary range owner.
-        Set<InetAddress> endpoints = new LinkedHashSet<>();
-        Iterator<Token> iter = TokenMetadata.ringIterator(tokenMetadata.sortedTokens(), token, false);
-        while (iter.hasNext())
+        Set<Replica> replicas = new LinkedHashSet<>();
+        Iterator<Token> iter = TokenMetadata.ringIterator(tokenMetadata.sortedTokens(), searchToken, false);
+
+        if (iter.hasNext())
         {
-            endpoints.add(tokenMetadata.getEndpoint(iter.next()));
-        }
-        return new ArrayList<>(endpoints);
-    }
+            Token end = iter.next();
+            Token start = tokenMetadata.getPredecessor(end);
+            Range<Token> range = new Range<>(start, end);
 
-    @Override
-    public int getReplicationFactor()
-    {
-        return getAllRingMembers().size();
-    }
+            InetAddressAndPort endpoint = tokenMetadata.getEndpoint(end);
+            replicas.add(Replica.fullReplica(endpoint, range));
 
-    @Override
-    public boolean isReplicatedInDatacenter(String dc)
-    {
-        return true;
-    }
-
-    @Override
-    public int getReplicationFactor(String dc)
-    {
-        int count = 0;
-        for (InetAddress address : getAllRingMembers())
-        {
-            if (Objects.equals(snitch.getDatacenter(address), dc))
-                count++;
-        }
-        return count;
-    }
-
-    @Override
-    public Set<String> getDatacenters()
-    {
-        Set<String> datacenters = new HashSet<>();
-        for (InetAddress address : getAllRingMembers())
-        {
-            datacenters.add(snitch.getDatacenter(address));
-        }
-        return datacenters;
-    }
-
-    @Override
-    public Multimap<InetAddress, Range<Token>> getAddressRanges(TokenMetadata metadata)
-    {
-        Multimap<InetAddress, Range<Token>> map = HashMultimap.create();
-        Collection<Range<Token>> ranges = metadata.getPrimaryRangesFor(metadata.sortedTokens());
-
-        for (InetAddress address : metadata.getAllRingMembers())
-        {
-            map.putAll(address, ranges);
+            while (iter.hasNext())
+            {
+                endpoint = tokenMetadata.getEndpoint(iter.next());
+                replicas.add(Replica.fullReplica(endpoint, range));
+            }
         }
 
-        return map;
+        return EndpointsForRange.copyOf(replicas);
     }
 
     @Override
-    public Multimap<Range<Token>, InetAddress> getRangeAddresses(TokenMetadata metadata)
+    public ReplicationFactor getReplicationFactor()
     {
-        Multimap<Range<Token>, InetAddress> map = HashMultimap.create();
-        Collection<Range<Token>> ranges = metadata.getPrimaryRangesFor(metadata.sortedTokens());
-        Set<InetAddress> allRingMembers = metadata.getAllRingMembers();
-
-        for (Range<Token> range : ranges)
-        {
-            map.putAll(range, allRingMembers);
-        }
-
-        return map;
+        return ReplicationFactor.fullOnly(getSizeOfRingMemebers());
     }
 
     @Override
     public void validateOptions() throws ConfigurationException
     {
+        // noop
+    }
+
+    @Override
+    public void maybeWarnOnOptions()
+    {
+        // noop
     }
 
     @Override
     public Collection<String> recognizedOptions()
     {
-        return UnmodifiableArrayList.emptyList();
-    }
-
-    /**
-     * @return <code>false</code> because the data is not partitioned across the ring.
-     * See APOLLO-589 for details about why this was introduced.
-     */
-    @Override
-    public boolean isPartitioned()
-    {
-        return false;
+        return Collections.emptyList();
     }
 }

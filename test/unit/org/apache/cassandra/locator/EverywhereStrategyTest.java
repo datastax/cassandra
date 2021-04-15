@@ -21,10 +21,12 @@ package org.apache.cassandra.locator;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
@@ -34,7 +36,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.utils.UnmodifiableArrayList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -42,7 +43,7 @@ import static org.junit.Assert.assertTrue;
 
 public class EverywhereStrategyTest
 {
-    private Random random = new Random();
+    private final Random random = new Random();
 
     @BeforeClass
     public static void setup()
@@ -80,8 +81,8 @@ public class EverywhereStrategyTest
 
         populateTokenMetadata(3, 1, metadata);
 
-        metadata.addBootstrapTokens(UnmodifiableArrayList.of(getRandomToken()),
-                                    InetAddress.getByName("127.0.0.4"));
+        metadata.addBootstrapTokens(Arrays.asList(getRandomToken()),
+                                    InetAddressAndPort.getByName("127.0.0.4"));
 
         EverywhereStrategy strategy = createStrategy(metadata);
 
@@ -94,7 +95,7 @@ public class EverywhereStrategyTest
         TokenMetadata metadata = new TokenMetadata();
 
         populateTokenMetadata(3, 1, metadata);
-        InetAddress leavingEndpoint = metadata.getAllRingMembers().iterator().next();
+        InetAddressAndPort leavingEndpoint = metadata.getAllRingMembers().iterator().next();
         metadata.addLeavingEndpoint(leavingEndpoint);
 
         EverywhereStrategy strategy = createStrategy(metadata);
@@ -115,19 +116,19 @@ public class EverywhereStrategyTest
 
         EverywhereStrategy strategy = createStrategy(metadata);
 
-        InetAddress bootstrapNode = InetAddress.getByName("127.0.0.4");
-        metadata.addBootstrapTokens(UnmodifiableArrayList.of(getRandomToken()), bootstrapNode);
+        InetAddressAndPort bootstrapNode = InetAddressAndPort.getByName("127.0.0.4");
+        metadata.addBootstrapTokens(Arrays.asList(getRandomToken()), bootstrapNode);
 
         metadata.calculatePendingRanges(strategy, strategy.keyspaceName);
         PendingRangeMaps pendingRangeMaps = metadata.getPendingRanges(strategy.keyspaceName);
 
         List<Range<Token>> pendingRanges = new ArrayList<>();
-        for (Map.Entry<Range<Token>, List<InetAddress>> pendingRangeEntry : pendingRangeMaps)
+        for (Map.Entry<Range<Token>, EndpointsForRange.Builder> pendingRangeEntry : pendingRangeMaps)
         {
-            List<InetAddress> pendingNodes = pendingRangeEntry.getValue();
+            EndpointsForRange.Builder pendingNodes = pendingRangeEntry.getValue();
             // only the bootstrap node has pending ranges
             assertEquals(1, pendingNodes.size());
-            assertTrue(pendingNodes.contains(bootstrapNode));
+            assertTrue(pendingNodes.endpoints().contains(bootstrapNode));
             pendingRanges.add(pendingRangeEntry.getKey());
         }
 
@@ -148,15 +149,17 @@ public class EverywhereStrategyTest
 
     private void populateTokenMetadata(int nodeCount, int tokens, TokenMetadata metadata) throws UnknownHostException
     {
-        List<InetAddress> nodes = new ArrayList<>();
+        List<InetAddressAndPort> nodes = new ArrayList<>();
         for (int i = 1; i <= nodeCount; i++)
         {
-            nodes.add(InetAddress.getByName(String.format("127.0.0.%d", i)));
+            InetAddress byName = InetAddress.getByName(String.format("127.0.0.%d", i));
+            InetAddressAndPort inetAddressAndPort = InetAddressAndPort.getByAddress(byName);
+            nodes.add(inetAddressAndPort);
         }
 
         for (int i = 0; i < tokens; i++)
         {
-            for (InetAddress node : nodes)
+            for (InetAddressAndPort node : nodes)
             {
                 Token randomToken = getRandomToken();
                 metadata.updateNormalToken(randomToken, node);
@@ -168,9 +171,9 @@ public class EverywhereStrategyTest
     {
         for (Token ringToken : metadata.sortedTokens())
         {
-            List<InetAddress> replicas = strategy.calculateNaturalEndpoints(ringToken, metadata);
-            assertEquals(metadata.getAllRingMembers().size(), replicas.size());
-            assertEquals(Sets.newHashSet(metadata.getAllRingMembers()), Sets.newHashSet(replicas));
+            EndpointsForRange endpointsForRange = strategy.calculateNaturalReplicas(ringToken, metadata);
+            assertEquals(metadata.getAllRingMembers().size(), endpointsForRange.size());
+            assertEquals(Sets.newHashSet(metadata.getAllRingMembers()), Sets.newHashSet(endpointsForRange.endpoints()));
         }
     }
 
