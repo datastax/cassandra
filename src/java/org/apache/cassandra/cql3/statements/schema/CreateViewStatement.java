@@ -151,6 +151,9 @@ public final class CreateViewStatement extends AlterSchemaStatement
         if (table.isView())
             throw ire("Materialized views cannot be created against other materialized views");
 
+        // Guardrail on table properties
+        Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+
         // guardrails to limit number of mvs per table.
         Set<ViewMetadata> baseTableViews = StreamSupport.stream(keyspace.views.forTable(table.id).spliterator(), false)
                                                         .collect(Collectors.toCollection(HashSet::new));
