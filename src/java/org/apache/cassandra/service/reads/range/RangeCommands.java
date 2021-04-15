@@ -105,12 +105,13 @@ public class RangeCommands
         }
 
         ReplicaPlanMerger mergedReplicaPlans = new ReplicaPlanMerger(replicaPlans, keyspace, consistencyLevel);
-        return new RangeCommandIterator(mergedReplicaPlans,
-                                        command,
-                                        concurrencyFactor,
-                                        maxConcurrencyFactor,
-                                        replicaPlans.size(),
-                                        queryStartNanoTime);
+
+        return RangeCommandIterator.create(mergedReplicaPlans,
+                                           command,
+                                           concurrencyFactor,
+                                           maxConcurrencyFactor,
+                                           replicaPlans.size(),
+                                           queryStartNanoTime);
     }
 
     /**
