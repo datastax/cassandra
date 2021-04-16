@@ -442,13 +442,13 @@ public class SSTableReaderTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
         sstable.getPosition(k(2), SSTableReader.Operator.EQ);
         assertEquals(0, sstable.getKeyCacheHit());
-        assertEquals(1, sstable.getBloomFilterTruePositiveCount());
+        assertEquals(1, store.getBloomFilterTruePositiveCount());
         sstable.getPosition(k(2), SSTableReader.Operator.EQ);
         assertEquals(1, sstable.getKeyCacheHit());
-        assertEquals(2, sstable.getBloomFilterTruePositiveCount());
+        assertEquals(2, store.getBloomFilterTruePositiveCount());
         sstable.getPosition(k(15), SSTableReader.Operator.EQ);
         assertEquals(1, sstable.getKeyCacheHit());
-        assertEquals(2, sstable.getBloomFilterTruePositiveCount());
+        assertEquals(2, store.getBloomFilterTruePositiveCount());
 
     }
 

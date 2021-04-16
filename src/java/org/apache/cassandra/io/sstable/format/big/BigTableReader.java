@@ -181,7 +181,7 @@ public class BigTableReader extends SSTableReader
             {
                 listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
                 Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
-                bloomFilterTracker.addTrueNegative();
+                getBloomFilterTracker().addTrueNegative();
                 return null;
             }
         }
@@ -221,7 +221,7 @@ public class BigTableReader extends SSTableReader
         if (skip)
         {
             if (op == Operator.EQ && updateCacheAndStats)
-                bloomFilterTracker.addFalsePositive();
+                getBloomFilterTracker().addFalsePositive();
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             Tracing.trace("Check against min and max keys allows skipping sstable {}", descriptor.generation);
             return null;
@@ -300,7 +300,7 @@ public class BigTableReader extends SSTableReader
                         cacheKey(decoratedKey, indexEntry);
                     }
                     if (op == Operator.EQ && updateCacheAndStats)
-                        bloomFilterTracker.addTruePositive();
+                        getBloomFilterTracker().addTruePositive();
                     listener.onSSTableSelected(this, indexEntry, SelectionReason.INDEX_ENTRY_FOUND);
                     Tracing.trace("Partition index with {} entries found for sstable {}", indexEntry.columnsIndexCount(), descriptor.generation);
                     return indexEntry;
@@ -316,7 +316,7 @@ public class BigTableReader extends SSTableReader
         }
 
         if (op == SSTableReader.Operator.EQ && updateCacheAndStats)
-            bloomFilterTracker.addFalsePositive();
+            getBloomFilterTracker().addFalsePositive();
         listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
         Tracing.trace("Partition index lookup complete (bloom filter false positive) for sstable {}", descriptor.generation);
         return null;
