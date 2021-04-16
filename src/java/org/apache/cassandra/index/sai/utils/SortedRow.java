@@ -37,11 +37,12 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
+import org.apache.lucene.util.FutureArrays;
 
 /**
  * The primary key of a row, composed by the partition key and the clustering key.
  */
-public class PrimaryKey implements Comparable<PrimaryKey>
+public class SortedRow implements Comparable<SortedRow>
 {
     private static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
@@ -57,76 +58,93 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     private Kind kind;
     private DecoratedKey partitionKey;
+    private byte[] sortedValue;
     private Clustering clustering;
     private ClusteringComparator clusteringComparator;
     private long sstableRowId;
     private boolean mutable = false;
     private long mutableId;
 
-    public static class PrimaryKeyFactory
+    public static class SortedRowFactory
     {
         private final IPartitioner partitioner;
         private final ClusteringComparator comparator;
-        private final PrimaryKey mutablePrimaryKey;
+        private final SortedRow mutableSortedRow;
         private final boolean mutable;
 
-        PrimaryKeyFactory(IPartitioner partitioner, ClusteringComparator comparator, boolean mutable)
+        SortedRowFactory(IPartitioner partitioner, ClusteringComparator comparator, boolean mutable)
         {
             this.partitioner = partitioner;
             this.comparator = comparator;
-            this.mutablePrimaryKey = new PrimaryKey();
+            this.mutableSortedRow = new SortedRow();
             this.mutable = mutable;
         }
 
-        public PrimaryKeyFactory copyOf()
+        public SortedRowFactory copyOf()
         {
-            return new PrimaryKeyFactory(partitioner, comparator, mutable);
+            return new SortedRowFactory(partitioner, comparator, mutable);
         }
 
-        public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
+        public SortedRow createSortedRow(byte[] sortedValue, DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
         {
-            return makeMutableKey(partitionKey, clustering, sstableRowId);
+            return new SortedRow(sortedValue, partitionKey, clustering, comparator, sstableRowId);
         }
 
-        public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering)
+        public SortedRow createKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
         {
-            return makeMutableKey(partitionKey, clustering, -1);
+            return makeMutableKey(null, partitionKey, clustering, sstableRowId);
         }
 
-        public PrimaryKey createKey(ByteComparable comparable, long sstableRowId)
+        public SortedRow createKey(DecoratedKey partitionKey, Clustering clustering)
         {
-            return createKeyFromPeekable(comparable.asPeekableBytes(ByteComparable.Version.OSS41), sstableRowId);
+            return makeMutableKey(null, partitionKey, clustering, -1);
         }
 
-        public PrimaryKey createKey(byte[] bytes)
+        public SortedRow createKey(byte[] sortedValue, ByteComparable comparable, long sstableRowId)
         {
-            return createKeyFromPeekable(ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
+            return createKeyFromPeekable(sortedValue, comparable.asPeekableBytes(ByteComparable.Version.OSS41), sstableRowId);
+        }
+
+        public SortedRow createKey(ByteComparable comparable, long sstableRowId)
+        {
+            return createKeyFromPeekable(null, comparable.asPeekableBytes(ByteComparable.Version.OSS41), sstableRowId);
+        }
+
+        public SortedRow createKey(byte[] bytes)
+        {
+            return createKey(null, bytes);
+        }
+
+        public SortedRow createKey(byte[] sortedValue, byte[] bytes)
+        {
+            return createKeyFromPeekable(sortedValue, ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
+            //return createKeyFromPeekable(ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
         }
 
         @VisibleForTesting
-        public PrimaryKey createKey(DecoratedKey key)
+        public SortedRow createKey(DecoratedKey key)
         {
-            return new PrimaryKey(key, Clustering.EMPTY, EMPTY_COMPARATOR);
+            return new SortedRow(key, Clustering.EMPTY, EMPTY_COMPARATOR);
         }
 
-        public PrimaryKey createKey(Token token)
+        public SortedRow createKey(Token token)
         {
-            return new PrimaryKey(token);
+            return new SortedRow(token);
         }
 
-        public PrimaryKey createKey(Token token, long sstableRowId)
+        public SortedRow createKey(Token token, long sstableRowId)
         {
-            return new PrimaryKey(token, sstableRowId);
+            return new SortedRow(token, sstableRowId);
         }
 
-        private PrimaryKey createKeyFromPeekable(ByteSource.Peekable peekable, long sstableRowId)
+        private SortedRow createKeyFromPeekable(byte[] sortedValue, ByteSource.Peekable peekable, long sstableRowId)
         {
             Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
             DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
 
             if ((comparator.size() == 0) || peekable.peek() == ByteSource.TERMINATOR)
-                return new PrimaryKey(key, Clustering.EMPTY, comparator);
+                return new SortedRow(key, Clustering.EMPTY, comparator);
 
             ByteBuffer[] values = new ByteBuffer[comparator.size()];
 
@@ -142,10 +160,10 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
             Clustering clustering = Clustering.make(values);
 
-            return makeMutableKey(key, clustering, sstableRowId);
+            return makeMutableKey(sortedValue, key, clustering, sstableRowId);
         }
 
-        private PrimaryKey makeMutableKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
+        private SortedRow makeMutableKey(byte[] sortedValue, DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
         {
 //            if (mutable)
 //            {
@@ -156,59 +174,65 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 //                mutablePrimaryKey.sstableRowId = sstableRowId;
 //                return mutablePrimaryKey;
 //            }
-            return new PrimaryKey(partitionKey, clustering, comparator, sstableRowId);
+            return new SortedRow(sortedValue, partitionKey, clustering, comparator, sstableRowId);
         }
     }
 
-    public static PrimaryKeyFactory immutableFactory(TableMetadata tableMetadata)
+    public static SortedRowFactory immutableFactory(TableMetadata tableMetadata)
     {
-        return new PrimaryKeyFactory(tableMetadata.partitioner, tableMetadata.comparator, false);
+        return new SortedRowFactory(tableMetadata.partitioner, tableMetadata.comparator, false);
     }
 
-    public static PrimaryKeyFactory factory(TableMetadata tableMetadata)
+    public static SortedRowFactory factory(TableMetadata tableMetadata)
     {
-        return new PrimaryKeyFactory(tableMetadata.partitioner, tableMetadata.comparator, true);
+        return new SortedRowFactory(tableMetadata.partitioner, tableMetadata.comparator, true);
     }
 
     @VisibleForTesting
-    public static PrimaryKeyFactory factory(IPartitioner partitioner, ClusteringComparator comparator)
+    public static SortedRowFactory factory(IPartitioner partitioner, ClusteringComparator comparator)
     {
-        return new PrimaryKeyFactory(partitioner, comparator, false);
+        return new SortedRowFactory(partitioner, comparator, false);
     }
 
-    public static PrimaryKeyFactory factory()
+    public static SortedRowFactory factory()
     {
-        return new PrimaryKeyFactory(Murmur3Partitioner.instance, EMPTY_COMPARATOR, false);
+        return new SortedRowFactory(Murmur3Partitioner.instance, EMPTY_COMPARATOR, false);
     }
 
-    private PrimaryKey()
+    private SortedRow()
     {
         mutable = true;
         mutableId = mutableCounter.getAndIncrement();
     }
 
-    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator)
+    private SortedRow(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator)
     {
         this(partitionKey, clustering, comparator, -1);
     }
 
-    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
+    private SortedRow(byte[] sortedValue, DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
     {
-        this(sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
+        this(sortedValue, sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
     }
 
-    private PrimaryKey(Token token)
+    private SortedRow(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
     {
-        this(Kind.TOKEN, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, -1);
+        this(null, sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
     }
 
-    private PrimaryKey(Token token, long sstableRowId)
+    private SortedRow(Token token)
     {
-        this(Kind.MAPPED, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, sstableRowId);
+        this(null, Kind.TOKEN, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, -1);
     }
 
-    private PrimaryKey(Kind kind, DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator, long sstableRowId)
+    private SortedRow(Token token, long sstableRowId)
     {
+        this(null, Kind.MAPPED, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, sstableRowId);
+    }
+
+    private SortedRow(byte[] sortedValue, Kind kind, DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator, long sstableRowId)
+    {
+        this.sortedValue = sortedValue;
         this.kind = kind;
         this.partitionKey = partitionKey;
         this.clustering = clustering;
@@ -232,14 +256,14 @@ public class PrimaryKey implements Comparable<PrimaryKey>
                              sstableRowId);
     }
 
-    public byte[] asBytes()
+    public byte[] primaryKeyAsBytes()
     {
-        ByteSource source = asComparableBytes(ByteComparable.Version.OSS41);
+        ByteSource source = primaryKeyAsComparableBytes(ByteComparable.Version.OSS41);
 
         return ByteSourceInverse.readBytes(source);
     }
 
-    public ByteSource asComparableBytes(ByteComparable.Version version)
+    public ByteSource primaryKeyAsComparableBytes(ByteComparable.Version version)
     {
         ByteSource[] sources = new ByteSource[clustering.size() + 2];
         sources[0] = partitionKey.getToken().asComparableBytes(version);
@@ -288,9 +312,18 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     }
 
     @Override
-    public int compareTo(PrimaryKey o)
+    public int compareTo(SortedRow o)
     {
 //        assert this.mutable && o.mutable && this.mutableId == o.mutableId : "Trying to compare the mutable primary key for a mapped value";
+        if (sortedValue != null)
+        {
+            final int cmp = FutureArrays.compareUnsigned(sortedValue, 0, sortedValue.length, o.sortedValue, 0, o.sortedValue.length);
+            if (cmp != 0)
+            {
+                // if the sorted rows have different bytes, return immediately
+                return cmp;
+            }
+        }
         if (kind == Kind.TOKEN || o.kind == Kind.TOKEN)
             return partitionKey.getToken().compareTo(o.partitionKey.getToken());
         int cmp = partitionKey.compareTo(o.partitionKey);
@@ -308,8 +341,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     @Override
     public boolean equals(Object obj)
     {
-        if (obj instanceof PrimaryKey)
-            return compareTo((PrimaryKey)obj) == 0;
+        if (obj instanceof SortedRow)
+            return compareTo((SortedRow)obj) == 0;
         return false;
     }
 }

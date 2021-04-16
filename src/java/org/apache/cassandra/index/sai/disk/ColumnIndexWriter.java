@@ -19,9 +19,8 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 
 /**
  * Creates an on-disk index for a given column.
@@ -31,7 +30,7 @@ public interface ColumnIndexWriter
     /**
      * Adds a row to this index.
      */
-    void addRow(PrimaryKey rowKey, Row row) throws IOException;
+    void addRow(SortedRow rowKey, Row row) throws IOException;
 
     /**
      * Builds on-disk index data structures from accumulated data, moves them all to the filesystem, and fsync created files.

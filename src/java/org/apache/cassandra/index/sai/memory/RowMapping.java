@@ -20,27 +20,21 @@ package org.apache.cassandra.index.sai.memory;
 import java.util.Collections;
 import java.util.Iterator;
 
-import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.LongArrayList;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
-import org.apache.cassandra.index.sai.disk.SegmentBuilder;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.SortedRow;
+import org.apache.cassandra.index.sai.utils.SortedRows;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
- * In memory representation of {@link PrimaryKey} to row ID mappings which only contains
+ * In memory representation of {@link SortedRow} to row ID mappings which only contains
  * {@link Row} regardless it's live or deleted. ({@link RangeTombstoneMarker} is not included.)
  *
  * For JBOD, we can make use of sstable min/max partition key to filter irrelevant {@link MemtableIndex} subranges.
@@ -57,15 +51,15 @@ public class RowMapping
         public void complete() {}
 
         @Override
-        public void add(PrimaryKey key) {}
+        public void add(SortedRow key) {}
     };
 
     private final MemtableTrie<Long> rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
 
     private volatile boolean complete = false;
 
-    public PrimaryKey minKey;
-    public PrimaryKey maxKey;
+    public SortedRow minKey;
+    public SortedRow maxKey;
 
     public long maxSegmentRowId = -1;
 
@@ -94,7 +88,7 @@ public class RowMapping
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        Iterator<Pair<ByteComparable, SortedRows>> iterator = index.iterator();
         return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             @Override
@@ -102,15 +96,15 @@ public class RowMapping
             {
                 while (iterator.hasNext())
                 {
-                    Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+                    Pair<ByteComparable, SortedRows> pair = iterator.next();
 
                     LongArrayList postings = null;
-                    Iterator<PrimaryKey> primaryKeys = pair.right.iterator();
+                    Iterator<SortedRow> primaryKeys = pair.right.iterator();
 
                     while (primaryKeys.hasNext())
                     {
-                        PrimaryKey primaryKey = primaryKeys.next();
-                        ByteComparable byteComparable = v -> primaryKey.asComparableBytes(v);
+                        SortedRow sortedRow = primaryKeys.next();
+                        ByteComparable byteComparable = v -> sortedRow.primaryKeyAsComparableBytes(v);
                         Long segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)
@@ -139,11 +133,11 @@ public class RowMapping
     /**
      * Include PrimaryKey to RowId mapping
      */
-    public void add(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException
+    public void add(SortedRow key) throws MemtableTrie.SpaceExhaustedException
     {
         assert !complete : "Cannot modify built RowMapping.";
 
-        ByteComparable byteComparable = v -> key.asComparableBytes(v);
+        ByteComparable byteComparable = v -> key.primaryKeyAsComparableBytes(v);
         rowMapping.apply(Trie.singleton(byteComparable, key.sstableRowId()), (existing, neww) -> neww);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, key.sstableRowId());

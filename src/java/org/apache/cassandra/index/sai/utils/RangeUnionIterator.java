@@ -19,11 +19,8 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -44,10 +41,10 @@ public class RangeUnionIterator extends RangeIterator
         this.toRelease = new ArrayList<>(ranges);
     }
 
-    public PrimaryKey computeNext()
+    public SortedRow computeNext()
     {
         candidates.clear();
-        PrimaryKey candidate = null;
+        SortedRow candidate = null;
         for (RangeIterator range : ranges)
         {
             if (range.hasNext())
@@ -82,7 +79,7 @@ public class RangeUnionIterator extends RangeIterator
         return candidate;
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(SortedRow nextKey)
     {
         for (RangeIterator range : ranges)
         {

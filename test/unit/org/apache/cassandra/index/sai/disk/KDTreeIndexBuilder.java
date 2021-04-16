@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -31,11 +30,7 @@ import java.util.stream.Stream;
 
 import org.junit.Assert;
 
-import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.LongArrayList;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -44,7 +39,6 @@ import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ShortType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
@@ -53,9 +47,8 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.LongArrays;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -107,8 +100,8 @@ public class KDTreeIndexBuilder
                                            minSegmentRowId,
                                            maxSegmentRowId,
                                            // min/max is unused for now
-                                           PrimaryKey.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a"))),
-                                           PrimaryKey.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b"))),
+                                           SortedRow.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a"))),
+                                           SortedRow.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b"))),
                                            UTF8Type.instance.fromString("c"),
                                            UTF8Type.instance.fromString("d"),
                                            indexMetas);

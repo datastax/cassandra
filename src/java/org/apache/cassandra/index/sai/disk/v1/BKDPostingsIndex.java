@@ -18,13 +18,13 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
-import com.carrotsearch.hppc.IntLongHashMap;
-import com.carrotsearch.hppc.IntLongMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -57,9 +57,16 @@ class BKDPostingsIndex
             {
                 final int node = input.readVInt();
                 final long filePointer = input.readVLong();
-                final long numPoints = input.readVLong();
+                final int numLeaves = input.readVInt();
+                final List<Integer> leafNodes = new ArrayList<>();
+                for (int l=0; l < numLeaves; l++)
+                {
+                    final int leafNodeID = input.readVInt();
+                    if (node != leafNodeID)
+                        leafNodes.add(leafNodeID);
+                }
 
-                index.put(node, new OneDimBKDPostingsWriter.NodeEntry(numPoints, filePointer));
+                index.put(node, new OneDimBKDPostingsWriter.NodeEntry(filePointer, leafNodes));
             }
         }
     }
@@ -101,7 +108,7 @@ class BKDPostingsIndex
      */
     long getPostingsFilePointer(int nodeID)
     {
-        checkArgument(exists(nodeID));
+        checkArgument(exists(nodeID), "nodeID="+nodeID+" availableNodeIDs="+index.keySet());
         return index.get(nodeID).postingsFilePointer;
     }
 

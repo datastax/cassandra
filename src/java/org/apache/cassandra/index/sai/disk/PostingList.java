@@ -19,11 +19,9 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -39,7 +37,7 @@ public interface PostingList extends Closeable
     default void close() throws IOException {}
 
     /**
-     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(PrimaryKey)}.
+     * Retrieves the next segment row ID, not including row IDs that have been returned by {@link #advance(SortedRow)}.
      *
      * @return next segment row ID
      */
@@ -55,13 +53,13 @@ public interface PostingList extends Closeable
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param nextPrimaryKey target primary key to advance to
+     * @param nextSortedRow target primary key to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    long advance(PrimaryKey nextPrimaryKey) throws IOException;
+    long advance(SortedRow nextSortedRow) throws IOException;
 
-    PrimaryKey mapRowId(long rowId);
+    SortedRow mapRowId(long rowId);
 
     /**
      * @return peekable wrapper of current posting list
@@ -99,16 +97,16 @@ public interface PostingList extends Closeable
             }
         }
 
-        public long advanceWithoutConsuming(PrimaryKey primaryKey) throws IOException
+        public long advanceWithoutConsuming(SortedRow sortedRow) throws IOException
         {
             if (peek() == END_OF_STREAM)
                 return END_OF_STREAM;
 
-            if (wrapped.mapRowId(peek()).compareTo(primaryKey) >= 0)
+            if (wrapped.mapRowId(peek()).compareTo(sortedRow) >= 0)
                 return peek();
 
             peeked = true;
-            next = wrapped.advance(primaryKey);
+            next = wrapped.advance(sortedRow);
             return next;
         }
 
@@ -130,9 +128,9 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public long advance(PrimaryKey primaryKey) throws IOException
+        public long advance(SortedRow sortedRow) throws IOException
         {
-            if (peeked && wrapped.mapRowId(next).compareTo(primaryKey) >= 0)
+            if (peeked && wrapped.mapRowId(next).compareTo(sortedRow) >= 0)
             {
                 peeked = false;
                 return next;
@@ -140,11 +138,11 @@ public interface PostingList extends Closeable
 
             peeked = false;
 
-            return wrapped.advance(primaryKey);
+            return wrapped.advance(sortedRow);
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public SortedRow mapRowId(long rowId)
         {
             return wrapped.mapRowId(rowId);
         }

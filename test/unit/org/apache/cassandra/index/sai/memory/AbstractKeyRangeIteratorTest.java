@@ -24,7 +24,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -97,7 +97,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(0L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(0L)));
 
         assertIterator(iterator, 1, 2, 3);
     }
@@ -107,7 +107,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(1L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(1L)));
 
         assertIterator(iterator, 1, 2, 3);
     }
@@ -117,7 +117,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(2L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(2L)));
 
         assertIterator(iterator, 2, 3);
     }
@@ -127,7 +127,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(3L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(3L)));
 
         assertIterator(iterator, 3);
     }
@@ -137,7 +137,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(4L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(4L)));
 
         assertIterator(iterator);
     }
@@ -147,7 +147,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 1, 2, 2, 3, 3);
 
-        iterator.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(2L)));
+        iterator.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(2L)));
 
         assertIterator(iterator, 2, 3);
     }
@@ -164,8 +164,8 @@ public abstract class AbstractKeyRangeIteratorTest
 
     protected abstract RangeIterator makeIterator(long minimumTokenValue, long maximumTokenValue, long... tokens);
 
-    protected PrimaryKey keyForToken(long token)
+    protected SortedRow keyForToken(long token)
     {
-        return PrimaryKey.factory().createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), KEY_BUFFER));
+        return SortedRow.factory().createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), KEY_BUFFER));
     }
 }

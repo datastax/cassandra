@@ -19,8 +19,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.Counter;
@@ -72,13 +71,13 @@ class RAMPostingSlices
             }
 
             @Override
-            public long advance(PrimaryKey primaryKey)
+            public long advance(SortedRow sortedRow)
             {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public PrimaryKey mapRowId(long rowId)
+            public SortedRow mapRowId(long rowId)
             {
                 throw new UnsupportedOperationException();
             }

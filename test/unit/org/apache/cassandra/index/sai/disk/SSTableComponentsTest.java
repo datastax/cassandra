@@ -24,30 +24,23 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.tries.MemtableTrie;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -124,13 +117,13 @@ public class SSTableComponentsTest extends SAITester
                                                    .addClusteringColumn("b", UTF8Type.instance)
                                                    .build();
 
-        PrimaryKey.PrimaryKeyFactory factory = PrimaryKey.factory(tableMetadata);
+        SortedRow.SortedRowFactory factory = SortedRow.factory(tableMetadata);
 
         int numRows = CQLTester.getRandom().nextIntBetween(2000, 10000);
         int width = CQLTester.getRandom().nextIntBetween(3, 8);
         numRows = (numRows / width) * width;
 
-        List<PrimaryKey> expected = new ArrayList<>(numRows);
+        List<SortedRow> expected = new ArrayList<>(numRows);
 
         for (int partitionKey = 0; partitionKey < numRows / width; partitionKey++)
         {
@@ -139,10 +132,10 @@ public class SSTableComponentsTest extends SAITester
                                                makeClustering(tableMetadata, CQLTester.getRandom().nextAsciiString(2, 200), CQLTester.getRandom().nextAsciiString(2, 200))));
         }
 
-        expected.sort(PrimaryKey::compareTo);
+        expected.sort(SortedRow::compareTo);
 
         int sstableRowId = 0;
-        for (PrimaryKey key : expected)
+        for (SortedRow key : expected)
             writer.nextRow(factory.createKey(key.partitionKey(), key.clustering(), sstableRowId++));
 
         writer.complete();

@@ -29,8 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertTrue;
@@ -134,13 +133,13 @@ public class TermsIteratorMergerTest extends SAITester
                 }
 
                 @Override
-                public long advance(PrimaryKey primaryKey) throws IOException
+                public long advance(SortedRow sortedRow) throws IOException
                 {
                     throw new UnsupportedOperationException();
                 }
 
                 @Override
-                public PrimaryKey mapRowId(long rowId)
+                public SortedRow mapRowId(long rowId)
                 {
                     throw new UnsupportedOperationException();
                 }

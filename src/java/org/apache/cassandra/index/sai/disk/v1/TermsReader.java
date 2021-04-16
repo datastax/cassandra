@@ -34,7 +34,7 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -310,16 +310,16 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        public long advance(PrimaryKey primaryKey) throws IOException
+        public long advance(SortedRow sortedRow) throws IOException
         {
-            long next = wrapped.advance(primaryKey);
+            long next = wrapped.advance(sortedRow);
             if (next == PostingList.END_OF_STREAM)
                 return next;
             return next + offset;
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public SortedRow mapRowId(long rowId)
         {
             return wrapped.mapRowId(rowId);
         }

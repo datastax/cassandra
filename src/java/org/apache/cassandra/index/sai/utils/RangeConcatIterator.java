@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.PriorityQueue;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -50,7 +49,7 @@ public class RangeConcatIterator extends RangeIterator
 
     @Override
     @SuppressWarnings("resource")
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(SortedRow nextKey)
     {
         while (!ranges.isEmpty())
         {
@@ -77,14 +76,14 @@ public class RangeConcatIterator extends RangeIterator
 
     @Override
     @SuppressWarnings("resource")
-    protected PrimaryKey computeNext()
+    protected SortedRow computeNext()
     {
         while (!ranges.isEmpty())
         {
             RangeIterator current = ranges.poll();
             if (current.hasNext())
             {
-                PrimaryKey next = current.next();
+                SortedRow next = current.next();
                 // hasNext will update RangeIterator's current which is used to sort in PQ
                 if (current.hasNext())
                     ranges.add(current);

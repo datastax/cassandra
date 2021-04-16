@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.service.StorageService;
@@ -101,7 +101,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
-                    results.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(tokenToSkip)));
+                    results.skipTo(SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(tokenToSkip)));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {
@@ -163,8 +163,8 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                                                                     size,
                                                                     0,
                                                                     Long.MAX_VALUE,
-                                                                    PrimaryKey.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(1))),
-                                                                    PrimaryKey.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMaximumToken(), ByteBufferUtil.bytes(2))),
+                                                                    SortedRow.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(1))),
+                                                                    SortedRow.factory().createKey(new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMaximumToken(), ByteBufferUtil.bytes(2))),
                                                                     wrap(termsEnum.get(0).left),
                                                                     wrap(termsEnum.get(terms - 1).left),
                                                                     indexMetas);

@@ -63,7 +63,7 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -103,7 +103,7 @@ public class ColumnContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
-    private final PrimaryKey.PrimaryKeyFactory primaryKeyFactory;
+    private final SortedRow.SortedRowFactory sortedRowFactory;
 
     public ColumnContext(TableMetadata tableMeta, IndexMetadata metadata)
     {
@@ -122,7 +122,7 @@ public class ColumnContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(getIndexName(), tableMeta)
                                               : new ColumnQueryMetrics.BKDIndexMetrics(getIndexName(), tableMeta);
 
-        this.primaryKeyFactory = PrimaryKey.factory(tableMeta);
+        this.sortedRowFactory = SortedRow.factory(tableMeta);
         logger.info(logMessage("Initialized column context with index writer config: {}"),
                 this.indexWriterConfig.toString());
     }
@@ -147,7 +147,7 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = indexWriterConfig;
-        this.primaryKeyFactory = PrimaryKey.factory(DatabaseDescriptor.getPartitioner(), clusteringComparator);
+        this.sortedRowFactory = SortedRow.factory(DatabaseDescriptor.getPartitioner(), clusteringComparator);
     }
 
     public ColumnContext(TableMetadata table, ColumnMetadata column)
@@ -163,7 +163,7 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
-        this.primaryKeyFactory = PrimaryKey.immutableFactory(table);
+        this.sortedRowFactory = SortedRow.immutableFactory(table);
     }
 
     public AbstractType<?> keyValidator()
@@ -176,9 +176,9 @@ public class ColumnContext
         return clusteringComparator;
     }
 
-    public PrimaryKey.PrimaryKeyFactory keyFactory()
+    public SortedRow.SortedRowFactory keyFactory()
     {
-        return primaryKeyFactory;
+        return sortedRowFactory;
     }
 
     public IndexMetrics getIndexMetrics()

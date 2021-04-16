@@ -22,7 +22,7 @@ import java.io.IOException;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.lucene.util.FixedBitSet;
 
 
@@ -83,9 +83,9 @@ public class FilteringPostingList implements PostingList
     }
 
     @Override
-    public  long advance(PrimaryKey primaryKey) throws IOException
+    public  long advance(SortedRow sortedRow) throws IOException
     {
-        long segmentRowId = delegate.advance(primaryKey);
+        long segmentRowId = delegate.advance(sortedRow);
 
         if (segmentRowId == PostingList.END_OF_STREAM)
         {
@@ -106,7 +106,7 @@ public class FilteringPostingList implements PostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public SortedRow mapRowId(long rowId)
     {
         return delegate.mapRowId(rowId);
     }

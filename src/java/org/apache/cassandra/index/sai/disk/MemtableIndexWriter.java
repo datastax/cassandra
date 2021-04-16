@@ -35,7 +35,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
@@ -73,7 +73,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
     }
 
     @Override
-    public void addRow(PrimaryKey rowKey, Row row)
+    public void addRow(SortedRow rowKey, Row row)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary
         // keys and row IDs in the flushing SSTable. This writer, therefore, does nothing in
@@ -103,8 +103,8 @@ public class MemtableIndexWriter implements ColumnIndexWriter
                 return;
             }
 
-            final PrimaryKey minKey = rowMapping.minKey;
-            final PrimaryKey maxKey = rowMapping.maxKey;
+            final SortedRow minKey = rowMapping.minKey;
+            final SortedRow maxKey = rowMapping.maxKey;
 
             final Iterator<Pair<ByteComparable, LongArrayList>> iterator = rowMapping.merge(memtable);
 
@@ -135,7 +135,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
         }
     }
 
-    private long flush(PrimaryKey minKey, PrimaryKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
+    private long flush(SortedRow minKey, SortedRow maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
     {
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;

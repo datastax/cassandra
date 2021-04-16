@@ -33,7 +33,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -183,6 +183,6 @@ public class SegmentMergerTest extends SAITester
         assertTrue(IndexComponents.isColumnIndexComplete(descriptor, context.getIndexName()));
         IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, table.params.compression);
         final MetadataSource source = MetadataSource.loadColumnMetadata(components);
-        return SegmentMetadata.load(source, PrimaryKey.factory(table), null);
+        return SegmentMetadata.load(source, SortedRow.factory(table), null);
     }
 }

@@ -32,12 +32,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
@@ -49,7 +48,7 @@ public class View implements Iterable<SSTableIndex>
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
-    private final IntervalTree<PrimaryKey, SSTableIndex, Interval<PrimaryKey, SSTableIndex>> keyIntervalTree;
+    private final IntervalTree<SortedRow, SSTableIndex, Interval<SortedRow, SSTableIndex>> keyIntervalTree;
 
     public View(ColumnContext context, Collection<SSTableIndex> indexes) {
         this.view = new HashMap<>();
@@ -59,7 +58,7 @@ public class View implements Iterable<SSTableIndex>
 
         TermTree.Builder termTreeBuilder = new RangeTermTree.Builder(validator);
 
-        List<Interval<PrimaryKey, SSTableIndex>> keyIntervals = new ArrayList<>();
+        List<Interval<SortedRow, SSTableIndex>> keyIntervals = new ArrayList<>();
         for (SSTableIndex sstableIndex : indexes)
         {
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
@@ -78,7 +77,7 @@ public class View implements Iterable<SSTableIndex>
         return termTree.search(expression);
     }
 
-    public List<SSTableIndex> match(PrimaryKey minKey, PrimaryKey maxKey)
+    public List<SSTableIndex> match(SortedRow minKey, SortedRow maxKey)
     {
         return keyIntervalTree.search(Interval.create(minKey, maxKey, null));
     }

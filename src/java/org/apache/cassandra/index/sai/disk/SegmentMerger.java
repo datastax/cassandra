@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -44,7 +44,7 @@ public interface SegmentMerger extends Closeable
 
     boolean isEmpty();
 
-    SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException;
+    SegmentMetadata merge(ColumnContext context, IndexComponents components, SortedRow minKey, SortedRow maxKey, long maxSSTableRowId) throws IOException;
 
     @SuppressWarnings("resource")
     static SegmentMerger newSegmentMerger(boolean literal)
@@ -70,7 +70,7 @@ public interface SegmentMerger extends Closeable
         }
 
         @Override
-        public SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException
+        public SegmentMetadata merge(ColumnContext context, IndexComponents components, SortedRow minKey, SortedRow maxKey, long maxSSTableRowId) throws IOException
         {
             try (final TermsIteratorMerger merger = new TermsIteratorMerger(segmentTermsIterators.toArray(new TermsIterator[0]), context.getValidator()))
             {
@@ -145,7 +145,7 @@ public interface SegmentMerger extends Closeable
         }
 
         @Override
-        public SegmentMetadata merge(ColumnContext context, IndexComponents components, PrimaryKey minKey, PrimaryKey maxKey, long maxSSTableRowId) throws IOException
+        public SegmentMetadata merge(ColumnContext context, IndexComponents components, SortedRow minKey, SortedRow maxKey, long maxSSTableRowId) throws IOException
         {
             final MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, context.getValidator());
 

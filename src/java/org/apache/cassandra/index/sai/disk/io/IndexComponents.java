@@ -38,8 +38,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
-import org.apache.cassandra.index.sai.disk.v1.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.PartitionKeysMeta;
 import org.apache.cassandra.index.sai.disk.v1.PostingsWriter;
 import org.apache.cassandra.index.sai.disk.v1.TrieTermsDictionaryWriter;
@@ -97,6 +95,8 @@ public class IndexComponents
          */
         KD_TREE("KDTree", false),
         KD_TREE_POSTING_LISTS("KDTreePostingLists", false),
+        KD_TREE_ORDER_MAPS("KDTreeOrderMaps", false),
+        KD_TREE_ROW_ORDINALS("KDTreeRowOrdinals", false),
         /**
          * Term dictionary written by {@link TrieTermsDictionaryWriter} stores mappings of term and
          * file pointer to posting block on posting file.
@@ -201,7 +201,7 @@ public class IndexComponents
 
     public static final NDIType[] STRING_COMPONENTS = new NDIType[]{ NDIType.TERMS_DATA, NDIType.POSTING_LISTS };
 
-    private static final NDIType[] NUMERIC_COMPONENTS = new NDIType[]{ NDIType.KD_TREE, NDIType.KD_TREE_POSTING_LISTS };
+    private static final NDIType[] NUMERIC_COMPONENTS = new NDIType[]{ NDIType.KD_TREE, NDIType.KD_TREE_POSTING_LISTS, NDIType.KD_TREE_ROW_ORDINALS, NDIType.KD_TREE_ORDER_MAPS };
 
     private static final NDIType[] PER_COLUMN_COMPONENTS = new NDIType[]{ NDIType.COLUMN_COMPLETION_MARKER, NDIType.META };
 
@@ -223,7 +223,7 @@ public class IndexComponents
      */
     public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, GROUP_META);
 
-    public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, columnCompletionMarker;
+    public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, kdTreeRowOrdinals, columnCompletionMarker;
 
     private static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
                                                                                             .trickleFsync(DatabaseDescriptor.getTrickleFsync())
@@ -258,6 +258,7 @@ public class IndexComponents
         groupCompletionMarker = NDIType.GROUP_COMPLETION_MARKER.newComponent();
         kdTree = NDIType.KD_TREE.newComponent(indexName);
         kdTreePostingLists = NDIType.KD_TREE_POSTING_LISTS.newComponent(indexName);
+        kdTreeRowOrdinals = NDIType.KD_TREE_ROW_ORDINALS.newComponent(indexName);
         columnCompletionMarker = NDIType.COLUMN_COMPLETION_MARKER.newComponent(indexName);
     }
 

@@ -26,7 +26,7 @@ import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -97,7 +97,7 @@ public class MergePostingList implements PostingList
 
     @SuppressWarnings("resource")
     @Override
-    public long advance(PrimaryKey key) throws IOException
+    public long advance(SortedRow key) throws IOException
     {
         temp.clear();
 
@@ -114,7 +114,7 @@ public class MergePostingList implements PostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public SortedRow mapRowId(long rowId)
     {
         throw new UnsupportedOperationException();
     }

@@ -24,25 +24,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Memtable;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
-import org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v1.PartitionKeysMeta;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
@@ -50,9 +42,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.IOUtils;
 
 /**
  * Writes all SSTable-attached index token and offset structures.
@@ -65,7 +55,7 @@ public interface SSTableComponentsWriter
 
     SSTableComponentsWriter NONE = (key) -> {};
 
-    void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException, IOException;
+    void nextRow(SortedRow key) throws MemtableTrie.SpaceExhaustedException, IOException;
 
     default void complete() throws IOException
     {}
@@ -91,14 +81,14 @@ public interface SSTableComponentsWriter
             this.rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
         }
 
-        public void nextRow(PrimaryKey key) throws MemtableTrie.SpaceExhaustedException, IOException
+        public void nextRow(SortedRow key) throws MemtableTrie.SpaceExhaustedException, IOException
         {
             if (key.size() <= MAX_RECURSIVE_KEY_LENGTH)
-                rowMapping.putRecursive(v -> key.asComparableBytes(v), key.sstableRowId(), (existing, neww) -> neww);
+                rowMapping.putRecursive(v -> key.primaryKeyAsComparableBytes(v), key.sstableRowId(), (existing, neww) -> neww);
             else
-                rowMapping.apply(Trie.singleton(v -> key.asComparableBytes(v), key.sstableRowId()), (existing, neww) -> neww);
+                rowMapping.apply(Trie.singleton(v -> key.primaryKeyAsComparableBytes(v), key.sstableRowId()), (existing, neww) -> neww);
             maxSSTableRowId = key.sstableRowId();
-            maxKeyLength = Math.max(maxKeyLength, key.asBytes().length);
+            maxKeyLength = Math.max(maxKeyLength, key.primaryKeyAsBytes().length);
             rowCount++;
             // If the trie is full then we need to flush it and start a new one
             if (rowMapping.reachedAllocatedSizeThreshold())

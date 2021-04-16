@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.IndexOutput;
@@ -33,6 +34,11 @@ public class MetadataWriter implements Closeable
 {
     private final IndexOutput output;
     private final Map<String, BytesRef> map = new HashMap<>();
+
+    public MetadataWriter(IndexComponents components) throws IOException
+    {
+        output = components.createOutput(components.meta, true);
+    }
 
     public MetadataWriter(IndexOutput output)
     {

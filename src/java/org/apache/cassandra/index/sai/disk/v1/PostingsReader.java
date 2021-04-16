@@ -26,7 +26,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.LongArray;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.lucene.index.CorruptIndexException;
@@ -213,15 +213,15 @@ public class PostingsReader implements OrdinalPostingList
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param nextPrimaryKey target primary key to advance to
+     * @param nextSortedRow target primary key to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
     @Override
-    public long advance(PrimaryKey nextPrimaryKey) throws IOException
+    public long advance(SortedRow nextSortedRow) throws IOException
     {
         listener.onAdvance();
-        int block = binarySearchBlock(nextPrimaryKey);
+        int block = binarySearchBlock(nextSortedRow);
 
         if (block < 0)
         {
@@ -231,16 +231,16 @@ public class PostingsReader implements OrdinalPostingList
         if (postingsBlockIdx == block + 1)
         {
             // we're in the same block, just iterate through
-            return slowAdvance(nextPrimaryKey);
+            return slowAdvance(nextSortedRow);
         }
         assert block > 0;
         // Even if there was an exact match, block might contain duplicates.
         // We iterate to the target token from the beginning.
         lastPosInBlock(block - 1);
-        return slowAdvance(nextPrimaryKey);
+        return slowAdvance(nextSortedRow);
     }
 
-    private long slowAdvance(PrimaryKey nextPrimaryKey) throws IOException
+    private long slowAdvance(SortedRow nextSortedRow) throws IOException
     {
         while (totalPostingsRead < numPostings)
         {
@@ -248,26 +248,26 @@ public class PostingsReader implements OrdinalPostingList
 
             advanceOnePosition(segmentRowId);
 
-            if (primaryKeyMap.primaryKeyFromRowId(segmentRowId).compareTo(nextPrimaryKey) >= 0)
+            if (primaryKeyMap.primaryKeyFromRowId(segmentRowId).compareTo(nextSortedRow) >= 0)
                 return segmentRowId;
         }
         return END_OF_STREAM;
     }
 
-    private int binarySearchBlock(PrimaryKey primaryKey)
+    private int binarySearchBlock(SortedRow sortedRow)
     {
         int low = postingsBlockIdx - 1;
         int high = Math.toIntExact(blockMaxValues.length()) - 1;
 
         // in current block
-        if (low <= high && primaryKey.compareTo(primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(low))) <= 0)
+        if (low <= high && sortedRow.compareTo(primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(low))) <= 0)
             return low;
 
         while (low <= high)
         {
             int mid = low + ((high - low) >> 1) ;
 
-            int cmp = primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid)).compareTo(primaryKey);
+            int cmp = primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid)).compareTo(sortedRow);
             if (cmp < 0)
             {
                 low = mid + 1;
@@ -279,7 +279,7 @@ public class PostingsReader implements OrdinalPostingList
             else
             {
                 // target found, but we need to check for duplicates
-                if (mid > 0 && primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid - 1)).compareTo(primaryKey) == 0)
+                if (mid > 0 && primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid - 1)).compareTo(sortedRow) == 0)
                 {
                     // there are duplicates, pivot left
                     high = mid - 1;
@@ -306,7 +306,7 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public SortedRow mapRowId(long rowId)
     {
         return primaryKeyMap.primaryKeyFromRowId(rowId);
     }

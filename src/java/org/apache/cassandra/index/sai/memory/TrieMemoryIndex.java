@@ -45,8 +45,8 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.SortedRow;
+import org.apache.cassandra.index.sai.utils.SortedRows;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.compress.BufferType;
@@ -62,7 +62,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
 
-    private final MemtableTrie<PrimaryKeys> data;
+    private final MemtableTrie<SortedRows> data;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final AbstractType<?> validator;
     private final boolean isLiteral;
@@ -96,7 +96,7 @@ public class TrieMemoryIndex extends MemoryIndex
             AbstractAnalyzer analyzer = columnContext.getAnalyzer();
             value = TypeUtil.encode(value, validator);
             analyzer.reset(value.duplicate());
-            final PrimaryKey primaryKey = columnContext.keyFactory().createKey(key, clustering);
+            final SortedRow sortedRow = columnContext.keyFactory().createKey(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
@@ -111,11 +111,11 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
                     {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                        data.putRecursive(encodedTerm, sortedRow, primaryKeysReducer);
                     }
                     else
                     {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        data.apply(Trie.singleton(encodedTerm, sortedRow), primaryKeysReducer);
                     }
                 }
                 catch (MemtableTrie.SpaceExhaustedException e)
@@ -149,10 +149,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, SortedRows>> iterator()
     {
-        Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        Iterator<Map.Entry<ByteComparable, SortedRows>> iterator = data.entrySet().iterator();
+        return new Iterator<Pair<ByteComparable, SortedRows>>()
         {
             @Override
             public boolean hasNext()
@@ -161,9 +161,9 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, SortedRows> next()
             {
-                Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
+                Map.Entry<ByteComparable, SortedRows> entry = iterator.next();
                 return Pair.create(decode(entry.getKey()), entry.getValue());
             }
         };
@@ -206,19 +206,19 @@ public class TrieMemoryIndex extends MemoryIndex
     private RangeIterator exactMatch(Expression expression)
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
-        final PrimaryKeys primaryKeys = data.get(prefix);
-        if (primaryKeys == null)
+        final SortedRows sortedRows = data.get(prefix);
+        if (sortedRows == null)
         {
             return RangeIterator.empty();
         }
-        return new KeyRangeIterator(primaryKeys.keys());
+        return new KeyRangeIterator(sortedRows.keys());
     }
 
     public static class Collector
     {
-        PrimaryKey minimumKey = null;
-        PrimaryKey maximumKey = null;
-        PriorityQueue<PrimaryKey> mergedKeys = new PriorityQueue<>(lastQueueSize.get());
+        SortedRow minimumKey = null;
+        SortedRow maximumKey = null;
+        PriorityQueue<SortedRow> mergedKeys = new PriorityQueue<>(lastQueueSize.get());
 
         AbstractBounds<PartitionPosition> keyRange;
 
@@ -227,17 +227,17 @@ public class TrieMemoryIndex extends MemoryIndex
             this.keyRange = keyRange;
         }
 
-        public void processContent(PrimaryKeys keys)
+        public void processContent(SortedRows keys)
         {
             if (keys.isEmpty())
                 return;
 
-            SortedSet<PrimaryKey> primaryKeys = keys.keys();
+            SortedSet<SortedRow> sortedRows = keys.keys();
 
             // shortcut to avoid generating iterator
-            if (primaryKeys.size() == 1)
+            if (sortedRows.size() == 1)
             {
-                PrimaryKey first = primaryKeys.first();
+                SortedRow first = sortedRows.first();
                 if (keyRange.contains(first.partitionKey()))
                 {
                     mergedKeys.add(first);
@@ -250,11 +250,11 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             // skip entire partition keys if they don't overlap
-            if (!keyRange.right.isMinimum() && primaryKeys.first().partitionKey().compareTo(keyRange.right) > 0
-                || primaryKeys.last().partitionKey().compareTo(keyRange.left) < 0)
+            if (!keyRange.right.isMinimum() && sortedRows.first().partitionKey().compareTo(keyRange.right) > 0
+                || sortedRows.last().partitionKey().compareTo(keyRange.left) < 0)
                return;
 
-            for (PrimaryKey key : primaryKeys)
+            for (SortedRow key : sortedRows)
             {
                 if (keyRange.contains(key.partitionKey()))
                 {
@@ -308,16 +308,16 @@ public class TrieMemoryIndex extends MemoryIndex
         return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
     }
 
-    private class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    private class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<SortedRows, SortedRow>
     {
         private final LongAdder heapAllocations = new LongAdder();
 
         @Override
-        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
+        public SortedRows apply(SortedRows existing, SortedRow neww)
         {
             if (existing == null)
             {
-                existing = new PrimaryKeys();
+                existing = new SortedRows();
                 heapAllocations.add(existing.unsharedHeapSize());
             }
             heapAllocations.add(existing.add(neww));

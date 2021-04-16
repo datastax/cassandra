@@ -19,27 +19,21 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -78,8 +72,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     /**
      * Ordered by their token position in current segment
      */
-    public final PrimaryKey minKey;
-    public final PrimaryKey maxKey;
+    public final SortedRow minKey;
+    public final SortedRow maxKey;
 
     /**
      * Minimum and maximum indexed column value ordered by its {@link org.apache.cassandra.db.marshal.AbstractType}.
@@ -97,8 +91,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                     long numRows,
                     long minSSTableRowId,
                     long maxSSTableRowId,
-                    PrimaryKey minKey,
-                    PrimaryKey maxKey,
+                    SortedRow minKey,
+                    SortedRow maxKey,
                     ByteBuffer minTerm,
                     ByteBuffer maxTerm,
                     ComponentMetadataMap componentMetadatas)
@@ -123,7 +117,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, PrimaryKey.PrimaryKeyFactory keyFactory, ICompressor compressor) throws IOException
+    private SegmentMetadata(IndexInput input, SortedRow.SortedRowFactory keyFactory, ICompressor compressor) throws IOException
     {
         this.segmentRowIdOffset = input.readLong();
 
@@ -152,7 +146,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
     @SuppressWarnings("resource")
     public static SegmentMetadata load(MetadataSource source,
-                                       PrimaryKey.PrimaryKeyFactory keyFactory,
+                                       SortedRow.SortedRowFactory keyFactory,
                                        ICompressor compressor) throws IOException
     {
         IndexInput input = source.get(NAME);
@@ -172,8 +166,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             output.writeLong(metadata.numRows);
             output.writeLong(metadata.minSSTableRowId);
             output.writeLong(metadata.maxSSTableRowId);
-            writeBytes(ByteSourceInverse.readBytes(metadata.minKey.asComparableBytes(ByteComparable.Version.OSS41)), output);
-            writeBytes(ByteSourceInverse.readBytes(metadata.maxKey.asComparableBytes(ByteComparable.Version.OSS41)), output);
+            writeBytes(ByteSourceInverse.readBytes(metadata.minKey.primaryKeyAsComparableBytes(ByteComparable.Version.OSS41)), output);
+            writeBytes(ByteSourceInverse.readBytes(metadata.maxKey.primaryKeyAsComparableBytes(ByteComparable.Version.OSS41)), output);
 
             if (compressor != null)
             {

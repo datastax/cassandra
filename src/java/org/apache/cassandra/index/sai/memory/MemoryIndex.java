@@ -33,7 +33,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.SortedRows;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
@@ -76,5 +76,5 @@ public abstract class MemoryIndex
     /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
-    public abstract Iterator<Pair<ByteComparable, PrimaryKeys>> iterator();
+    public abstract Iterator<Pair<ByteComparable, SortedRows>> iterator();
 }

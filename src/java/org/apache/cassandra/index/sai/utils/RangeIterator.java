@@ -25,7 +25,6 @@ import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -33,13 +32,13 @@ import org.apache.cassandra.io.util.FileUtils;
  * 1. no generic type to reduce allocation
  * 2. CONCAT iterator type
  */
-public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
+public abstract class RangeIterator extends AbstractIterator<SortedRow> implements Closeable
 {
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 
-    private final PrimaryKey min, max;
+    private final SortedRow min, max;
     private final long count;
-    private PrimaryKey current;
+    private SortedRow current;
 
     protected RangeIterator(Builder.Statistics statistics)
     {
@@ -51,7 +50,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         this(range == null ? null : range.min, range == null ? null : range.max, range == null ? -1 : range.count);
     }
 
-    public RangeIterator(PrimaryKey min, PrimaryKey max, long count)
+    public RangeIterator(SortedRow min, SortedRow max, long count)
     {
         if (min == null || max == null || count == 0)
             assert min == null && max == null && (count == 0 || count == -1) : min + " - " + max + " " + count;
@@ -62,17 +61,17 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         this.count = count;
     }
 
-    public final PrimaryKey getMinimum()
+    public final SortedRow getMinimum()
     {
         return min;
     }
 
-    public final PrimaryKey getCurrent()
+    public final SortedRow getCurrent()
     {
         return current;
     }
 
-    public final PrimaryKey getMaximum()
+    public final SortedRow getMaximum()
     {
         return max;
     }
@@ -92,7 +91,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      *
      * @return The next current token after the skip was performed
      */
-    public final PrimaryKey skipTo(PrimaryKey nextToken)
+    public final SortedRow skipTo(SortedRow nextToken)
     {
         if (min == null || max == null)
             return endOfData();
@@ -115,9 +114,9 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         return recomputeNext();
     }
 
-    protected abstract void performSkipTo(PrimaryKey nextToken);
+    protected abstract void performSkipTo(SortedRow nextToken);
 
-    protected PrimaryKey recomputeNext()
+    protected SortedRow recomputeNext()
     {
         return tryToComputeNext() ? peek() : endOfData();
     }
@@ -155,12 +154,12 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             ranges = new PriorityQueue<>(16, Comparator.comparing(RangeIterator::getCurrent));
         }
 
-        public PrimaryKey getMinimum()
+        public SortedRow getMinimum()
         {
             return statistics.min;
         }
 
-        public PrimaryKey getMaximum()
+        public SortedRow getMaximum()
         {
             return statistics.max;
         }
@@ -214,8 +213,8 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         public static class EmptyRangeIterator extends RangeIterator
         {
             EmptyRangeIterator() { super(null, null, 0); }
-            public PrimaryKey computeNext() { return endOfData(); }
-            protected void performSkipTo(PrimaryKey nextToken) { }
+            public SortedRow computeNext() { return endOfData(); }
+            protected void performSkipTo(SortedRow nextToken) { }
             public void close() { }
         }
 
@@ -225,7 +224,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         {
             protected final IteratorType iteratorType;
 
-            protected PrimaryKey min, max;
+            protected SortedRow min, max;
             protected long tokenCount;
 
             // iterator with the least number of items
@@ -343,7 +342,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      *  If either range is empty, they're disjoint.
      */
     @VisibleForTesting
-    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
+    protected static boolean isOverlapping(SortedRow min, SortedRow max, RangeIterator b)
     {
         return (min != null && max != null) &&
                b.getCount() != 0 &&

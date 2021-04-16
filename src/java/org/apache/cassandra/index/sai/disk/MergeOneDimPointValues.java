@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.util.List;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.BKDReader;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -108,13 +106,13 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
                 // The scratch sizes may be different for literal datatypes.
                 // In which case we need to copy them to the tempScratch buffer
                 // which is the correct size.
-                if (reader.scratch.length != tempScratch.length)
+                if (reader.getTermValue().length != tempScratch.length)
                 {
-                    System.arraycopy(reader.scratch, 0, tempScratch, 0, reader.scratch.length);
+                    System.arraycopy(reader.getTermValue(), 0, tempScratch, 0, reader.getTermValue().length);
                     visitor.visit(rowID, tempScratch);
                 }
                 else
-                    visitor.visit(rowID, reader.scratch);
+                    visitor.visit(rowID, reader.getTermValue());
 
                 if (reader.hasNext())
                 {

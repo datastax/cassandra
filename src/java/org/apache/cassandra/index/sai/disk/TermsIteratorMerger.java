@@ -24,8 +24,7 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
-import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -130,13 +129,13 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long advance(PrimaryKey primaryKey) throws IOException
+        public long advance(SortedRow sortedRow) throws IOException
         {
-            return monitored.advance(primaryKey);
+            return monitored.advance(sortedRow);
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public SortedRow mapRowId(long rowId)
         {
             return monitored.mapRowId(rowId);
         }

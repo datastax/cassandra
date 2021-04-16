@@ -22,12 +22,9 @@ import java.io.IOException;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
@@ -35,7 +32,7 @@ import org.apache.cassandra.utils.Throwables;
 
 public interface PrimaryKeyMap extends Closeable
 {
-    PrimaryKey primaryKeyFromRowId(long sstableRowId);
+    SortedRow primaryKeyFromRowId(long sstableRowId);
 
     default PrimaryKeyMap copyOf()
     {
@@ -51,14 +48,14 @@ public interface PrimaryKeyMap extends Closeable
     default void close() throws IOException
     {}
 
-    PrimaryKeyMap IDENTITY = sstableRowId -> PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(sstableRowId), sstableRowId);
+    PrimaryKeyMap IDENTITY = sstableRowId -> SortedRow.factory().createKey(new Murmur3Partitioner.LongToken(sstableRowId), sstableRowId);
 
     class DefaultPrimaryKeyMap implements PrimaryKeyMap
     {
         private final FileHandle primaryKeys;
         private final BKDReader reader;
         private final BKDReader.IteratorState iterator;
-        private final PrimaryKey.PrimaryKeyFactory keyFactory;
+        private final SortedRow.SortedRowFactory keyFactory;
         private final long size;
 
         public DefaultPrimaryKeyMap(IndexComponents indexComponents, TableMetadata tableMetadata) throws IOException
@@ -82,7 +79,7 @@ public interface PrimaryKeyMap extends Closeable
                 this.iterator = null;
             }
 
-            this.keyFactory = PrimaryKey.factory(tableMetadata);
+            this.keyFactory = SortedRow.factory(tableMetadata);
         }
 
         private DefaultPrimaryKeyMap(DefaultPrimaryKeyMap orig) throws IOException
@@ -115,12 +112,12 @@ public interface PrimaryKeyMap extends Closeable
         }
 
         @Override
-        public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+        public SortedRow primaryKeyFromRowId(long sstableRowId)
         {
             if (iterator != null)
             {
                 iterator.seekTo(sstableRowId);
-                PrimaryKey key = keyFactory.createKey(iterator.asByteComparable(), sstableRowId);
+                SortedRow key = keyFactory.createKey(iterator.asByteComparable(), sstableRowId);
                 return key;
             }
             return null;

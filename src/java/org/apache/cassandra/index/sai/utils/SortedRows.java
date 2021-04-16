@@ -24,30 +24,30 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import org.apache.cassandra.utils.ObjectSizes;
 
 /**
- * A sorted set of {@link PrimaryKey}s.
+ * A sorted set of {@link SortedRow}s.
  *
  * The primary keys are sorted first by token, then by partition key value, and then by clustering.
  */
-public class PrimaryKeys implements Iterable<PrimaryKey>
+public class SortedRows implements Iterable<SortedRow>
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new PrimaryKeys());
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new SortedRows());
 
     // from https://github.com/gaul/java-collection-overhead
     long SET_ENTRY_OVERHEAD = 36;
 
-    private final ConcurrentSkipListSet<PrimaryKey> keys = new ConcurrentSkipListSet<>();
+    private final ConcurrentSkipListSet<SortedRow> keys = new ConcurrentSkipListSet<>();
 
     /**
-     * Adds the specified {@link PrimaryKey}.
+     * Adds the specified {@link SortedRow}.
      *
      * @param key a primary key
      */
-    public long add(PrimaryKey key)
+    public long add(SortedRow key)
     {
         return keys.add(key) ? SET_ENTRY_OVERHEAD : 0;
     }
 
-    public SortedSet<PrimaryKey> keys()
+    public SortedSet<SortedRow> keys()
     {
         return keys;
     }
@@ -68,7 +68,7 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     }
 
     @Override
-    public Iterator<PrimaryKey> iterator()
+    public Iterator<SortedRow> iterator()
     {
         return keys.iterator();
     }

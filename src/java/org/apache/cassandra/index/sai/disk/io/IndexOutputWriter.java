@@ -40,6 +40,11 @@ public class IndexOutputWriter extends IndexOutput
         this.out = out;
     }
 
+    public void skipToEnd() throws IOException
+    {
+        out.skipBytes(out.length());
+    }
+
     public void skipBytes(long length) throws IOException
     {
         this.out.skipBytes(length);

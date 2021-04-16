@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import com.google.common.base.Preconditions;
 
@@ -121,15 +122,15 @@ public class BKDTreeRamBuffer implements Accountable
             @Override
             public void getValue(int i, BytesRef packedValue)
             {
-                final long offset = (long) packedBytesLength * (long) ords[i];
-                packedValue.length = packedBytesLength;
+                final long offset = (long) pointNumBytes * (long) ords[i];
+                packedValue.length = pointNumBytes;
                 bytes.setRawBytesRef(packedValue, offset);
             }
 
             @Override
             public byte getByteAt(int i, int k)
             {
-                final long offset = (long) packedBytesLength * (long) ords[i] + (long) k;
+                final long offset = (long) pointNumBytes * (long) ords[i] + (long) k;
 
                 return bytes.readByte(offset);
             }
@@ -155,9 +156,11 @@ public class BKDTreeRamBuffer implements Accountable
                 for (int i = 0; i < numPoints; i++)
                 {
                     getValue(i, scratch);
-                    assert scratch.length == packedValue.length;
-                    System.arraycopy(scratch.bytes, scratch.offset, packedValue, 0, packedBytesLength);
-                    visitor.visit(getDocID(i), packedValue);
+                    assert scratch.length == pointNumBytes;
+                    System.arraycopy(scratch.bytes, scratch.offset, packedValue, 0, pointNumBytes);
+                    int docID = getDocID(i);
+                    System.out.println("visitor=" + visitor + " docID=" + docID + " packedValue=" + Arrays.toString(packedValue));
+                    visitor.visit(docID, packedValue);
                 }
             }
 

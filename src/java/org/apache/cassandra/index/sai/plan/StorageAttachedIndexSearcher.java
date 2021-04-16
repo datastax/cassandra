@@ -46,7 +46,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -56,7 +56,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
-    private final PrimaryKey.PrimaryKeyFactory keyFactory;
+    private final SortedRow.SortedRowFactory keyFactory;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
@@ -67,7 +67,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         this.command = command;
         this.queryContext = new QueryContext(executionQuotaMs);
         this.controller = new QueryController(cfs, command, expressions, queryContext, tableQueryMetrics);
-        this.keyFactory = PrimaryKey.factory(cfs.metadata.get());
+        this.keyFactory = SortedRow.factory(cfs.metadata.get());
     }
 
     @Override
@@ -121,8 +121,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
-        private final PrimaryKey startPrimaryKey;
-        private final PrimaryKey lastPrimaryKey;
+        private final SortedRow startSortedRow;
+        private final SortedRow lastSortedRow;
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> current;
 
@@ -130,16 +130,16 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryController controller;
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
-        private final PrimaryKey.PrimaryKeyFactory keyFactory;
+        private final SortedRow.SortedRowFactory keyFactory;
 
-        private PrimaryKey currentKey = null;
-        private PrimaryKey lastKey;
+        private SortedRow currentKey = null;
+        private SortedRow lastKey;
 
         private ResultRetriever(Operation operation,
                                 QueryController controller,
                                 ReadExecutionController executionController,
                                 QueryContext queryContext,
-                                PrimaryKey.PrimaryKeyFactory keyFactory)
+                                SortedRow.SortedRowFactory keyFactory)
         {
             this.keyRanges = controller.dataRanges().iterator();
             this.current = keyRanges.next().keyRange();
@@ -152,8 +152,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             //TODO These ought to take the decorated keys in which case we ought to be able to
             //be able to get a sstable row id for them from the primary key map
-            this.startPrimaryKey = keyFactory.createKey(controller.mergeRange().left.getToken());
-            this.lastPrimaryKey = keyFactory.createKey(controller.mergeRange().right.getToken());
+            this.startSortedRow = keyFactory.createKey(controller.mergeRange().left.getToken());
+            this.lastSortedRow = keyFactory.createKey(controller.mergeRange().right.getToken());
        }
 
         @Override
@@ -162,7 +162,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (operation == null)
                 return endOfData();
 
-            operation.skipTo(startPrimaryKey);
+            operation.skipTo(startSortedRow);
             if (!operation.hasNext())
                 return endOfData();
             currentKey = operation.next();
@@ -173,7 +173,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // allocation, reuse their token mergers as they process individual positions on the ring.)
             while (true)
             {
-                if (!lastPrimaryKey.partitionKey().getToken().isMinimum() && lastPrimaryKey.compareTo(currentKey) < 0)
+                if (!lastSortedRow.partitionKey().getToken().isMinimum() && lastSortedRow.compareTo(currentKey) < 0)
                     return endOfData();
 
                 while (current != null)
@@ -209,7 +209,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
         }
 
-        public UnfilteredRowIterator apply(PrimaryKey key)
+        public UnfilteredRowIterator apply(SortedRow key)
         {
             if ((lastKey != null && lastKey.compareTo(key) == 0) || !controller.needsRow(key))
             {
@@ -227,7 +227,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
         }
 
-        private static UnfilteredRowIterator applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
+        private static UnfilteredRowIterator applyIndexFilter(SortedRow key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
         {
             Row staticRow = partition.staticRow();
             List<Unfiltered> clusters = new ArrayList<>();

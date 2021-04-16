@@ -36,7 +36,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.SortedRows;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -116,11 +116,11 @@ public class TrieMemoryIndexTest
             index.add(key, Clustering.EMPTY, decompose.apply(i));
         }
 
-        final Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        final Iterator<Pair<ByteComparable, SortedRows>> iterator = index.iterator();
         int i = 0;
         while (iterator.hasNext())
         {
-            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+            Pair<ByteComparable, SortedRows> pair = iterator.next();
             assertEquals(1, pair.right.size());
 
             final int rowId = i;

@@ -89,7 +89,7 @@ public class TermIterator extends RangeIterator
         return new TermIterator(ranges, perSSTableIndexes, queryContext);
     }
 
-    protected PrimaryKey computeNext()
+    protected SortedRow computeNext()
     {
         try
         {
@@ -101,7 +101,7 @@ public class TermIterator extends RangeIterator
         }
     }
 
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(SortedRow nextToken)
     {
         try
         {

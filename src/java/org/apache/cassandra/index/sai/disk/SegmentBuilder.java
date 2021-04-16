@@ -26,7 +26,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
@@ -34,7 +33,7 @@ import org.apache.cassandra.index.sai.disk.v1.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -74,7 +73,7 @@ public abstract class SegmentBuilder
     int rowCount = 0;
     int maxSegmentRowId = -1;
     // in token order
-    private PrimaryKey minKey, maxKey;
+    private SortedRow minKey, maxKey;
     // in termComparator order
     private ByteBuffer minTerm, maxTerm;
 
@@ -181,7 +180,7 @@ public abstract class SegmentBuilder
         return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
-    public long add(ByteBuffer term, PrimaryKey key)
+    public long add(ByteBuffer term, SortedRow key)
     {
         assert !flushed : "Cannot add to flushed segment.";
         assert key.sstableRowId() >= maxSSTableRowId;

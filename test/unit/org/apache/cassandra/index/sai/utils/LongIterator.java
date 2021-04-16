@@ -18,25 +18,18 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.function.LongFunction;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class LongIterator extends RangeIterator
 {
-    private final List<PrimaryKey> keys;
+    private final List<SortedRow> keys;
     private int currentIdx = 0;
 
     /**
@@ -66,7 +59,7 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected PrimaryKey computeNext()
+    protected SortedRow computeNext()
     {
         // throws exception if it's last element or chosen 1 out of n
         if (shouldThrow && (currentIdx >= keys.size() - 1 || random.nextInt(keys.size()) == 0))
@@ -79,11 +72,11 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(SortedRow nextToken)
     {
         for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < keys.size(); i++)
         {
-            PrimaryKey token = keys.get(i);
+            SortedRow token = keys.get(i);
             if (token.compareTo(nextToken) >= 0)
             {
                 currentIdx = i;
@@ -96,15 +89,15 @@ public class LongIterator extends RangeIterator
     public void close()
     {}
 
-    public static PrimaryKey fromToken(long token)
+    public static SortedRow fromToken(long token)
     {
-        return PrimaryKey.factory().createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)));
+        return SortedRow.factory().createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)));
     }
 
-    public static PrimaryKey fromTokenAndRowId(long token, long rowId)
+    public static SortedRow fromTokenAndRowId(long token, long rowId)
     {
-        return PrimaryKey.factory()
-                         .createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)),
+        return SortedRow.factory()
+                        .createKey(new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBufferUtil.bytes(token)),
                                     Clustering.EMPTY,
                                     rowId);
     }
@@ -132,7 +125,7 @@ public class LongIterator extends RangeIterator
         List<Long> results = new ArrayList<>();
         while (keys.hasNext())
         {
-            PrimaryKey key = keys.next();
+            SortedRow key = keys.next();
             results.add(key.sstableRowId());
         }
 

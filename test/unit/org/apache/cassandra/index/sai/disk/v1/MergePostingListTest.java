@@ -34,7 +34,6 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 public class MergePostingListTest extends NdiRandomizedTest
 {

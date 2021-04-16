@@ -22,13 +22,11 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -63,11 +61,11 @@ public class RangeIntersectionIterator extends RangeIterator
         this.processedRanges = new ArrayList<>(ranges.size());
     }
 
-    protected PrimaryKey computeNext()
+    protected SortedRow computeNext()
     {
         processedRanges.clear();
         RangeIterator head = null;
-        PrimaryKey candidate = null;
+        SortedRow candidate = null;
         while (!ranges.isEmpty())
         {
             RangeIterator range = ranges.remove(0);
@@ -113,7 +111,7 @@ public class RangeIntersectionIterator extends RangeIterator
         return candidate;
     }
 
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(SortedRow nextToken)
     {
         for (RangeIterator range : ranges)
             if (range.hasNext())

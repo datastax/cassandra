@@ -56,7 +56,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SortedRow;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -149,12 +149,12 @@ public class QueryController
         return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
     }
 
-    public boolean needsRow(PrimaryKey key)
+    public boolean needsRow(SortedRow key)
     {
         return key.hasEmptyClustering() || command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
-    public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
+    public UnfilteredRowIterator getPartition(SortedRow key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new IllegalArgumentException("non-null key required");
@@ -220,7 +220,7 @@ public class QueryController
         return builder;
     }
 
-    private ClusteringIndexFilter makeFilter(PrimaryKey key)
+    private ClusteringIndexFilter makeFilter(SortedRow key)
     {
         if (key.hasEmptyClustering())
             return command.clusteringIndexFilter(key.partitionKey());

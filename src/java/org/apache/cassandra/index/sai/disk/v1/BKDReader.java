@@ -21,13 +21,16 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Stopwatch;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +57,8 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.FutureArrays;
 import org.apache.lucene.util.packed.DirectWriter;
+import org.apache.lucene.util.packed.PackedInts;
+import org.apache.lucene.util.packed.PackedLongValues;
 
 /**
  * Handles intersection of a multi-dimensional shape in byte[] space with a block KD-tree previously written with
@@ -63,13 +68,17 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    final BKDPostingsIndex postingsIndex;
+
     private final FileHandle postingsFile, kdtreeFile;
-    private final BKDPostingsIndex postingsIndex;
     private final ICompressor compressor;
     private final DirectReaders.Reader leafOrderMapReader;
     private final TreeMap<Long,Integer> leafFPToLeafNode;
-    private final long[] filePointers; // TODO: convert to packed longs
     private final PrimaryKeyMap primaryKeyMap;
+    private final PackedLongValues filePointers;
+
+    public static final String DEFAULT_POSTING_INDEX = "DEFAULT_POSTING_INDEX";
+    final Map<String,SortedPostingsIndex> postingIndexMap = new HashMap();
 
     /**
      * Performs a blocking read.
@@ -92,22 +101,169 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         super(indexComponents, kdtreeFile, bkdIndexRoot);
         this.postingsFile = postingsFile;
         this.kdtreeFile = kdtreeFile;
+        this.primaryKeyMap = primaryKeyMap;
         this.postingsIndex = postingsFile == null ? null : new BKDPostingsIndex(postingsFile, bkdPostingsRoot);
         this.compressor = null;
         final byte bits = (byte) DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1);
         leafOrderMapReader = DirectReaders.getReaderForBitsPerValue(bits);
 
-        leafFPToLeafNode = getLeafOffsets();
+        leafFPToLeafNode = new TreeMap();
+        final PackedIndexTree index = new PackedIndexTree();
+        getLeafOffsets(index, leafFPToLeafNode);
 
-        filePointers = new long[leafFPToLeafNode.size()];
-        int i = 0;
+        final PackedLongValues.Builder filePointerBuilder = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
+
         for (Map.Entry<Long,Integer> entry : leafFPToLeafNode.entrySet())
         {
             final Long filePosition = entry.getKey();
-            //final Integer nodeID = entry.getValue();
-            filePointers[i++] = filePosition;
+            filePointerBuilder.add(filePosition);
         }
-        this.primaryKeyMap = primaryKeyMap;
+        filePointers = filePointerBuilder.build();
+    }
+
+    public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor,
+                                                           QueryEventListener.BKDIndexEventListener listener,
+                                                           QueryContext context)
+    {
+        return intersect(visitor,
+                         listener,
+                         context,
+                         DEFAULT_POSTING_INDEX,
+                         null);
+    }
+
+    public List<RowIDAndPointIDIterator> rowIDIterators() throws IOException
+    {
+        List<RowIDAndPointIDIterator> list = new ArrayList<>();
+        int count = 0;
+        for (Map.Entry<Long, Integer> entry : leafFPToLeafNode.entrySet())
+        {
+            IndexInput bkdInput = indexComponents.openInput(kdtreeFile);
+            SharedIndexInput bkdPostingsInput = new SharedIndexInput(indexComponents.openInput(postingsFile));
+            RowIDAndPointIDIterator iterator = leafRowIDIterator(count++,
+                                                                 entry.getValue(),
+                                                                 entry.getKey(),
+                                                                 bkdInput,
+                                                                 bkdPostingsInput);
+            list.add(iterator);
+        }
+        return list;
+    }
+
+    public static abstract class RowIDAndPointIDIterator extends AbstractIterator<BKDReader.RowIDAndPointID> implements Closeable
+    {
+    }
+
+    public interface SortedPostingInputs
+    {
+        IndexInput openPostingsInput() throws IOException;
+
+        IndexInput openOrderMapInput() throws IOException;
+    }
+
+    public RowIDAndPointIDIterator leafRowIDIterator(int leafIdx,
+                                                     int leafNodeID,
+                                                     long filePointer,
+                                                     IndexInput bkdInput,
+                                                     SharedIndexInput bkdPostingsInput) throws IOException
+    {
+        bkdInput.seek(filePointer);
+        final int count = bkdInput.readVInt();
+        // loading doc ids occurred here prior
+        final int orderMapLength = bkdInput.readVInt(); // read and unused
+        final long orderMapPointer = bkdInput.getFilePointer();
+
+        // TODO: need to change the order map stored on disk to avoid the origIndex array creation
+        final short[] origIndex = new short[maxPointsInLeafNode];
+
+        final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
+        for (int x = 0; x < count; x++)
+        {
+            final short idx = (short) LeafOrderMap.getValue(randoInput, orderMapPointer, x, leafOrderMapReader);
+            origIndex[idx] = (short)x; // TODO: this can be avoided with the above comment
+        }
+
+        final long start = leafIdx * this.maxPointsInLeafNode;
+
+        final RowIDAndPointID obj = new RowIDAndPointID();
+
+        final PostingsReader postingsReader;
+
+        if (postingsIndex.exists(leafNodeID))
+        {
+            final long pointer = postingsIndex.getPostingsFilePointer(leafNodeID);
+            final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(bkdPostingsInput, pointer);
+            postingsReader = new PostingsReader(bkdPostingsInput.sharedCopy(), summary, QueryEventListener.PostingListEventListener.NO_OP, primaryKeyMap);
+        }
+        else
+        {
+            throw new IllegalStateException();
+        }
+
+        return new RowIDAndPointIDIterator()
+        {
+            int count = 0;
+
+            @Override
+            public void close() throws IOException
+            {
+                postingsReader.close();
+                bkdInput.close();
+                bkdPostingsInput.close();
+            }
+
+            @Override
+            protected RowIDAndPointID computeNext()
+            {
+                try
+                {
+                    final long rowID = postingsReader.nextPosting();
+
+                    if (rowID == PostingList.END_OF_STREAM) return endOfData();
+
+                    int orderIdx = origIndex[count++];
+
+                    // TODO: use the LeafOrderMap.getValue here
+                    //final int orderIdx = LeafOrderMap.getValue(randoInput, orderMapPointer, count++, leafOrderMapReader);
+                    final long pointID = start + orderIdx;
+
+                    obj.pointID = pointID;
+                    obj.rowID = rowID;
+
+                    return obj;
+                }
+                catch (IOException ioex)
+                {
+                    throw new RuntimeException(ioex);
+                }
+            }
+        };
+    }
+
+    public static class RowIDAndPointID implements Comparable<RowIDAndPointID>
+    {
+        public long rowID;
+        public long pointID;
+
+        @Override
+        public int compareTo(BKDReader.RowIDAndPointID other)
+        {
+            final int cmp = Long.compare(this.rowID, other.rowID);
+            if (cmp == 0)
+            {
+                return Long.compare(this.pointID, other.pointID);
+            }
+            return cmp;
+        }
+
+        @Override
+        public String toString()
+        {
+            return MoreObjects.toStringHelper(this)
+                              .add("rowID", rowID)
+                              .add("pointID", pointID)
+                              .toString();
+        }
     }
 
     public interface DocMapper
@@ -167,21 +323,33 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final LongArrayList tempPostings = new LongArrayList();
         final long[] postings = new long[maxPointsInLeafNode];
         final DocMapper docMapper;
-        public final byte[] scratch;
+        private final byte[] scratch;
+        private final byte[] scratchShort;
         long lastPointId = Long.MIN_VALUE;
+        int currentNodeID = -1;
 
         public IteratorState(DocMapper docMapper) throws IOException
         {
             this.docMapper = docMapper;
 
             scratch = new byte[packedBytesLength];
+            scratchShort = new byte[packedBytesLength - 1];
 
             final long firstLeafFilePointer = getMinLeafBlockFP();
             bkdInput = indexComponents.openInput(kdtreeFile);
             sharedInput = postingsFile == null ? null : new SharedIndexInput(indexComponents.openInput(postingsFile));
             bkdInput.seek(firstLeafFilePointer);
+        }
 
-            getLeafOffsets();
+        public byte[] getTermValue()
+        {
+            System.arraycopy(scratch, 1, scratchShort, 0, scratchShort.length);
+            return scratchShort;
+        }
+
+        public byte[] getRawTermValue()
+        {
+            return scratch;
         }
 
         public int packedBytesLength()
@@ -254,7 +422,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
         public ByteComparable asByteComparable()
         {
-            return v -> ByteSource.fixedLength(scratch);
+            //return v -> ByteSource.fixedLength(scratch);
+            return v -> ByteSource.fixedLength(getTermValue());
         }
 
         public long rowID()
@@ -291,11 +460,12 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
         private void newLeaf()
         {
-            final long filePointer = filePointers[leaf];
+            final long filePointer = filePointers.get(leaf);
             final int leafNode = leafFPToLeafNode.get(filePointer);
             try
             {
                 leafPointCount = readLeaf(filePointer, leafNode, bkdInput, packedValues, sharedInput, postings, tempPostings);
+                currentNodeID = leafNode;
             }
             catch (IOException e)
             {
@@ -327,7 +497,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
 
             @Override
-            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+            {
                 return Relation.CELL_CROSSES_QUERY;
             }
         };
@@ -440,9 +611,41 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
     }
 
-    @SuppressWarnings("resource")
-    public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
+    private class ExtendedBytesIntersectVisitor implements IntersectVisitor
     {
+        final IntersectVisitor visitor;
+        private byte[] scratch = new byte[bytesPerDim - 1];
+        private byte[] scratch2 = new byte[bytesPerDim - 1];
+
+        public ExtendedBytesIntersectVisitor(IntersectVisitor visitor)
+        {
+            this.visitor = visitor;
+        }
+
+        @Override
+        public boolean visit(byte[] packedValue)
+        {
+            System.arraycopy(packedValue, 1, scratch, 0, scratch.length);
+            return visitor.visit(scratch);
+        }
+
+        @Override
+        public Relation compare(byte[] minPackedValue, byte[] maxPackedValue)
+        {
+            System.arraycopy(minPackedValue, 1, scratch, 0, scratch.length);
+            System.arraycopy(maxPackedValue, 1, scratch2, 0, scratch.length);
+            return visitor.compare(scratch, scratch2);
+        }
+    }
+
+    public List<PostingList.PeekablePostingList> intersect(IntersectVisitor visitor,
+                                                           QueryEventListener.BKDIndexEventListener listener,
+                                                           QueryContext context,
+                                                           final String postingIndexName,
+                                                           SortedPostingInputs sortedPostingInputs)
+    {
+        visitor = new ExtendedBytesIntersectVisitor(visitor);
+
         Relation relation = visitor.compare(minPackedValue, maxPackedValue);
 
         if (relation == Relation.CELL_OUTSIDE_QUERY)
@@ -452,15 +655,33 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         listener.onSegmentHit();
-        final IndexInput bkdInput = indexComponents.openInput(indexFile);
-        final SharedIndexInput sharedInput = new SharedIndexInput(indexComponents.openInput(postingsFile));
-        final IndexInput orderMapInput = null;
 
+        final IndexInput bkdInput = indexComponents.openInput(indexFile);
+        final SharedIndexInput sharedInput;
+        final IndexInput orderMapInput;
+        if (postingIndexName.equals(DEFAULT_POSTING_INDEX))
+        {
+            sharedInput = new SharedIndexInput(indexComponents.openInput(postingsFile));
+            orderMapInput = null;
+        }
+        else
+        {
+            try
+            {
+                sharedInput = new SharedIndexInput(sortedPostingInputs.openPostingsInput());
+                orderMapInput = sortedPostingInputs.openOrderMapInput();
+            }
+            catch (IOException ioex)
+            {
+                throw new RuntimeException(ioex);
+            }
+        }
         final PackedIndexTree index = new PackedIndexTree();
 
         final Intersection completable =
-        relation == Relation.CELL_INSIDE_QUERY ? new Intersection(bkdInput, sharedInput, index, listener, context)
-                                               : new FilteringIntersection(bkdInput, sharedInput, orderMapInput, index, visitor, listener, context);
+        relation == Relation.CELL_INSIDE_QUERY ?
+        new Intersection(bkdInput, sharedInput, index, listener, context, postingIndexName) :
+        new FilteringIntersection(bkdInput, sharedInput, orderMapInput, index, visitor, listener, context, postingIndexName);
 
         try
         {
@@ -478,25 +699,32 @@ public class BKDReader extends TraversingBKDReader implements Closeable
      */
     class Intersection
     {
-        private final Stopwatch queryExecutionTimer = Stopwatch.createStarted();
         final QueryContext context;
 
         final IndexInput bkdInput;
         final SharedIndexInput sharedInput;
         final IndexTree index;
         final QueryEventListener.BKDIndexEventListener listener;
+        final String postingIndexName;
 
         Intersection(IndexInput bkdInput,
                      SharedIndexInput sharedInput,
                      IndexTree index,
                      QueryEventListener.BKDIndexEventListener listener,
-                     QueryContext context)
+                     QueryContext context,
+                     String postingIndexName)
         {
             this.bkdInput = bkdInput;
             this.sharedInput = sharedInput;
             this.index = index;
             this.listener = listener;
             this.context = context;
+            this.postingIndexName = postingIndexName;
+        }
+
+        protected void closeAll()
+        {
+            FileUtils.closeQuietly(sharedInput, bkdInput);
         }
 
         public List<PostingList.PeekablePostingList> execute()
@@ -504,9 +732,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             try
             {
                 List<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
-                executeInternal(postingLists);
+                executeInternal(postingLists, postingIndexName);
 
-                FileUtils.closeQuietly(bkdInput);
+                closeAll();
 
                 return postingLists;
             }
@@ -520,45 +748,68 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
-        protected void executeInternal(final List<PostingList.PeekablePostingList> postingLists) throws IOException
+        protected void executeInternal(final List<PostingList.PeekablePostingList> postingLists,
+                                       String postingIndexName) throws IOException
         {
-            collectPostingLists(postingLists);
+            collectPostingLists(postingLists, postingIndexName);
         }
 
         protected void closeOnException()
         {
-            FileUtils.closeQuietly(bkdInput);
+            closeAll();
         }
 
-        public void collectPostingLists(List<PostingList.PeekablePostingList> postingLists) throws IOException
+        public void collectPostingLists(List<PostingList.PeekablePostingList> postingLists,
+                                        String postingIndexName) throws IOException
         {
             context.checkpoint();
 
             final int nodeID = index.getNodeID();
 
-            // if there is pre-built posting for entire subtree
-            if (postingsIndex.exists(nodeID))
+            if (postingIndexName.equals(DEFAULT_POSTING_INDEX))
             {
-                final long postingsFilePointer = postingsIndex.getPostingsFilePointer(nodeID);
-                final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(), postingsFilePointer);
-                PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(),
-                                                                   summary,
-                                                                   listener.postingListEventListener(),
-                                                                   primaryKeyMap);
-                postingLists.add(postingsReader.peekable());
-                return;
+                if (postingsIndex.exists(nodeID))
+                {
+                    final long postingsFilePointer = postingsIndex.getPostingsFilePointer(nodeID);
+                    final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(),
+                                                                                                  postingsFilePointer);
+                    PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(),
+                                                                       summary,
+                                                                       listener.postingListEventListener(),
+                                                                       primaryKeyMap);
+                    postingLists.add(postingsReader.peekable());
+                    return;
+                }
             }
+            else
+            {
+                final SortedPostingsIndex postingsIndex = postingIndexMap.get(postingIndexName);
 
+                // if there is pre-built posting for entire subtree
+                if (postingsIndex.exists(nodeID))
+                {
+                    final SortedPostingsWriter.SortedNode node = postingsIndex.getNode(nodeID);
+
+                    final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(),
+                                                                                                  node.postingsFilePointer);
+                    PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(),
+                                                                       summary,
+                                                                       listener.postingListEventListener(),
+                                                                       primaryKeyMap);
+                    postingLists.add(postingsReader.peekable());
+                    return;
+                }
+            }
             Preconditions.checkState(!index.isLeafNode(), "Leaf node %s does not have kd-tree postings.", index.getNodeID());
 
             // Recurse on left sub-tree:
             index.pushLeft();
-            collectPostingLists(postingLists);
+            collectPostingLists(postingLists, postingIndexName);
             index.pop();
 
             // Recurse on right sub-tree:
             index.pushRight();
-            collectPostingLists(postingLists);
+            collectPostingLists(postingLists, postingIndexName);
             index.pop();
         }
     }
@@ -738,10 +989,13 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         FilteringIntersection(IndexInput bkdInput,
                               SharedIndexInput sharedInput,
                               IndexInput orderMapInput,
-                              IndexTree index, IntersectVisitor visitor,
-                              QueryEventListener.BKDIndexEventListener listener, QueryContext context)
+                              IndexTree index,
+                              IntersectVisitor visitor,
+                              QueryEventListener.BKDIndexEventListener listener,
+                              QueryContext context,
+                              String postingIndexName)
         {
-            super(bkdInput, sharedInput, index, listener, context);
+            super(bkdInput, sharedInput, index, listener, context, postingIndexName);
             this.orderMapInput = orderMapInput;
             this.visitor = visitor;
             this.commonPrefixLengths = new int[numDims];
@@ -750,14 +1004,22 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         @Override
-        public void executeInternal(final List<PostingList.PeekablePostingList> postingLists) throws IOException
+        protected void closeAll()
         {
-            collectPostingLists(postingLists, minPackedValue, maxPackedValue);
+            super.closeAll();
+            IOUtils.closeQuietly(orderMapInput);
+        }
+
+        @Override
+        public void executeInternal(final List<PostingList.PeekablePostingList> postingLists, String postingIndexName) throws IOException
+        {
+            collectPostingLists(postingLists, minPackedValue, maxPackedValue, postingIndexName);
         }
 
         public void collectPostingLists(List<PostingList.PeekablePostingList> postingLists,
                                         byte[] cellMinPacked,
-                                        byte[] cellMaxPacked) throws IOException
+                                        byte[] cellMaxPacked,
+                                        String postingIndexName) throws IOException
         {
             context.checkpoint();
 
@@ -772,7 +1034,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             if (r == Relation.CELL_INSIDE_QUERY)
             {
                 // This cell is fully inside of the query shape: recursively add all points in this cell without filtering
-                super.collectPostingLists(postingLists);
+                super.collectPostingLists(postingLists, postingIndexName);
                 return;
             }
 
@@ -783,7 +1045,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 return;
             }
 
-            visitNode(postingLists, cellMinPacked, cellMaxPacked);
+            visitNode(postingLists, cellMinPacked, cellMaxPacked, postingIndexName);
         }
 
         @SuppressWarnings("resource")
@@ -794,7 +1056,6 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             final int count = bkdInput.readVInt();
 
             // loading doc ids occurred here prior
-
             final FixedBitSet[] holder = new FixedBitSet[1];
 
             final int orderMapLength = bkdInput.readVInt();
@@ -819,18 +1080,58 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 leafInput = CryptoUtils.uncompress(bkdInput, compressor, compBytes, uncompBytes);
             }
 
-            visitDocValues(commonPrefixLengths, scratchPackedValue1, leafInput, count, visitor, holder, origIndex);
-
-            final int nodeID = index.getNodeID();
-
-            if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
+            if (postingIndexName.equals(DEFAULT_POSTING_INDEX))
             {
-                final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
-                postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
+                final int nodeID = index.getNodeID();
+
+                visitDocValues(commonPrefixLengths, scratchPackedValue1, leafInput, count, visitor, holder, origIndex);
+
+                if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
+                {
+                    final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
+                    postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
+                }
+            }
+            else
+            {
+                final SortedPostingsIndex postingsIndex = postingIndexMap.get(postingIndexName);
+
+                final int nodeID = index.getNodeID();
+
+                // if there is pre-built posting for entire subtree
+                if (postingsIndex.exists(nodeID))
+                {
+                    final SortedPostingsWriter.SortedNode node = postingsIndex.getNode(nodeID);
+                    final SeekingRandomAccessInput sortedOrderMapRandoInput = new SeekingRandomAccessInput(orderMapInput);
+
+                    // reuse origIndex2?
+                    final short[] origIndex2 = new short[maxPointsInLeafNode];
+                    for (int x = 0; x < count; x++)
+                    {
+                        origIndex2[x] = (short) LeafOrderMap.getValue(sortedOrderMapRandoInput, node.orderMapFilePointer, x, leafOrderMapReader);
+                    }
+
+                    visitDocValues(commonPrefixLengths, scratchPackedValue1, leafInput, count, visitor, holder, origIndex2);
+
+                    final FixedBitSet filteredValues = holder[0];
+
+                    System.out.println("filterLeaf filteredValues.cardinality=" + filteredValues.cardinality() + " origIndex3=" + Arrays.toString(Arrays.copyOf(origIndex2, count)));
+
+                    if (filteredValues.cardinality() > 0)
+                    {
+                        final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(sharedInput.sharedCopy(), node.postingsFilePointer);
+                        final PostingsReader postingsReader = new PostingsReader(sharedInput.sharedCopy(), summary, listener.postingListEventListener(), primaryKeyMap);
+                        final PostingList.PeekablePostingList postingList = new FilteringPostingList(filteredValues, postingsReader).peekable();
+                        postingLists.add(postingList);
+                    }
+                }
             }
         }
 
-        void visitNode(List<PostingList.PeekablePostingList> postingLists, byte[] cellMinPacked, byte[] cellMaxPacked) throws IOException
+        void visitNode(List<PostingList.PeekablePostingList> postingLists,
+                       byte[] cellMinPacked,
+                       byte[] cellMaxPacked,
+                       String postingIndexName) throws IOException
         {
             int splitDim = index.getSplitDim();
             assert splitDim >= 0 : "splitDim=" + splitDim;
@@ -849,7 +1150,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             System.arraycopy(splitDimValue.bytes, splitDimValue.offset, splitPackedValue, splitDim * bytesPerDim, bytesPerDim);
 
             index.pushLeft();
-            collectPostingLists(postingLists, cellMinPacked, splitPackedValue);
+            collectPostingLists(postingLists, cellMinPacked, splitPackedValue, postingIndexName);
             index.pop();
 
             // Restore the split dim value since it may have been overwritten while recursing:
@@ -858,7 +1159,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             System.arraycopy(cellMinPacked, 0, splitPackedValue, 0, packedBytesLength);
             System.arraycopy(splitDimValue.bytes, splitDimValue.offset, splitPackedValue, splitDim * bytesPerDim, bytesPerDim);
             index.pushRight();
-            collectPostingLists(postingLists, splitPackedValue, cellMaxPacked);
+            collectPostingLists(postingLists, splitPackedValue, cellMaxPacked, postingIndexName);
             index.pop();
         }
 
