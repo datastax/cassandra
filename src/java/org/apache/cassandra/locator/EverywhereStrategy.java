@@ -101,4 +101,14 @@ public class EverywhereStrategy extends AbstractReplicationStrategy
     {
         return Collections.emptyList();
     }
+
+    /**
+     * @return <code>false</code> because the data is not partitioned across the ring.
+     * See APOLLO-589 for details about why this was introduced.
+     */
+    @Override
+    public boolean isPartitioned()
+    {
+        return false;
+    }
 }

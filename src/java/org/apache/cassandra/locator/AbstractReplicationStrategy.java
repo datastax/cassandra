@@ -370,6 +370,14 @@ public abstract class AbstractReplicationStrategy
     }
 
     /**
+     * Whether this strategy partitions data across the ring
+     */
+    public boolean isPartitioned()
+    {
+        return true;
+    }
+
+    /**
      * Before constructing the ARS we first give it a chance to prepare the options map in any way it
      * would like to. For example datacenter auto-expansion or other templating to make the user interface
      * more usable. Note that this may mutate the passed strategyOptions Map.
