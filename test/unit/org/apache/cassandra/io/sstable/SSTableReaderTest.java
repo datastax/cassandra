@@ -521,6 +521,7 @@ public class SSTableReaderTest
 
     public void doTestSpannedIndexPositions(int maxSegmentSize) throws IOException
     {
+        // expect to create many regions - that is, the size of index must exceed the page size multiple times
         int originalMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
         MmappedRegions.MAX_SEGMENT_SIZE = maxSegmentSize;
 
@@ -1177,6 +1178,7 @@ public class SSTableReaderTest
     @Test
     public void testLoadingSummaryUsesCorrectPartitioner() throws Exception
     {
+        Assume.assumeTrue(BigFormat.isSelected());
         ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_INDEXED);
 
         new RowUpdateBuilder(store.metadata(), System.currentTimeMillis(), "k1")
