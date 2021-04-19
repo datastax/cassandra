@@ -30,7 +30,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.junit.AfterClass;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -379,6 +381,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadTwoTablesTime() throws Exception
     {
+        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(60);
         String columnFamily1 = COLUMN_FAMILY8;
         String columnFamily2 = COLUMN_FAMILY_K2_1;
@@ -401,6 +404,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadCacheLoadTimeExceedingLimit() throws Exception
     {
+        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(2);
         int delayMillis = 1000;
         int numberOfRows = 100;

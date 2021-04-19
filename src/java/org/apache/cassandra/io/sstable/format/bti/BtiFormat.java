@@ -295,6 +295,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
         private final boolean isLatestVersion;
 
+        private final boolean hasMaxColumnValueLengths;
+
         private final int correspondingMessagingVersion;
 
         BtiVersion(BtiFormat format, String version)
@@ -302,6 +304,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             super(format, version);
 
             isLatestVersion = version.compareTo(current_version) == 0;
+            hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = MessagingService.VERSION_40;
         }
 
@@ -417,6 +420,23 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             return true;
         }
 
+        @Override
+        public boolean hasZeroCopyMetadata()
+        {
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+        }
+
+        @Override
+        public boolean hasIncrementalNodeSyncMetadata()
+        {
+            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+        }
+
+        @Override
+        public boolean hasMaxColumnValueLengths()
+        {
+            return hasMaxColumnValueLengths;
+        }
     }
 
     private static class BtiTableSpecificMetricsProviders implements MetricsProviders

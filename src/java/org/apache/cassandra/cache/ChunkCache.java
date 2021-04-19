@@ -225,15 +225,28 @@ public class ChunkCache
         @Override
         public Buffer rebuffer(long position)
         {
+            int spin = 0;
             try
             {
                 long pageAlignedPos = position & alignmentMask;
                 Buffer buf;
-                do
-                    buf = cache.get(new Key(source, pageAlignedPos)).reference();
-                while (buf == null);
+                Key key = new Key(source, pageAlignedPos);
+                while (true)
+                {
+                    buf = cache.get(key).reference();
+                    if (buf != null)
+                        return buf;
 
-                return buf;
+                    if (++spin == 1000)
+                    {
+                        String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
+                                                   "This is likely due to the chunk cache being too small for the " +
+                                                   "number of concurrently running requests.", key);
+                        throw new RuntimeException(msg);
+                        // Note: this might also be caused by reference counting errors, especially double release of
+                        // chunks.
+                    }
+                }
             }
             catch (Throwable t)
             {

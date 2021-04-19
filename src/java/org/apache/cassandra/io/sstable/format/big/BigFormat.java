@@ -518,6 +518,25 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         {
             return isCompatible() && version.charAt(0) == current_version.charAt(0);
         }
+
+        @Override
+        public boolean hasZeroCopyMetadata()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasIncrementalNodeSyncMetadata()
+        {
+            return false;
+        }
+
+        // TODO TBD
+        @Override
+        public boolean hasMaxColumnValueLengths()
+        {
+            return false;
+        }
     }
 
     private static class BigTableSpecificMetricsProviders implements MetricsProviders
