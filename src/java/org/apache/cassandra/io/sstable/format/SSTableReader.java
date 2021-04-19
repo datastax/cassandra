@@ -116,6 +116,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseable;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
@@ -290,7 +291,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * @param sstables SSTables to calculate key count
      * @return estimated key count
      */
-    public static long getApproximateKeyCount(Iterable<SSTableReader> sstables)
+    public static long getApproximateKeyCount(Iterable<? extends SSTableReader> sstables)
     {
         long count = -1;
 
@@ -1579,7 +1580,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * and stash a reference to it to be released when they are. Once all such references are
      * released, this shared tidy will be performed.
      */
-    static final class GlobalTidy implements Tidy
+    static final class GlobalTidy implements RefCounted.Tidy
     {
         static final WeakReference<ScheduledFuture<?>> NULL = new WeakReference<>(null);
         // keyed by descriptor, mapping to the shared GlobalTidy for that descriptor

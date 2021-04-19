@@ -175,10 +175,10 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
      */
     protected abstract boolean hasMoreSlices();
 
-    private static Row readStaticRow(SSTableReader sstable,
-                                     FileDataInput file,
-                                     DeserializationHelper helper,
-                                     Columns statics) throws IOException
+    public static Row readStaticRow(SSTableReader sstable,
+                                    FileDataInput file,
+                                    DeserializationHelper helper,
+                                    Columns statics) throws IOException
     {
         if (!sstable.header.hasStatic())
             return Rows.EMPTY_STATIC_ROW;

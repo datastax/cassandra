@@ -144,7 +144,7 @@ public class CassandraStreamManager implements TableStreamManager
                 List<Range<Token>> ranges = sstable.isRepaired() ? normalizedFullRanges : normalizedAllRanges;
                 List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
 
-                Ref<SSTableReader> ref = refs.get(sstable);
+                Ref<? extends SSTableReader> ref = refs.get(sstable);
                 if (sections.isEmpty())
                 {
                     ref.release();
