@@ -111,7 +111,7 @@ def _patch_init(klass):
     klass.__init__ = new_method
 
 
-def patch_import_conversion(klass):
+def patch_geotypes_import_conversion(klass):
     """
     monkey patches cqlshlib.copyutil.ImportConversion to support geotypes
     """

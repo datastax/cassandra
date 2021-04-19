@@ -170,10 +170,10 @@ from cqlshlib.formatting import (DEFAULT_DATE_FORMAT, DEFAULT_NANOTIME_FORMAT,
 from cqlshlib.tracing import print_trace, print_trace_session
 from cqlshlib.util import get_file_encoding_bomsize, trim_if_present
 
-from cqlshlib.geotypes import patch_import_conversion  # nopep8
+from cqlshlib.geotypes import patch_geotypes_import_conversion  # nopep8
 from cqlshlib.daterangetype import patch_daterange_import_conversion  # nopep
 
-patch_import_conversion(ImportConversion)
+patch_geotypes_import_conversion(ImportConversion)
 patch_daterange_import_conversion(ImportConversion)
 
 DEFAULT_HOST = '127.0.0.1'
