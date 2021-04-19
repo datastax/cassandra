@@ -34,4 +34,10 @@ public class CorruptSSTableException extends RuntimeException
     {
         this(cause, new File(path));
     }
+
+    protected CorruptSSTableException(String msg, Throwable cause, File path)
+    {
+        super(msg, cause);
+        this.path = path;
+    }
 }

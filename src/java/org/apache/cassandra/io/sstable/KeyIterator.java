@@ -25,6 +25,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
+// TODO STAR-247: Implement a unit test
 public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
 {
     private final IPartitioner partitioner;
