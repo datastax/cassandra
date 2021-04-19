@@ -42,7 +42,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
 public class SSTableIndex
 {
     private final ColumnIndex columnIndex;
-    private final Ref<SSTableReader> sstableRef;
+    private final Ref<? extends SSTableReader> sstableRef;
     private final SSTableReader sstable;
     private final OnDiskIndex index;
     private final AtomicInteger references = new AtomicInteger(1);

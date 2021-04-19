@@ -207,7 +207,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
         return collector.toByteComparable();
     }
 
-    protected long advanceNode()
+    private long advanceNode()
     {
         long child;
         int transitionByte;
