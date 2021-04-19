@@ -175,15 +175,9 @@ public class View
         }
     }
 
-    public Iterable<SSTableReader> getUncompacting(Iterable<SSTableReader> candidates)
+    public Iterable<? extends SSTableReader> getUncompacting(Iterable<? extends SSTableReader> candidates)
     {
-        return filter(candidates, new Predicate<SSTableReader>()
-        {
-            public boolean apply(SSTableReader sstable)
-            {
-                return !compacting.contains(sstable);
-            }
-        });
+        return filter(candidates, (Predicate<SSTableReader>) sstable -> !compacting.contains(sstable));
     }
 
     public boolean isEmpty()

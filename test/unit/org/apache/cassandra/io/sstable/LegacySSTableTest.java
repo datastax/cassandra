@@ -298,7 +298,8 @@ public class LegacySSTableTest
             CacheService.instance.invalidateKeyCache();
             long startCount = CacheService.instance.keyCache.size();
             verifyReads(legacyVersion);
-            verifyCache(legacyVersion, startCount);
+            if (Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion)).getLiveSSTables().stream().anyMatch(sstr -> BigFormat.is(sstr.descriptor.getFormat())))
+                verifyCache(legacyVersion, startCount);
             compactLegacyTables(legacyVersion);
         }
     }
