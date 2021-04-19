@@ -20,11 +20,9 @@ package org.apache.cassandra.locator;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.InetAddress;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 
 import com.google.common.base.Preconditions;
 
@@ -287,7 +285,7 @@ public abstract class AbstractReplicationStrategy
     }
 
     /**
-     * Return the number of token-owning nodes.
+     * Returns the number of token-owning nodes.
      */
     protected int getSizeOfRingMemebers()
     {

@@ -103,8 +103,12 @@ public class EverywhereStrategy extends AbstractReplicationStrategy
     }
 
     /**
+     * CASSANDRA-12510 added a check that forbids decommission when the number of
+     * nodes will drop below the RF for a given keyspace. This check is breaking on
+     * EverywhereStrategy because all nodes replicate the keyspace, so this check does
+     * not make sense for partitioned keyspaces such as LocalStrategy and EverywhereStrategy.
+     *
      * @return <code>false</code> because the data is not partitioned across the ring.
-     * See APOLLO-589 for details about why this was introduced.
      */
     @Override
     public boolean isPartitioned()
