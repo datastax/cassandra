@@ -139,6 +139,29 @@ public class EverywhereStrategyTest
         assertEquals(tokenRange.left, tokenRange.right);
     }
 
+    @Test
+    public void allRingMembersContributeToReplicationFactor() throws Throwable
+    {
+        TokenMetadata metadata = new TokenMetadata();
+        populateTokenMetadata(10, 5, metadata);
+
+        EverywhereStrategy strategy = createStrategy(metadata);
+
+        assertEquals(10, strategy.getReplicationFactor().fullReplicas);
+        assertEquals(10, strategy.getReplicationFactor().allReplicas);
+    }
+
+    @Test
+    public void noRecognizedOptions() throws Throwable
+    {
+        TokenMetadata metadata = new TokenMetadata();
+        populateTokenMetadata(10, 5, metadata);
+
+        EverywhereStrategy strategy = createStrategy(metadata);
+
+        assertTrue("EverywhereStrategy should have no options", strategy.recognizedOptions().isEmpty());
+    }
+
     private EverywhereStrategy createStrategy(TokenMetadata tokenMetadata)
     {
         IEndpointSnitch snitch = new PropertyFileSnitch();
