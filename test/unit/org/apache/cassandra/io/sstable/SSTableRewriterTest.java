@@ -44,6 +44,8 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
@@ -911,6 +913,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         File dir = cfs.getDirectories().getDirectoryForNewSSTables();
+        Row staticRow = Rows.EMPTY_STATIC_ROW;
 
         // Can't update a writer that is eagerly cleared on switch
         boolean eagerWriterMetaRelease = true;
@@ -926,6 +929,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                 UnfilteredRowIterator uri = mock(UnfilteredRowIterator.class);
                 when(uri.partitionLevelDeletion()).thenReturn(DeletionTime.build(0, 0));
                 when(uri.partitionKey()).thenReturn(bopKeyFromInt(0));
+                when(uri.staticRow()).thenReturn(staticRow);
                 // should not be able to append after buffer release on switch
                 firstWriter.append(uri);
                 fail("Expected AssertionError was not thrown.");

@@ -177,6 +177,10 @@ public final class JVMStabilityInspector
             logger.warn("Unexpected error while handling unexpected error", e);
         }
 
+        if (t.getSuppressed() != null)
+            for (Throwable suppressed : t.getSuppressed())
+                inspectThrowable(suppressed, fn);
+
         if (t.getCause() != null)
             inspectThrowable(t.getCause(), fn, isUncaughtException);
     }
