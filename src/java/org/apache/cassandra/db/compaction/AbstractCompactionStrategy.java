@@ -232,7 +232,7 @@ public abstract class AbstractCompactionStrategy
      * @param originalCandidates The collection to check for excluded SSTables
      * @return list of the SSTables with excluded ones filtered out
      */
-    public static List<SSTableReader> filterSuspectSSTables(Iterable<SSTableReader> originalCandidates)
+    public static List<SSTableReader> filterSuspectSSTables(Iterable<? extends SSTableReader> originalCandidates)
     {
         List<SSTableReader> filtered = new ArrayList<>();
         for (SSTableReader sstable : originalCandidates)

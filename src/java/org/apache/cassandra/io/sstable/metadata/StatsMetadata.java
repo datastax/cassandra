@@ -39,9 +39,12 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.io.ISerializer;
+import org.apache.cassandra.io.sstable.UnsupportedSSTableException;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.EstimatedHistogram;
@@ -354,6 +357,24 @@ public class StatsMetadata extends MetadataComponent
                     size += TimeUUID.sizeInBytes();
             }
 
+            // we do not have zero copy metadata
+            if (version.hasZeroCopyMetadata())
+            {
+                size += 1;
+            }
+
+            // we do not have node sync metadata
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                size += Long.BYTES;
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                size += 4; // num columns
+            }
+
             if (version.hasIsTransient())
             {
                 size += TypeSizes.sizeof(component.isTransient);
@@ -470,6 +491,24 @@ public class StatsMetadata extends MetadataComponent
                 {
                     out.writeByte(0);
                 }
+            }
+
+            // we do not have zero copy metadata
+            if (version.hasZeroCopyMetadata())
+            {
+                out.writeByte(0);
+            }
+
+            // we do not have node sync metadata
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                out.writeLong(Long.MAX_VALUE);
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                out.writeInt(0);
             }
 
             if (version.hasIsTransient())
@@ -618,6 +657,32 @@ public class StatsMetadata extends MetadataComponent
             if (version.hasPendingRepair() && in.readByte() != 0)
             {
                 pendingRepair = TimeUUID.deserialize(in);
+            }
+
+            if (version.hasZeroCopyMetadata() && in.readByte() != 0)
+            {
+                throw new UnsupportedSSTableException(String.format("Found DSE zero copy metadata in %s. " +
+                                                                    "Files copied over using partial zero-copy " +
+                                                                    "streaming in DSE are not currently supported.", in),
+                                                      null,
+                                                      in instanceof FileDataInput ? new File(((FileDataInput) in).getPath()) : null);
+            }
+
+            if (version.hasIncrementalNodeSyncMetadata())
+            {
+                logger.warn("Ignoring incremental node sync metadata from {} as it is not supported", in);
+                in.readLong();
+            }
+
+            // TODO TBD
+            if (version.hasMaxColumnValueLengths())
+            {
+                int colCount = in.readInt();
+                for (int i = 0; i < colCount; i++)
+                {
+                    ByteBufferUtil.readWithVIntLength(in);
+                    in.readInt();
+                }
             }
 
             boolean isTransient = version.hasIsTransient() && in.readBoolean();
