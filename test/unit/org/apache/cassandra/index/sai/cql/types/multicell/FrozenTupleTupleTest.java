@@ -35,7 +35,9 @@ public class FrozenTupleTupleTest extends IndexingTypeSupport
     {
         return generateParameters(new FrozenTupleDataSet(new FrozenTupleDataSet(new DataSet.AsciiDataSet(), new DataSet.UuidDataSet()), new DataSet.AsciiDataSet()));
     }
-    public FrozenTupleTupleTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+
+    public FrozenTupleTupleTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
 
