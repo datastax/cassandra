@@ -43,7 +43,7 @@ from cassandra.query import SimpleStatement, ordered_dict_factory, TraceUnavaila
 from cassandra.util import datetime_from_timestamp
 
 from cqlshlib import cql3handling, pylexotron, sslhandling, cqlshhandling, authproviderhandling
-from cqlshlib.copyutil import ExportTask, ImportTask
+from cqlshlib.copyutil import ExportTask, ImportTask, ImportConversion
 from cqlshlib.displaying import (ANSI_RESET, BLUE, COLUMN_NAME_COLORS, CYAN,
                                  RED, WHITE, FormattedValue, colorme)
 from cqlshlib.formatting import (DEFAULT_DATE_FORMAT, DEFAULT_NANOTIME_FORMAT,
@@ -52,6 +52,11 @@ from cqlshlib.formatting import (DEFAULT_DATE_FORMAT, DEFAULT_NANOTIME_FORMAT,
 from cqlshlib.tracing import print_trace, print_trace_session
 from cqlshlib.util import get_file_encoding_bomsize, is_file_secure
 from cqlshlib.serverversion import version as build_version
+from cqlshlib.geotypes import patch_geotypes_import_conversion  # nopep8
+from cqlshlib.daterangetype import patch_daterange_import_conversion  # nopep
+
+patch_geotypes_import_conversion(ImportConversion)
+patch_daterange_import_conversion(ImportConversion)
 
 
 UTF8 = 'utf-8'
