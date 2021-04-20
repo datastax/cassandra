@@ -39,7 +39,8 @@ public class FrozenUDTCollectionTest extends IndexingTypeSupport
         new CollectionDataSet.MapDataSet<>(new DataSet.BigintDataSet())));
     }
 
-    public FrozenUDTCollectionTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+    public FrozenUDTCollectionTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
 

@@ -33,7 +33,8 @@ public class BooleanTest extends IndexingTypeSupport
         return generateParameters(new DataSet.BooleanDataSet());
     }
 
-    public BooleanTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+    public BooleanTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
 
