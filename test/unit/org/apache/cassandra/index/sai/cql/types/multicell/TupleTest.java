@@ -36,7 +36,8 @@ public class TupleTest extends IndexingTypeSupport
         return generateParameters(new TupleDataSet(new DataSet.BigintDataSet(), new DataSet.AsciiDataSet()));
     }
 
-    public TupleTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+    public TupleTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
 

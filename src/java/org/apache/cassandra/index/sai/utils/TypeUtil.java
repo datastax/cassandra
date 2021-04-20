@@ -37,6 +37,7 @@ import java.util.stream.StreamSupport;
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -46,7 +47,7 @@ import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ReversedType;
-import org.apache.cassandra.db.marshal.StringType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -442,18 +443,27 @@ public class TypeUtil
      */
     public static boolean isLiteral(AbstractType<?> type)
     {
-        return isString(type) || isCompositeOrFrozen(type) || baseType(type) instanceof BooleanType;
+        return isUTF8OrAscii(type) || isCompositeOrFrozen(type) || baseType(type) instanceof BooleanType;
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is based on a string, e.g. UTF8 or Ascii
+     * Returns <code>true</code> if given {@link AbstractType} is UTF8 or Ascii
      */
-    public static boolean isString(AbstractType<?> type)
+    public static boolean isUTF8OrAscii(AbstractType<?> type)
     {
         type = baseType(type);
-        return type instanceof StringType;
+        return type instanceof UTF8Type || type instanceof AsciiType;
     }
 
+//    /**
+//     * Returns <code>true</code> if given {@link AbstractType} is based on a string, e.g. UTF8 or Ascii
+//     */
+//    public static boolean isString(AbstractType<?> type)
+//    {
+//        type = baseType(type);
+//        return type instanceof StringType;
+//    }
+//
     /**
      * Returns <code>true</code> if given {@link AbstractType} is a Composite(map entry) or frozen.
      */
