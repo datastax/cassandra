@@ -57,8 +57,8 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableIndexWriter.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt() * 1024;
-    public static final int MAX_FROZEN_COLLECTION_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt() * 1024;
+    public static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt(1) * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt(5) * 1024;
     public static final String TERM_OVERSIZE_MESSAGE =
             "Can't add term of column {} to index for key: {}, term size {} " +
                     "max allowed size {}, use analyzed = true (if not yet set) for that column.";
@@ -88,7 +88,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         this.analyzer = columnContext.getAnalyzer();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
-        this.maxTermSize = columnContext.isFrozenCollection() ? MAX_FROZEN_COLLECTION_TERM_SIZE : MAX_STRING_TERM_SIZE;
+        this.maxTermSize = columnContext.isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
 
     }
 
