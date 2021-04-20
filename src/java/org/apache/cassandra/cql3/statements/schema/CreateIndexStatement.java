@@ -52,6 +52,18 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private final IndexAttributes attrs;
     private final boolean ifNotExists;
 
+    private static final String DSE_INDEX_WARNING = "Index %s was not created. DSE custom index (%s) is not " +
+                                                    "supported. Consult the docs on alternatives (SAI indexes, " +
+                                                    "Secondary Indexes).";
+
+    private static final Set<String> DSE_INDEXES = ImmutableSet.of(
+        "com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex",
+        "com.datastax.bdp.cassandra.index.solr.ThriftSolrSecondaryIndex",
+        "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex",
+        "com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex",
+        "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex"
+    );
+
     public CreateIndexStatement(String keyspaceName,
                                 String tableName,
                                 String indexName,
@@ -69,6 +81,13 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
     public Keyspaces apply(Keyspaces schema)
     {
+        if (isDseIndexCreateStatement())
+        {
+            // DSE indexes are not supported. The index is not created, the attempt is ignored (doesn't cause error),
+            // a meaningfull warning is returned instead.
+            return schema;
+        }
+
         attrs.validate();
 
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()) && !DatabaseDescriptor.getEnableSASIIndexes())
@@ -147,7 +166,15 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
             return ImmutableSet.of(SASIIndex.USAGE_WARNING);
 
+        if (isDseIndexCreateStatement())
+            return ImmutableSet.of(String.format(DSE_INDEX_WARNING, indexName, attrs.customClass));
+
         return ImmutableSet.of();
+    }
+
+    private boolean isDseIndexCreateStatement()
+    {
+        return DSE_INDEXES.contains(attrs.customClass);
     }
 
     private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
