@@ -32,14 +32,13 @@ import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
 import static java.util.stream.Stream.of;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MMAPPED_MAX_SEGMENT_SIZE_IN_MB;
 import static org.apache.cassandra.utils.Throwables.perform;
 
 public class MmappedRegions extends SharedCloseableImpl
 {
-    /**
-     * In a perfect world, MAX_SEGMENT_SIZE would be final, but we need to test with a smaller size
-     */
-    public static int MAX_SEGMENT_SIZE = Integer.MAX_VALUE;
+    /** In a perfect world, MAX_SEGMENT_SIZE would be final, but we need to test with a smaller size */
+    public static int MAX_SEGMENT_SIZE = MMAPPED_MAX_SEGMENT_SIZE_IN_MB.getInt(Integer.MAX_VALUE);
 
     /**
      * When we need to grow the arrays, we add this number of region slots
