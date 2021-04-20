@@ -58,11 +58,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     static final int ALLOCATED_SIZE_THRESHOLD;
     static
     {
-        // Default threshold + 10% == 2 GB. This should give the owner enough time to react to the
-        // {@link #reachedAllocatedSizeThreshold()} signal and switch this trie out before it fills up.
-        int limitInMB = CassandraRelevantProperties.MEMTABLE_OVERHEAD_SIZE.getInt(2048 * 10 / 11);
+        // Default threshold + 10% == 1 GB. Adjusted slightly up to avoid a tiny final allocation for the 2G max.
+        int limitInMB = CassandraRelevantProperties.MEMTABLE_TRIE_SIZE_LIMIT.getInt(1024 * 10 / 11 + 1);
         if (limitInMB < 1 || limitInMB > 2047)
-            throw new AssertionError(CassandraRelevantProperties.MEMTABLE_OVERHEAD_SIZE.getKey() +
+            throw new AssertionError(CassandraRelevantProperties.MEMTABLE_TRIE_SIZE_LIMIT.getKey() +
                                      " must be within 1 and 2047");
         ALLOCATED_SIZE_THRESHOLD = 1024 * 1024 * limitInMB;
     }
