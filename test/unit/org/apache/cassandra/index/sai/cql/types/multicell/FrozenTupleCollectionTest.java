@@ -41,7 +41,8 @@ public class FrozenTupleCollectionTest extends IndexingTypeSupport
         ));
     }
 
-    public FrozenTupleCollectionTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+    public FrozenTupleCollectionTest(DataSet<?> dataset, boolean widePartitions, IndexingTypeSupport.Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
 
