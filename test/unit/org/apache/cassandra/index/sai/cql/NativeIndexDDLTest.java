@@ -76,6 +76,8 @@ import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throwables;
@@ -235,18 +237,18 @@ public class StorageAttachedIndexDDLTest extends SAITester
     public void shouldFailCreateWithUserType()
     {
         String typeName = createType("CREATE TYPE %s (a text, b int, c double)");
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ')');
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ")");
 
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(val) " +
-                                            "USING 'sai'")).isInstanceOf(InvalidQueryException.class);
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
+                                            "USING 'StorageAttachedIndex'")).isInstanceOf(InvalidQueryException.class);
     }
 
     @Test
-    public void shouldNotFailCreateWithTupleType()
+    public void shouldNotFailCreateWithTupleType() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val tuple<text, int, double>)");
 
-        executeNet("CREATE INDEX ON %s(val) USING 'sai'");
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         TableMetadata metadata = currentTableMetadata();
         AbstractType<?> tuple = metadata.getColumn(ColumnIdentifier.getInterned("val", false)).type;

@@ -72,7 +72,7 @@ public abstract class IndexingTypeSupport extends SAITester
     public void createTable()
     {
         dataset.init();
-        
+
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, value %s, PRIMARY KEY(pk, ck))", dataset));
 
         disableCompaction();
