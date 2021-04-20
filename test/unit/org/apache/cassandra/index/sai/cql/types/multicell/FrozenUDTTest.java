@@ -35,10 +35,12 @@ public class FrozenUDTTest extends IndexingTypeSupport
     {
         return generateParameters(new FrozenUDTDataSet(new DataSet.BigintDataSet(), new DataSet.AsciiDataSet()));
     }
-    public FrozenUDTTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+
+    public FrozenUDTTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    {
         super(dataset, widePartitions, scenario);
     }
-    
+
     @Test
     public void test() throws Throwable
     {
