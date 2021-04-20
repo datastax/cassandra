@@ -99,8 +99,9 @@ public abstract class QuerySet extends CQLTester
 
     public static class BooleanQuerySet extends QuerySet
     {
-        BooleanQuerySet(DataSet<?> dataset) {
-            super(dataset);
+        BooleanQuerySet(DataSet<?> dataSet)
+        {
+            super(dataSet);
         }
 
         @Override
