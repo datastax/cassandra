@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
 
-import com.google.common.collect.ImmutableSet;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -31,6 +30,7 @@ import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.statements.schema.CreateIndexStatement;
 import org.apache.cassandra.schema.KeyspaceParams;
 
 import static org.junit.Assert.assertTrue;
@@ -42,13 +42,7 @@ public class CreateIndexStatementTest extends CQLTester
     @Parameterized.Parameters(name = "index = {0}")
     public static Set<String> dseIndexes()
     {
-        return ImmutableSet.of(
-            "com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex",
-            "com.datastax.bdp.cassandra.index.solr.ThriftSolrSecondaryIndex",
-            "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex",
-            "com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex",
-            "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex"
-        );
+        return CreateIndexStatement.DSE_INDEXES;
     }
 
     @Parameterized.Parameter()

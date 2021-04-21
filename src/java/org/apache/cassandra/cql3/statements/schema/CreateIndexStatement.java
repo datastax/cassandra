@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -56,7 +57,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                                                     "supported. Consult the docs on alternatives (SAI indexes, " +
                                                     "Secondary Indexes).";
 
-    private static final Set<String> DSE_INDEXES = ImmutableSet.of(
+    @VisibleForTesting
+    public static final Set<String> DSE_INDEXES = ImmutableSet.of(
         "com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex",
         "com.datastax.bdp.cassandra.index.solr.ThriftSolrSecondaryIndex",
         "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex",
