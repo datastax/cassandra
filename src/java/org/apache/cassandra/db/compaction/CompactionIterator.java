@@ -105,11 +105,11 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     private volatile String targetDirectory;
 
     /*
-     * counters for merged rows.
+     * counters for merged rows frequency(AKA histogram).
      * array index represents (number of merged rows - 1), so index 0 is counter for no merge (1 row),
      * index 1 is counter for 2 rows merged, and so on.
      */
-    private final long[] mergeCounters;
+    private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
     private final ActiveCompactionsTracker activeCompactions;
@@ -139,7 +139,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         for (ISSTableScanner scanner : scanners)
             bytes += scanner.getLengthInBytes();
         this.totalBytes = bytes;
-        this.mergeCounters = new long[scanners.size()];
+        this.mergedRowsHistogram = new long[scanners.size()];
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
@@ -186,15 +186,15 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         this.targetDirectory = targetDirectory;
     }
 
-    private void updateCounterFor(int rows)
+    private void incMergedRowsHistogram(int rows)
     {
-        assert rows > 0 && rows - 1 < mergeCounters.length;
-        mergeCounters[rows - 1] += 1;
+        assert rows > 0 && rows - 1 < mergedRowsHistogram.length;
+        mergedRowsHistogram[rows - 1] += 1;
     }
 
-    public long[] getMergedRowCounts()
+    public long[] getMergedRowsHistogram()
     {
-        return mergeCounters;
+        return mergedRowsHistogram;
     }
 
     public long getTotalSourceCQLRows()
@@ -231,7 +231,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
                 assert merged > 0;
 
-                CompactionIterator.this.updateCounterFor(merged);
+                CompactionIterator.this.incMergedRowsHistogram(merged);
 
                 if (!rowProcessingNeeded())
                     return null;
