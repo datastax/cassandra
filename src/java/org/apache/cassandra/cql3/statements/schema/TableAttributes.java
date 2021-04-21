@@ -120,7 +120,8 @@ public final class TableAttributes extends PropertyDefinitions
         if (hasOption(Option.COMMENT))
             builder.comment(getString(Option.COMMENT));
 
-        if (hasOption(Option.COMPACTION)){
+        if (hasOption(Option.COMPACTION))
+        {
             if (hasUnsupportedDseCompaction())
                 builder.compaction(CompactionParams.DEFAULT);
             else

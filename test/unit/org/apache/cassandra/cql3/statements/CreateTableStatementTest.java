@@ -21,7 +21,6 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
-import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,6 +32,8 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
@@ -70,8 +71,7 @@ public class CreateTableStatementTest extends CQLTester
         assertTrue(rows.wasApplied());
 
         String warning = rows.getAllExecutionInfo().get(0).getWarnings().get(0);
-        assertTrue("DSE compaction strategy should cause a warning",
-                   warning.contains("The given compactin strategy is not supported"));
+        assertThat(warning, containsString("The compaction strategy parameter was overridden with the default"));
 
         assertDefaultCompactionStrategy(tableName);
     }
@@ -81,7 +81,6 @@ public class CreateTableStatementTest extends CQLTester
         ResultSet result = executeNet("DESCRIBE TABLE ks." + tableName);
 
         String createStatement = result.one().getString("create_statement");
-
-        Assert.assertTrue(createStatement.contains(CompactionParams.DEFAULT.klass().getCanonicalName()));
+        assertThat(createStatement, containsString(CompactionParams.DEFAULT.klass().getCanonicalName()));
     }
 }
