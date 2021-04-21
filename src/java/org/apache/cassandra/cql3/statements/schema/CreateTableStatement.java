@@ -372,6 +372,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
     @Override
     public Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        Set<String> warnings = new HashSet<>();
+
         int tableCount = Schema.instance.getNumberOfTables();
         if (tableCount > DatabaseDescriptor.tableCountWarnThreshold())
         {
@@ -379,9 +381,17 @@ public final class CreateTableStatement extends AlterSchemaStatement
                                        tableCount,
                                        Schema.instance.getKeyspaces().size());
             logger.warn(msg);
-            return ImmutableSet.of(msg);
+            warnings.add(msg);
         }
-        return ImmutableSet.of();
+
+        if (attrs.hasUnsupportedDseCompaction())
+        {
+            warnings.add("The given compactin strategy is not supported. The compaction strategy parameter was " +
+                         String.format("overriden with the default (%s). ", CompactionParams.DEFAULT.toString()) +
+                         "Inspect your schema and adjust other table properties if needed.");
+        }
+
+        return warnings;
     }
 
     private static class DefaultNames
