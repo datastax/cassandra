@@ -521,7 +521,7 @@ public class CompactionsCQLTest extends CQLTester
         // sstables have been removed.
         try
         {
-            AbstractCompactionTask task = new NotifyingCompactionTask((LeveledCompactionTask) lcs.getNextBackgroundTask(0));
+            AbstractCompactionTask task = new NotifyingCompactionTask(lcs, (LeveledCompactionTask) lcs.getNextBackgroundTask(0));
             task.execute(CompactionManager.instance.active);
             fail("task should throw exception");
         }
@@ -544,9 +544,9 @@ public class CompactionsCQLTest extends CQLTester
 
     private static class NotifyingCompactionTask extends LeveledCompactionTask
     {
-        public NotifyingCompactionTask(LeveledCompactionTask task)
+        public NotifyingCompactionTask(LeveledCompactionStrategy lcs, LeveledCompactionTask task)
         {
-            super(task.cfs, task.transaction, task.getLevel(), task.gcBefore, task.getLevel(), false);
+            super(lcs, task.transaction, task.getLevel(), task.gcBefore, task.getLevel(), false);
         }
 
         @Override

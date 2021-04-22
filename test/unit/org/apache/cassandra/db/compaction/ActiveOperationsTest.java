@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Arrays;
-import java.io.Closeable;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -96,7 +95,7 @@ public class ActiveOperationsTest extends CQLTester
             });
             Future<?> f2 = es.submit(() -> {
                 Uninterruptibles.awaitUninterruptibly(trigger);
-                CompactionManager.instance.active.getCompactionsForSSTable(null, null);
+                CompactionManager.instance.active.getOperationsForSSTable(null, null);
             });
             trigger.countDown();
             FBUtilities.waitOnFutures(Arrays.asList(f1, f2));
