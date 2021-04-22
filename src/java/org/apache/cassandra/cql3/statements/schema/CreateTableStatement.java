@@ -420,6 +420,24 @@ public final class CreateTableStatement extends AlterSchemaStatement
         }
     }
 
+    @Override
+    public Set<String> clientWarnings(KeyspacesDiff diff)
+    {
+        Set<String> warnings = new HashSet<>();
+
+        if (attrs.hasUnsupportedDseCompaction())
+        {
+            Map<String, String> compactionOptions = attrs.getMap(TableParams.Option.COMPACTION.toString());
+            String strategy = compactionOptions.get(CompactionParams.Option.CLASS.toString());
+            warnings.add(String.format("The given compaction strategy (%s) is not supported. ", strategy) +
+                         "The compaction strategy parameter was overridden with the default " +
+                         String.format("(%s). ", CompactionParams.DEFAULT.klass().getCanonicalName()) +
+                         "Inspect your schema and adjust other table properties if needed.");
+        }
+
+        return warnings;
+    }
+
     private static class DefaultNames
     {
         private static final String DEFAULT_CLUSTERING_NAME = "column";
