@@ -47,7 +47,7 @@ class BackgroundCompactions implements CompactionObserver
     /** The compaction logger */
     private final CompactionLogger compactionLogger;
 
-    /** The compaction aggregates wither either pending or ongoing compactions, or both. */
+    /** The compaction aggregates with either pending or ongoing compactions, or both. */
     private volatile TreeMap<Long, CompactionAggregate> aggregates = new TreeMap<>();
 
     /**  The ongoing compactions grouped by unique operation ID. */
@@ -64,7 +64,8 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     /**
-     * Creates new aggregates with the pending aggregates but adding any existing aggregates with
+     * Updates the list of pending compactions, while preserving the set of running ones. This is done
+     * by creating new aggregates with the pending aggregates but adding any existing aggregates with
      * compactions in progress. If there is a matching pending aggregate then the existing compactions
      * are transferred to it, otherwise the old aggregate is stripped of its pending compactios and then
      * it is kept with the compactions in progress only.

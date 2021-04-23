@@ -138,7 +138,7 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     /**
-     * Create a compaction task for tombstone collection.
+     * Create a compaction task for deleted data collection.
      */
     public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
