@@ -1030,7 +1030,6 @@ public class CompactionStrategyManager implements INotificationConsumer
         if (checkBoundaries)
             maybeReloadDiskBoundaries();
 
-        maybeReloadDiskBoundaries();
         readLock.lock();
         try
         {
