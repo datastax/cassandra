@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.NavigableMap;
@@ -83,7 +84,11 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
             return null;
 
         Set<SSTableReader> compacting = cfs.getCompactingSSTables();
-        Set<SSTableReader> uncompacting = ImmutableSet.copyOf(filter(sstables, sstable -> !compacting.contains(sstable)));
+        Set<SSTableReader> uncompacting;
+        synchronized (sstables)
+        {
+            uncompacting = ImmutableSet.copyOf(filter(sstables, sstable -> !compacting.contains(sstable)));
+        }
 
         // Find fully expired SSTables. Those will be included no matter what.
         Set<SSTableReader> expired = Collections.emptySet();
@@ -150,22 +155,49 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
                                    this.highestWindowSeen);
     }
 
+
     @Override
-    public synchronized void addSSTable(SSTableReader sstable)
+    public void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
     {
-        sstables.add(sstable);
+        synchronized (sstables)
+        {
+            for (SSTableReader remove : removed)
+                sstables.remove(remove);
+            sstables.addAll(added);
+        }
     }
 
     @Override
-    public synchronized void removeSSTable(SSTableReader sstable)
+    public void addSSTable(SSTableReader sstable)
     {
-        sstables.remove(sstable);
+        synchronized (sstables)
+        {
+            sstables.add(sstable);
+        }
+    }
+
+    @Override
+    void removeDeadSSTables()
+    {
+        removeDeadSSTables(sstables);
+    }
+
+    @Override
+    public void removeSSTable(SSTableReader sstable)
+    {
+        synchronized (sstables)
+        {
+            sstables.remove(sstable);
+        }
     }
 
     @Override
     protected Set<SSTableReader> getSSTables()
     {
-        return ImmutableSet.copyOf(sstables);
+        synchronized (sstables)
+        {
+            return ImmutableSet.copyOf(sstables);
+        }
     }
 
     /**

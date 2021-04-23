@@ -159,6 +159,32 @@ public class LeveledManifest
         lastCompactedSSTables[minLevel] = SSTableReader.firstKeyOrdering.max(added);
     }
 
+    /**
+     * See {@link AbstractCompactionStrategy#removeDeadSSTables}
+     */
+    public synchronized void removeDeadSSTables()
+    {
+        int removed = 0;
+        Set<SSTableReader> liveSet = cfs.getLiveSSTables();
+
+        for (int i = 0; i < generations.levelCount(); i++)
+        {
+            Iterator<SSTableReader> it = generations.get(i).iterator();
+            while (it.hasNext())
+            {
+                SSTableReader sstable = it.next();
+                if (!liveSet.contains(sstable))
+                {
+                    it.remove();
+                    ++removed;
+                }
+            }
+        }
+
+        if (removed > 0)
+            logger.debug("Removed {} dead sstables from the compactions tracked list.", removed);
+    }
+
     private String toString(Collection<SSTableReader> sstables)
     {
         StringBuilder builder = new StringBuilder();

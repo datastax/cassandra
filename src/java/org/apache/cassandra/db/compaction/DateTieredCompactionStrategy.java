@@ -80,9 +80,9 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
         synchronized (sstables)
         {
             if (sstables.isEmpty())
-                return Collections.emptyList();
+                return ImmutableList.of();
 
-            uncompacting = ImmutableSet.copyOf(filter(cfs.getNoncompactingSSTables(), sstables::contains));
+            uncompacting = ImmutableSet.copyOf(cfs.getNoncompactingSSTables(sstables));
         }
 
         Set<SSTableReader> expired = Collections.emptySet();
@@ -194,22 +194,47 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
         return sstableMinTimestampPairs;
     }
 
-    @Override
-    public synchronized void addSSTable(SSTableReader sstable)
+    public void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
     {
-        sstables.add(sstable);
+        synchronized (sstables)
+        {
+            for (SSTableReader remove : removed)
+                removeSSTable(remove);
+            addSSTables(added);
+        }
     }
 
     @Override
-    public synchronized void removeSSTable(SSTableReader sstable)
+    public void addSSTable(SSTableReader sstable)
     {
-        sstables.remove(sstable);
+        synchronized (sstables)
+        {
+            sstables.add(sstable);
+        }
+    }
+
+    @Override
+    public void removeSSTable(SSTableReader sstable)
+    {
+        synchronized (sstables)
+        {
+            sstables.remove(sstable);
+        }
+    }
+
+    @Override
+    void removeDeadSSTables()
+    {
+        removeDeadSSTables(sstables);
     }
 
     @Override
     protected Set<SSTableReader> getSSTables()
     {
-        return ImmutableSet.copyOf(sstables);
+        synchronized (sstables)
+        {
+            return ImmutableSet.copyOf(sstables);
+        }
     }
 
     /**

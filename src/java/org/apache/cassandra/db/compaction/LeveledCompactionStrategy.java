@@ -318,6 +318,12 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     }
 
     @Override
+    void removeDeadSSTables()
+    {
+        manifest.removeDeadSSTables();
+    }
+
+    @Override
     public void addSSTable(SSTableReader added)
     {
         manifest.addSSTables(Collections.singleton(added));

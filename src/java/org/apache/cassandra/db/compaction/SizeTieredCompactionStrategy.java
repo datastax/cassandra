@@ -74,7 +74,11 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
         int minThreshold = cfs.getMinimumCompactionThreshold();
         int maxThreshold = cfs.getMaximumCompactionThreshold();
 
-        List<SSTableReader> candidates = filterSuspectSSTables(filter(cfs.getNoncompactingSSTables(), sstables::contains));
+        List<SSTableReader> candidates = new ArrayList<>();
+        synchronized (sstables)
+        {
+            Iterables.addAll(candidates, nonSuspectAndNotIn(sstables, cfs.getCompactingSSTables()));
+        }
 
         SizeTieredBuckets sizeTieredBuckets = new SizeTieredBuckets(candidates, sizeTieredOptions, minThreshold, maxThreshold);
         sizeTieredBuckets.aggregate();
@@ -353,21 +357,47 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    public synchronized void addSSTable(SSTableReader added)
+    public void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
     {
-        sstables.add(added);
+        synchronized (sstables)
+        {
+            for (SSTableReader remove : removed)
+                sstables.remove(remove);
+            sstables.addAll(added);
+        }
     }
 
     @Override
-    public synchronized void removeSSTable(SSTableReader sstable)
+    public void addSSTable(SSTableReader added)
     {
-        sstables.remove(sstable);
+        synchronized (sstables)
+        {
+            sstables.add(added);
+        }
+    }
+
+    @Override
+    void removeDeadSSTables()
+    {
+        removeDeadSSTables(sstables);
+    }
+
+    @Override
+    public void removeSSTable(SSTableReader sstable)
+    {
+        synchronized (sstables)
+        {
+            sstables.remove(sstable);
+        }
     }
 
     @Override
     protected Set<SSTableReader> getSSTables()
     {
-        return ImmutableSet.copyOf(sstables);
+        synchronized (sstables)
+        {
+            return ImmutableSet.copyOf(sstables);
+        }
     }
 
     public String toString()

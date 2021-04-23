@@ -229,6 +229,11 @@ public abstract class AbstractCompactionStrategy
                     return createCompactionTask(gcBefore, transaction, compaction);
                 }
 
+                // Getting references to the sstables failed. This may be because we tried to compact sstables that are
+                // no longer present (due to races in getting the notification), or because we still haven't
+                // received any replace notifications. Remove any non-live sstables we track and try again.
+                removeDeadSSTables();
+
                 previous = compaction.getSelected();
             }
         }
@@ -286,6 +291,12 @@ public abstract class AbstractCompactionStrategy
                 LifecycleTransaction modifier = cfs.getTracker().tryModify(latestBucket, OperationType.COMPACTION);
                 if (modifier != null)
                     return createCompactionTask(gcBefore, modifier, false, false);
+
+                // Getting references to the sstables failed. This may be because we tried to compact sstables that are
+                // no longer present (due to races in getting the notification), or because we still haven't
+                // received any replace notifications. Remove any non-live sstables we track and try again.
+                removeDeadSSTables();
+
                 previousCandidate = latestBucket;
             }
         }
@@ -307,6 +318,8 @@ public abstract class AbstractCompactionStrategy
     @SuppressWarnings("resource")
     public synchronized Collection<AbstractCompactionTask> getMaximalTask(int gcBefore, boolean splitOutput)
     {
+        removeDeadSSTables();
+
         Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(getSSTables());
         if (Iterables.isEmpty(filteredSSTables))
             return null;
@@ -470,12 +483,7 @@ public abstract class AbstractCompactionStrategy
      * Note that implementations must be able to handle duplicate notifications here (that removed are already gone and
      * added have already been added)
      * */
-    public synchronized void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
-    {
-        for (SSTableReader remove : removed)
-            removeSSTable(remove);
-        addSSTables(added);
-    }
+    public abstract void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added);
 
     /**
      * Adds sstable, note that implementations must handle duplicate notifications here (added already being in the compaction strategy)
@@ -489,6 +497,37 @@ public abstract class AbstractCompactionStrategy
     {
         for (SSTableReader sstable : added)
             addSSTable(sstable);
+    }
+
+    /**
+     * Remove any tracked sstable that is no longer in the live set. Note that because we get notifications after the
+     * tracker is modified, anything we know of must be already in the live set -- if it is not, it has been removed
+     * from there, and we either haven't received the removal notification yet, or we did and we messed it up (i.e.
+     * we got it before the addition). The former is transient, but the latter can cause persistent problems, including
+     * fully stopping compaction. In any case, we should remove any such sstables.
+     * There are two special-case implementations of this in MemoryOnlyStrategy and LeveledManifest.
+     */
+    abstract void removeDeadSSTables();
+
+    void removeDeadSSTables(Iterable<SSTableReader> sstables)
+    {
+        synchronized (sstables)
+        {
+            int removed = 0;
+            Set<SSTableReader> liveSet = cfs.getLiveSSTables();
+            for (Iterator<SSTableReader> it = sstables.iterator(); it.hasNext(); )
+            {
+                SSTableReader sstable = it.next();
+                if (!liveSet.contains(sstable))
+                {
+                    it.remove();
+                    ++removed;
+                }
+            }
+
+            if (removed > 0)
+                logger.debug("Removed {} dead sstables from the compactions tracked list.", removed);
+        }
     }
 
     /**

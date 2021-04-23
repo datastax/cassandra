@@ -19,6 +19,7 @@ package org.apache.cassandra.db.compaction;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.*;
@@ -473,7 +474,7 @@ public class Verifier implements Closeable
             try
             {
                 sstable.mutateRepairedAndReload(ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
-                cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+                cfs.getTracker().notifySSTableRepairedStatusChanged(ImmutableList.of(sstable));
             }
             catch(IOException ioe)
             {
