@@ -243,6 +243,7 @@ public class ScrubTest
         catch (IOError err)
         {
             Throwables.assertAnyCause(err, CorruptSSTableException.class);
+            assertTrue(Throwables.isCausedBy(err, CorruptSSTableException.class));
         }
 
         // with skipCorrupted == true, the corrupt rows will be skipped
