@@ -533,7 +533,6 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
             return false;
         }
 
-        // TODO TBD
         @Override
         public boolean hasMaxColumnValueLengths()
         {
