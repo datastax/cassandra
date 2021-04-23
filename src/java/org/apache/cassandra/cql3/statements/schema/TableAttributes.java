@@ -40,8 +40,10 @@ import static java.lang.String.format;
 public final class TableAttributes extends PropertyDefinitions
 {
     public static final String ID = "id";
-    private static final Set<String> validKeywords;
-    private static final Set<String> obsoleteKeywords;
+    private static final Set<String> VALID_KEYWORDS;
+    private static final Set<String> IGNORED_KEYWORDS = ImmutableSet.of(
+        "nodesync"
+    );
 
     private static final Set<String> UNSUPPORTED_DSE_COMPACTION_STRATEGIES = ImmutableSet.of(
         "org.apache.cassandra.db.compaction.TieredCompactionStrategy",
@@ -56,13 +58,12 @@ public final class TableAttributes extends PropertyDefinitions
         for (Option option : Option.values())
             validBuilder.add(option.toString());
         validBuilder.add(ID);
-        validKeywords = validBuilder.build();
-        obsoleteKeywords = ImmutableSet.of();
+        VALID_KEYWORDS = validBuilder.build();
     }
 
     public void validate()
     {
-        validate(validKeywords, obsoleteKeywords);
+        validate(VALID_KEYWORDS, IGNORED_KEYWORDS);
         build(TableParams.builder()).validate();
     }
 
