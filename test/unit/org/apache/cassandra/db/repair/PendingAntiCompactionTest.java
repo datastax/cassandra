@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.FutureCallback;
@@ -80,7 +81,6 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.NonThrowingCloseable;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -678,7 +678,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         catch (IOException ex)
         {
-            Throwables.maybeFail(ex);
+            throw Throwables.propagate(ex);
         }
         finally
         {

@@ -32,6 +32,9 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 
+import static com.google.common.base.Throwables.propagate;
+
+
 public abstract class AbstractCompactionTask extends WrappedRunnable
 {
     protected final ColumnFamilyStore cfs;
@@ -65,7 +68,7 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
         }
         catch (Throwable err)
         {
-            Throwables.maybeFail(cleanup(err));
+            propagate(cleanup(err));
         }
     }
 
