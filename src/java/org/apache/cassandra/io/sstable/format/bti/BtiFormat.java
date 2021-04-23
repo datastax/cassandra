@@ -287,7 +287,22 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
     static class BtiVersion extends Version
     {
         public static final String current_version = "da";
-        public static final String earliest_supported_version = "da";
+        public static final String earliest_supported_version = "aa";
+
+        // aa (DSE 6.0): trie index format
+        // ab (DSE pre-6.8): ILLEGAL - handled as 'b' (predates 'ba'). Pre-GA "LABS" releases of DSE 6.8 used this
+        //                   sstable version.
+        // ac (DSE 6.0.11, 6.7.6): corrected sstable min/max clustering (DB-3691/CASSANDRA-14861)
+        // ad (DSE 6.0.14, 6.7.11): added hostId of the node from which the sstable originated (DB-4629)
+        // b  (DSE early 6.8 "LABS") has some of 6.8 features but not all
+        // ba (DSE 6.8): encrypted indices and metadata
+        //               new BloomFilter serialization format
+        //               add incremental NodeSync information to metadata
+        //               improved min/max clustering representation
+        //               presence marker for partition level deletions
+        // bb (DSE 6.8.5): added hostId of the node from which the sstable originated (DB-4629)
+        // ca (DSE-DB aka Stargazer based on OSS 4.0): bb fields without maxColumnValueLengths + all OSS fields
+        // cb (OSS 5.0): token space coverage
 
         // versions aa-cz are not supported in OSS
         // da (5.0): initial version of the BIT format
@@ -295,6 +310,13 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
         private final boolean isLatestVersion;
 
+        /**
+         * DB-2648/CASSANDRA-9067: DSE 6.8/OSS 4.0 bloom filter representation changed (bitset data is no longer stored
+         * as BIG_ENDIAN longs, which avoids some redundant bit twiddling).
+         */
+        private final boolean hasOldBfFormat;
+        private final boolean hasAccurateLegacyMinMax;
+        private final boolean hasOriginatingHostId;
         private final boolean hasMaxColumnValueLengths;
 
         private final int correspondingMessagingVersion;
@@ -304,6 +326,9 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             super(format, version);
 
             isLatestVersion = version.compareTo(current_version) == 0;
+            hasOldBfFormat = version.compareTo("b") < 0;
+            hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
+            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = MessagingService.VERSION_40;
         }
@@ -344,10 +369,11 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             return true;
         }
 
+        // this field is not present in DSE
         @Override
         public boolean hasIsTransient()
         {
-            return true;
+            return version.compareTo("ca") >= 0;
         }
 
         @Override
@@ -359,47 +385,47 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public boolean hasOldBfFormat()
         {
-            return false;
+            return hasOldBfFormat;
         }
 
         @Override
         public boolean hasAccurateMinMax()
         {
-            return true;
+            return hasAccurateLegacyMinMax;
         }
 
         public boolean hasLegacyMinMax()
         {
-            return false;
+            return !hasImprovedMinMax();
         }
 
         @Override
         public boolean hasOriginatingHostId()
         {
-            return true;
+            return hasOriginatingHostId;
         }
 
         @Override
         public boolean hasImprovedMinMax() {
-            return true;
+            return version.compareTo("ba") >= 0;
         }
 
         @Override
         public boolean hasTokenSpaceCoverage()
         {
-            return true;
+            return version.compareTo("cb") >= 0;
         }
 
         @Override
         public boolean hasPartitionLevelDeletionsPresenceMarker()
         {
-            return true;
+            return version.compareTo("ba") >= 0;
         }
 
         @Override
         public boolean hasKeyRange()
         {
-            return true;
+            return version.compareTo("da") >= 0;
         }
 
         @Override

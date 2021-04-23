@@ -19,10 +19,13 @@ package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.commons.lang3.ArrayUtils;
+import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
@@ -102,6 +105,7 @@ public class StatsMetadata extends MetadataComponent
 
     public final ByteBuffer firstKey;
     public final ByteBuffer lastKey;
+    private final ImmutableMap<ByteBuffer, Integer> maxColumnValueLengths;
 
     public StatsMetadata(EstimatedHistogram estimatedPartitionSize,
                          EstimatedHistogram estimatedCellPerPartitionCount,
@@ -126,8 +130,9 @@ public class StatsMetadata extends MetadataComponent
                          TimeUUID pendingRepair,
                          boolean isTransient,
                          boolean hasPartitionLevelDeletions,
-                         ByteBuffer firstKey,
-                         ByteBuffer lastKey)
+                         ByteBuffer firstKey, 
+                         ByteBuffer lastKey,
+                         Map<ByteBuffer, Integer> maxColumnValueLengths)
     {
         this.estimatedPartitionSize = estimatedPartitionSize;
         this.estimatedCellPerPartitionCount = estimatedCellPerPartitionCount;
@@ -155,6 +160,7 @@ public class StatsMetadata extends MetadataComponent
         this.hasPartitionLevelDeletions = hasPartitionLevelDeletions;
         this.firstKey = firstKey;
         this.lastKey = lastKey;
+        this.maxColumnValueLengths = ImmutableMap.copyOf(maxColumnValueLengths);
     }
 
     public MetadataType getType()
@@ -211,8 +217,9 @@ public class StatsMetadata extends MetadataComponent
                                  pendingRepair,
                                  isTransient,
                                  hasPartitionLevelDeletions,
-                                 firstKey,
-                                 lastKey);
+                                 firstKey, 
+                                 lastKey, 
+                                 maxColumnValueLengths);
     }
 
     public StatsMetadata mutateRepairedMetadata(long newRepairedAt, TimeUUID newPendingRepair, boolean newIsTransient)
@@ -240,8 +247,9 @@ public class StatsMetadata extends MetadataComponent
                                  newPendingRepair,
                                  newIsTransient,
                                  hasPartitionLevelDeletions,
-                                 firstKey,
-                                 lastKey);
+                                 firstKey, 
+                                 lastKey, 
+                                 maxColumnValueLengths);
     }
 
     @Override
@@ -275,6 +283,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(hasPartitionLevelDeletions, that.hasPartitionLevelDeletions)
                        .append(firstKey, that.firstKey)
                        .append(lastKey, that.lastKey)
+                       .append(maxColumnValueLengths, that.maxColumnValueLengths)
                        .build();
     }
 
@@ -305,6 +314,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(hasPartitionLevelDeletions)
                        .append(firstKey)
                        .append(lastKey)
+                       .append(maxColumnValueLengths)
                        .build();
     }
 
@@ -369,10 +379,11 @@ public class StatsMetadata extends MetadataComponent
                 size += Long.BYTES;
             }
 
-            // TODO TBD
             if (version.hasMaxColumnValueLengths())
             {
                 size += 4; // num columns
+                for (Map.Entry<ByteBuffer, Integer> entry : component.maxColumnValueLengths.entrySet())
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(entry.getKey()) + 4; // column name, max value length
             }
 
             if (version.hasIsTransient())
@@ -505,10 +516,15 @@ public class StatsMetadata extends MetadataComponent
                 out.writeLong(Long.MAX_VALUE);
             }
 
-            // TODO TBD
+            // left for being able to import DSE sstables, not used
             if (version.hasMaxColumnValueLengths())
             {
-                out.writeInt(0);
+                out.writeInt(component.maxColumnValueLengths.size());
+                for (Map.Entry<ByteBuffer, Integer> entry : component.maxColumnValueLengths.entrySet())
+                {
+                    ByteBufferUtil.writeWithVIntLength(entry.getKey(), out);
+                    out.writeInt(entry.getValue());
+                }
             }
 
             if (version.hasIsTransient())
@@ -674,15 +690,20 @@ public class StatsMetadata extends MetadataComponent
                 in.readLong();
             }
 
-            // TODO TBD
+            // left for being able to import DSE sstables, not used
+            final Map<ByteBuffer, Integer> maxColumnValueLengths;
             if (version.hasMaxColumnValueLengths())
             {
                 int colCount = in.readInt();
+                ImmutableMap.Builder<ByteBuffer, Integer> builder = ImmutableMap.builderWithExpectedSize(colCount);
+
                 for (int i = 0; i < colCount; i++)
-                {
-                    ByteBufferUtil.readWithVIntLength(in);
-                    in.readInt();
-                }
+                    builder.put(ByteBufferUtil.readWithVIntLength(in), in.readInt());
+                maxColumnValueLengths = builder.build();
+            }
+            else
+            {
+                maxColumnValueLengths = Collections.emptyMap();
             }
 
             boolean isTransient = version.hasIsTransient() && in.readBoolean();
@@ -743,8 +764,9 @@ public class StatsMetadata extends MetadataComponent
                                      pendingRepair,
                                      isTransient,
                                      hasPartitionLevelDeletions,
-                                     firstKey,
-                                     lastKey);
+                                     firstKey, 
+                                     lastKey, 
+                                     maxColumnValueLengths);
         }
 
         private int countUntilNull(ByteBuffer[] bufferArray)
