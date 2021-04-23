@@ -60,7 +60,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -602,7 +601,7 @@ public class LegacySSTableTest
      * </p>
      */
     @Ignore
-//    @Test
+    @Test
     public void testGenerateSstables() throws Throwable
     {
         Version version = TrieIndexFormat.latestVersion;
