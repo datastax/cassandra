@@ -42,7 +42,9 @@ public final class TableAttributes extends PropertyDefinitions
     public static final String ID = "id";
     private static final Set<String> VALID_KEYWORDS;
     private static final Set<String> IGNORED_KEYWORDS = ImmutableSet.of(
-        "nodesync"
+        "nodesync",
+        "dse_vertex_label_property",
+        "dse_edge_label_property"
     );
 
     private static final Set<String> UNSUPPORTED_DSE_COMPACTION_STRATEGIES = ImmutableSet.of(
