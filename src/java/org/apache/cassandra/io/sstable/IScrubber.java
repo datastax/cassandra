@@ -22,7 +22,7 @@ import java.util.StringJoiner;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.utils.Closeable;
 
 public interface IScrubber extends Closeable
@@ -31,7 +31,7 @@ public interface IScrubber extends Closeable
 
     void close();
 
-    CompactionInfo.Holder getScrubInfo();
+    TableOperation getScrubInfo();
 
     @VisibleForTesting
     ScrubResult scrubWithResult();

@@ -42,9 +42,10 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
@@ -263,7 +264,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     }
 
     @Override
-    public CompactionInfo.Holder getScrubInfo()
+    public TableOperation getScrubInfo()
     {
         return scrubInfo;
     }
@@ -358,7 +359,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     }
 
 
-    public static class ScrubInfo extends CompactionInfo.Holder
+    public static class ScrubInfo extends AbstractTableOperation
     {
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
@@ -373,18 +374,18 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             scrubCompactionId = nextTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.SCRUB,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          scrubCompactionId,
-                                          ImmutableSet.of(sstable),
-                                          File.getPath(sstable.getFilename()).getParent().toString());
+                return new OperationProgress(sstable.metadata(), 
+                                             OperationType.SCRUB,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             scrubCompactionId,
+                                             ImmutableSet.of(sstable),
+                                             File.getPath(sstable.getFilename()).getParent().toString());
             }
             catch (Exception e)
             {

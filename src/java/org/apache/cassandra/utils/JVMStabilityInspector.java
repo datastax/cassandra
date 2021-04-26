@@ -179,7 +179,7 @@ public final class JVMStabilityInspector
 
         if (t.getSuppressed() != null)
             for (Throwable suppressed : t.getSuppressed())
-                inspectThrowable(suppressed, fn);
+                inspectThrowable(suppressed, fn, isUncaughtException);
 
         if (t.getCause() != null)
             inspectThrowable(t.getCause(), fn, isUncaughtException);
