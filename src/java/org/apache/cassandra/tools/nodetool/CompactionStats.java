@@ -29,6 +29,7 @@ import io.airlift.airline.Option;
 
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
+import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.tools.NodeProbe;
@@ -50,6 +51,11 @@ public class CompactionStats extends NodeToolCmd
             description = "Display fields matching vtable output")
     private boolean vtableOutput = false;
 
+    @Option(title = "aggregate",
+    name = {"-A", "--aggregate"},
+    description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
+    private boolean aggregate = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -58,6 +64,11 @@ public class CompactionStats extends NodeToolCmd
         pendingTasksAndConcurrentCompactorsStats(probe, tableBuilder);
         compactionsStats(probe, tableBuilder);
         reportCompactionTable(probe.getCompactionManagerProxy().getCompactions(), probe.getCompactionThroughputBytes(), humanReadable, vtableOutput, out, tableBuilder);
+
+        if (aggregate)
+        {
+            reportAggregateCompactions(probe);
+        }
     }
 
     private void pendingTasksAndConcurrentCompactorsStats(NodeProbe probe, TableBuilder tableBuilder)
@@ -169,4 +180,14 @@ public class CompactionStats extends NodeToolCmd
         table.printTo(out);
     }
 
+    private static void reportAggregateCompactions(NodeProbe probe)
+    {
+        List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
+        if (statistics.isEmpty())
+            return;
+
+        System.out.println("Aggregated view:");
+        for (CompactionStrategyStatistics stat : statistics)
+            System.out.println(stat.toString());
+    }
 }

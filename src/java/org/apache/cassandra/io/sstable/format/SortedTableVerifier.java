@@ -282,7 +282,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             {
 
                 if (verifyInfo.isStopRequested())
-                    throw new CompactionInterruptedException(verifyInfo.getCompactionInfo());
+                    throw new CompactionInterruptedException(verifyInfo.getProgress());
 
                 long rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at %d", rowStart);
@@ -484,17 +484,17 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             verificationCompactionId = TimeUUID.Generator.nextTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.VERIFY,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          verificationCompactionId,
-                                          ImmutableSet.of(sstable));
+                return new OperationProgress(sstable.metadata(),
+                                             OperationType.VERIFY,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             verificationCompactionId,
+                                             ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {

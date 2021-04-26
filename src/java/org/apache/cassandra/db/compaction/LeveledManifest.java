@@ -35,7 +35,11 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
-import com.google.common.primitives.Ints;
+
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +51,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.db.compaction.LeveledGenerations.MAX_LEVEL_COUNT;
 
@@ -59,7 +62,13 @@ public class LeveledManifest
      * if we have more than MAX_COMPACTING_L0 sstables in L0, we will run a round of STCS with at most
      * cfs.getMaxCompactionThreshold() sstables.
      */
-    private static final int MAX_COMPACTING_L0 = 32;
+    @VisibleForTesting
+    static final int MAX_COMPACTING_L0 = 32;
+
+    /**
+     * The maximum number of sstables in L0 for calculating the maximum number of bytes in L0.
+     */
+    static final int MAX_SSTABLES_L0 = 4;
 
     /**
      * If we go this many rounds without compacting
@@ -162,6 +171,32 @@ public class LeveledManifest
         lastCompactedSSTables[minLevel] = SSTableReader.firstKeyOrdering.max(added);
     }
 
+    /**
+     * See {@link AbstractCompactionStrategy#removeDeadSSTables}
+     */
+    public synchronized void removeDeadSSTables()
+    {
+        int removed = 0;
+        Set<SSTableReader> liveSet = cfs.getLiveSSTables();
+
+        for (int i = 0; i < generations.levelCount(); i++)
+        {
+            Iterator<SSTableReader> it = generations.get(i).iterator();
+            while (it.hasNext())
+            {
+                SSTableReader sstable = it.next();
+                if (!liveSet.contains(sstable))
+                {
+                    it.remove();
+                    ++removed;
+                }
+            }
+        }
+
+        if (removed > 0)
+            logger.debug("Removed {} dead sstables from the compactions tracked list.", removed);
+    }
+
     private String toString(Collection<SSTableReader> sstables)
     {
         StringBuilder builder = new StringBuilder();
@@ -185,7 +220,7 @@ public class LeveledManifest
     public static long maxBytesForLevel(int level, int levelFanoutSize, long maxSSTableSizeInBytes)
     {
         if (level == 0)
-            return 4L * maxSSTableSizeInBytes;
+            return MAX_SSTABLES_L0 * maxSSTableSizeInBytes;
         double bytes = Math.pow(levelFanoutSize, level) * maxSSTableSizeInBytes;
         if (bytes > Long.MAX_VALUE)
             throw new RuntimeException("At most " + Long.MAX_VALUE + " bytes may be in a compaction level; your maxSSTableSize must be absurdly high to compute " + bytes);
@@ -196,17 +231,17 @@ public class LeveledManifest
      * @return highest-priority sstables to compact, and level to compact them to
      * If no compactions are necessary, will return null
      */
-    public synchronized CompactionCandidate getCompactionCandidates()
+    synchronized CompactionAggregate.Leveled getCompactionCandidate()
     {
         // during bootstrap we only do size tiering in L0 to make sure
         // the streamed files can be placed in their original levels
         if (StorageService.instance.isBootstrapMode())
         {
-            List<SSTableReader> mostInteresting = getSSTablesForSTCS(generations.get(0));
+            CompactionPick mostInteresting = getSSTablesForSTCS(generations.get(0));
             if (!mostInteresting.isEmpty())
             {
                 logger.info("Bootstrapping - doing STCS in L0");
-                return new CompactionCandidate(mostInteresting, 0, Long.MAX_VALUE);
+                return getSTCSAggregate(mostInteresting);
             }
             return null;
         }
@@ -240,7 +275,7 @@ public class LeveledManifest
 
         // Let's check that L0 is far enough behind to warrant STCS.
         // If it is, it will be used before proceeding any of higher level
-        CompactionCandidate l0Compaction = getSTCSInL0CompactionCandidate();
+        CompactionAggregate.Leveled l0Compactions = getSTCSInL0CompactionCandidate();
 
         for (int i = generations.levelCount() - 1; i > 0; i--)
         {
@@ -249,7 +284,7 @@ public class LeveledManifest
                 continue; // mostly this just avoids polluting the debug log with zero scores
             // we want to calculate score excluding compacting ones
             Set<SSTableReader> sstablesInLevel = Sets.newHashSet(sstables);
-            Set<SSTableReader> remaining = Sets.difference(sstablesInLevel, cfs.getTracker().getCompacting());
+            Set<SSTableReader> remaining = Sets.difference(sstablesInLevel, cfs.getCompactingSSTables());
             long remainingBytesForLevel = SSTableReader.getTotalBytes(remaining);
             long maxBytesForLevel = maxBytesForLevel(i, maxSSTableSizeInBytes);
             double score = (double) remainingBytesForLevel / (double) maxBytesForLevel;
@@ -267,18 +302,20 @@ public class LeveledManifest
                 }
 
                 // before proceeding with a higher level, let's see if L0 is far enough behind to warrant STCS
-                if (l0Compaction != null)
-                    return l0Compaction;
+                if (l0Compactions != null)
+                    return l0Compactions;
 
                 // L0 is fine, proceed with this level
                 Collection<SSTableReader> candidates = getCandidatesFor(i);
+                int pendingCompactions = Math.max(0, getEstimatedPendingTasks(i) - 1);
+
                 if (!candidates.isEmpty())
                 {
                     int nextLevel = getNextLevel(candidates);
                     candidates = getOverlappingStarvedSSTables(nextLevel, candidates);
                     if (logger.isTraceEnabled())
                         logger.trace("Compaction candidates for L{} are {}", i, toString(candidates));
-                    return new CompactionCandidate(candidates, nextLevel, maxSSTableSizeInBytes);
+                    return CompactionAggregate.createLeveled(sstablesInLevel, candidates, pendingCompactions, maxSSTableSizeInBytes, i, nextLevel, score);
                 }
                 else
                 {
@@ -288,7 +325,9 @@ public class LeveledManifest
         }
 
         // Higher levels are happy, time for a standard, non-STCS L0 compaction
-        if (generations.get(0).isEmpty())
+        Set<SSTableReader> sstables = getLevel(0);
+
+        if (sstables.isEmpty())
             return null;
         Collection<SSTableReader> candidates = getCandidatesFor(0);
         if (candidates.isEmpty())
@@ -296,36 +335,51 @@ public class LeveledManifest
             // Since we don't have any other compactions to do, see if there is a STCS compaction to perform in L0; if
             // there is a long running compaction, we want to make sure that we continue to keep the number of SSTables
             // small in L0.
-            return l0Compaction;
+            return l0Compactions;
         }
-        return new CompactionCandidate(candidates, getNextLevel(candidates), maxSSTableSizeInBytes);
+        double l0Score = (double) SSTableReader.getTotalBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
+        int l0PendingCompactions = Math.max(0, getEstimatedPendingTasks(0) - 1);
+        return CompactionAggregate.createLeveled(sstables, candidates, l0PendingCompactions, maxSSTableSizeInBytes, 0, getNextLevel(candidates), l0Score);
     }
 
-    private CompactionCandidate getSTCSInL0CompactionCandidate()
+    private CompactionAggregate.Leveled getSTCSInL0CompactionCandidate()
     {
         if (!DatabaseDescriptor.getDisableSTCSInL0() && generations.get(0).size() > MAX_COMPACTING_L0)
         {
-            List<SSTableReader> mostInteresting = getSSTablesForSTCS(generations.get(0));
+            CompactionPick mostInteresting = getSSTablesForSTCS(getLevel(0));
             if (!mostInteresting.isEmpty())
             {
                 logger.debug("L0 is too far behind, performing size-tiering there first");
-                return new CompactionCandidate(mostInteresting, 0, Long.MAX_VALUE);
+                return getSTCSAggregate(mostInteresting);
             }
         }
 
         return null;
     }
 
-    private List<SSTableReader> getSSTablesForSTCS(Collection<SSTableReader> sstables)
+    private CompactionAggregate.Leveled getSTCSAggregate(CompactionPick compaction)
     {
-        Iterable<? extends SSTableReader> candidates = cfs.getTracker().getUncompacting(sstables);
-        List<Pair<SSTableReader,Long>> pairs = SizeTieredCompactionStrategy.createSSTableAndLengthPairs(AbstractCompactionStrategy.filterSuspectSSTables(candidates));
-        List<List<SSTableReader>> buckets = SizeTieredCompactionStrategy.getBuckets(pairs,
-                                                                                    options.bucketHigh,
-                                                                                    options.bucketLow,
-                                                                                    options.minSSTableSize);
-        return SizeTieredCompactionStrategy.mostInterestingBucket(buckets,
-                cfs.getMinimumCompactionThreshold(), cfs.getMaximumCompactionThreshold());
+        Set<SSTableReader> sstables = getLevel(0);
+        double score = (double) SSTableReader.getTotalBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
+        int remainingSSTables = sstables.size() - compaction.sstables.size();
+        int pendingTasks = remainingSSTables > cfs.getMinimumCompactionThreshold()
+                           ? (int) Math.ceil(remainingSSTables / cfs.getMaximumCompactionThreshold())
+                           : 0;
+        return CompactionAggregate.createLeveledForSTCS(sstables, compaction, pendingTasks, score);
+    }
+
+    private CompactionPick getSSTablesForSTCS(Collection<SSTableReader> sstables)
+    {
+        Iterable<? extends SSTableReader> candidates = cfs.getNoncompactingSSTables(sstables);
+
+        SizeTieredCompactionStrategy.SizeTieredBuckets sizeTieredBuckets;
+        sizeTieredBuckets = new SizeTieredCompactionStrategy.SizeTieredBuckets(candidates,
+                                                                               options,
+                                                                               cfs.getMinimumCompactionThreshold(),
+                                                                               cfs.getMaximumCompactionThreshold());
+        sizeTieredBuckets.aggregate();
+
+        return CompactionAggregate.getSelected(sizeTieredBuckets.getAggregates());
     }
 
     /**
@@ -449,7 +503,7 @@ public class LeveledManifest
         return overlapping(first, last, others);
     }
 
-    private static Set<SSTableReader> overlappingWithBounds(SSTableReader sstable, Map<SSTableReader, Bounds<Token>> others)
+    static Set<SSTableReader> overlappingWithBounds(SSTableReader sstable, Map<SSTableReader, Bounds<Token>> others)
     {
         return overlappingWithBounds(sstable.getFirst().getToken(), sstable.getLast().getToken(), others);
     }
@@ -477,7 +531,8 @@ public class LeveledManifest
         return overlapped;
     }
 
-    private static Map<SSTableReader, Bounds<Token>> genBounds(Iterable<SSTableReader> ssTableReaders)
+    @VisibleForTesting
+    static Map<SSTableReader, Bounds<Token>> genBounds(Iterable<SSTableReader> ssTableReaders)
     {
         Map<SSTableReader, Bounds<Token>> boundsMap = new HashMap<>();
         for (SSTableReader sstable : ssTableReaders)
@@ -488,16 +543,22 @@ public class LeveledManifest
     }
 
     /**
+     * Determine the highest-priority sstables to compact for the given level and add any overlapping sstables
+     * from the next level.
+     * <p/>
      * @return highest-priority sstables to compact for the given level.
      * If no compactions are possible (because of concurrent compactions or because some sstables are excluded
      * for prior failure), will return an empty list.  Never returns null.
+     *
+     * @param level the level number
+     * @return highest-priority sstables to compact for the given level.
      */
     private Collection<SSTableReader> getCandidatesFor(int level)
     {
         assert !generations.get(level).isEmpty();
         logger.trace("Choosing candidates for L{}", level);
 
-        final Set<SSTableReader> compacting = cfs.getTracker().getCompacting();
+        final Set<SSTableReader> compacting = cfs.getCompactingSSTables();
 
         if (level == 0)
         {
@@ -595,7 +656,7 @@ public class LeveledManifest
     {
         Set<SSTableReader> sstables = new HashSet<>();
         Set<SSTableReader> levelSSTables = new HashSet<>(generations.get(0));
-        for (SSTableReader sstable : cfs.getTracker().getCompacting())
+        for (SSTableReader sstable : cfs.getCompactingSSTables())
         {
             if (levelSSTables.contains(sstable))
                 sstables.add(sstable);
@@ -630,41 +691,68 @@ public class LeveledManifest
         return 0;
     }
 
-    public int getEstimatedTasks()
+    public synchronized List<CompactionAggregate> getEstimatedTasks(CompactionAggregate.Leveled selected)
     {
-        return getEstimatedTasks(0);
-    }
-
-    int getEstimatedTasks(long additionalLevel0Bytes)
-    {
-        return getEstimatedTasks((level) -> SSTableReader.getTotalBytes(getLevel(level)) + (level == 0 ? additionalLevel0Bytes : 0));
-    }
-
-    private synchronized int getEstimatedTasks(Function<Integer,Long> fnTotalSizeBytesByLevel)
-    {
-        long tasks = 0;
-        long[] estimated = new long[generations.levelCount()];
+        List<CompactionAggregate> ret = new ArrayList<>(generations.levelCount());
 
         for (int i = generations.levelCount() - 1; i >= 0; i--)
         {
-            // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
-            estimated[i] = (long)Math.ceil((double)Math.max(0L, fnTotalSizeBytesByLevel.apply(i) - (long)(maxBytesForLevel(i, maxSSTableSizeInBytes) * 1.001)) / (double)maxSSTableSizeInBytes);
-            tasks += estimated[i];
+            Set<SSTableReader> sstables = generations.get(i);
+
+            // do not log high levels that are empty, only log after we've found a non-empty level
+            if (sstables.isEmpty() && ret.isEmpty())
+                continue;
+
+            if (selected != null && selected.level == i)
+            {
+                ret.add(selected);
+                continue; // pending tasks already calculated by getCompactionCandidate()
+            }
+
+            if (i == 0)
+            { // for L0 if it is too far behind then pick the STCS choice
+                CompactionAggregate l0Compactions = getSTCSInL0CompactionCandidate();
+                if (l0Compactions != null)
+                {
+                    ret.add(l0Compactions);
+                    continue;
+                }
+            }
+
+            int pendingTasks = getEstimatedPendingTasks(i);
+            double score = (double) SSTableReader.getTotalBytes(sstables) / (double) maxBytesForLevel(i, maxSSTableSizeInBytes);
+            ret.add(CompactionAggregate.createLeveled(sstables, pendingTasks, maxSSTableSizeInBytes, i, score));
         }
 
-        if (!DatabaseDescriptor.getDisableSTCSInL0() && generations.get(0).size() > cfs.getMaximumCompactionThreshold())
-        {
-            int l0compactions = generations.get(0).size() / cfs.getMaximumCompactionThreshold();
-            tasks += l0compactions;
-            estimated[0] += l0compactions;
-        }
-
-        logger.trace("Estimating {} compactions to do for {}.{}",
-                     Arrays.toString(estimated), cfs.getKeyspaceName(), cfs.name);
-        return Ints.checkedCast(tasks);
+        logger.trace("Estimating {} compactions to do for {}", ret.size(), cfs.metadata());
+        return ret;
     }
 
-    public int getNextLevel(Collection<SSTableReader> sstables)
+    /**
+     * @return the estimated number of LCS compactions for a given level with the given sstables. Because it compacts one sstable at
+     *         a time, this number is determined as the number of bytes above the maximum divided the maximum sstable size in bytes.
+     *
+     *         This is however incorrect for L0. If the STCS threshold has been exceeded, we simply divide by the max threshold,
+     *         otherwise we currently use a very pessimistic estimate (no overlapping sstables).
+     */
+    private int getEstimatedPendingTasks(int level)
+    {
+        final Set<SSTableReader> sstables = getLevel(level);
+        if (sstables.isEmpty())
+            return 0;
+
+        final Set<SSTableReader> compacting = cfs.getCompactingSSTables();
+        final Set<SSTableReader> remaining = Sets.difference(Sets.newHashSet(sstables), compacting);
+
+        if (level == 0 && !DatabaseDescriptor.getDisableSTCSInL0() && remaining.size() > MAX_COMPACTING_L0)
+            return remaining.size() / cfs.getMaximumCompactionThreshold();
+
+        // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
+        return Math.toIntExact((long) Math.ceil((Math.max(0L, SSTableReader.getTotalBytes(remaining) -
+                                                              (maxBytesForLevel(level, maxSSTableSizeInBytes) * 1.001)) / (double) maxSSTableSizeInBytes)));
+    }
+
+    int getNextLevel(Collection<SSTableReader> sstables)
     {
         int maximumLevel = Integer.MIN_VALUE;
         int minimumLevel = Integer.MAX_VALUE;
@@ -701,19 +789,5 @@ public class LeveledManifest
     {
         generations.newLevel(sstable, oldLevel);
         lastCompactedSSTables[oldLevel] = sstable;
-    }
-
-    public static class CompactionCandidate
-    {
-        public final Collection<SSTableReader> sstables;
-        public final int level;
-        public final long maxSSTableBytes;
-
-        public CompactionCandidate(Collection<SSTableReader> sstables, int level, long maxSSTableBytes)
-        {
-            this.sstables = sstables;
-            this.level = level;
-            this.maxSSTableBytes = maxSSTableBytes;
-        }
     }
 }

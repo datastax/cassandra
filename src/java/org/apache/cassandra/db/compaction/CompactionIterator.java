@@ -70,6 +70,7 @@ import org.apache.cassandra.utils.TimeUUID;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static org.apache.cassandra.config.Config.PaxosStatePurging.legacy;
 import static org.apache.cassandra.config.DatabaseDescriptor.paxosStatePurging;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Merge multiple iterators over the content of sstable into a "compacted" iterator.
@@ -87,7 +88,7 @@ import static org.apache.cassandra.config.DatabaseDescriptor.paxosStatePurging;
  *   <li>keep tracks of the compaction progress.</li>
  * </ul>
  */
-public class CompactionIterator extends CompactionInfo.Holder implements UnfilteredPartitionIterator
+public class CompactionIterator implements UnfilteredPartitionIterator
 {
     private static final long UNFILTERED_TO_UPDATE_PROGRESS = 100;
 
@@ -98,53 +99,43 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     private final long nowInSec;
     private final TimeUUID compactionId;
     private final long totalBytes;
-    private long bytesRead;
-    private long totalSourceCQLRows;
+    private volatile long[] bytesReadByLevel;
 
     // Keep targetDirectory for compactions, needed for `nodetool compactionstats`
     private volatile String targetDirectory;
 
-    /*
-     * counters for merged rows frequency(AKA histogram).
-     * array index represents (number of merged rows - 1), so index 0 is counter for no merge (1 row),
-     * index 1 is counter for 2 rows merged, and so on.
+    /**
+     * Merged frequency counters for partitions and rows (AKA histograms).
+     * The array index represents the number of sstables containing the row or partition minus one. So index 0 contains
+     * the number of rows or partitions coming from a single sstable (therefore copied rather than merged), index 1 contains
+     * the number of rows or partitions coming from two sstables and so forth.
      */
+    private final long[] mergedPartitionsHistogram;
     private final long[] mergedRowsHistogram;
 
     private final UnfilteredPartitionIterator compacted;
-    private final ActiveCompactionsTracker activeCompactions;
-
-    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, long nowInSec, TimeUUID compactionId)
-    {
-        this(type, scanners, controller, nowInSec, compactionId, ActiveCompactionsTracker.NOOP, null);
-    }
+    private final TableOperation op;
 
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
-    public CompactionIterator(OperationType type,
-                              List<ISSTableScanner> scanners,
-                              AbstractCompactionController controller,
-                              long nowInSec,
-                              TimeUUID compactionId,
-                              ActiveCompactionsTracker activeCompactions,
-                              TopPartitionTracker.Collector topPartitionCollector)
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
     {
         this.controller = controller;
         this.type = type;
         this.scanners = scanners;
         this.nowInSec = nowInSec;
         this.compactionId = compactionId;
-        this.bytesRead = 0;
+        this.bytesReadByLevel = new long[LeveledGenerations.MAX_LEVEL_COUNT];
 
         long bytes = 0;
         for (ISSTableScanner scanner : scanners)
             bytes += scanner.getLengthInBytes();
         this.totalBytes = bytes;
+        this.mergedPartitionsHistogram = new long[scanners.size()];
         this.mergedRowsHistogram = new long[scanners.size()];
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
-        this.activeCompactions = activeCompactions == null ? ActiveCompactionsTracker.NOOP : activeCompactions;
-        this.activeCompactions.beginCompaction(this); // note that CompactionTask also calls this, but CT only creates CompactionIterator with a NOOP ActiveCompactions
+        op = createOperation();
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
@@ -157,7 +148,36 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
                                                        : new Purger(controller, nowInSec);
         merged = Transformation.apply(merged, purger);
         merged = DuplicateRowChecker.duringCompaction(merged, type);
-        compacted = Transformation.apply(merged, new AbortableUnfilteredPartitionTransformation(this));
+        compacted = Transformation.apply(merged, new AbortableUnfilteredPartitionTransformation(op));
+    }
+
+    protected TableOperation createOperation()
+    {
+        return new AbstractTableOperation() {
+
+            @Override
+            public OperationProgress getProgress()
+            {
+                return new AbstractTableOperation.OperationProgress(controller.cfs.metadata(), type, bytesRead(), totalBytes, compactionId, sstables);
+            }
+
+            @Override
+            public boolean isGlobal()
+            {
+                return false;
+            }
+        };
+    }
+
+    /**
+     * @return A {@link TableOperation} backed by this iterator. This operation can be observed for progress
+     * and for interrupting provided that it is registered with a {@link TableOperationObserver}, normally the
+     * metrics in the compaction manager. The caller is responsible for registering the operation and checking
+     * {@link TableOperation#isStopRequested()}.
+     */
+    public TableOperation getOperation()
+    {
+        return op;
     }
 
     public TableMetadata metadata()
@@ -165,15 +185,40 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return controller.cfs.metadata();
     }
 
-    public CompactionInfo getCompactionInfo()
+    long bytesRead()
     {
-        return new CompactionInfo(controller.cfs.metadata(),
-                                  type,
-                                  bytesRead,
-                                  totalBytes,
-                                  compactionId,
-                                  sstables,
-                                  targetDirectory);
+        long[] bytesReadByLevel = this.bytesReadByLevel;
+        return Arrays.stream(bytesReadByLevel).reduce(Long::sum).orElse(0L);
+    }
+
+    long bytesRead(int level)
+    {
+        return level >= 0 && level < bytesReadByLevel.length ? bytesReadByLevel[level] : 0;
+    }
+
+    long totalBytes()
+    {
+        return totalBytes;
+    }
+
+    long totalSourcePartitions()
+    {
+        return Arrays.stream(mergedPartitionsHistogram).reduce(0L, Long::sum);
+    }
+
+    long totalSourceRows()
+    {
+        return Arrays.stream(mergedRowsHistogram).reduce(0L, Long::sum);
+    }
+
+    long[] mergedPartitionsHistogram()
+    {
+        return mergedPartitionsHistogram;
+    }
+
+    long[] mergedRowsHistogram()
+    {
+        return mergedRowsHistogram;
     }
 
     public boolean isGlobal()
@@ -184,22 +229,6 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     public void setTargetDirectory(final String targetDirectory)
     {
         this.targetDirectory = targetDirectory;
-    }
-
-    private void incMergedRowsHistogram(int rows)
-    {
-        assert rows > 0 && rows - 1 < mergedRowsHistogram.length;
-        mergedRowsHistogram[rows - 1] += 1;
-    }
-
-    public long[] getMergedRowsHistogram()
-    {
-        return mergedRowsHistogram;
-    }
-
-    public long getTotalSourceCQLRows()
-    {
-        return totalSourceCQLRows;
     }
 
     private UnfilteredPartitionIterators.MergeListener listener()
@@ -220,51 +249,18 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
             public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
             {
-                int merged = 0;
+                int numVersions = 0;
                 for (int i=0, isize=versions.size(); i<isize; i++)
                 {
                     @SuppressWarnings("resource")
                     UnfilteredRowIterator iter = versions.get(i);
                     if (iter != null)
-                        merged++;
+                        numVersions++;
                 }
 
-                assert merged > 0;
+                mergedPartitionsHistogram[numVersions - 1] += 1;
 
-                CompactionIterator.this.incMergedRowsHistogram(merged);
-
-                if (!rowProcessingNeeded())
-                    return null;
-
-                Columns statics = Columns.NONE;
-                Columns regulars = Columns.NONE;
-                for (int i=0, isize=versions.size(); i<isize; i++)
-                {
-                    @SuppressWarnings("resource")
-                    UnfilteredRowIterator iter = versions.get(i);
-                    if (iter != null)
-                    {
-                        statics = statics.mergeTo(iter.columns().statics);
-                        regulars = regulars.mergeTo(iter.columns().regulars);
-                    }
-                }
-                final RegularAndStaticColumns regularAndStaticColumns = new RegularAndStaticColumns(statics, regulars);
-
-                // If we have a 2ndary index, we must update it with deleted/shadowed cells.
-                // we can reuse a single CleanupTransaction for the duration of a partition.
-                // Currently, it doesn't do any batching of row updates, so every merge event
-                // for a single partition results in a fresh cycle of:
-                // * Get new Indexer instances
-                // * Indexer::start
-                // * Indexer::onRowMerge (for every row being merged by the compaction)
-                // * Indexer::commit
-                // A new OpOrder.Group is opened in an ARM block wrapping the commits
-                // TODO: this should probably be done asynchronously and batched.
-                final CompactionTransaction indexTransaction =
-                    controller.cfs.indexManager.newCompactionTransaction(partitionKey,
-                                                                         regularAndStaticColumns,
-                                                                         versions.size(),
-                                                                         nowInSec);
+                final CompactionTransaction indexTransaction = getIndexTransaction(partitionKey,versions);
 
                 return new UnfilteredRowIterators.MergeListener()
                 {
@@ -274,9 +270,23 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
                     public Row onMergedRows(Row merged, Row[] versions)
                     {
-                        indexTransaction.start();
-                        indexTransaction.onRowMerge(merged, versions);
-                        indexTransaction.commit();
+                        int numVersions = 0;
+                        for (Row v : versions)
+                        {
+                            if (v != null)
+                                numVersions++;
+                        }
+
+                        assert numVersions > 0 && numVersions - 1 < mergedRowsHistogram.length;
+                        mergedRowsHistogram[numVersions - 1] += 1;
+
+                        if (indexTransaction != null)
+                        {
+                            indexTransaction.start();
+                            indexTransaction.onRowMerge(merged, versions);
+                            indexTransaction.commit();
+                        }
+
                         return merged;
                     }
 
@@ -296,12 +306,49 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         };
     }
 
+    private CompactionTransaction getIndexTransaction(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
+    {
+        if (type != OperationType.COMPACTION || !controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION))
+            return null;
+
+        Columns statics = Columns.NONE;
+        Columns regulars = Columns.NONE;
+        for (int i=0, isize=versions.size(); i<isize; i++)
+        {
+            @SuppressWarnings("resource")
+            UnfilteredRowIterator iter = versions.get(i);
+            if (iter != null)
+            {
+                statics = statics.mergeTo(iter.columns().statics);
+                regulars = regulars.mergeTo(iter.columns().regulars);
+            }
+        }
+        final RegularAndStaticColumns regularAndStaticColumns = new RegularAndStaticColumns(statics, regulars);
+        // If we have a 2ndary index, we must update it with deleted/shadowed cells.
+        // we can reuse a single CleanupTransaction for the duration of a partition.
+        // Currently, it doesn't do any batching of row updates, so every merge event
+        // for a single partition results in a fresh cycle of:
+        // * Get new Indexer instances
+        // * Indexer::start
+        // * Indexer::onRowMerge (for every row being merged by the compaction)
+        // * Indexer::commit
+        // A new OpOrder.Group is opened in an ARM block wrapping the commits
+        // TODO: this should probably be done asynchronously and batched.
+        return controller.cfs.indexManager.newCompactionTransaction(partitionKey, regularAndStaticColumns, versions.size(), nowInSec);
+    }
+
     private void updateBytesRead()
     {
-        long n = 0;
+        long[] bytesReadByLevel = new long[this.bytesReadByLevel.length];
         for (ISSTableScanner scanner : scanners)
-            n += scanner.getCurrentPosition();
-        bytesRead = n;
+        {
+            int level = scanner.level();
+            long n = scanner.getCurrentPosition();
+
+            if (level >= 0 && level < bytesReadByLevel.length)
+                bytesReadByLevel[level] += n;
+        }
+        this.bytesReadByLevel = bytesReadByLevel;
     }
 
     public long getBytesRead()
@@ -326,19 +373,14 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
     public void close()
     {
-        try
-        {
-            compacted.close();
-        }
-        finally
-        {
-            activeCompactions.finishCompaction(this);
-        }
+        updateBytesRead();
+
+        Throwables.maybeFail(Throwables.close(null, compacted));
     }
 
     public String toString()
     {
-        return this.getCompactionInfo().toString();
+        return String.format("%s: %s, (%d/%d)", type, metadata(), bytesRead(), totalBytes());
     }
 
     private class Purger extends PurgeFunction
@@ -375,7 +417,6 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         @Override
         protected void updateProgress()
         {
-            totalSourceCQLRows++;
             if ((++compactedUnfiltered) % UNFILTERED_TO_UPDATE_PROGRESS == 0)
                 updateBytesRead();
         }
@@ -719,34 +760,36 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     private static class AbortableUnfilteredPartitionTransformation extends Transformation<UnfilteredRowIterator>
     {
         private final AbortableUnfilteredRowTransformation abortableIter;
+        private final TableOperation op;
 
-        private AbortableUnfilteredPartitionTransformation(CompactionIterator iter)
+        private AbortableUnfilteredPartitionTransformation(TableOperation op)
         {
-            this.abortableIter = new AbortableUnfilteredRowTransformation(iter);
+            this.op = op;
+            this.abortableIter = new AbortableUnfilteredRowTransformation(op);
         }
 
         @Override
         protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
-            if (abortableIter.iter.isStopRequested())
-                throw new CompactionInterruptedException(abortableIter.iter.getCompactionInfo());
+            if (op.isStopRequested())
+                throw new CompactionInterruptedException(op.getProgress());
             return Transformation.apply(partition, abortableIter);
         }
     }
 
     private static class AbortableUnfilteredRowTransformation extends Transformation<UnfilteredRowIterator>
     {
-        private final CompactionIterator iter;
+        private final TableOperation op;
 
-        private AbortableUnfilteredRowTransformation(CompactionIterator iter)
+        private AbortableUnfilteredRowTransformation(TableOperation op)
         {
-            this.iter = iter;
+            this.op = op;
         }
 
         public Row applyToRow(Row row)
         {
-            if (iter.isStopRequested())
-                throw new CompactionInterruptedException(iter.getCompactionInfo());
+            if (op.isStopRequested())
+                throw new CompactionInterruptedException(op.getProgress());
             return row;
         }
     }

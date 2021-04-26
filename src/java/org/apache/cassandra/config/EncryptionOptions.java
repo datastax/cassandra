@@ -26,8 +26,10 @@ import java.util.Objects;
 import java.util.Set;
 
 import javax.annotation.Nullable;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 
 import org.slf4j.Logger;
@@ -400,6 +402,50 @@ public class EncryptionOptions
     public List<String> getAcceptedProtocols()
     {
         return sslContextFactoryInstance == null ? null : sslContextFactoryInstance.getAcceptedProtocols();
+    }
+    
+    /* This list is substituted in configurations that have explicitly specified the original "TLS" default,
+     * by extracting it from the default "TLS" SSL Context instance
+     */
+    private static final Supplier<List<String>> TLS_PROTOCOL_SUBSTITUTION = Suppliers.memoize(SSLFactory::tlsInstanceProtocolSubstitution);
+
+    /**
+     * Combine the pre-4.0 protocol field with the accepted_protocols list, substituting a list of
+     * explicit protocols for the previous catchall default of "TLS"
+     * @return array of protocol names suitable for passing to SslContextBuilder.protocols, or null if the default
+     */
+    public List<String> acceptedProtocols()
+    {
+        if (accepted_protocols == null)
+        {
+            if (protocol == null)
+            {
+                return null;
+            }
+            // TLS is accepted by SSLContext.getInstance as a shorthand for give me an engine that
+            // can speak some of the TLS protocols.  It is not supported by SSLEngine.setAcceptedProtocols
+            // so substitute if the user hasn't provided an accepted protocol configuration
+            else if (protocol.equalsIgnoreCase("TLS"))
+            {
+                return TLS_PROTOCOL_SUBSTITUTION.get();
+            }
+            else // the user was trying to limit to a single specific protocol, so try that
+            {
+                return ImmutableList.of(protocol);
+            }
+        }
+
+        if (protocol != null && !protocol.equalsIgnoreCase("TLS") &&
+            accepted_protocols.stream().noneMatch(ap -> ap.equalsIgnoreCase(protocol)))
+        {
+            // If the user provided a non-generic default protocol, append it to accepted_protocols - they wanted
+            // it after all.
+            return ImmutableList.<String>builder().addAll(accepted_protocols).add(protocol).build();
+        }
+        else
+        {
+            return accepted_protocols;
+        }
     }
 
     public String[] acceptedProtocolsArray()

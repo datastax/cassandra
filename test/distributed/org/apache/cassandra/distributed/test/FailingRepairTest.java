@@ -336,6 +336,11 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             return Collections.emptySet();
         }
 
+        public int level()
+        {
+            return 0;
+        }
+
         public TableMetadata metadata()
         {
             return null;
