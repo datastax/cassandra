@@ -30,8 +30,17 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.functions.ScalarFunction;
+import org.apache.cassandra.cql3.functions.UDAggregate;
+import org.apache.cassandra.cql3.functions.UDFunction;
+import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.schema.Functions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -45,14 +54,13 @@ import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import org.apache.cassandra.transport.ProtocolVersion;
 
+import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
-
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Iterables.transform;
 
 public final class CreateAggregateStatement extends AlterSchemaStatement
 {
@@ -64,6 +72,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     private final Term.Raw rawInitialValue;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
 
     public CreateAggregateStatement(String keyspaceName,
                                     String aggregateName,
@@ -73,7 +82,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                     FunctionName finalFunctionName,
                                     Term.Raw rawInitialValue,
                                     boolean orReplace,
-                                    boolean ifNotExists)
+                                    boolean ifNotExists,
+                                    boolean deterministic)
     {
         super(keyspaceName);
         this.aggregateName = aggregateName;
@@ -84,6 +94,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         this.rawInitialValue = rawInitialValue;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -271,6 +282,17 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         return new AuditLogContext(AuditLogEntryType.CREATE_AGGREGATE, keyspaceName, aggregateName);
     }
 
+    @Override
+    Set<String> clientWarnings(KeyspacesDiff diff)
+    {
+        if (deterministic)
+        {
+            return ImmutableSet.of(
+                String.format("Unsupported aggregate property was ignored (DETERMINISTIC) for %s", aggregateName));
+        }
+        return ImmutableSet.of();
+    }
+
     public String toString()
     {
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, aggregateName);
@@ -296,6 +318,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         private final Term.Raw rawInitialValue;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
 
         public Raw(FunctionName aggregateName,
                    List<CQL3Type.Raw> rawArgumentTypes,
@@ -304,7 +327,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                    String finalFunctionName,
                    Term.Raw rawInitialValue,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic)
         {
             this.aggregateName = aggregateName;
             this.rawArgumentTypes = rawArgumentTypes;
@@ -314,6 +338,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             this.rawInitialValue = rawInitialValue;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
         }
 
         public CreateAggregateStatement prepare(ClientState state)
@@ -328,7 +353,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                                 null != finalFunctionName ? new FunctionName(keyspaceName, finalFunctionName) : null,
                                                 rawInitialValue,
                                                 orReplace,
-                                                ifNotExists);
+                                                ifNotExists,
+                                                deterministic);
         }
     }
 }

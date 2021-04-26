@@ -654,6 +654,7 @@ createAggregateStatement returns [CreateAggregateStatement.Raw stmt]
     @init {
         boolean orReplace = false;
         boolean ifNotExists = false;
+        boolean deterministic = false;
 
         List<CQL3Type.Raw> argTypes = new ArrayList<>();
     }
@@ -675,7 +676,10 @@ createAggregateStatement returns [CreateAggregateStatement.Raw stmt]
       (
         K_INITCOND ival = term
       )?
-      { $stmt = new CreateAggregateStatement.Raw(fn, argTypes, stype, sfunc, ffunc, ival, orReplace, ifNotExists); }
+      (
+        K_DETERMINISTIC { deterministic = true; }
+      )?
+      { $stmt = new CreateAggregateStatement.Raw(fn, argTypes, stype, sfunc, ffunc, ival, orReplace, ifNotExists, deterministic); }
     ;
 
 dropAggregateStatement returns [DropAggregateStatement.Raw stmt]
