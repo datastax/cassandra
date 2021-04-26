@@ -209,6 +209,8 @@ K_INPUT:       I N P U T;
 K_LANGUAGE:    L A N G U A G E;
 K_OR:          O R;
 K_REPLACE:     R E P L A C E;
+K_DETERMINISTIC: D E T E R M I N I S T I C;
+K_MONOTONIC:   M O N O T O N I C;
 
 K_JSON:        J S O N;
 K_DEFAULT:     D E F A U L T;

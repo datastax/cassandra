@@ -59,6 +59,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
     private final String body;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
+    private final boolean monotonic;
 
     public CreateFunctionStatement(String keyspaceName,
                                    String functionName,
@@ -69,7 +71,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                    String language,
                                    String body,
                                    boolean orReplace,
-                                   boolean ifNotExists)
+                                   boolean ifNotExists,
+                                   boolean deterministic,
+                                   boolean monotonic)
     {
         super(keyspaceName);
         this.functionName = functionName;
@@ -81,6 +85,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         this.body = body;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
+        this.monotonic = monotonic;
     }
 
     // TODO: replace affected aggregates !!
@@ -198,6 +204,24 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         return new AuditLogContext(AuditLogEntryType.CREATE_FUNCTION, keyspaceName, functionName);
     }
 
+    @Override
+    Set<String> clientWarnings(KeyspacesDiff diff)
+    {
+        ImmutableSet.Builder<String> warnings = ImmutableSet.builder();
+
+        if (monotonic)
+        {
+            warnings.add("Unsupported function property was ignored (MONOTONIC)");
+        }
+
+        if (deterministic)
+        {
+            warnings.add("Unsupported function property was ignored (DETERMINISTIC)");
+        }
+
+        return warnings.build();
+    }
+
     public String toString()
     {
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, functionName);
@@ -214,6 +238,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         private final String body;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
+        private final boolean monotonic;
 
         public Raw(FunctionName name,
                    List<ColumnIdentifier> argumentNames,
@@ -223,7 +249,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                    String language,
                    String body,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic,
+                   boolean monotonic)
         {
             this.name = name;
             this.argumentNames = argumentNames;
@@ -234,6 +262,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
             this.body = body;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
+            this.monotonic = monotonic;
         }
 
         public CreateFunctionStatement prepare(ClientState state)
@@ -249,7 +279,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                                language,
                                                body,
                                                orReplace,
-                                               ifNotExists);
+                                               ifNotExists,
+                                               deterministic,
+                                               monotonic);
         }
     }
 }

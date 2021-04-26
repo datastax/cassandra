@@ -707,6 +707,9 @@ createFunctionStatement returns [CreateFunctionStatement.Raw stmt]
         List<ColumnIdentifier> argNames = new ArrayList<>();
         List<CQL3Type.Raw> argTypes = new ArrayList<>();
         boolean calledOnNullInput = false;
+
+        boolean deterministic = false;
+        boolean monotonic = false;
     }
     : K_CREATE (K_OR K_REPLACE { orReplace = true; })?
       K_FUNCTION
@@ -720,10 +723,16 @@ createFunctionStatement returns [CreateFunctionStatement.Raw stmt]
       ')'
       ( (K_RETURNS K_NULL) | (K_CALLED { calledOnNullInput=true; })) K_ON K_NULL K_INPUT
       K_RETURNS returnType = comparatorType
+      ( K_DETERMINISTIC { deterministic = true; } )?
+      (
+        K_MONOTONIC { monotonic=true; }
+        | K_MONOTONIC K_ON k=noncol_ident { monotonic=true; }
+      )?
       K_LANGUAGE language = IDENT
       K_AS body = STRING_LITERAL
       { $stmt = new CreateFunctionStatement.Raw(
-          fn, argNames, argTypes, returnType, calledOnNullInput, $language.text.toLowerCase(), $body.text, orReplace, ifNotExists);
+          fn, argNames, argTypes, returnType, calledOnNullInput, $language.text.toLowerCase(), $body.text, orReplace,
+          ifNotExists, deterministic, monotonic);
       }
     ;
 
@@ -1908,5 +1917,7 @@ basic_unreserved_keyword returns [String str]
         | K_EDGE
         | K_VERTEX
         | K_LABEL
+        | K_DETERMINISTIC
+        | K_MONOTONIC
         ) { $str = $k.text; }
     ;
