@@ -43,7 +43,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  long gcBefore,
                                  ShardManager shardManager)
     {
-        super(cfs, txn, gcBefore);
+        super(cfs, txn, gcBefore, false);
         this.controller = strategy.getController();
         this.shardManager = shardManager;
     }

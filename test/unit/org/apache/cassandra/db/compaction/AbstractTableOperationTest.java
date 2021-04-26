@@ -32,15 +32,15 @@ import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
-public class CompactionInfoTest extends AbstractPendingAntiCompactionTest
+public class AbstractTableOperationTest extends AbstractPendingAntiCompactionTest
 {
     @Test
-    public void testCompactionInfoToStringContainsTaskId()
+    public void testAbstractTableOperationToStringContainsTaskId()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         TimeUUID expectedTaskId = nextTimeUUID();
-        CompactionInfo compactionInfo = new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, 0, 1000, expectedTaskId, new ArrayList<>());
-        Assertions.assertThat(compactionInfo.toString())
+        AbstractTableOperation.OperationProgress task = new AbstractTableOperation.OperationProgress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, expectedTaskId, new ArrayList<>());
+        Assertions.assertThat(task.toString())
                   .contains(expectedTaskId.toString());
     }
 
@@ -50,8 +50,9 @@ public class CompactionInfoTest extends AbstractPendingAntiCompactionTest
         UUID tableId = UUID.randomUUID();
         TimeUUID taskId = nextTimeUUID();
         ColumnFamilyStore cfs = MockSchema.newCFS(builder -> builder.id(TableId.fromUUID(tableId)));
-        CompactionInfo compactionInfo = new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, 0, 1000, taskId, new ArrayList<>());
-        Assertions.assertThat(compactionInfo.toString())
-                  .isEqualTo("Compaction(%s, 0 / 1000 bytes)@%s(mockks, mockcf1)", taskId, tableId);
+        AbstractTableOperation.OperationProgress task = new AbstractTableOperation.OperationProgress(cfs.metadata(), OperationType.COMPACTION, 0, 1000, taskId, new ArrayList<>());
+        Assertions.assertThat(task.toString())
+                  .isEqualTo("Compaction(%s, 0 / 1000 bytes)@%s(%s, %s)",
+                             taskId, tableId, cfs.getKeyspaceName(), cfs.getTableName());
     }
 }
