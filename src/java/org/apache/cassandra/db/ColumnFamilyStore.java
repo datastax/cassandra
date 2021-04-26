@@ -87,7 +87,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
+import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -473,6 +474,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
+        compactionStrategyManager.reload(metadata().params.compaction);
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
@@ -893,6 +895,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public String getTableName()
     {
         return name;
+    }
+
+    public String getKeyspaceName()
+    {
+        return keyspace.getName();
     }
 
     public Descriptor newSSTableDescriptor(File directory)
@@ -1678,9 +1685,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getView().select(sstableSet);
     }
 
-    public Iterable<SSTableReader> getUncompactingSSTables()
+    public Iterable<SSTableReader> getNoncompactingSSTables()
     {
-        return data.getUncompacting();
+        return data.getNoncompacting();
+    }
+
+    public Iterable<? extends SSTableReader> getNoncompactingSSTables(Iterable<? extends SSTableReader> candidates)
+    {
+        return data.getNoncompacting(candidates);
+    }
+
+    public Set<SSTableReader> getCompactingSSTables()
+    {
+        return data.getCompacting();
     }
 
     public Map<UUID, PendingStat> getPendingRepairStats()
@@ -2386,6 +2403,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             cfs.runWithCompactionsDisabled((Callable<Void>) () -> {
                 cfs.data.reset(memtableFactory.create(new AtomicReference<>(CommitLogPosition.NONE), cfs.metadata, cfs));
+                cfs.compactionStrategyManager.forceReload();
                 return null;
             }, true, false);
         }
@@ -2474,7 +2492,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
         };
 
-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, CompactionInfo.StopTrigger.TRUNCATE);
+        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
 
         viewManager.build();
         logger.info("Truncate of {}.{} is complete", keyspace.getName(), name);
@@ -2507,14 +2525,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return runWithCompactionsDisabled(callable, (sstable) -> true, interruptValidation, interruptViews, true);
     }
 
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews, CompactionInfo.StopTrigger trigger)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews, AbstractTableOperation.StopTrigger trigger)
     {
         return runWithCompactionsDisabled(callable, (sstable) -> true, interruptValidation, interruptViews, true, trigger);
     }
 
     public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
     {
-        return runWithCompactionsDisabled(callable, sstablesPredicate, interruptValidation, interruptViews, interruptIndexes, CompactionInfo.StopTrigger.NONE);
+        return runWithCompactionsDisabled(callable, sstablesPredicate, interruptValidation, interruptViews, interruptIndexes, AbstractTableOperation.StopTrigger.NONE);
     }
 
     /**
@@ -2527,7 +2545,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      * @param interruptIndexes if we should interrupt compactions on indexes. NOTE: if you set this to true your sstablePredicate
      *                         must be able to handle LocalPartitioner sstables!
      */
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes, CompactionInfo.StopTrigger trigger)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes, AbstractTableOperation.StopTrigger trigger)
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
@@ -2675,6 +2693,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public CompactionStrategyManager getCompactionStrategyManager()
     {
         return compactionStrategyManager;
+    }
+
+    public CompactionLogger getCompactionLogger()
+    {
+        return compactionStrategyManager == null ? null : compactionStrategyManager.compactionLogger;
     }
 
     public void setCrcCheckChance(double crcCheckChance)
