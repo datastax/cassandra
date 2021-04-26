@@ -37,8 +37,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionInfo;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.FSWriteError;
@@ -293,10 +292,10 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         return CompactionManager.instance.submitCacheWrite(getWriter(keysToSave));
     }
 
-    public class Writer extends CompactionInfo.Holder
+    public class Writer extends AbstractTableOperation
     {
         private final Iterator<K> keyIterator;
-        private final CompactionInfo info;
+        private final OperationProgress info;
         private long keysWritten;
         private final long keysEstimate;
 
@@ -324,13 +323,13 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             else
                 type = OperationType.UNKNOWN;
 
-            info = CompactionInfo.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
-                                                  type,
-                                                  0,
-                                                  keysEstimate,
-                                                  Unit.KEYS,
-                                                  nextTimeUUID(),
-                                                  getCacheDataPath(CURRENT_VERSION).toPath().toString());
+            info = OperationProgress.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
+                                                     type,
+                                                     0,
+                                                     keysEstimate,
+                                                     Unit.KEYS, 
+                                                     nextTimeUUID(),
+                                                     getCacheDataPath(CURRENT_VERSION).toPath().toString());
         }
 
         public CacheService.CacheType cacheType()
@@ -338,7 +337,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             return cacheType;
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             // keyset can change in size, thus total can too
             // TODO need to check for this one... was: info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));

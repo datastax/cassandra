@@ -636,6 +636,21 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     /**
+     * Called by {@link org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy} and other compaction
+     * strategies to determine the read hotness of this sstables, this method returna a "read hotness" which is
+     * calculated by looking at the last two hours read rate and dividing this number by the estimated number of keys.
+     * <p/>
+     * Note that some system tables do not have read meters, in which case this method will return zero.
+     *
+     * @return the last two hours read rate per estimated key
+     */
+    public double hotness()
+    {
+        // system tables don't have read meters, just use 0.0 for the hotness
+        return readMeter == null ? 0.0 : readMeter.twoHourRate() / estimatedKeys();
+    }
+
+    /**
      * All the resources which should be released upon closing this sstable reader are registered with in
      * {@link GlobalTidy}. This method lets close a provided resource explicitly any time and unregister it from
      * {@link GlobalTidy} so that it is not tried to be released twice.

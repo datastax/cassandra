@@ -220,7 +220,7 @@ public class IndexSummaryManager<T extends SSTableReader & IndexSummarySupport<T
                 {
                     View view = cfStore.getTracker().getView();
                     allSSTables = ImmutableSet.copyOf(view.select(SSTableSet.CANONICAL));
-                    nonCompacting = ImmutableSet.copyOf(view.getUncompacting(allSSTables));
+                    nonCompacting = ImmutableSet.copyOf(view.getNoncompacting(allSSTables));
                 }
                 while (null == (txn = cfStore.getTracker().tryModify(nonCompacting, OperationType.INDEX_SUMMARY)));
 
@@ -284,9 +284,9 @@ public class IndexSummaryManager<T extends SSTableReader & IndexSummarySupport<T
      * @return a list of new SSTableReader instances
      */
     @VisibleForTesting
-    public static <T extends SSTableReader & IndexSummarySupport> List<T> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
+    public static <T extends SSTableReader & IndexSummarySupport<T>> List<T> redistributeSummaries(IndexSummaryRedistribution redistribution) throws IOException
     {
-        return (List<T>) CompactionManager.instance.runAsActiveCompaction(redistribution, redistribution::redistributeSummaries);
+        return CompactionManager.instance.runIndexSummaryRedistribution(redistribution);
     }
 
     @VisibleForTesting

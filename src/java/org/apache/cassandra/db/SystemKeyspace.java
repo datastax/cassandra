@@ -316,7 +316,7 @@ public final class SystemKeyspace
                 + "columnfamily_name text,"
                 + "compacted_at timestamp,"
                 + "keyspace_name text,"
-                + "rows_merged map<int, bigint>,"
+                + "rows_merged map<int, bigint>," // Note that we currently store partitions, not rows!
                 + "compaction_properties frozen<map<text, text>>,"
                 + "PRIMARY KEY ((id)))")
                 .defaultTimeToLive((int) TimeUnit.DAYS.toSeconds(7))
@@ -614,12 +614,13 @@ public final class SystemKeyspace
                                                long compactedAt,
                                                long bytesIn,
                                                long bytesOut,
-                                               Map<Integer, Long> rowsMerged,
+                                               Map<Integer, Long> partitionsMerged,
                                                Map<String, String> compactionProperties)
     {
         // don't write anything when the history table itself is compacted, since that would in turn cause new compactions
         if (ksname.equals("system") && cfname.equals(COMPACTION_HISTORY))
             return;
+        // For historical reasons (pre 3.0 refactor) we call the final field rows_merged but we actually store partitions!
         String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged, compaction_properties) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         executeInternal(format(req, COMPACTION_HISTORY),
                         taskId,
@@ -628,7 +629,7 @@ public final class SystemKeyspace
                         ByteBufferUtil.bytes(compactedAt),
                         bytesIn,
                         bytesOut,
-                        rowsMerged,
+                        partitionsMerged,
                         compactionProperties);
     }
 

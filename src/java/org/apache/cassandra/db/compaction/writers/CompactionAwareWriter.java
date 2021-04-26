@@ -322,4 +322,9 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
                          .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
                          .addDefaultComponents(cfs.indexManager.listIndexGroups());
     }
+    
+    public long bytesWritten()
+    {
+        return sstableWriter.bytesWritten();
+    }
 }
