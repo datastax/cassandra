@@ -413,9 +413,23 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     }
 
     @Override
+    public void replaceSSTables(Collection<SSTableReader> removed, Collection<SSTableReader> added)
+    {
+        for (SSTableReader remove : removed)
+            removeSSTable(remove);
+        addSSTables(added);
+    }
+
+    @Override
     public synchronized void addSSTable(SSTableReader added)
     {
         sstables.add(added);
+    }
+
+    @Override
+    void removeDeadSSTables()
+    {
+        removeDeadSSTables(sstables);
     }
 
     @Override

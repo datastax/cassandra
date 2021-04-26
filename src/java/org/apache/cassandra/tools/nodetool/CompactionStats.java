@@ -27,8 +27,8 @@ import java.util.Map.Entry;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
+import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.tools.NodeProbe;
@@ -50,6 +50,11 @@ public class CompactionStats extends NodeToolCmd
             description = "Display fields matching vtable output")
     private boolean vtableOutput = false;
 
+    @Option(title = "aggregate",
+    name = {"-A", "--aggregate"},
+    description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
+    private boolean aggregate = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -58,6 +63,11 @@ public class CompactionStats extends NodeToolCmd
         pendingTasksAndConcurrentCompactorsStats(probe, tableBuilder);
         compactionsStats(probe, tableBuilder);
         reportCompactionTable(probe.getCompactionManagerProxy().getCompactions(), probe.getCompactionThroughputBytes(), humanReadable, vtableOutput, out, tableBuilder);
+
+        if (aggregate)
+        {
+            reportAggregateCompactions(probe);
+        }
     }
 
     private void pendingTasksAndConcurrentCompactorsStats(NodeProbe probe, TableBuilder tableBuilder)
@@ -135,21 +145,21 @@ public class CompactionStats extends NodeToolCmd
 
         for (Map<String, String> c : compactions)
         {
-            long total = Long.parseLong(c.get(CompactionInfo.TOTAL));
-            long completed = Long.parseLong(c.get(CompactionInfo.COMPLETED));
-            String taskType = c.get(CompactionInfo.TASK_TYPE);
-            String keyspace = c.get(CompactionInfo.KEYSPACE);
-            String columnFamily = c.get(CompactionInfo.COLUMNFAMILY);
-            String unit = c.get(CompactionInfo.UNIT);
-            boolean toFileSize = humanReadable && Unit.isFileSize(unit);
-            String[] tables = c.get(CompactionInfo.SSTABLES).split(",");
+            long total = Long.parseLong(c.get(TableOperation.Progress.TOTAL));
+            long completed = Long.parseLong(c.get(TableOperation.Progress.COMPLETED));
+            String taskType = c.get(TableOperation.Progress.OPERATION_TYPE);
+            String keyspace = c.get(TableOperation.Progress.KEYSPACE);
+            String columnFamily = c.get(TableOperation.Progress.COLUMNFAMILY);
+            String unit = c.get(TableOperation.Progress.UNIT);
+            boolean toFileSize = humanReadable && TableOperation.Unit.isFileSize(unit);
+            String[] tables = c.get(TableOperation.Progress.SSTABLES).split(",");
             String progressStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
             String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
             String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + '%';
-            String id = c.get(CompactionInfo.COMPACTION_ID);
+            String id = c.get(TableOperation.Progress.OPERATION_ID);
             if (vtableOutput)
             {
-                String targetDirectory = c.get(CompactionInfo.TARGET_DIRECTORY);
+                String targetDirectory = c.get(TableOperation.Progress.TARGET_DIRECTORY);
                 table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, unit, targetDirectory);
             }
             else
@@ -169,4 +179,14 @@ public class CompactionStats extends NodeToolCmd
         table.printTo(out);
     }
 
+    private static void reportAggregateCompactions(NodeProbe probe)
+    {
+        List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
+        if (statistics.isEmpty())
+            return;
+
+        System.out.println("Aggregated view:");
+        for (CompactionStrategyStatistics stat : statistics)
+            System.out.println(stat.toString());
+    }
 }
