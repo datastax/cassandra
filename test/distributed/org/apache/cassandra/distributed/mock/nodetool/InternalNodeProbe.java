@@ -160,7 +160,36 @@ public class InternalNodeProbe extends NodeProbe
     @Override
     public Object getCompactionMetric(String metricName)
     {
-        throw new UnsupportedOperationException();
+        CompactionMetrics metrics = CompactionManager.instance.getMetrics();
+        switch(metricName)
+        {
+            case "BytesCompacted":
+                return metrics.bytesCompacted;
+            case "CompletedTasks":
+                return metrics.completedTasks.getValue();
+            case "CompactionsAborted":
+                return metrics.compactionsAborted;
+            case "CompactionsReduced":
+                return metrics.compactionsReduced;
+            case "PendingTasks":
+                return metrics.pendingTasks.getValue();
+            case "PendingTasksByTableName":
+                return metrics.pendingTasksByTableName.getValue();
+            case "WriteAmplificationByTableName":
+                return metrics.writeAmplificationByTableName.getValue();
+            case "AggregateCompactions":
+                return metrics.aggregateCompactions.getValue();
+            case "MaxOverlapsMap":
+                return metrics.overlapsMap.getValue();
+            case "SSTablesDroppedFromCompaction":
+                return metrics.sstablesDropppedFromCompactions;
+            case "TotalCompactionsCompleted":
+                return metrics.totalCompactionsCompleted;
+            case "CompressedBytesCompacted":
+                return metrics.compressedBytesCompacted;
+            default:
+                throw new RuntimeException("Unknown compaction metric: " + metricName);
+        }
     }
 
     @Override

@@ -30,11 +30,12 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
@@ -69,7 +70,6 @@ public class SSTableTasksTableTest extends CQLTester
 
         long bytesCompacted = 123;
         long bytesTotal = 123456;
-        long totalCompressedBytes = 112233;
         TimeUUID compactionId = nextTimeUUID();
         List<SSTableReader> sstables = IntStream.range(0, 10)
                 .mapToObj(i -> MockSchema.sstable(i, i * 10L, i * 10L + 9, cfs))
@@ -77,11 +77,11 @@ public class SSTableTasksTableTest extends CQLTester
 
         String directory = String.format("/some/datadir/%s/%s-%s", cfs.metadata.keyspace, cfs.metadata.name, cfs.metadata.id.asUUID());
 
-        CompactionInfo.Holder compactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation compactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, totalCompressedBytes, compactionId, sstables, directory);
+                return new OperationProgress(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables, directory);
             }
 
             public boolean isGlobal()
@@ -90,14 +90,14 @@ public class SSTableTasksTableTest extends CQLTester
             }
         };
 
-        CompactionManager.instance.active.beginCompaction(compactionHolder);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(compactionHolder))
+        {
+            UntypedResultSet result = execute("SELECT * FROM vts.sstable_tasks");
+            assertRows(result, row(CQLTester.KEYSPACE, currentTable(), compactionId, 1.0 * bytesCompacted / bytesTotal,
+                                   OperationType.COMPACTION.toString().toLowerCase(), bytesCompacted, sstables.size(),
+                                   directory, bytesTotal, AbstractTableOperation.Unit.BYTES.toString()));
+        }
         UntypedResultSet result = execute("SELECT * FROM vts.sstable_tasks");
-        assertRows(result, row(CQLTester.KEYSPACE, currentTable(), compactionId, 1.0 * bytesCompacted / bytesTotal,
-                OperationType.COMPACTION.toString().toLowerCase(), bytesCompacted, sstables.size(),
-                directory, bytesTotal, totalCompressedBytes, CompactionInfo.Unit.BYTES.toString()));
-
-        CompactionManager.instance.active.finishCompaction(compactionHolder);
-        result = execute("SELECT * FROM vts.sstable_tasks");
         assertEmpty(result);
     }
 }

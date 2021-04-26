@@ -61,6 +61,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
@@ -83,7 +84,7 @@ public class CompactionsCQLTest extends CQLTester
     public void before() throws IOException
     {
         strategy = DatabaseDescriptor.getCorruptedTombstoneStrategy();
-
+        
         CommitLog.instance.resetUnsafe(true);
     }
 
@@ -494,7 +495,7 @@ public class CompactionsCQLTest extends CQLTester
         AbstractCompactionTask act = lcs.getNextBackgroundTask(0);
         // we should be compacting all 50 sstables:
         assertEquals(50, act.transaction.originals().size());
-        act.execute(ActiveCompactionsTracker.NOOP);
+        act.execute();
     }
 
     @Test
@@ -531,7 +532,7 @@ public class CompactionsCQLTest extends CQLTester
         assertEquals(0, ((LeveledCompactionTask)act).getLevel());
         assertTrue(act.transaction.originals().stream().allMatch(s -> s.getSSTableLevel() == 0));
         txn.abort(); // unmark the l1 sstable compacting
-        act.execute(ActiveCompactionsTracker.NOOP);
+        act.execute();
     }
 
     @Test
@@ -595,7 +596,7 @@ public class CompactionsCQLTest extends CQLTester
         // sstables have been removed.
         try
         {
-            AbstractCompactionTask task = new NotifyingCompactionTask((LeveledCompactionTask) lcs.getNextBackgroundTask(0));
+            AbstractCompactionTask task = new NotifyingCompactionTask(lcs, (LeveledCompactionTask) lcs.getNextBackgroundTask(0));
             task.execute(CompactionManager.instance.active);
             fail("task should throw exception");
         }
@@ -618,9 +619,9 @@ public class CompactionsCQLTest extends CQLTester
 
     private static class NotifyingCompactionTask extends LeveledCompactionTask
     {
-        public NotifyingCompactionTask(LeveledCompactionTask task)
+        public NotifyingCompactionTask(LeveledCompactionStrategy lcs, LeveledCompactionTask task)
         {
-            super(task.cfs, task.transaction, task.getLevel(), task.gcBefore, task.getLevel(), false);
+            super(lcs, task.transaction, task.getLevel(), task.gcBefore, task.getLevel(), false);
         }
 
         @Override
@@ -872,11 +873,8 @@ public class CompactionsCQLTest extends CQLTester
             execute("insert into %s (id, i) values (?,?)", i, i);
             getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
-        // When we have an existing compaction with sstables of total size more than double the available space,
-        // we should not be able to then run a major compaction
-        CompactionInfo.Holder holder = holder(OperationType.COMPACTION, 2);
-        CompactionManager.instance.active.beginCompaction(holder);
-        try
+        AbstractTableOperation holder = holder(OperationType.COMPACTION);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(holder))
         {
             getCurrentColumnFamilyStore().forceMajorCompaction();
             fail("Exception expected");
@@ -885,56 +883,30 @@ public class CompactionsCQLTest extends CQLTester
         {
             // expected
         }
-        finally
-        {
-            CompactionManager.instance.active.finishCompaction(holder);
-        }
         // don't block compactions if there is a huge validation
-        holder = holder(OperationType.VALIDATION, 2);
-        CompactionManager.instance.active.beginCompaction(holder);
-        try
+        holder = holder(OperationType.VALIDATION);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(holder))
         {
             getCurrentColumnFamilyStore().forceMajorCompaction();
-        }
-        finally
-        {
-            CompactionManager.instance.active.finishCompaction(holder);
-        }
-
-        // Should be able to run when the sstables in question are 90% of the total available space
-        holder = holder(OperationType.COMPACTION, 0.9);
-        CompactionManager.instance.active.beginCompaction(holder);
-        try
-        {
-            getCurrentColumnFamilyStore().forceMajorCompaction();
-        }
-        finally
-        {
-            CompactionManager.instance.active.finishCompaction(holder);
         }
     }
 
-    private CompactionInfo.Holder holder(OperationType opType, double availableSpaceMultiplier)
+    private AbstractTableOperation holder(OperationType opType)
     {
-        CompactionInfo.Holder holder = new CompactionInfo.Holder()
+        AbstractTableOperation holder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
                 long availableSpace = 0;
                 for (File f : getCurrentColumnFamilyStore().getDirectories().getCFDirectories())
                     availableSpace += PathUtils.tryGetSpace(f.toPath(), FileStore::getUsableSpace);
 
-                Set<SSTableReader> liveSSTables = getCurrentColumnFamilyStore().getLiveSSTables();
-                long totalDiskUsage = (long)(availableSpace * availableSpaceMultiplier);
-                // Arbitrary compression ratio of 3.4
-                long totalUncompressedSize = (long) ((double) totalDiskUsage * 3.4);
-                return new CompactionInfo(getCurrentColumnFamilyStore().metadata(),
-                                          opType,
-                                          +0,
-                                          totalUncompressedSize,
-                                          totalDiskUsage,
-                                          nextTimeUUID(),
-                                          liveSSTables);
+                return new OperationProgress(getCurrentColumnFamilyStore().metadata(), 
+                                             opType,                                               
+                                             +0,                                               
+                                             +availableSpace * 2, 
+                                             nextTimeUUID(),                                                                                                                   
+                                             getCurrentColumnFamilyStore().getLiveSSTables());
             }
 
             public boolean isGlobal()

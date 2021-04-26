@@ -103,7 +103,7 @@ public class StreamSessionTest extends CQLTester
         do
         {
             Thread.sleep(100);
-        } while (!CompactionManager.instance.active.getCompactions().isEmpty());
+        } while (!CompactionManager.instance.active.getTableOperations().isEmpty());
 
         assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
 
@@ -137,7 +137,7 @@ public class StreamSessionTest extends CQLTester
         do
         {
             Thread.sleep(100);
-        } while (!CompactionManager.instance.active.getCompactions().isEmpty());
+        } while (!CompactionManager.instance.active.getTableOperations().isEmpty());
 
         assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
 

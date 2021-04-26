@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -65,24 +65,23 @@ final class SSTableTasksTable extends AbstractVirtualTable
     {
         SimpleDataSet result = new SimpleDataSet(metadata());
 
-        for (CompactionInfo task : CompactionManager.instance.getSSTableTasks())
+        for (AbstractTableOperation.OperationProgress task : CompactionManager.instance.getSSTableTasks())
         {
-            long completed = task.getCompleted();
-            long total = task.getTotal();
-            long totalCompressed = task.getTotalCompressed();
+            long completed = task.completed();
+            long total = task.total();
 
             double completionRatio = total == 0L ? 1.0 : (((double) completed) / total);
 
-            result.row(task.getKeyspace().orElse("*"),
-                       task.getTable().orElse("*"),
-                       task.getTaskId())
+            result.row(task.keyspace().orElse("*"),
+                       task.table().orElse("*"),
+                       task.operationId())
                   .column(COMPLETION_RATIO, completionRatio)
-                  .column(KIND, task.getTaskType().toString().toLowerCase())
+                  .column(KIND, task.operationType().toString().toLowerCase())
                   .column(PROGRESS, completed)
-                  .column(SSTABLES, task.getSSTables().size())
+                  .column(SSTABLES, task.sstables().size())
                   .column(TOTAL, total)
-                  .column(UNIT, task.getUnit().toString().toLowerCase())
-                  .column(TOTAL_COMPRESSED, totalCompressed)
+                   .column(UNIT, task.unit().toString().toLowerCase())
+                   .column(TOTAL_COMPRESSED, 0L)
                   .column(TARGET_DIRECTORY, task.targetDirectory());
         }
 
