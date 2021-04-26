@@ -32,14 +32,15 @@ import java.util.function.LongPredicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionController;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -111,7 +112,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         }
     }
 
-    public CompactionInfo.Holder getVerifyInfo()
+    public AbstractTableOperation getVerifyInfo()
     {
         return verifyInfo;
     }
@@ -128,7 +129,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             try
             {
                 sstable.mutateRepairedAndReload(ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
-                cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+                cfs.getTracker().notifySSTableRepairedStatusChanged(ImmutableList.of(sstable));
             }
             catch (IOException ioe)
             {
@@ -282,7 +283,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             {
 
                 if (verifyInfo.isStopRequested())
-                    throw new CompactionInterruptedException(verifyInfo.getCompactionInfo());
+                    throw new CompactionInterruptedException(verifyInfo.getProgress());
 
                 long rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at %d", rowStart);
@@ -469,7 +470,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         }
     }
 
-    protected static class VerifyInfo extends CompactionInfo.Holder
+    protected static class VerifyInfo extends AbstractTableOperation
     {
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
@@ -484,17 +485,17 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             verificationCompactionId = TimeUUID.Generator.nextTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.VERIFY,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          verificationCompactionId,
-                                          ImmutableSet.of(sstable));
+                return new OperationProgress(sstable.metadata(),
+                                             OperationType.VERIFY,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             verificationCompactionId,
+                                             ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {
