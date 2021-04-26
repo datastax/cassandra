@@ -42,7 +42,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -165,7 +164,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 {
                     if (isStopRequested())
                     {
-                        throw new CompactionInterruptedException(getCompactionInfo());
+                        throw new CompactionInterruptedException(getProgress());
                     }
 
                     DecoratedKey key = keys.next();
@@ -241,14 +240,14 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     }
 
     @Override
-    public CompactionInfo getCompactionInfo()
+    public OperationProgress getProgress()
     {
-        return new CompactionInfo(metadata,
-                                  OperationType.INDEX_BUILD,
-                                  bytesProcessed,
-                                  totalSizeInBytes,
-                                  compactionId,
-                                  sstables.keySet());
+        return new OperationProgress(metadata,
+                                     OperationType.INDEX_BUILD,
+                                     bytesProcessed,
+                                     totalSizeInBytes,
+                                     compactionId,
+                                     sstables.keySet());
     }
 
     /**

@@ -185,8 +185,11 @@ public class CompactionStrategyManager implements INotificationConsumer
         currentBoundaries = boundariesSupplier.get();
         params = schemaCompactionParams = cfs.metadata().params.compaction;
         enabled = params.isEnabled();
-        setStrategy(schemaCompactionParams);
-        startup();
+    }
+
+    CompactionLogger compactionLogger()
+    {
+        return compactionLogger;
     }
 
     /**
@@ -262,7 +265,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             if (txn != null)
             {
                 logger.debug("Running automatic sstable upgrade for {}", sstable);
-                return getCompactionStrategyFor(sstable).getCompactionTask(txn, Integer.MIN_VALUE, Long.MAX_VALUE);
+                return getCompactionStrategyFor(sstable).createCompactionTask(txn, Integer.MIN_VALUE, Long.MAX_VALUE);
             }
         }
         return null;
@@ -496,7 +499,7 @@ public class CompactionStrategyManager implements INotificationConsumer
     /**
      * @param newParams new CompactionParams set in via CQL
      */
-    private void reloadParamsFromSchema(CompactionParams newParams)
+    public void reloadParamsFromSchema(CompactionParams newParams)
     {
         logger.debug("Recreating compaction strategy for {}.{} - compaction parameters changed via CQL",
                      cfs.getKeyspaceName(), cfs.getTableName());
@@ -533,6 +536,22 @@ public class CompactionStrategyManager implements INotificationConsumer
         {
             if (!params.equals(this.params))
                 reloadParamsFromJMX(params);
+        }
+        finally
+        {
+            writeLock.unlock();
+        }
+    }
+
+    /**
+     * Version of the above forcing the strategy to always be reloaded. Used by tests that need to clear the state.
+     */
+    public void forceReload()
+    {
+        writeLock.lock();
+        try
+        {
+            reloadParamsFromSchema(schemaCompactionParams);
         }
         finally
         {
@@ -1037,7 +1056,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         try
         {
             validateForCompaction(txn.originals());
-            return compactionStrategyFor(txn.originals().iterator().next()).getCompactionTask(txn, gcBefore, maxSSTableBytes);
+            return compactionStrategyFor(txn.originals().iterator().next()).createCompactionTask(txn, gcBefore, maxSSTableBytes);
         }
         finally
         {
@@ -1198,7 +1217,14 @@ public class CompactionStrategyManager implements INotificationConsumer
 
     public List<List<AbstractCompactionStrategy>> getStrategies()
     {
-        maybeReloadDiskBoundaries();
+        return getStrategies(true);
+    }
+
+    private List<List<AbstractCompactionStrategy>> getStrategies(boolean checkBoundaries)
+    {
+        if (checkBoundaries)
+            maybeReloadDiskBoundaries();
+
         readLock.lock();
         try
         {
@@ -1212,7 +1238,19 @@ public class CompactionStrategyManager implements INotificationConsumer
         }
     }
 
-    public void overrideLocalParams(CompactionParams params)
+    /**
+     * @return the statistics for the compaction strategies that have compactions in progress or pending
+     */
+    public List<CompactionStrategyStatistics> getStrategyStatistics()
+    {
+        return getStrategies(false).stream()
+                                   .flatMap(list -> list.stream())
+                                   .filter(strategy -> strategy.getTotalCompactions() > 0)
+                                   .map(AbstractCompactionStrategy::getStatistics)
+                                   .collect(Collectors.toList());
+    }
+
+    public void setNewLocalCompactionStrategy(CompactionParams params)
     {
         logger.info("Switching local compaction strategy from {} to {}", this.params, params);
         maybeReloadParamsFromJMX(params);
