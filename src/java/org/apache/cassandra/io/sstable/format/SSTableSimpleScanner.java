@@ -126,6 +126,12 @@ implements ISSTableScanner
         return ImmutableSet.of(sstable);
     }
 
+    @Override
+    public int level()
+    {
+        return 0;
+    }
+
     public TableMetadata metadata()
     {
         return sstable.metadata();

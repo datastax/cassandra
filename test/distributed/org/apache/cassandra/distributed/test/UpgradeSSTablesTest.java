@@ -33,10 +33,10 @@ import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactions;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.ActiveOperations;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
@@ -319,20 +319,20 @@ public class UpgradeSSTablesTest extends TestBaseImpl
 
         public static void install(ClassLoader classLoader, Integer num)
         {
-            new ByteBuddy().rebase(ActiveCompactions.class)
-                           .method(named("beginCompaction"))
+            new ByteBuddy().rebase(ActiveOperations.class)
+                           .method(named("onOperationStart"))
                            .intercept(MethodDelegation.to(UpgradeSStablesLatchByteman.class))
                            .make()
                            .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
         }
 
         @SuppressWarnings("unused")
-        public static void beginCompaction(CompactionInfo.Holder ci, @SuperCall Callable<Void> zuperCall)
+        public static void onOperationStart(TableOperation op, @SuperCall Callable<Void> zuperCall)
         {
             try
             {
                 zuperCall.call();
-                if (ci.getCompactionInfo().getTaskType() == OperationType.UPGRADE_SSTABLES)
+                if (op.getProgress().operationType() == OperationType.UPGRADE_SSTABLES)
                 {
                     starting.decrement();
                     Assert.assertTrue(start.awaitUninterruptibly(1, TimeUnit.MINUTES));
@@ -353,20 +353,20 @@ public class UpgradeSSTablesTest extends TestBaseImpl
 
         public static void install(ClassLoader classLoader, Integer num)
         {
-            new ByteBuddy().rebase(ActiveCompactions.class)
-                           .method(named("beginCompaction"))
+            new ByteBuddy().rebase(ActiveOperations.class)
+                           .method(named("onOperationStart"))
                            .intercept(MethodDelegation.to(CompactionLatchByteman.class))
                            .make()
                            .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
         }
 
         @SuppressWarnings("unused")
-        public static void beginCompaction(CompactionInfo.Holder ci, @SuperCall Callable<Void> zuperCall)
+        public static void onOperationStart(TableOperation op, @SuperCall Callable<Void> zuperCall)
         {
             try
             {
                 zuperCall.call();
-                if (ci.getCompactionInfo().getTaskType() == OperationType.COMPACTION)
+                if (op.getProgress().operationType() == OperationType.COMPACTION)
                 {
                     starting.decrement();
                     Assert.assertTrue(start.awaitUninterruptibly(1, TimeUnit.MINUTES));

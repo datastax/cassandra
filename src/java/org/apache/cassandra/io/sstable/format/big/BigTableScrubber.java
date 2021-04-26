@@ -108,7 +108,7 @@ public class BigTableScrubber extends SortedTableScrubber<BigTableReader> implem
         while (!dataFile.isEOF())
         {
             if (scrubInfo.isStopRequested())
-                throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
+                throw new CompactionInterruptedException(scrubInfo.getProgress());
 
             long partitionStart = dataFile.getFilePointer();
             outputHandler.debug("Reading row at %d", partitionStart);
