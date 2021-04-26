@@ -31,7 +31,7 @@ import net.bytebuddy.implementation.MethodDelegation;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactions;
+import org.apache.cassandra.db.compaction.ActiveOperations;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.streaming.StreamManager;
@@ -72,7 +72,7 @@ public class StreamsDiskSpaceTest extends TestBaseImpl
                                           .withConfig(config -> config.set("hinted_handoff_enabled", false)
                                                                       .with(GOSSIP)
                                                                       .with(NETWORK))
-                                          .withInstanceInitializer((cl, id) -> BB.doInstall(cl, id, ActiveCompactions.class, "estimatedRemainingWriteBytes"))
+                                          .withInstanceInitializer((cl, id) -> BB.doInstall(cl, id, ActiveOperations.class, "estimatedRemainingWriteBytes"))
                                           .start()))
         {
             cluster.schemaChange("create table " + KEYSPACE + ".tbl (id int primary key, t int) with compaction={'class': 'SizeTieredCompactionStrategy'}");

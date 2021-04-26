@@ -28,12 +28,13 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
@@ -65,9 +66,13 @@ public class CompactionStatsTest extends CQLTester
                       "                [(-pp | --print-port)] [(-pw <password> | --password <password>)]\n" +
                       "                [(-pwf <passwordFilePath> | --password-file <passwordFilePath>)]\n" +
                       "                [(-u <username> | --username <username>)] compactionstats\n" +
-                      "                [(-H | --human-readable)] [(-V | --vtable)]\n" +
+                      "                [(-A | --aggregate)] [(-H | --human-readable)] [(-V | --vtable)]\n" +
                       "\n" +
                       "OPTIONS\n" +
+                      "        -A, --aggregate\n" +
+                      "            Show the compaction aggregates for the compactions in progress, e.g.\n" +
+                      "            the levels for LCS or the buckets for STCS and TWCS.\n" +
+                      "\n" +
                       "        -h <host>, --host <host>\n" +
                       "            Node hostname or ip address\n" +
                       "\n" +
@@ -108,11 +113,11 @@ public class CompactionStatsTest extends CQLTester
         List<SSTableReader> sstables = IntStream.range(0, 10)
                                                 .mapToObj(i -> MockSchema.sstable(i, i * 10L, i * 10L + 9, cfs))
                                                 .collect(Collectors.toList());
-        CompactionInfo.Holder compactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation compactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables);
+                return new OperationProgress(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables);
             }
 
             public boolean isGlobal()
@@ -121,27 +126,27 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionManager.instance.active.beginCompaction(compactionHolder);
-        String stdout = waitForNumberOfPendingTasks(1, "compactionstats");
-        assertThat(stdout).containsPattern("id\\s+compaction type\\s+keyspace\\s+table\\s+completed\\s+total\\s+unit\\s+progress");
-        String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%.2f%%",
-                                                    compactionId, OperationType.COMPACTION, CQLTester.KEYSPACE, currentTable(), bytesCompacted, bytesTotal,
-                                                    CompactionInfo.Unit.BYTES, (double) bytesCompacted / bytesTotal * 100);
-        assertThat(stdout).containsPattern(expectedStatsPattern);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(compactionHolder))
+        {
+            String stdout = waitForNumberOfPendingTasks(1, "compactionstats");
+            assertThat(stdout).containsPattern("id\\s+compaction type\\s+keyspace\\s+table\\s+completed\\s+total\\s+unit\\s+progress");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%.2f%%",
+                                                        compactionId, OperationType.COMPACTION, CQLTester.KEYSPACE, currentTable(), bytesCompacted, bytesTotal,
+                                                        AbstractTableOperation.Unit.BYTES, (double) bytesCompacted / bytesTotal * 100);
+            assertThat(stdout).containsPattern(expectedStatsPattern);
 
-        assertThat(stdout).containsPattern(expectedStatsPattern);
-        assertThat(stdout).containsPattern("concurrent compactors\\s+[0-9]*");
-        assertThat(stdout).containsPattern("pending tasks\\s+[0-9]*");
-        assertThat(stdout).containsPattern("compactions completed\\s+[0-9]*");
-        assertThat(stdout).containsPattern("data compacted\\s+[0-9]*");
-        assertThat(stdout).containsPattern("compactions aborted\\s+[0-9]*");
-        assertThat(stdout).containsPattern("compactions reduced\\s+[0-9]*");
-        assertThat(stdout).containsPattern("sstables dropped from compaction\\s+[0-9]*");
-        assertThat(stdout).containsPattern("15 minute rate\\s+[0-9]*.[0-9]*[0-9]*/minute");
-        assertThat(stdout).containsPattern("mean rate\\s+[0-9]*.[0-9]*[0-9]*/hour");
-        assertThat(stdout).containsPattern("compaction throughput \\(MiB/s\\)\\s+throttling disabled \\(0\\)");
-
-        CompactionManager.instance.active.finishCompaction(compactionHolder);
+            assertThat(stdout).containsPattern(expectedStatsPattern);
+            assertThat(stdout).containsPattern("concurrent compactors\\s+[0-9]*");
+            assertThat(stdout).containsPattern("pending tasks\\s+[0-9]*");
+            assertThat(stdout).containsPattern("compactions completed\\s+[0-9]*");
+            assertThat(stdout).containsPattern("data compacted\\s+[0-9]*");
+            assertThat(stdout).containsPattern("compactions aborted\\s+[0-9]*");
+            assertThat(stdout).containsPattern("compactions reduced\\s+[0-9]*");
+            assertThat(stdout).containsPattern("sstables dropped from compaction\\s+[0-9]*");
+            assertThat(stdout).containsPattern("15 minute rate\\s+[0-9]*.[0-9]*[0-9]*/minute");
+            assertThat(stdout).containsPattern("mean rate\\s+[0-9]*.[0-9]*[0-9]*/hour");
+            assertThat(stdout).containsPattern("compaction throughput \\(MiB/s\\)\\s+throttling disabled \\(0\\)");
+        }
         waitForNumberOfPendingTasks(0, "compactionstats");
     }
 
@@ -158,11 +163,11 @@ public class CompactionStatsTest extends CQLTester
                                                 .mapToObj(i -> MockSchema.sstable(i, i * 10L, i * 10L + 9, cfs))
                                                 .collect(Collectors.toList());
         String targetDirectory = "/some/dir/" + cfs.metadata.keyspace + '/' + cfs.metadata.name + '-' + cfs.metadata.id.asUUID();
-        CompactionInfo.Holder compactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation compactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables, targetDirectory);
+                return new OperationProgress(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables, targetDirectory);
             }
 
             public boolean isGlobal()
@@ -171,11 +176,11 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionInfo.Holder nonCompactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation nonCompactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.CLEANUP, bytesCompacted, bytesTotal, compactionId, sstables);
+                return new OperationProgress(cfs.metadata(), OperationType.CLEANUP, bytesCompacted, bytesTotal, compactionId, sstables);
             }
 
             public boolean isGlobal()
@@ -184,23 +189,22 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionManager.instance.active.beginCompaction(compactionHolder);
-        CompactionManager.instance.active.beginCompaction(nonCompactionHolder);
-        String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "-V");
-        assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
-        String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
-                                                    CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                    OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, CompactionInfo.Unit.BYTES,
-                                                    targetDirectory);
-        assertThat(stdout).containsPattern(expectedStatsPattern);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(compactionHolder);
+             NonThrowingCloseable c2 = CompactionManager.instance.active.onOperationStart(nonCompactionHolder))
+        {
+            String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "-V");
+            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+                                                        CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
+                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, AbstractTableOperation.Unit.BYTES,
+                                                        targetDirectory);
+            assertThat(stdout).containsPattern(expectedStatsPattern);
 
-        String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
-                                                                    CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                                    OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, CompactionInfo.Unit.BYTES);
-        assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
-
-        CompactionManager.instance.active.finishCompaction(compactionHolder);
-        CompactionManager.instance.active.finishCompaction(nonCompactionHolder);
+            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+                                                                        CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
+                                                                        OperationType.COMPACTION, bytesCompacted, sstables.size(), bytesTotal, AbstractTableOperation.Unit.BYTES);
+            assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
+        }
         waitForNumberOfPendingTasks(0, "compactionstats", "-V");
     }
 
@@ -216,11 +220,11 @@ public class CompactionStatsTest extends CQLTester
         List<SSTableReader> sstables = IntStream.range(0, 10)
                                                 .mapToObj(i -> MockSchema.sstable(i, i * 10L, i * 10L + 9, cfs))
                                                 .collect(Collectors.toList());
-        CompactionInfo.Holder compactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation compactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables);
+                return new OperationProgress(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables);
             }
 
             public boolean isGlobal()
@@ -229,15 +233,15 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionManager.instance.active.beginCompaction(compactionHolder);
-        String stdout = waitForNumberOfPendingTasks(1, "compactionstats", "--human-readable");
-        assertThat(stdout).containsPattern("id\\s+compaction type\\s+keyspace\\s+table\\s+completed\\s+total\\s+unit\\s+progress");
-        String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%.2f%%",
-                                                    compactionId, OperationType.COMPACTION, CQLTester.KEYSPACE, currentTable(), "123 bytes", "120.56 KiB",
-                                                    CompactionInfo.Unit.BYTES, (double) bytesCompacted / bytesTotal * 100);
-        assertThat(stdout).containsPattern(expectedStatsPattern);
-
-        CompactionManager.instance.active.finishCompaction(compactionHolder);
+        try (NonThrowingCloseable ignored = CompactionManager.instance.active.onOperationStart(compactionHolder))
+        {
+            String stdout = waitForNumberOfPendingTasks(1, "compactionstats", "--human-readable");
+            assertThat(stdout).containsPattern("id\\s+compaction type\\s+keyspace\\s+table\\s+completed\\s+total\\s+unit\\s+progress");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%.2f%%",
+                                                        compactionId, OperationType.COMPACTION, CQLTester.KEYSPACE, currentTable(), "123 bytes", "120.56 KiB",
+                                                        AbstractTableOperation.Unit.BYTES, (double) bytesCompacted / bytesTotal * 100);
+            assertThat(stdout).containsPattern(expectedStatsPattern);
+        }
         waitForNumberOfPendingTasks(0, "compactionstats", "--human-readable");
     }
 
@@ -254,11 +258,11 @@ public class CompactionStatsTest extends CQLTester
                                                 .mapToObj(i -> MockSchema.sstable(i, i * 10L, i * 10L + 9, cfs))
                                                 .collect(Collectors.toList());
         String targetDirectory = "/some/dir/" + cfs.metadata.keyspace + '/' + cfs.metadata.name + '-' + cfs.metadata.id.asUUID();
-        CompactionInfo.Holder compactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation compactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables, targetDirectory);
+                return new OperationProgress(cfs.metadata(), OperationType.COMPACTION, bytesCompacted, bytesTotal, compactionId, sstables, targetDirectory);
             }
 
             public boolean isGlobal()
@@ -267,11 +271,11 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionInfo.Holder nonCompactionHolder = new CompactionInfo.Holder()
+        AbstractTableOperation nonCompactionHolder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public AbstractTableOperation.OperationProgress getProgress()
             {
-                return new CompactionInfo(cfs.metadata(), OperationType.CLEANUP, bytesCompacted, bytesTotal, compactionId, sstables);
+                return new AbstractTableOperation.OperationProgress(cfs.metadata(), OperationType.CLEANUP, bytesCompacted, bytesTotal, compactionId, sstables);
             }
 
             public boolean isGlobal()
@@ -280,22 +284,21 @@ public class CompactionStatsTest extends CQLTester
             }
         };
 
-        CompactionManager.instance.active.beginCompaction(compactionHolder);
-        CompactionManager.instance.active.beginCompaction(nonCompactionHolder);
-        String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "--vtable", "--human-readable");
-        assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
-        String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
-                                                    CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                    OperationType.COMPACTION, "123 bytes", sstables.size(), "120.56 KiB", CompactionInfo.Unit.BYTES,
-                                                    targetDirectory);
-        assertThat(stdout).containsPattern(expectedStatsPattern);
-        String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
-                                                                    CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
-                                                                    OperationType.CLEANUP, "123 bytes", sstables.size(), "120.56 KiB", CompactionInfo.Unit.BYTES);
-        assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
-
-        CompactionManager.instance.active.finishCompaction(compactionHolder);
-        CompactionManager.instance.active.finishCompaction(nonCompactionHolder);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(compactionHolder);
+             NonThrowingCloseable c2 = CompactionManager.instance.active.onOperationStart(nonCompactionHolder))
+        {
+            String stdout = waitForNumberOfPendingTasks(2, "compactionstats", "--vtable", "--human-readable");
+            assertThat(stdout).containsPattern("keyspace\\s+table\\s+task id\\s+completion ratio\\s+kind\\s+progress\\s+sstables\\s+total\\s+unit\\s+target directory");
+            String expectedStatsPattern = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+                                                        CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
+                                                        OperationType.COMPACTION, "123 bytes", sstables.size(), "120.56 KiB", AbstractTableOperation.Unit.BYTES,
+                                                        targetDirectory);
+            assertThat(stdout).containsPattern(expectedStatsPattern);
+            String expectedStatsPatternForNonCompaction = String.format("%s\\s+%s\\s+%s\\s+%.2f%%\\s+%s\\s+%s\\s+%s\\s+%s\\s+%s",
+                                                                        CQLTester.KEYSPACE, currentTable(), compactionId, (double) bytesCompacted / bytesTotal * 100,
+                                                                        OperationType.CLEANUP, "123 bytes", sstables.size(), "120.56 KiB", AbstractTableOperation.Unit.BYTES);
+            assertThat(stdout).containsPattern(expectedStatsPatternForNonCompaction);
+        }
         waitForNumberOfPendingTasks(0, "compactionstats", "--vtable", "--human-readable");
     }
 

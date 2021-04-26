@@ -514,7 +514,7 @@ public class LeveledCompactionStrategyTest
     }
 
     @Test
-    public void testCompactionCandidateOrdering() throws Exception
+    public void testCompactionCandidateOrdering()
     {
         // add some data
         byte [] b = new byte[100 * 1024];
@@ -896,7 +896,7 @@ public class LeveledCompactionStrategyTest
 
         // compaction for L8 sstables is not supposed to be run because there is no upper level to promote sstables
         // that's why we expect compaction candidates for L7 only
-        Collection<SSTableReader> compactionCandidates = lm.getCompactionCandidates().sstables;
+        Collection<SSTableReader> compactionCandidates = lm.getCompactionCandidate().sstables;
         assertThat(compactionCandidates).containsAll(sstablesOnL7);
         assertThat(compactionCandidates).doesNotContainAnyElementsOf(sstablesOnL8);
     }

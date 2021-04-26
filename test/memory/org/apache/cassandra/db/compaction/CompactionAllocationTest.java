@@ -249,7 +249,7 @@ public class CompactionAllocationTest
         default void executeCompactions()
         {
             ColumnFamilyStore cfs = getCfs();
-            ActiveCompactions active = new ActiveCompactions();
+            ActiveOperations active = new ActiveOperations();
             Set<SSTableReader> sstables = cfs.getLiveSSTables();
 
             CompactionTasks tasks = cfs.getCompactionStrategyManager()

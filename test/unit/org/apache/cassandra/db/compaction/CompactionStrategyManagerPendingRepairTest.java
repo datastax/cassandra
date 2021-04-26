@@ -257,7 +257,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
         // run the compaction
-        compactionTask.execute(ActiveCompactionsTracker.NOOP);
+        compactionTask.execute();
 
         Assert.assertTrue(repairedContains(sstable));
         Assert.assertFalse(unrepairedContains(sstable));
@@ -298,7 +298,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
         // run the compaction
-        compactionTask.execute(ActiveCompactionsTracker.NOOP);
+        compactionTask.execute();
 
         Assert.assertFalse(repairedContains(sstable));
         Assert.assertTrue(unrepairedContains(sstable));
@@ -357,7 +357,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertTrue(hasPendingStrategiesFor(repairID));
 
         // run the compaction
-        compactionTask.execute(ActiveCompactionsTracker.NOOP);
+        compactionTask.execute();
 
         // The repair session is finalized but there is an sstable left behind pending repair!
         SSTableReader compactedSSTable = cfs.getLiveSSTables().iterator().next();
@@ -377,7 +377,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         if (compactionTask != null)
         {
             Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
-            compactionTask.execute(ActiveCompactionsTracker.NOOP);
+            compactionTask.execute();
         }
 
         System.out.println("*********************************************************************************************");
@@ -425,7 +425,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
         // run the compaction
-        compactionTask.execute(ActiveCompactionsTracker.NOOP);
+        compactionTask.execute();
 
         Assert.assertTrue(cfs.getLiveSSTables().isEmpty());
         Assert.assertFalse(hasPendingStrategiesFor(repairID));
@@ -456,7 +456,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
 
         // run the compaction
-        compactionTask.execute(ActiveCompactionsTracker.NOOP);
+        compactionTask.execute();
 
         Assert.assertFalse(cfs.getLiveSSTables().isEmpty());
         Assert.assertFalse(hasPendingStrategiesFor(repairID));

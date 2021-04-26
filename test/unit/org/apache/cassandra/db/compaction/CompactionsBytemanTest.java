@@ -157,10 +157,10 @@ public class CompactionsBytemanTest extends CQLTester
 
     @Test
     @BMRule(name = "Stop all compactions",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
+    targetClass = "CompactionTask$CompactionOperation",
+    targetMethod = "<init>",
     targetLocation = "AT INVOKE getCompactionAwareWriter",
-    action = "$ci.stop()")
+    action = "$this.op.stop()")
     public void testStopUserDefinedCompactionRepaired() throws Throwable
     {
         testStopCompactionRepaired((cfs) -> {
@@ -171,10 +171,10 @@ public class CompactionsBytemanTest extends CQLTester
 
     @Test
     @BMRule(name = "Stop all compactions",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
+    targetClass = "CompactionTask$CompactionOperation",
+    targetMethod = "<init>",
     targetLocation = "AT INVOKE getCompactionAwareWriter",
-    action = "$ci.stop()")
+    action = "$this.op.stop()")
     public void testStopSubRangeCompactionRepaired() throws Throwable
     {
         testStopCompactionRepaired((cfs) -> {
@@ -208,7 +208,7 @@ public class CompactionsBytemanTest extends CQLTester
         }
 
         assertTrue(cfs.getTracker().getCompacting().isEmpty());
-        assertTrue(CompactionManager.instance.active.getCompactions().stream().noneMatch(h -> h.getCompactionInfo().getTableMetadata().equals(cfs.metadata)));
+        assertTrue(CompactionManager.instance.active.getTableOperations().stream().noneMatch(h -> h.getProgress().metadata().equals(cfs.metadata)));
 
         try
         {
@@ -223,7 +223,7 @@ public class CompactionsBytemanTest extends CQLTester
         }
 
         assertTrue(cfs.getTracker().getCompacting().isEmpty());
-        assertTrue(CompactionManager.instance.active.getCompactions().stream().noneMatch(h -> h.getCompactionInfo().getTableMetadata().equals(cfs.metadata)));
+        assertTrue(CompactionManager.instance.active.getTableOperations().stream().noneMatch(h -> h.getProgress().metadata().equals(cfs.metadata)));
 
     }
 }
