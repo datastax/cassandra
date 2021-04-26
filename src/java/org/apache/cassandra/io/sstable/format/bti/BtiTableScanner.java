@@ -83,6 +83,11 @@ public class BtiTableScanner extends SSTableScanner<BtiTableReader, TrieIndexEnt
         return new BtiScanningIterator();
     }
 
+    @Override
+    public int level() {
+        return sstable.getSSTableLevel();
+    }
+
     protected class BtiScanningIterator extends SSTableScanner<BtiTableReader, TrieIndexEntry, BtiTableScanner.BtiScanningIterator>.BaseKeyScanningIterator implements Closeable
     {
         private PartitionIterator iterator;

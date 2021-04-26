@@ -56,6 +56,11 @@ public class EmptySSTableScanner extends AbstractUnfilteredPartitionIterator imp
         return ImmutableSet.of(sstable);
     }
 
+    @Override
+    public int level() {
+        return 0;
+    }
+
     public long getCurrentPosition()
     {
         return 0;
