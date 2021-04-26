@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.ImmutableMap;
+
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileStoreUtils;
 import org.apache.cassandra.io.util.PathUtils;
@@ -37,7 +38,7 @@ import net.bytebuddy.implementation.MethodDelegation;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactions;
+import org.apache.cassandra.db.compaction.ActiveOperations;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 
@@ -112,7 +113,7 @@ public class CompactionDiskSpaceTest extends TestBaseImpl
         static File sstableDir;
         public static void install(ClassLoader cl, Integer node)
         {
-            new ByteBuddy().rebase(ActiveCompactions.class)
+            new ByteBuddy().rebase(ActiveOperations.class)
                            .method(named("estimatedRemainingWriteBytes"))
                            .intercept(MethodDelegation.to(BB.class))
                            .make()
