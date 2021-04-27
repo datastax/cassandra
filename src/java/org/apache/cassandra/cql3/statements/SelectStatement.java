@@ -259,6 +259,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
+    @Override
     public void validate(ClientState state) throws InvalidRequestException
     {
         if (parameters.allowFiltering && !SchemaConstants.isSystemKeyspace(table.keyspace))
@@ -271,7 +272,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead();
-        Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
 
         long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);

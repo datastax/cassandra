@@ -2320,7 +2320,6 @@ drop_compact_storage_enabled: false
 #
 storage_compatibility_mode: CASSANDRA_4
 
-
 # Prevents preparing a repair session or beginning a repair streaming session if pending compactions is over
 # the given value.  Defaults to disabled.
 # reject_repair_compaction_threshold: 1024
@@ -2484,3 +2483,11 @@ storage_compatibility_mode: CASSANDRA_4
 #         # especially in keyspaces with many tables. The splitter avoids batching tables together if they
 #         # exceed other configuration parameters like bytes_per_assignment or partitions_per_assignment.
 #         max_tables_per_assignment: 64
+
+# Apply database-as-a-service defaults.
+#
+# When enabled, some guardrails defaults are modified to values that are appropriate for cloud environments.
+# This includes (but is not limited to) stricter guardrails defaults.
+#
+# This can be used as an convenience to develop and test applications meant to run in a cloud environment.
+# apply_dbaas_defaults: false
