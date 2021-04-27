@@ -24,7 +24,8 @@ package org.apache.cassandra.db.memtable;
  */
 public class DefaultMemtableFactory
 {
-    // We can't use TrieMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
-    public static final Memtable.Factory INSTANCE = TrieMemtable::new;
-//    public static final Memtable.Factory INSTANCE = SkipListMemtable::new;
+    public static Memtable.Factory create()
+    {
+        return TrieMemtable.FACTORY;
+    }
 }

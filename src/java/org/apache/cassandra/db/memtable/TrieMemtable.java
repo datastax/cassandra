@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
@@ -61,6 +62,8 @@ import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -73,10 +76,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
 
-    public static final Factory FACTORY = TrieMemtable::new;
+    public static final Factory FACTORY = new TrieMemtable.Factory();
 
     /** Buffer type to use for memtable tries (on- vs off-heap) */
     public static final BufferType BUFFER_TYPE;
+
     static
     {
         switch (DatabaseDescriptor.getMemtableAllocationType())
@@ -124,24 +128,29 @@ public class TrieMemtable extends AbstractAllocatorMemtable
      */
     private final Trie<BTreePartitionData> mergedTrie;
 
+    private final TrieMemtableMetricsView metrics;
+
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
         // TODO: allow for shard count override
         this.boundaries = owner.localRangeSplits(FBUtilities.getAvailableProcessors());
-        this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef);
+        this.metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
+        this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
     }
 
-    private static MemtableShard[] generatePartitionShards(int splits, TableMetadataRef metadata)
+    private static MemtableShard[] generatePartitionShards(int splits,
+                                                           TableMetadataRef metadata,
+                                                           TrieMemtableMetricsView metrics)
     {
         if (splits == 1)
-            return new MemtableShard[] { new MemtableShard(0, metadata) };
+            return new MemtableShard[] { new MemtableShard(0, metadata, metrics) };
 
         MemtableShard[] partitionMapContainer = new MemtableShard[splits];
         for (int i = 0; i < splits; i++)
-            partitionMapContainer[i] = new MemtableShard(i, metadata);
+            partitionMapContainer[i] = new MemtableShard(i, metadata, metrics);
 
         return partitionMapContainer;
     }
@@ -181,6 +190,12 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     public void discard()
     {
         super.discard();
+        // metrics here are not thread safe, but I think we can live with that
+        metrics.lastFlushShardDataSizes.reset();
+        for (MemtableShard shard : shards)
+        {
+            metrics.lastFlushShardDataSizes.update(shard.liveDataSize());
+        }
         for (MemtableShard shard : shards)
         {
             shard.allocator.setDiscarded();
@@ -386,6 +401,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         private volatile long currentOperations = 0;
 
+        private ReentrantLock writeLock = new ReentrantLock();
+
         // Content map for the given shard. This is implemented as a memtable trie which uses the prefix-free
         // byte-comparable ByteSource representations of the keys to address the partitions.
         //
@@ -408,24 +425,39 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
         private final MemtableAllocator allocator;
 
-        MemtableShard(int shardId, TableMetadataRef metadata)
+        private final TrieMemtableMetricsView metrics;
+
+        MemtableShard(int shardId, TableMetadataRef metadata, TrieMemtableMetricsView metrics)
         {
-            this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator());
+            this(metadata, AbstractAllocatorMemtable.MEMORY_POOL.newAllocator(), metrics);
         }
 
         @VisibleForTesting
-        MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator)
+        MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics)
         {
             this.data = new MemtableTrie<>(BUFFER_TYPE);
             this.columnsCollector = new AbstractMemtable.ColumnsCollector(metadata.get().regularAndStaticColumns());
             this.statsCollector = new AbstractMemtable.StatsCollector();
             this.allocator = allocator;
+            this.metrics = metrics;
         }
 
         public long put(DecoratedKey key, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
         {
             BTreePartitionUpdater updater = new BTreePartitionUpdater(allocator, opGroup, indexer);
-            synchronized (this)
+            boolean locked = writeLock.tryLock();
+            if (locked)
+            {
+                metrics.uncontendedPuts.inc();
+            }
+            else
+            {
+                metrics.contendedPuts.inc();
+                long lockStartTime = System.nanoTime();
+                writeLock.lock();
+                metrics.contentionTime.addNano(System.nanoTime() - lockStartTime);
+            }
+            try
             {
                 try
                 {
@@ -457,6 +489,10 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     columnsCollector.update(update.columns());
                     statsCollector.update(update.stats());
                 }
+            }
+            finally
+            {
+                writeLock.unlock();
             }
             return updater.colUpdateTimeDelta;
         }
@@ -635,6 +671,23 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         public Iterator<Row> iterator()
         {
             return ensureOnHeap.applyToPartition(super.iterator());
+        }
+    }
+
+    static class Factory implements Memtable.Factory
+    {
+        public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound,
+                               TableMetadataRef metadaRef,
+                               Owner owner)
+        {
+            return new TrieMemtable(commitLogLowerBound, metadaRef, owner);
+        }
+
+        @Override
+        public TableMetrics.ReleasableMetric memtableMetrics(TableMetadataRef metadataRef)
+        {
+            TrieMemtableMetricsView metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
+            return metrics::release;
         }
     }
 }
