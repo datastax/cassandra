@@ -64,7 +64,7 @@ import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.schema.Views;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JavaDriverUtils;
@@ -253,6 +253,7 @@ public class CQLSSTableWriter implements Closeable
         if (values.size() != boundNames.size())
             throw new InvalidRequestException(String.format("Invalid number of arguments, expecting %d values but got %d", boundNames.size(), values.size()));
 
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(null, values);
         ClientState state = ClientState.forInternalCalls();
         List<ByteBuffer> keys = modificationStatement.buildPartitionKeyNames(options, state);
@@ -619,9 +620,9 @@ public class CQLSSTableWriter implements Closeable
          */
         private TableMetadata createTable(Types types)
         {
-            ClientState state = ClientState.forInternalCalls();
-            CreateTableStatement statement = schemaStatement.prepare(state);
-            statement.validate(ClientState.forInternalCalls());
+            QueryState state = QueryState.forInternalCalls();
+            CreateTableStatement statement = schemaStatement.prepare(state.getClientState());
+            statement.validate(state);
 
             TableMetadata.Builder builder = statement.builder(types);
             if (partitioner != null)

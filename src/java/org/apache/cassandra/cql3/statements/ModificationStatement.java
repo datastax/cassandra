@@ -57,6 +57,18 @@ import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.BallotGenerator;
 import org.apache.cassandra.service.paxos.Commit.Proposal;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.ViewMetadata;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
+import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
@@ -256,7 +268,8 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             state.ensurePermission(Permission.EXECUTE, function);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    @Override
+    public void validate(QueryState state) throws InvalidRequestException
     {
         checkFalse(hasConditions() && attrs.isTimestampSet(), "Cannot provide custom timestamp for conditional updates");
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");
@@ -266,7 +279,8 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         checkFalse(isVirtual() && attrs.isTimeToLiveSet(), "Expiring columns are not supported by virtual tables");
         checkFalse(isVirtual() && hasConditions(), "Conditional updates are not supported by virtual tables");
 
-        if (attrs.isTimestampSet())
+        // there are system queries with USING TIMESTAMP, e.g. SchemaKeyspace#saveSystemKeyspacesSchema
+        if (SchemaConstants.isUserKeyspace(metadata.keyspace) && attrs.isTimestampSet())
             Guardrails.userTimestampsEnabled.ensureEnabled(state);
     }
 
@@ -380,6 +394,19 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     private boolean appliesOnlyToStaticColumns()
     {
         return appliesOnlyToStaticColumns(operations, conditions);
+    }
+
+    public void validateDiskUsage(QueryState state, QueryOptions options)
+    {
+        // reject writes if any replica exceeds disk usage failure limit or warn if exceeds warn limit
+        if (Guardrails.replicaDiskUsage.enabled(state) && DiskUsageBroadcaster.instance.hasStuffedOrFullNode())
+        {
+            for (ByteBuffer keyValue : buildPartitionKeyNames(options, state))
+            {
+                for (InetAddressAndPort replica : StorageService.instance.getNaturalReplicasForToken(keyspace(), keyValue).endpointList())
+                    Guardrails.replicaDiskUsage.guard(replica, state);
+            }
+        }
     }
 
     /**
@@ -497,10 +524,8 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
-        if (isCounter())
-            cl.validateCounterForWrite(metadata());
-        else
-            cl.validateForWrite();
+        validateConsistency(cl, queryState);
+        validateDiskUsage(queryState, options);
 
         validateDiskUsage(options, queryState.getClientState());
         validateTimestamp(queryState, options);
@@ -523,6 +548,14 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         return null;
     }
 
+    public void validateConsistency(ConsistencyLevel cl, QueryState queryState)
+    {
+        if (isCounter())
+            cl.validateCounterForWrite(metadata(), queryState);
+        else
+            cl.validateForWrite(metadata.keyspace, queryState);
+    }
+
     private ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         CQL3CasRequest request = makeCasRequest(queryState, options);
@@ -533,7 +566,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                    request,
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
-                                                   queryState.getClientState(),
+                                                   queryState,
                                                    options.getNowInSeconds(queryState),
                                                    queryStartNanoTime))
         {

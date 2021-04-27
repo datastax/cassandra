@@ -28,6 +28,7 @@ import java.util.stream.StreamSupport;
 
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.cql3.functions.Function;
@@ -480,6 +481,7 @@ public abstract class Lists
             idx.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             // we should not get here for frozen lists
@@ -519,6 +521,7 @@ public abstract class Lists
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to append to a frozen list";
@@ -586,10 +589,16 @@ public abstract class Lists
             List<ByteBuffer> toAdd = ((Value) value).elements;
             final int totalCount = toAdd.size();
 
+            // Guardrails about collection size are only checked for the added elements without considering
+            // already existent elements. This is done so to avoid read-before-write, having additional checks
+            // during SSTable write.
+            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, params.state);
+
             // we have to obey MAX_NANOS per batch - in the unlikely event a client has decided to prepend a list with
             // an insane number of entries.
             PrecisionTime pt = null;
             int remainingInBatch = 0;
+            int dataSize = 0;
             for (int i = totalCount - 1; i >= 0; i--)
             {
                 if (remainingInBatch == 0)
@@ -601,8 +610,10 @@ public abstract class Lists
 
                 // TODO: is this safe as part of LWTs?
                 ByteBuffer uuid = ByteBuffer.wrap(atUnixMillisAsBytes(pt.millis, (pt.nanos + remainingInBatch--)));
-                params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                Cell cell = params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                dataSize += cell.dataSize();
             }
+            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
         }
     }
 
@@ -619,6 +630,7 @@ public abstract class Lists
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete from a frozen list";
@@ -660,6 +672,7 @@ public abstract class Lists
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete an item by index from a frozen list";

@@ -340,6 +340,8 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+            consistencyForPaxos.validateForCas(keyspaceName);
+            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
 
             Function<Ballot, Pair<PartitionUpdate, RowIterator>> updateProposer = ballot ->
             {
@@ -491,9 +493,9 @@ public class StorageProxy implements StorageProxyMBean
         AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
         try
         {
-            consistencyForPaxos.validateForCas();
-            consistencyForReplayCommits.validateForCasCommit(latestRs);
-            consistencyForCommit.validateForCasCommit(latestRs);
+            consistencyForPaxos.validateForCas(metadata.keyspace);
+            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace);
+            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
             while (nanoTime() - queryStartNanoTime < timeoutNanos)

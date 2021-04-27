@@ -49,20 +49,24 @@ public final class SchemaConstants
     public static final String VIRTUAL_SCHEMA = "system_virtual_schema";
 
     public static final String VIRTUAL_VIEWS = "system_views";
+    public static final String SCHEMA_VIRTUAL_KEYSPACE_NAME = "system_virtual_schema";
+    public static final String SYSTEM_VIEWS_KEYSPACE_NAME = "system_views";
 
     public static final String DUMMY_KEYSPACE_OR_TABLE_NAME = "--dummy--";
 
     /* system keyspace names (the ones with LocalStrategy replication strategy) */
-    public static final Set<String> LOCAL_SYSTEM_KEYSPACE_NAMES =
-        ImmutableSet.of(SYSTEM_KEYSPACE_NAME, SCHEMA_KEYSPACE_NAME);
+    public static final Set<String> LOCAL_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(SYSTEM_KEYSPACE_NAME, SCHEMA_KEYSPACE_NAME);
 
     /* virtual table system keyspace names */
     public static final Set<String> VIRTUAL_SYSTEM_KEYSPACE_NAMES =
         ImmutableSet.of(VIRTUAL_VIEWS, VIRTUAL_SCHEMA);
 
     /* replicate system keyspace names (the ones with a "true" replication strategy) */
-    public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES =
-        ImmutableSet.of(TRACE_KEYSPACE_NAME, AUTH_KEYSPACE_NAME, DISTRIBUTED_KEYSPACE_NAME);
+    public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(TRACE_KEYSPACE_NAME, AUTH_KEYSPACE_NAME, DISTRIBUTED_KEYSPACE_NAME);
+
+    /* virtual keyspace names */
+    public static final Set<String> VIRTUAL_KEYSPACE_NAMES = ImmutableSet.of(SCHEMA_VIRTUAL_KEYSPACE_NAME, SYSTEM_VIEWS_KEYSPACE_NAME);
+
     /**
      * The longest permissible KS or CF name.
      *
@@ -152,5 +156,28 @@ public final class SchemaConstants
                            .addAll(AuthKeyspace.TABLE_NAMES)
                            .addAll(SystemDistributedKeyspace.TABLE_NAMES)
                            .build();
+    }
+    
+    /**
+     * @return whether or not the keyspace is a virtual keyspace (system_virtual_schema, system_views)
+     */
+    public static boolean isVirtualKeyspace(String keyspaceName)
+    {
+        return VIRTUAL_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
+    }
+
+    public static boolean isInternalKeyspace(String keyspaceName)
+    {
+        return isLocalSystemKeyspace(keyspaceName)
+               || isReplicatedSystemKeyspace(keyspaceName)
+               || isVirtualKeyspace(keyspaceName);
+    }
+    
+    /**
+     * @return whether or not the keyspace is a user keyspace
+     */
+    public static boolean isUserKeyspace(String keyspaceName)
+    {
+        return !isInternalKeyspace(keyspaceName);
     }
 }

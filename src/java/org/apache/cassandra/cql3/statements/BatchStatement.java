@@ -51,7 +51,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
 import static java.util.function.Predicate.isEqual;
-
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -255,7 +254,8 @@ public class BatchStatement implements CQLStatement
 
     // The batch itself will be validated in either Parsed#prepare() - for regular CQL3 batches,
     //   or in QueryProcessor.processBatch() - for native protocol batches.
-    public void validate(ClientState state) throws InvalidRequestException
+    @Override
+    public void validate(QueryState state) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validate(state);
@@ -407,8 +407,17 @@ public class BatchStatement implements CQLStatement
         long timestamp = options.getTimestamp(queryState);
         long nowInSeconds = options.getNowInSeconds(queryState);
 
-        if (options.getConsistency() == null)
+        ConsistencyLevel cl = options.getConsistency();
+        if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
+
+        for (int i = 0; i < statements.size(); i++ )
+        {
+            ModificationStatement statement = statements.get(i);
+            statement.validateConsistency(cl, queryState);
+            statement.validateDiskUsage(queryState, options.forStatement(i));
+        }
+
         if (options.getSerialConsistency() == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
@@ -472,7 +481,7 @@ public class BatchStatement implements CQLStatement
                                                    casRequest,
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
-                                                   state.getClientState(),
+                                                   state,
                                                    options.getNowInSeconds(state),
                                                    queryStartNanoTime))
         {

@@ -176,6 +176,13 @@ public class ClientState
         this.clientOptions = source.clientOptions;
     }
 
+    private ClientState(AuthenticatedUser user)
+    {
+        this.isInternal = false;
+        this.remoteAddress = null;
+        this.user = user;
+    }
+
     /**
      * @return a ClientState object for internal C* calls (not limited by any kind of auth).
      */
@@ -197,6 +204,14 @@ public class ClientState
     public static ClientState forExternalCalls(SocketAddress remoteAddress)
     {
         return new ClientState((InetSocketAddress)remoteAddress);
+    }
+
+    /**
+     * @return a ClientState object for internal calls with the given user logged in (not limited by any kind of auth).
+     */
+    public static ClientState forExternalCalls(AuthenticatedUser user)
+    {
+        return new ClientState(user);
     }
 
     /**

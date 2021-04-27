@@ -65,6 +65,9 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
             if (builder.hasMissingElements())
                 break;
+
+            if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
+                Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", queryState);
         }
         return builder.build();
     }

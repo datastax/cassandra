@@ -167,4 +167,12 @@ public class PropertyDefinitions
             throw new SyntaxException(format("Invalid double value %s for '%s'", value, key));
         }
     }
+
+    /**
+     * Returns the name of all the properties that are updated by this object.
+     */
+    public Set<String> updatedProperties()
+    {
+        return properties.keySet();
+    }
 }

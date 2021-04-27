@@ -259,10 +259,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    @Override
+    public void validate(QueryState state) throws InvalidRequestException
     {
         if (parameters.allowFiltering && !SchemaConstants.isSystemKeyspace(table.keyspace))
             Guardrails.allowFilteringEnabled.ensureEnabled(state);
+    }
+
+    private void validateQueryOptions(QueryOptions options)
+    {
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(options.getConsistency());
     }
 
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
@@ -272,6 +279,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         cl.validateForRead();
         Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
+        validateQueryOptions(options);
 
         long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
@@ -684,6 +692,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      */
     public Slices clusteringIndexFilterAsSlices()
     {
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ClientState state = ClientState.forInternalCalls();
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
@@ -703,6 +712,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      */
     public SinglePartitionReadCommand internalReadForView(DecoratedKey key, long nowInSec)
     {
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ClientState state = ClientState.forInternalCalls();
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();

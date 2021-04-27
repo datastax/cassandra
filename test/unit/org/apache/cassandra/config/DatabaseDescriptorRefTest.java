@@ -196,6 +196,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.exceptions.ConfigurationException",
     "org.apache.cassandra.exceptions.InvalidRequestException",
     "org.apache.cassandra.exceptions.RequestValidationException",
+    "org.apache.cassandra.exceptions.SyntaxException",
     "org.apache.cassandra.exceptions.TransportException",
     "org.apache.cassandra.fql.FullQueryLogger",
     "org.apache.cassandra.fql.FullQueryLoggerOptions",
