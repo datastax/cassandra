@@ -233,6 +233,7 @@ public class CQL3CasRequest implements CASRequest
         return builder.build();
     }
 
+    @Override
     public PartitionUpdate makeUpdates(FilteredPartition current, ClientState clientState, Ballot ballot) throws InvalidRequestException
     {
         PartitionUpdate.Builder updateBuilder = new PartitionUpdate.Builder(metadata, key, updatedColumns(), conditions.size());

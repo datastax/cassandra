@@ -65,11 +65,13 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static java.lang.String.format;
 import static java.lang.String.join;
@@ -120,6 +122,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             throw ire("Cannot use ALTER TABLE on a materialized view; use ALTER MATERIALIZED VIEW instead");
 
         return schema.withAddedOrUpdated(apply(keyspace, table));
+    }
+
+    public ResultMessage execute(QueryState state, boolean locally)
+    {
+        return super.execute(state, locally);
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
@@ -256,6 +263,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 this.isStatic = isStatic;
                 this.mask = mask;
             }
+
         }
 
         private final Collection<Column> newColumns;

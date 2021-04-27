@@ -54,6 +54,7 @@ public class AlterRoleStatement extends AuthenticationStatement
         this.ifExists = ifExists;
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         opts.validate();
