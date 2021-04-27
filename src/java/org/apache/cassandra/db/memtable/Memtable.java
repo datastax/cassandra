@@ -139,7 +139,7 @@ public interface Memtable extends Comparable<Memtable>
          * Memtable metrics lifecycle matches table lifecycle. It is the table
          * that owns the metrics and decides when to release them;
          */
-        default TableMetrics.ReleasableMetric memtableMetrics(TableMetadataRef metadataRef)
+        default TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
         {
             return null;
         }

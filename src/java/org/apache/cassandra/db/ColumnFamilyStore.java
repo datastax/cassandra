@@ -421,7 +421,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             indexManager.addIndex(info, true);
         }
 
-        metric = new TableMetrics(this, memtableFactory.memtableMetrics(metadata));
+        metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
 
         if (data.loadsstables)
         {

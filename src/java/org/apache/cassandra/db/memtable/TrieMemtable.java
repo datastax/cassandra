@@ -67,6 +67,7 @@ import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
@@ -75,6 +76,7 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
 public class TrieMemtable extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
+    public static final String TRIE_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=TrieMemtableConfig";
 
     public static final Factory FACTORY = new TrieMemtable.Factory();
 
@@ -96,6 +98,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         default:
             throw new AssertionError();
         }
+
+        MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
     }
 
     /** If keys is below this length, we will use a recursive procedure for inserting data in the memtable trie. */
@@ -130,12 +134,16 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     private final TrieMemtableMetricsView metrics;
 
+    @VisibleForTesting
+    public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
+
+    private static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, FBUtilities.getAvailableProcessors());
+
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        // TODO: allow for shard count override
-        this.boundaries = owner.localRangeSplits(FBUtilities.getAvailableProcessors());
+        this.boundaries = owner.localRangeSplits(getShardCount());
         this.metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
@@ -684,10 +692,41 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
 
         @Override
-        public TableMetrics.ReleasableMetric memtableMetrics(TableMetadataRef metadataRef)
+        public TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
         {
             TrieMemtableMetricsView metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
             return metrics::release;
         }
+    }
+
+    private static class TrieMemtableConfig implements TrieMemtableConfigMXBean
+    {
+        @Override
+        public void setShardCount(String shardCount)
+        {
+            if ("auto".equalsIgnoreCase(shardCount))
+            {
+                SHARD_COUNT = FBUtilities.getAvailableProcessors();
+            }
+            else
+            {
+                try
+                {
+                    SHARD_COUNT = Integer.valueOf(shardCount);
+                }
+                catch (NumberFormatException ex)
+                {
+                    logger.warn("Unable to parse {} as valid value for shard count", shardCount);
+                    return;
+                }
+            }
+            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
+        }
+    }
+
+    @VisibleForTesting
+    public static int getShardCount()
+    {
+        return SHARD_COUNT;
     }
 }
