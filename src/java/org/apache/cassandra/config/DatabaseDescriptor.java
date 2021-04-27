@@ -5324,4 +5324,9 @@ public class DatabaseDescriptor
     {
         conf.sai_options.zerocopy_used_threshold = threshold;
     }
+
+    public static boolean isApplyDbaasDefaults()
+    {
+        return conf.apply_dbaas_defaults;
+    }
 }
