@@ -267,8 +267,7 @@ public class StressCQLSSTableWriter implements Closeable
                                                        options,
                                                        insert.getTimestamp(TimeUnit.MILLISECONDS.toMicros(now), options),
                                                        (int) TimeUnit.MILLISECONDS.toSeconds(now),
-                                                       insert.getTimeToLive(options),
-                                                       Collections.emptyMap());
+                                                       insert.getTimeToLive(options), Collections.emptyMap());
 
         try
         {

@@ -651,8 +651,8 @@ public class Paxos
         SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
         TableMetadata metadata = readCommand.metadata();
 
-        consistencyForConsensus.validateForCas();
-        consistencyForCommit.validateForCasCommit(Keyspace.open(metadata.keyspace).getReplicationStrategy());
+        consistencyForConsensus.validateForCas(metadata.keyspace, clientState);
+        consistencyForCommit.validateForCasCommit(Keyspace.open(metadata.keyspace).getReplicationStrategy(), metadata.keyspace, clientState);
 
         Ballot minimumBallot = null;
         int failedAttemptsDueToContention = 0;

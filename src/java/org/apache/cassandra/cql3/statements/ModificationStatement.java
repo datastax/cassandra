@@ -256,6 +256,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             state.ensurePermission(Permission.EXECUTE, function);
     }
 
+    @Override
     public void validate(ClientState state) throws InvalidRequestException
     {
         checkFalse(hasConditions() && attrs.isTimestampSet(), "Cannot provide custom timestamp for conditional updates");
@@ -266,7 +267,8 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         checkFalse(isVirtual() && attrs.isTimeToLiveSet(), "Expiring columns are not supported by virtual tables");
         checkFalse(isVirtual() && hasConditions(), "Conditional updates are not supported by virtual tables");
 
-        if (attrs.isTimestampSet())
+        // there are system queries with USING TIMESTAMP, e.g. SchemaKeyspace#saveSystemKeyspacesSchema
+        if (SchemaConstants.isUserKeyspace(metadata.keyspace) && attrs.isTimestampSet())
             Guardrails.userTimestampsEnabled.ensureEnabled(state);
     }
 
@@ -497,10 +499,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
-        if (isCounter())
-            cl.validateCounterForWrite(metadata());
-        else
-            cl.validateForWrite();
+        validateConsistency(cl);
 
         validateDiskUsage(options, queryState.getClientState());
         validateTimestamp(queryState, options);
@@ -521,6 +520,14 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         }
 
         return null;
+    }
+
+    public void validateConsistency(ConsistencyLevel cl)
+    {
+        if (isCounter())
+            cl.validateCounterForWrite(metadata());
+        else
+            cl.validateForWrite();
     }
 
     private ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)

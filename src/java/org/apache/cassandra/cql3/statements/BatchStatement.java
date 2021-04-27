@@ -51,7 +51,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
 import static java.util.function.Predicate.isEqual;
-
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -255,6 +254,7 @@ public class BatchStatement implements CQLStatement
 
     // The batch itself will be validated in either Parsed#prepare() - for regular CQL3 batches,
     //   or in QueryProcessor.processBatch() - for native protocol batches.
+    @Override
     public void validate(ClientState state) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
@@ -407,8 +407,10 @@ public class BatchStatement implements CQLStatement
         long timestamp = options.getTimestamp(queryState);
         long nowInSeconds = options.getNowInSeconds(queryState);
 
-        if (options.getConsistency() == null)
+        ConsistencyLevel cl = options.getConsistency();
+        if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
+
         if (options.getSerialConsistency() == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
@@ -417,7 +419,11 @@ public class BatchStatement implements CQLStatement
                                                 clientState);
 
         for (int i = 0; i < statements.size(); i++ )
-            statements.get(i).validateDiskUsage(options.forStatement(i), clientState);
+        {
+            ModificationStatement statement = statements.get(i);
+            statement.validateConsistency(cl);
+            statement.validateDiskUsage(options.forStatement(i), clientState);
+        }
 
         if (hasConditions)
             return executeWithConditions(options, queryState, queryStartNanoTime);

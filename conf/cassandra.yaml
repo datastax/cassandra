@@ -2105,3 +2105,11 @@ drop_compact_storage_enabled: false
 #   a stable cluster. If a node from a previous version was started by accident we won't any longer toggle behaviors as when UPGRADING.
 #
 storage_compatibility_mode: CASSANDRA_4
+
+# Apply database-as-a-service defaults.
+#
+# When enabled, some guardrails defaults are modified to values that are appropriate for cloud environments.
+# This includes (but is not limited to) stricter guardrails defaults.
+#
+# This can be used as an convenience to develop and test applications meant to run in a cloud environment.
+# apply_dbaas_defaults: false
