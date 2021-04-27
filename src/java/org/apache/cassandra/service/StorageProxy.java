@@ -340,6 +340,8 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+            consistencyForPaxos.validateForCas(keyspaceName, clientState);
+            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, clientState);
 
             Function<Ballot, Pair<PartitionUpdate, RowIterator>> updateProposer = ballot ->
             {
@@ -349,7 +351,7 @@ public class StorageProxy implements StorageProxyMBean
                 ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
 
                 FilteredPartition current;
-                try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime))
+                try (RowIterator rowIter = readOne(readCommand, readConsistency, clientState, queryStartNanoTime))
                 {
                     current = FilteredPartition.create(rowIter);
                 }
@@ -388,6 +390,7 @@ public class StorageProxy implements StorageProxyMBean
                            consistencyForPaxos,
                            consistencyForCommit,
                            consistencyForCommit,
+                           clientState,
                            queryStartNanoTime,
                            casWriteMetrics,
                            updateProposer);
@@ -481,6 +484,7 @@ public class StorageProxy implements StorageProxyMBean
                                        ConsistencyLevel consistencyForPaxos,
                                        ConsistencyLevel consistencyForReplayCommits,
                                        ConsistencyLevel consistencyForCommit,
+                                       ClientState clientState,
                                        long queryStartNanoTime,
                                        CASClientRequestMetrics casMetrics,
                                        Function<Ballot, Pair<PartitionUpdate, RowIterator>> createUpdateProposal)
@@ -491,9 +495,9 @@ public class StorageProxy implements StorageProxyMBean
         AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
         try
         {
-            consistencyForPaxos.validateForCas();
-            consistencyForReplayCommits.validateForCasCommit(latestRs);
-            consistencyForCommit.validateForCasCommit(latestRs);
+            consistencyForPaxos.validateForCas(metadata.keyspace, clientState);
+            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, clientState);
+            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, clientState);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
             while (nanoTime() - queryStartNanoTime < timeoutNanos)
@@ -1833,17 +1837,17 @@ public class StorageProxy implements StorageProxyMBean
         return true;
     }
 
-    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState clientState, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, queryStartNanoTime), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, clientState, queryStartNanoTime), command);
     }
 
     /**
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState clientState, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         if (!isSafeToPerformRead(group.queries))
@@ -1869,7 +1873,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return consistencyLevel.isSerialConsistency()
-             ? readWithPaxos(group, consistencyLevel, queryStartNanoTime)
+             ? readWithPaxos(group, consistencyLevel, clientState, queryStartNanoTime)
              : readRegular(group, consistencyLevel, queryStartNanoTime);
     }
 
@@ -1883,15 +1887,15 @@ public class StorageProxy implements StorageProxyMBean
         return !StorageService.instance.isBootstrapMode();
     }
 
-    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState clientState, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         return Paxos.useV2()
                 ? Paxos.read(group, consistencyLevel)
-                : legacyReadWithPaxos(group, consistencyLevel, queryStartNanoTime);
+                : legacyReadWithPaxos(group, consistencyLevel, clientState, queryStartNanoTime);
     }
 
-    private static PartitionIterator legacyReadWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static PartitionIterator legacyReadWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState clientState, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         if (group.queries.size() > 1)
@@ -1928,6 +1932,7 @@ public class StorageProxy implements StorageProxyMBean
                         consistencyLevel,
                         consistencyForReplayCommitsOrFetch,
                         ConsistencyLevel.ANY,
+                        clientState,
                         start,
                         casReadMetrics,
                         updateProposer);

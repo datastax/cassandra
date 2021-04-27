@@ -167,12 +167,16 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw new InvalidRequestException(TRANSIENTLY_REPLICATED_KEYSPACE_NOT_SUPPORTED);
 
         // guardrails to limit number of secondary indexes per table.
-        Guardrails.secondaryIndexesPerTable.guard(table.indexes.size() + 1,
-                                                  Strings.isNullOrEmpty(indexName)
-                                                  ? String.format("on table %s", table.name)
-                                                  : String.format("%s on table %s", indexName, table.name),
-                                                  false,
-                                                  state);
+        if (!attrs.isCustom)
+        {
+            long existingSecondaryIndexes = table.indexes.stream().filter(indexMetadata -> !indexMetadata.isCustom()).count();
+            Guardrails.secondaryIndexesPerTable.guard(existingSecondaryIndexes + 1,
+                                                      Strings.isNullOrEmpty(indexName)
+                                                      ? String.format("on table %s", table.name)
+                                                      : String.format("%s on table %s", indexName, table.name),
+                                                      false,
+                                                      state);
+        }
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));
 

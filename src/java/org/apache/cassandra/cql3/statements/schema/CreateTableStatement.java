@@ -48,9 +48,8 @@ import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
-import static java.util.Comparator.comparing;
-
 import static com.google.common.collect.Iterables.concat;
+import static java.util.Comparator.comparing;
 
 public final class CreateTableStatement extends AlterSchemaStatement
 {
@@ -477,10 +476,15 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
     public static TableMetadata.Builder parse(String cql, String keyspace)
     {
+        return parse(cql, keyspace, Types.none());
+    }
+
+    public static TableMetadata.Builder parse(String cql, String keyspace, Types types)
+    {
         return CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE")
-                                .keyspace(keyspace)
-                                .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
-                                .builder(Types.none());
+                         .keyspace(keyspace)
+                         .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
+                         .builder(types);
     }
 
     public final static class Raw extends CQLStatement.Raw
