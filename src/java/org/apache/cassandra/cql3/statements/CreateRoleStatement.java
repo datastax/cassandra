@@ -57,6 +57,7 @@ public class CreateRoleStatement extends AuthenticationStatement
         }
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         opts.validate();

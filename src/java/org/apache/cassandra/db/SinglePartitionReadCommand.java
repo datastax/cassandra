@@ -476,7 +476,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         if (clusteringIndexFilter.isEmpty(metadata().comparator))
             return EmptyIterators.partition();
 
-        return StorageProxy.read(Group.one(this), consistency, requestTime);
+        return StorageProxy.read(Group.one(this), consistency, state, requestTime);
     }
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)
@@ -1311,7 +1311,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
         public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException
         {
-            return StorageProxy.read(this, consistency, requestTime);
+            return StorageProxy.read(this, consistency, state, requestTime);
         }
     }
 
