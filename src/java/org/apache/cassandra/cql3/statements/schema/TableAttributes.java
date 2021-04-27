@@ -41,7 +41,7 @@ import static org.apache.cassandra.schema.TableParams.Option.*;
 public final class TableAttributes extends PropertyDefinitions
 {
     public static final String ID = "id";
-    private static final Set<String> validKeywords;
+    public static final Set<String> validKeywords;
     private static final Set<String> obsoleteKeywords;
 
     private static final Set<String> UNSUPPORTED_DSE_COMPACTION_STRATEGIES = ImmutableSet.of(
