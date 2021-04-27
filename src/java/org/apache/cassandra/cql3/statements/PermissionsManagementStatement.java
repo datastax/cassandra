@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
+
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -42,6 +43,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         this.grantee = RoleResource.role(grantee.getName());
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         // validate login here before authorize to avoid leaking user existence to anonymous users.
