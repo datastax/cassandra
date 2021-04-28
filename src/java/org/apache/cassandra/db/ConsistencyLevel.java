@@ -231,10 +231,10 @@ public enum ConsistencyLevel
     }
 
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
-    public void validateForCasCommit(String keyspaceName) throws InvalidRequestException
+    public void validateForCasCommit(String keyspaceName, QueryState queryState) throws InvalidRequestException
     {
         if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         switch (this)
         {
@@ -247,10 +247,10 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForCas(String keyspaceName) throws InvalidRequestException
+    public void validateForCas(String keyspaceName, QueryState queryState) throws InvalidRequestException
     {
         if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
