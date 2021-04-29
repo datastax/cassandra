@@ -225,6 +225,9 @@ K_UNMASK:      U N M A S K;
 K_SELECT_MASKED: S E L E C T '_' M A S K E D;
 
 K_VECTOR:       V E C T O R;
+K_EDGE:        E D G E;
+K_VERTEX:      V E R T E X;
+K_LABEL:       L A B E L;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');
