@@ -123,6 +123,16 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
         Guardrails.keyspaces.guard(Schema.instance.getUserKeyspaces().size() + 1, keyspaceName, false, state);
     }
 
+    Set<String> clientWarnings(KeyspacesDiff diff)
+    {
+        if (attrs.hasProperty("graph_engine"))
+        {
+            clientWarnings.add("The unsupported graph property 'graph_engine' was ignored.");
+        }
+
+        return clientWarnings;
+    }
+
     public static final class Raw extends CQLStatement.Raw
     {
         public final String keyspaceName;
