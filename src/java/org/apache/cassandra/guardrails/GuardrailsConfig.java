@@ -96,6 +96,8 @@ public class GuardrailsConfig
 
     public Boolean read_before_write_list_operations_enabled;
 
+    public Boolean truncate_table_enabled;
+
     /**
      * Validate that the value provided for each guardrail setting is valid.
      *
@@ -145,6 +147,8 @@ public class GuardrailsConfig
      */
     public void applyConfig()
     {
+        enforceDefault(truncate_table_enabled, v -> truncate_table_enabled = v, true, true);
+
         enforceDefault(user_timestamps_enabled, v -> user_timestamps_enabled = v, true, true);
 
         enforceDefault(column_value_size_failure_threshold_in_kb, v -> column_value_size_failure_threshold_in_kb = v, NO_LIMIT, 5 * 1024L);
