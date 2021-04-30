@@ -137,27 +137,24 @@ public class MutlipleSSTableFormatsTest extends CQLTester
     @Test
     public void testCompactionToBigFormat() throws Throwable
     {
-        Map<Integer, Integer> content = createSSTables();
-        System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, BigFormat.instance.getType().name);
-        enableCompaction();
-        compact();
-        List<SSTableFormat.Type> createdFormats = createdFormats();
-        Assertions.assertThat(createdFormats).hasSize(1);
-        Assertions.assertThat(createdFormats.get(0)).isEqualTo(BigFormat.instance.getType());
-
-        checkRead(content);
+        testCompaction(BigFormat.instance);
     }
 
     @Test
     public void testCompactionToBtiFormat() throws Throwable
     {
+        testCompaction(TrieIndexFormat.instance);
+    }
+
+    private void testCompaction(SSTableFormat format) throws Throwable
+    {
         Map<Integer, Integer> content = createSSTables();
-        System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, TrieIndexFormat.instance.getType().name);
+        System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, format.getType().name);
         enableCompaction();
         compact();
         List<SSTableFormat.Type> createdFormats = createdFormats();
         Assertions.assertThat(createdFormats).hasSize(1);
-        Assertions.assertThat(createdFormats.get(0)).isEqualTo(TrieIndexFormat.instance.getType());
+        Assertions.assertThat(createdFormats.get(0)).isEqualTo(format.getType());
         checkRead(content);
     }
 
