@@ -21,7 +21,6 @@ import java.util.*;
 import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -339,6 +338,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         LEGACY(Guardrails.secondaryIndexesPerTable, null),
         SAI(Guardrails.indexesPerTableSai, Guardrails.indexesTotalSai),
+        SASI(Guardrails.indexesPerTableSasi, null),
         UNKNOWN(null, null);
 
         final Guardrail.Threshold perTableThreshold;
@@ -366,6 +366,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             {
                 case "org.apache.cassandra.index.internal.CassandraIndex":
                     return IndexGuardrails.LEGACY;
+                case "org.apache.cassandra.index.sasi.SASIIndex":
+                    return IndexGuardrails.SASI;
                 case "org.apache.cassandra.index.sai.StorageAttachedIndex":
                     return IndexGuardrails.SAI;
                 default:

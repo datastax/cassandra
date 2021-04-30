@@ -74,6 +74,12 @@ public abstract class Guardrails
                                                                            (x, what, v, t) -> format("Tables cannot have more than %s secondary indexes, failed to create secondary index %s",
                                                                                                      t, what));
 
+    public static final Threshold indexesPerTableSasi = new Threshold("sasi_indexes_per_table_failure_threshold",
+                                                                      () -> -1,
+                                                                      () -> config.sasi_indexes_per_table_failure_threshold,
+                                                                      (x, what, v, t) -> format("Tables cannot have more than %s SASI indexes, failed to create SASI index %s",
+                                                                                                t, what));
+
     public static final Threshold indexesPerTableSai = new Threshold("sai_indexes_per_table_failure_threshold",
                                                                      () -> -1,
                                                                      () -> config.sai_indexes_per_table_failure_threshold,

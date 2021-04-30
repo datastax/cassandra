@@ -1468,7 +1468,6 @@ enable_transient_replication: false
   # columns_per_table_failure_threshold: -1
 
   # Failure threshold to prevent creating more secondary indexes per table than threshold (does not apply to CUSTOM INDEX StorageAttachedIndex)
-  # Failure threshold to prevent creating more secondary indexes per table than threshold
   # Default: -1 to disable, may differ if apply_dbaas_defaults is enabled
   # secondary_index_per_table_failure_threshold: -1
 

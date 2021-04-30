@@ -88,6 +88,7 @@ public class GuardrailsConfig
 
     // Legacy 2i guardrail
     public Integer secondary_index_per_table_failure_threshold;
+    public Integer sasi_indexes_per_table_failure_threshold;
     // SAI indexes guardrail
     public Integer sai_indexes_per_table_failure_threshold;
     public Integer sai_indexes_total_failure_threshold;
@@ -171,6 +172,7 @@ public class GuardrailsConfig
 
         enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, -1L, 20L);
         enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, NO_LIMIT, 1);
+        enforceDefault(sasi_indexes_per_table_failure_threshold, v -> sasi_indexes_per_table_failure_threshold = v, NO_LIMIT, 0);
         enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, NO_LIMIT, 2);
         enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, -1L, 100L);
         enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, -1L, 200L);
