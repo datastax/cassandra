@@ -1354,7 +1354,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             {
                 weightedRanges = new ArrayList<>(localRanges.size());
                 for (Range<Token> r : localRanges)
-                    weightedRanges.add(new Splitter.WeightedRange(1.0, r));
+                {
+                    for (Range<Token> u: r.unwrap())
+                        weightedRanges.add(new Splitter.WeightedRange(1.0, u));
+                }
                 weightedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
             }
 
