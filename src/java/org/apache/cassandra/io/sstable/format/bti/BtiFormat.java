@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.bti;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.google.common.base.Preconditions;
@@ -119,6 +120,11 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
     public static boolean is(SSTableFormat<?, ?> format)
     {
         return format.name().equals(NAME);
+    }
+
+    public static BtiFormat getInstance()
+    {
+        return (BtiFormat) Objects.requireNonNull(DatabaseDescriptor.getSSTableFormats().get(NAME), "Unknown SSTable format: " + NAME);
     }
 
     public static boolean isSelected()
