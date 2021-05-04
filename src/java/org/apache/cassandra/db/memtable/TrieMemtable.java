@@ -232,6 +232,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return colUpdateTimeDelta;
     }
 
+    @Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         super.addMemoryUsageTo(stats);
@@ -248,6 +249,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
      * Technically we should scatter gather on all the core threads because the size in following calls are not
      * using volatile variables, but for metrics purpose this should be good enough.
      */
+    @Override
     public long getLiveDataSize()
     {
         long total = 0L;
@@ -256,6 +258,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return total;
     }
 
+    @Override
     public long getOperations()
     {
         long total = 0L;
@@ -264,6 +267,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return total;
     }
 
+    @Override
     public long partitionCount()
     {
         int total = 0;
@@ -272,6 +276,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return total;
     }
 
+    @Override
     public long getMinTimestamp()
     {
         long min = Long.MAX_VALUE;
@@ -280,6 +285,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return min;
     }
 
+    @Override
     RegularAndStaticColumns columns()
     {
         for (MemtableShard shard : shards)
@@ -287,6 +293,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return columnsCollector.get();
     }
 
+    @Override
     EncodingStats encodingStats()
     {
         for (MemtableShard shard : shards)
@@ -493,7 +500,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                     updateLiveDataSize(updater.dataSize);
                     updateCurrentOperations(update.operationCount());
 
-                    // TODO: check if stats are further optimisable
+                    // TODO: lambov 2021-03-30: check if stats are further optimisable
                     columnsCollector.update(update.columns());
                     statsCollector.update(update.stats());
                 }

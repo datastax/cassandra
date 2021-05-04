@@ -28,7 +28,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Token;
 
 /**
- * Holds boundaries (tokens) used to map a particular token (so partition key) to a TPC core ID.
+ * Holds boundaries (tokens) used to map a particular token (so partition key) to a shard id.
  * In practice, each keyspace has its associated boundaries, see {@link Keyspace}.
  * <p>
  * Technically, if we use {@code n} shards, this is a list of {@code n-1} tokens and each token {@code tk} gets assigned
@@ -39,20 +39,12 @@ public class ShardBoundaries
 {
     private static final Token[] EMPTY_TOKEN_ARRAY = new Token[0];
 
-    // Special boundaries that map all tokens to core 0.
-    // For local system tables these boundaries will be used when:
-    // - the partitioner does not support splitting, otherwise the LOCAL boundaries will be used.
-    // For all other tables these boundaries will be used in either of these cases:
-    // - the default partitioner doesn't support splitting, because in this case the local ranges will always be null
-    // - StorageService is not yet initialized AND there are no SSTables
-    // - the available TokenMetadata doesn't contain ranges for a keyspace on a node
-    public static ShardBoundaries NONE = new ShardBoundaries(EMPTY_TOKEN_ARRAY, -1);
-//
-//    // Special boundaries for LOCAL tables, for which we know all the data is local, so we can split
-//    // the entire partition range supported by the partitioner. We need these boundaries very early on during
-//    // startup and they do not change, therefore they are stored in this static field. The partitioner
-//    // needs to support the maximum token, but this is a requirement for partitioners with a splitter.
-//    public static final ShardBoundaries LOCAL = computeLocalRanges(DatabaseDescriptor.getPartitioner(), TPCUtils.getNumCores());
+    // Special boundaries that map all tokens to one shard.
+    // These boundaries will be used in either of these cases:
+    // - there is only 1 shard configured
+    // - the default partitioner doesn't support splitting
+    // - the keyspace is local system keyspace
+    public static final ShardBoundaries NONE = new ShardBoundaries(EMPTY_TOKEN_ARRAY, -1);
 
     private final Token[] boundaries;
     public final long ringVersion;
@@ -70,7 +62,7 @@ public class ShardBoundaries
     }
 
     /**
-     * Computes the core to use for the provided token.
+     * Computes the shard to use for the provided token.
      */
     public int getShardForToken(Token tk)
     {
@@ -83,7 +75,7 @@ public class ShardBoundaries
     }
 
     /**
-     * Computes the core to use for the provided key.
+     * Computes the shard to use for the provided key.
      */
     public int getShardForKey(DecoratedKey key)
     {
@@ -96,10 +88,10 @@ public class ShardBoundaries
     }
 
     /**
-     * The number of shards that this boundaries support, that is how many different core ID {@link #getShardForToken} might
+     * The number of shards that this boundaries support, that is how many different shard ids {@link #getShardForToken} might
      * possibly return.
      *
-     * @return the number of core supported by theses boundaries.
+     * @return the number of shards supported by theses boundaries.
      */
     public int shardCount()
     {
@@ -110,13 +102,13 @@ public class ShardBoundaries
     public String toString()
     {
         if (boundaries.length == 0)
-            return "core 0: (min, max)";
+            return "shard 0: (min, max)";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("core 0: (min, ").append(boundaries[0]).append(") ");
+        sb.append("shard 0: (min, ").append(boundaries[0]).append(") ");
         for (int i = 0; i < boundaries.length - 1; i++)
-            sb.append("core ").append(i+1).append(": (").append(boundaries[i]).append(", ").append(boundaries[i+1]).append("] ");
-        sb.append("core ").append(boundaries.length).append(": (").append(boundaries[boundaries.length-1]).append(", max)");
+            sb.append("shard ").append(i+1).append(": (").append(boundaries[i]).append(", ").append(boundaries[i+1]).append("] ");
+        sb.append("shard ").append(boundaries.length).append(": (").append(boundaries[boundaries.length-1]).append(", max)");
         return sb.toString();
     }
 

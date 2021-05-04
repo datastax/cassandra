@@ -162,6 +162,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
     }
 
+    @Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         stats.ownershipRatioOnHeap += getAllocator().onHeap().ownershipRatio();

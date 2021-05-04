@@ -1355,6 +1355,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 weightedRanges = new ArrayList<>(localRanges.size());
                 for (Range<Token> r : localRanges)
                 {
+                    // WeightedRange supports only unwrapped ranges as it relies
+                    // on right - left == num tokens equality
                     for (Range<Token> u: r.unwrap())
                         weightedRanges.add(new Splitter.WeightedRange(1.0, u));
                 }

@@ -24,14 +24,11 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.slf4j.LoggerFactory;
-
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.github.jamm.MemoryLayoutSpecification;
 

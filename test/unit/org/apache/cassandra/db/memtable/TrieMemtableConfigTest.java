@@ -39,8 +39,6 @@ import static org.junit.Assert.assertEquals;
 
 public class TrieMemtableConfigTest extends CQLTester
 {
-    private static final int NUM_SHARDS = 13;
-
     @BeforeClass
     public static void setup() throws Exception
     {
