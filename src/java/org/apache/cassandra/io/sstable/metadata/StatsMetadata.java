@@ -342,11 +342,11 @@ public class StatsMetadata extends MetadataComponent
                 // min column names
                 size += 4;
                 ClusteringBound<?> minClusteringValues = component.coveredClustering.start();
-                size += minClusteringValues.size() * 2 /* short length */ + minClusteringValues.dataSize();
+                size += countUntilNull(minClusteringValues.getBufferArray()) * 2 /* short length */ + minClusteringValues.dataSize();
                 // max column names
                 size += 4;
                 ClusteringBound<?> maxClusteringValues = component.coveredClustering.end();
-                size += maxClusteringValues.size() * 2 /* short length */ + maxClusteringValues.dataSize();
+                size += countUntilNull(maxClusteringValues.getBufferArray()) * 2 /* short length */ + maxClusteringValues.dataSize();
             }
             else if (version.hasImprovedMinMax())
             {
