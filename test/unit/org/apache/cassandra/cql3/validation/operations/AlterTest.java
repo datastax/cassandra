@@ -347,7 +347,6 @@ public class AlterTest extends CQLTester
     public void testCreateAlterNetworkTopologyWithDefaults() throws Throwable
     {
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
-        logger.info("DUPA: partitioner={}", DatabaseDescriptor.getPartitioner());
         metadata.clearUnsafe();
         InetAddressAndPort local = FBUtilities.getBroadcastAddressAndPort();
         InetAddressAndPort remote = InetAddressAndPort.getByName("127.0.0.4");
