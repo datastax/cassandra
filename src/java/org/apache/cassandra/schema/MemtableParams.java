@@ -60,7 +60,7 @@ public final class MemtableParams
     private MemtableParams()
     {
         this.options = ImmutableMap.of();
-        this.factory = DefaultMemtableFactory.create();
+        this.factory = new DefaultMemtableFactory();
     }
 
     public MemtableParams(Map<String, String> options)
