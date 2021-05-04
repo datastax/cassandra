@@ -37,7 +37,6 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public abstract class AbstractMemtable implements Memtable
 {
-    protected final AtomicLong liveDataSize = new AtomicLong(0);
     protected final AtomicLong currentOperations = new AtomicLong(0);
     protected final ColumnsCollector columnsCollector;
     protected final StatsCollector statsCollector = new StatsCollector();
@@ -55,11 +54,6 @@ public abstract class AbstractMemtable implements Memtable
     public TableMetadata metadata()
     {
         return metadata.get();
-    }
-
-    public long getLiveDataSize()
-    {
-        return liveDataSize.get();
     }
 
     public long getOperations()
