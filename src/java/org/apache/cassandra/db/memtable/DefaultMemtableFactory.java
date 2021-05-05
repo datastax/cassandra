@@ -18,11 +18,17 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.schema.TableMetadataRef;
+
 /**
  * This class exists solely to avoid initialization of the default memtable class.
  * Some tests want to setup table parameters before initializing DatabaseDescriptor -- this allows them to do so.
  */
-public class DefaultMemtableFactory
+public class DefaultMemtableFactory implements Memtable.Factory
 {
     // We can't use TrieMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
     public static final Memtable.Factory INSTANCE = (commitLogLowerBound, metadataRef, owner) -> new TrieMemtable(commitLogLowerBound, metadataRef, owner, null);

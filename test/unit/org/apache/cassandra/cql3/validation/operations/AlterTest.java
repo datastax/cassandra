@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.validation.operations;
 import java.util.UUID;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -50,6 +51,15 @@ import static org.junit.Assert.fail;
 
 public class AlterTest extends CQLTester
 {
+    @BeforeClass
+    public static void setUpClass()
+    {
+        // AlterTest uses Murmur3 partitioner, but injects OrderPreservingPartitioner.StringToken
+        // into TokenMetadata; expect trouble
+        System.setProperty(TrieMemtable.SHARD_COUNT_PROPERTY, "1");
+        CQLTester.setUpClass();
+    }
+
     @Test
     public void testNonFrozenCollectionsAreIncompatibleWithBlob() throws Throwable
     {
