@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.validation.operations;
 import java.util.UUID;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -42,6 +43,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -50,6 +52,15 @@ import static org.junit.Assert.fail;
 
 public class AlterTest extends CQLTester
 {
+    @BeforeClass
+    public static void setUpClass()
+    {
+        // AlterTest uses Murmur3 partitioner, but injects OrderPreservingPartitioner.StringToken
+        // into TokenMetadata; expect trouble
+        MEMTABLE_SHARD_COUNT.setString("1");
+        CQLTester.setUpClass();
+    }
+
     @Test
     public void testNonFrozenCollectionsAreIncompatibleWithBlob() throws Throwable
     {
