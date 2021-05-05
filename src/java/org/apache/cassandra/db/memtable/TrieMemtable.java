@@ -173,6 +173,16 @@ public class TrieMemtable extends AbstractShardedMemtable
         return true;
     }
 
+    @VisibleForTesting
+    @Override
+    public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
+    {
+        super.switchOut(writeBarrier, commitLogUpperBound);
+
+        for (MemtableShard shard : shards)
+            shard.allocator.setDiscarding();
+    }
+
     @Override
     public void discard()
     {
@@ -218,6 +228,19 @@ public class TrieMemtable extends AbstractShardedMemtable
             // This should never happen as {@link InMemoryTrie#reachedAllocatedSizeThreshold} should become
             // true and trigger a memtable switch long before this limit is reached.
             throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public void addMemoryUsageTo(MemoryUsage stats)
+    {
+        super.addMemoryUsageTo(stats);
+        for (MemtableShard shard : shards)
+        {
+            stats.ownsOnHeap += shard.allocator.onHeap().owns();
+            stats.ownsOffHeap += shard.allocator.offHeap().owns();
+            stats.ownershipRatioOnHeap += shard.allocator.onHeap().ownershipRatio();
+            stats.ownershipRatioOffHeap += shard.allocator.offHeap().ownershipRatio();
         }
     }
 
