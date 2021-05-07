@@ -139,9 +139,10 @@ public class TrieMemtable extends AbstractShardedMemtable
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
     {
         super(commitLogLowerBound, metadataRef, owner, shardCountOption);
-        this.metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
+        this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), allocator, metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);
+        logger.debug("Created memtable with {} shards", this.shards.length);
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -731,7 +732,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         @Override
         public TableMetrics.ReleasableMetric createMemtableMetrics(TableMetadataRef metadataRef)
         {
-            TrieMemtableMetricsView metrics = new TrieMemtableMetricsView(metadataRef.keyspace, metadataRef.name);
+            TrieMemtableMetricsView metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
             return metrics::release;
         }
 
