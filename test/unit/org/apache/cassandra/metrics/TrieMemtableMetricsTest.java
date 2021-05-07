@@ -129,11 +129,13 @@ public class TrieMemtableMetricsTest extends SchemaLoader
 
         writeAndFlush(10);
         assertEquals(10, metrics.contendedPuts.getCount() + metrics.uncontendedPuts.getCount());
+        Long maxShardSize = metrics.lastFlushShardDataSizes.maxGauge.getValue();
 
         // verify that metrics survive flush / memtable switching
-        writeAndFlush(10);
-        assertEquals(20, metrics.contendedPuts.getCount() + metrics.uncontendedPuts.getCount());
-        assertEquals(metrics.lastFlushShardDataSizes.toString(), NUM_SHARDS, metrics.lastFlushShardDataSizes.numSamplesGauge.getValue().intValue());
+        writeAndFlush(100);
+        assertEquals(110, metrics.contendedPuts.getCount() + metrics.uncontendedPuts.getCount());
+        assertEquals(metrics.lastFlushShardDataSizes.toString(), NUM_SHARDS, (int) metrics.lastFlushShardDataSizes.numSamplesGauge.getValue());
+        assertThat(metrics.lastFlushShardDataSizes.maxGauge.getValue(), greaterThan(maxShardSize));
     }
 
     @Test
@@ -180,7 +182,7 @@ public class TrieMemtableMetricsTest extends SchemaLoader
 
     private TrieMemtableMetricsView getMemtableMetrics(ColumnFamilyStore cfs)
     {
-        return new TrieMemtableMetricsView(cfs.getKeyspaceName(), cfs.name);
+        return TrieMemtableMetricsView.getOrCreate(cfs.keyspace.getName(), cfs.name);
     }
 
     private void writeAndFlush(int rows) throws IOException, ExecutionException, InterruptedException
