@@ -57,8 +57,8 @@ public abstract class AbstractMemtableWithCommitlog extends AbstractMemtable
         // This can prepare the memtable data for deletion; it will still be used while the flush is proceeding.
         // A setDiscarded call will follow.
         assert this.writeBarrier == null;
-        this.writeBarrier = writeBarrier;
         this.commitLogUpperBound = commitLogUpperBound;
+        this.writeBarrier = writeBarrier;
     }
 
     public void discard()
