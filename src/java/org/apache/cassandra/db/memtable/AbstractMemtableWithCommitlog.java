@@ -112,8 +112,9 @@ public abstract class AbstractMemtableWithCommitlog extends AbstractMemtable
         return commitLogLowerBound.get();
     }
 
-    public LastCommitLogPosition getCommitLogUpperBound()
+    public LastCommitLogPosition getFinalCommitLogUpperBound()
     {
+        assert commitLogUpperBound != null : "Commit log upper bound should be set before flushing";
         assert commitLogUpperBound.get() instanceof LastCommitLogPosition : "Commit log upper bound has not been sealed yet? " + commitLogUpperBound.get();
         return (LastCommitLogPosition) commitLogUpperBound.get();
     }

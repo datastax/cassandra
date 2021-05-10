@@ -33,7 +33,6 @@ import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public abstract class AbstractMemtable implements Memtable
 {
@@ -195,7 +194,7 @@ public abstract class AbstractMemtable implements Memtable
 
         public LastCommitLogPosition commitLogUpperBound()
         {
-            return AbstractMemtable.this.getCommitLogUpperBound();
+            return AbstractMemtable.this.getFinalCommitLogUpperBound();
         }
 
         public EncodingStats encodingStats()
