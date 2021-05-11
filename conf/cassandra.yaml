@@ -490,7 +490,7 @@ concurrent_materialized_view_writes: 32
 
 # Enable the sstable chunk cache.  The chunk cache will store recently accessed
 # sections of the sstable in-memory as uncompressed buffers.
-# file_cache_enabled: false
+file_cache_enabled: true
 
 # Maximum memory to use for sstable chunk cache and buffer pooling.
 # 32MB of this are reserved for pooling buffers, the rest is used for chunk cache
@@ -545,7 +545,7 @@ concurrent_materialized_view_writes: 32
 #
 # offheap_objects
 #    off heap objects
-memtable_allocation_type: heap_buffers
+memtable_allocation_type: offheap_objects
 
 # Limit memory usage for Merkle tree calculations during repairs. The default
 # is 1/16th of the available heap. The main tradeoff is that smaller trees
@@ -596,7 +596,7 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-#memtable_flush_writers: 2
+memtable_flush_writers: 8
 
 # Total space to use for change-data-capture logs on disk.
 #
