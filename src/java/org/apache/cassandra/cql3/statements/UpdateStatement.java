@@ -176,13 +176,13 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.builder(type,
+                                                                               metadata,
+                                                                               whereClause.build(),
+                                                                               bindVariables,
+                                                                               applyOnlyToStaticColumns,
+                                                                               false,
+                                                                               false).build();
 
             return new UpdateStatement(type,
                                        bindVariables,
@@ -244,13 +244,13 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.builder(type,
+                                                                               metadata,
+                                                                               whereClause.build(),
+                                                                               bindVariables,
+                                                                               applyOnlyToStaticColumns,
+                                                                               false,
+                                                                               false).build();
 
             return new UpdateStatement(type,
                                        bindVariables,

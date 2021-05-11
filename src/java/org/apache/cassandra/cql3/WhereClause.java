@@ -17,30 +17,21 @@
  */
 package org.apache.cassandra.cql3;
 
-import java.util.List;
 import java.util.Objects;
 
-import com.google.common.collect.ImmutableList;
-
 import org.antlr.runtime.RecognitionException;
+import org.apache.cassandra.cql3.restrictions.ExpressionTree;
 import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
-
-import static java.lang.String.join;
-
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Iterables.transform;
 
 public final class WhereClause
 {
-    private static final WhereClause EMPTY = new WhereClause(new Builder());
+    private static final WhereClause EMPTY = new WhereClause(ExpressionTree.EMPTY);
 
-    public final List<Relation> relations;
-    public final List<CustomIndexExpression> expressions;
+    private final ExpressionTree expressionTree;
 
-    private WhereClause(Builder builder)
+    private WhereClause(ExpressionTree expressionTree)
     {
-        relations = builder.relations.build();
-        expressions = builder.expressions.build();
+        this.expressionTree = expressionTree;
     }
 
     public static WhereClause empty()
@@ -50,7 +41,12 @@ public final class WhereClause
 
     public boolean containsCustomExpressions()
     {
-        return !expressions.isEmpty();
+        return root().containsCustomExpressions();
+    }
+
+    public ExpressionTree.ExpressionElement root()
+    {
+        return expressionTree.root();
     }
 
     /**
@@ -61,15 +57,7 @@ public final class WhereClause
      */
     public WhereClause renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
-        WhereClause.Builder builder = new WhereClause.Builder();
-
-        relations.stream()
-                 .map(r -> r.renameIdentifier(from, to))
-                 .forEach(builder::add);
-
-        expressions.forEach(builder::add);
-
-        return builder.build();
+        return new WhereClause(expressionTree.rename(from, to));
     }
 
     public static WhereClause parse(String cql) throws RecognitionException
@@ -90,9 +78,7 @@ public final class WhereClause
      */
     public String toCQLString()
     {
-        return join(" AND ",
-                    concat(transform(relations, Relation::toCQLString),
-                           transform(expressions, CustomIndexExpression::toCQLString)));
+        return expressionTree.toString();
     }
 
     @Override
@@ -105,35 +91,52 @@ public final class WhereClause
             return false;
 
         WhereClause wc = (WhereClause) o;
-        return relations.equals(wc.relations) && expressions.equals(wc.expressions);
+        return expressionTree.equals(wc.expressionTree);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relations, expressions);
+        return Objects.hash(expressionTree);
     }
 
     public static final class Builder
     {
-        ImmutableList.Builder<Relation> relations = new ImmutableList.Builder<>();
-        ImmutableList.Builder<CustomIndexExpression> expressions = new ImmutableList.Builder<>();
+        ExpressionTree.Builder builder = new ExpressionTree.Builder();
 
         public Builder add(Relation relation)
         {
-            relations.add(relation);
+            builder.add(relation);
             return this;
         }
 
         public Builder add(CustomIndexExpression expression)
         {
-            expressions.add(expression);
+            builder.add(expression);
+            return this;
+        }
+
+        public Builder startEnclosure()
+        {
+            builder.startEnclosure();
+            return this;
+        }
+
+        public Builder endEnclosure()
+        {
+            builder.endEnclosure();
+            return this;
+        }
+
+        public Builder setCurrentOperator(String operator)
+        {
+            builder.setCurrentOperator(operator);
             return this;
         }
 
         public WhereClause build()
         {
-            return new WhereClause(this);
+            return new WhereClause(builder.build());
         }
     }
 }
