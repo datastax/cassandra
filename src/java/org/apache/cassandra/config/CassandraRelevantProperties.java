@@ -292,6 +292,8 @@ public enum CassandraRelevantProperties
     /** @deprecated See CASSANDRA-17797 */
     @Deprecated(since = "4.1")
     IGNORE_RACK("cassandra.ignore_rack"),
+    INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD("cassandra.index.guardrails.table_failure_threshold"),
+    INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD("cassandra.index.guardrails.total_failure_threshold"),
     INDEX_SUMMARY_EXPECTED_KEY_SIZE("cassandra.index_summary_expected_key_size", "64"),
     INITIAL_TOKEN("cassandra.initial_token"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
