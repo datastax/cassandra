@@ -60,15 +60,11 @@ public class GuardrailSecondaryIndexesPerTableTest extends ThresholdTester
         assertCreateIndexFails("v2", "v2_idx");
         assertCurrentValue(3);
 
-        // 2i guardrail will also affect custom indexes
-        assertCreateCustomIndexFails("v2");
-
         // drop the two first indexes, we should be able to create new indexes again
         dropIndex(format("DROP INDEX %s.%s", keyspace(), "v3_idx"));
         assertCurrentValue(2);
 
         assertCreateIndexWarns("v3", "");
-        assertCreateCustomIndexFails("v4");
         assertCurrentValue(3);
 
         // previous guardrail should not apply to another base table
@@ -111,13 +107,6 @@ public class GuardrailSecondaryIndexesPerTableTest extends ThresholdTester
         assertThresholdFails(format("CREATE INDEX %s ON %%s(%s)", indexName, column),
                              format("aborting the creation of secondary index %son table %s",
                                     Strings.isNullOrEmpty(indexName) ? "" : indexName + " ", currentTable())
-        );
-    }
-
-    private void assertCreateCustomIndexFails(String column) throws Throwable
-    {
-        assertThresholdFails(format("CREATE CUSTOM INDEX ON %%s (%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", column),
-                             format("aborting the creation of secondary index on table %s", currentTable())
         );
     }
 }
