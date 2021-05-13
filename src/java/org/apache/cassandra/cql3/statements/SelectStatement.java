@@ -266,14 +266,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Guardrails.allowFilteringEnabled.ensureEnabled(state);
     }
 
+    private void validateQueryOptions(QueryState queryState, QueryOptions options)
+    {
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.readConsistencyLevels.guard(EnumSet.of(options.getConsistency()), queryState.getClientState());
+    }
+
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead();
-        if (SchemaConstants.isUserKeyspace(table.keyspace))
-            Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
+        validateQueryOptions(state, options);
 
         long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
@@ -412,11 +417,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             private final ConsistencyLevel consistency;
             private final ClientState clientState;
 
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
+            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState queryState)
             {
                 super(pager);
                 this.consistency = consistency;
-                this.clientState = clientState;
+                this.clientState = queryState;
             }
 
             public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
