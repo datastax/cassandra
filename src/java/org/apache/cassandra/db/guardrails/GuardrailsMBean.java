@@ -117,6 +117,38 @@ public interface GuardrailsMBean
     void setSecondaryIndexesEnabled(boolean enabled);
 
     /**
+     * @return The threshold to warn when creating more storage attached indexes per table than threshold. -1 means disabled.
+     */
+    int getStorageAttachedIndexesPerTableWarnThreshold();
+
+    /**
+     * @return The threshold to prevent creating more storage attached indexes per table than threshold. -1 means disabled.
+     */
+    int getStorageAttachedIndexesPerTableFailThreshold();
+
+    /**
+     * @param warn The threshold to warn when creating more storage attached indexes per table than threshold. -1 means disabled.
+     * @param fail The threshold to prevent creating more storage attached indexes per table than threshold. -1 means disabled.
+     */
+    void setStorageAttachedIndexesPerTableThreshold(int warn, int fail);
+
+    /**
+     * @return The threshold to warn when creating more storage attached indexes total than threshold. -1 means disabled.
+     */
+    int getStorageAttachedIndexesTotalWarnThreshold();
+
+    /**
+     * @return The threshold to prevent creating more storage attached indexes total than threshold. -1 means disabled.
+     */
+    int getStorageAttachedIndexesTotalFailThreshold();
+
+    /**
+     * @param warn The threshold to warn when creating more storage attached indexes total than threshold. -1 means disabled.
+     * @param fail The threshold to prevent creating more storage attahced indexes total than threshold. -1 means disabled.
+     */
+    void setStorageAttachedIndexesTotalThreshold(int warn, int fail);
+
+    /**
      * @return The threshold to warn when creating more materialized views per table than threshold.
      * -1 means disabled.
      */
