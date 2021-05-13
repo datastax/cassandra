@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.stream.StreamSupport;
 
 import com.google.common.base.Strings;
 import com.google.common.annotations.VisibleForTesting;
@@ -204,6 +205,27 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
 
+        String className = index.getIndexClassName();
+        IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
+        String indexDescription = indexName == null ? String.format("on table %s", table.name) : String.format("%s on table %s", indexName, table.name);
+
+        // Guardrail to limit number of secondary indexes (per table)
+        if (guardRails.hasPerTableThreshold())
+        {
+            long indexesOnSameTable = table.indexes.stream().filter(other -> className.equals(other.getIndexClassName())).count();
+            guardRails.perTableThreshold.guard(indexesOnSameTable + 1, indexDescription,false, state);
+        }
+
+        // Guardrail to limit number of secondary indexes (total)
+        if (guardRails.hasTotalThreshold())
+        {
+            long indexesOnAllTables = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(ks -> ks.getColumnFamilyStores().stream())
+                                                   .flatMap(ks -> ks.indexManager.listIndexes().stream())
+                                                   .map(i -> i.getIndexMetadata().getIndexClassName())
+                                                   .filter(otherClassName -> className.equals(otherClassName)).count();
+            guardRails.totalThreshold.guard(indexesOnAllTables + 1, indexDescription, false, state);
+        }
+
         // check to disallow creation of an index which duplicates an existing one in all but name
         IndexMetadata equalIndex = tryFind(table.indexes, i -> i.equalsWithoutName(index)).orNull();
         if (null != equalIndex)
@@ -378,5 +400,48 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
             return new CreateIndexStatement(keyspaceName, tableName.getName(), indexName.getName(), rawIndexTargets, attrs, ifNotExists);
         }
+    }
+
+    enum IndexGuardrails
+    {
+        LEGACY(Guardrails.secondaryIndexesPerTable, null),
+        SAI(Guardrails.indexesPerTableSai, Guardrails.indexesTotalSai),
+        SASI(Guardrails.indexesPerTableSasi, null),
+        UNKNOWN(null, null);
+
+        final Guardrail.Threshold perTableThreshold;
+        final Guardrail.Threshold totalThreshold;
+
+        IndexGuardrails(Guardrail.Threshold perTableThreshold, Guardrail.Threshold totalThreshold)
+        {
+            this.perTableThreshold = perTableThreshold;
+            this.totalThreshold = totalThreshold;
+        }
+
+        boolean hasPerTableThreshold()
+        {
+            return perTableThreshold != null;
+        }
+
+        boolean hasTotalThreshold()
+        {
+            return totalThreshold != null;
+        }
+
+        static IndexGuardrails forClassName(String className)
+        {
+            switch (className)
+            {
+                case "org.apache.cassandra.index.internal.CassandraIndex":
+                    return IndexGuardrails.LEGACY;
+                case "org.apache.cassandra.index.sasi.SASIIndex":
+                    return IndexGuardrails.SASI;
+                case "org.apache.cassandra.index.sai.StorageAttachedIndex":
+                    return IndexGuardrails.SAI;
+                default:
+                    return IndexGuardrails.UNKNOWN;
+            }
+        }
+
     }
 }
