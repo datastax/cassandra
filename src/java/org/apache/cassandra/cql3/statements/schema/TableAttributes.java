@@ -123,6 +123,11 @@ public final class TableAttributes extends PropertyDefinitions
         }
     }
 
+    public static Set<String> allKeywords()
+    {
+        return Sets.union(validKeywords, obsoleteKeywords);
+    }
+
     private TableParams build(TableParams.Builder builder)
     {
         if (hasOption(Option.ALLOW_AUTO_SNAPSHOT))
