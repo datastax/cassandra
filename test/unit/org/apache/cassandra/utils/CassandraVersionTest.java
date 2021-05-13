@@ -19,25 +19,25 @@ package org.apache.cassandra.utils;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Splitter;
-import org.apache.commons.lang.CharRange;
 import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import com.datastax.driver.core.VersionNumber;
-import org.apache.cassandra.io.sstable.format.Version;
 import org.assertj.core.api.Assertions;
 import org.quicktheories.core.Gen;
 import org.quicktheories.generators.Generate;
 import org.quicktheories.generators.SourceDSL;
-import org.quicktheories.impl.Constraint;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -301,5 +301,20 @@ public class CassandraVersionTest
             }
         }
         throw new NoSuchMethodException(CassandraVersion.class + "." + name + Arrays.toString(args));
+    }
+
+    @Test
+    public void testVersionComparison()
+    {
+        List<CassandraVersion> versionsInOrder = Stream.of("4.0.0-alpha",
+                                                           "4.0.0-beta5",
+                                                           "4.0.0-beta5+dsedb_alpha3",
+                                                           "4.0.0",
+                                                           "4.0.0+dsedb")
+                                                       .map(CassandraVersion::new)
+                                                       .collect(Collectors.toList());
+        List<CassandraVersion> sorted = new ArrayList<>(versionsInOrder);
+        sorted.sort(CassandraVersion::compareTo);
+        assertEquals(versionsInOrder, sorted);
     }
 }
