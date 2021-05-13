@@ -177,7 +177,7 @@ public class GuardrailsConfigCommandsTest extends CQLTester
                 // else it is threshold, so it does not match the key
 
                 // assert converted snake-case guardrail name is actually in Config / cassandra.yaml
-                assertTrue(configFieldNames.contains(guardrailName));
+                assertTrue("does not contain " + guardrailName, configFieldNames.contains(guardrailName));
             }
         }
     }
@@ -205,6 +205,7 @@ public class GuardrailsConfigCommandsTest extends CQLTester
     "group_by_enabled                                true          \n" +
     "intersect_filtering_query_enabled               true          \n" +
     "intersect_filtering_query_warned                true          \n" +
+    "logged_batch_enabled                            true          \n" +
     "non_partition_restricted_index_query_enabled    true          \n" +
     "read_before_write_list_operations_enabled       true          \n" +
     "secondary_indexes_enabled                       true          \n" +
@@ -229,17 +230,23 @@ public class GuardrailsConfigCommandsTest extends CQLTester
     "maximum_timestamp_threshold               [null, null]  \n" +
     "minimum_replication_factor_threshold      [-1, -1]      \n" +
     "minimum_timestamp_threshold               [null, null]  \n" +
+    "offset_rows_threshold                     [20000, 10000] \n" +
     "page_size_threshold                       [-1, -1]      \n" +
+    "page_weight_threshold                     [null, null]  \n" +
     "partition_keys_in_select_threshold        [-1, -1]      \n" +
-    "partition_size_threshold                  [null, null]  \n" +
+    "partition_size_threshold                  [null, 100MiB] \n" +
     "partition_tombstones_threshold            [-1, -1]      \n" +
+    "query_filters_threshold                   [-1, -1]      \n" +
+    "sai_ann_rerank_k_threshold                [4000, -1]    \n" +
     "sai_frozen_term_size_threshold            [8KiB, 1KiB]  \n" +
+    "sai_indexes_per_table_threshold           [10, -1]      \n" +
+    "sai_indexes_total_threshold               [10, -1]      \n" +
     "sai_sstable_indexes_per_query_threshold   [-1, 32]      \n" +
     "sai_string_term_size_threshold            [8KiB, 1KiB]  \n" +
     "sai_vector_term_size_threshold            [32KiB, 16KiB]\n" +
     "secondary_indexes_per_table_threshold     [-1, -1]      \n" +
     "tables_threshold                          [-1, -1]      \n" +
-    "vector_dimensions_threshold               [-1, -1]      \n";
+    "vector_dimensions_threshold               [8192, -1]      \n";
 
     private static final String ALL_THRESHOLDS_GETTER_VERBOSE_OUTPUT =
     "collection_size_fail_threshold               null \n" +
@@ -268,16 +275,28 @@ public class GuardrailsConfigCommandsTest extends CQLTester
     "minimum_replication_factor_warn_threshold    -1   \n" +
     "minimum_timestamp_fail_threshold             null \n" +
     "minimum_timestamp_warn_threshold             null \n" +
+    "offset_rows_fail_threshold                   20000\n" +
+    "offset_rows_warn_threshold                   10000\n" +
     "page_size_fail_threshold                     -1   \n" +
     "page_size_warn_threshold                     -1   \n" +
+    "page_weight_fail_threshold                   null\n" +
+    "page_weight_warn_threshold                   null\n" +
     "partition_keys_in_select_fail_threshold      -1   \n" +
     "partition_keys_in_select_warn_threshold      -1   \n" +
     "partition_size_fail_threshold                null \n" +
-    "partition_size_warn_threshold                null \n" +
+    "partition_size_warn_threshold                100MiB \n" +
     "partition_tombstones_fail_threshold          -1   \n" +
     "partition_tombstones_warn_threshold          -1   \n" +
+    "query_filters_fail_threshold                 -1   \n" +
+    "query_filters_warn_threshold                 -1   \n" +
+    "sai_ann_rerank_k_fail_threshold              4000 \n" +
+    "sai_ann_rerank_k_warn_threshold              -1   \n" +
     "sai_frozen_term_size_fail_threshold          8KiB \n" +
     "sai_frozen_term_size_warn_threshold          1KiB \n" +
+    "sai_indexes_per_table_fail_threshold         10   \n" +
+    "sai_indexes_per_table_warn_threshold         -1   \n" +
+    "sai_indexes_total_fail_threshold             10   \n" +
+    "sai_indexes_total_warn_threshold             -1   \n" +
     "sai_sstable_indexes_per_query_fail_threshold -1   \n" +
     "sai_sstable_indexes_per_query_warn_threshold 32   \n" +
     "sai_string_term_size_fail_threshold          8KiB \n" +
@@ -288,7 +307,7 @@ public class GuardrailsConfigCommandsTest extends CQLTester
     "secondary_indexes_per_table_warn_threshold   -1   \n" +
     "tables_fail_threshold                        -1   \n" +
     "tables_warn_threshold                        -1   \n" +
-    "vector_dimensions_fail_threshold             -1   \n" +
+    "vector_dimensions_fail_threshold             8192 \n" +
     "vector_dimensions_warn_threshold             -1   \n";
 
     private static final String ALL_VALUES_GETTER_OUTPUT =
