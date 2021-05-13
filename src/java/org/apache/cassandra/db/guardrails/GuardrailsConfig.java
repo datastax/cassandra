@@ -207,6 +207,13 @@ public interface GuardrailsConfig
     boolean getSimpleStrategyEnabled();
 
     /**
+     * Returns whether use of Counters is enabled
+     *
+     * @return {@code true} if Counters are allowed, {@code false} otherwise.
+     */
+    boolean getCounterEnabled();
+
+    /**
      * @return The threshold to warn when an IN query creates a cartesian product with a size exceeding threshold.
      * -1 means disabled.
      */
