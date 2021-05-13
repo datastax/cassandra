@@ -93,6 +93,37 @@ public final class CreateTableStatement extends AlterSchemaStatement
         this.useCompactStorage = useCompactStorage;
     }
 
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
+        // require the server to be initialized, so skipping them if it isn't.
+        if (Guardrails.ready())
+        {
+            // Guardrails on table properties
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+            Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
+
+            // Guardrail on counter
+            if (rawColumns.values().stream().anyMatch(CQL3Type.Raw::isCounter))
+                Guardrails.counterEnabled.ensureEnabled(state);
+
+            // Guardrail on columns per table
+            Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, state);
+
+            if (Guardrails.tablesLimit.enabled(state))
+            {
+                // guardrails on number of tables
+                int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(ksm -> Keyspace.open(ksm.name))
+                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                     .sum();
+                Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
+            }
+        }
+    }
+
     public Keyspaces apply(Keyspaces schema)
     {
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
