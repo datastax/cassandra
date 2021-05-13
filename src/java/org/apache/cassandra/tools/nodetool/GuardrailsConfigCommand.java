@@ -23,6 +23,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -348,13 +349,23 @@ public abstract class GuardrailsConfigCommand extends NodeTool.NodeToolCmd
      * Special map for methods which do not adhere to camel-case convention precisely.
      * These will be translated manually.
      */
-    private static final Map<String, String> toSnakeCaseTranslationMap = Map.of("ZeroTTLOnTWCSEnabled", "zero_ttl_on_twcs_enabled",
+    private static final Map<String, String> toSnakeCaseTranslationMap = Map.copyOf(new HashMap<>()
+                                                                        {{putAll(
+                                                                         Map.of("ZeroTTLOnTWCSEnabled", "zero_ttl_on_twcs_enabled",
                                                                                 "ZeroTTLOnTWCSWarned", "zero_ttl_on_twcs_warned",
                                                                                 "FieldsPerUDTFailThreshold", "fields_per_udt_fail_threshold",
                                                                                 "FieldsPerUDTWarnThreshold", "fields_per_udt_warn_threshold",
                                                                                 "FieldsPerUDTThreshold", "fields_per_udt_threshold",
                                                                                 "SimpleStrategyEnabled", "simplestrategy_enabled",
-                                                                                "NonPartitionRestrictedQueryEnabled", "non_partition_restricted_index_query_enabled");
+                                                                                "NonPartitionRestrictedQueryEnabled", "non_partition_restricted_index_query_enabled"));
+                                                                         putAll(Map.of(
+                                                                                "SaiAnnRerankKFailThreshold", "sai_ann_rerank_k_fail_threshold",
+                                                                                "SaiAnnRerankKWarnThreshold", "sai_ann_rerank_k_warn_threshold",
+                                                                                "StorageAttachedIndexesPerTableWarnThreshold", "sai_indexes_per_table_warn_threshold",
+                                                                                "StorageAttachedIndexesPerTableFailThreshold", "sai_indexes_per_table_fail_threshold",
+                                                                                "StorageAttachedIndexesTotalWarnThreshold", "sai_indexes_total_warn_threshold",
+                                                                                "StorageAttachedIndexesTotalFailThreshold", "sai_indexes_total_fail_threshold"));
+                                                                        }});
     /**
      * Set of guardrails which are flags, even though their suffix would suggest they are part of "values" which have warned, ignored, and disallowed sub-categories
      */
@@ -372,7 +383,6 @@ public abstract class GuardrailsConfigCommand extends NodeTool.NodeToolCmd
         {
             if (category == null)
                 return null;
-
             try
             {
                 return GuardrailCategory.valueOf(category.toLowerCase());
