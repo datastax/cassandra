@@ -20,7 +20,7 @@ package org.apache.cassandra.io.sstable.metadata;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Map;
@@ -30,17 +30,13 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -49,8 +45,9 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.serializers.UTF8Serializer;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.junit.Assert.assertEquals;
@@ -167,14 +164,14 @@ public class MetadataSerializerTest
     public void testMVersions() throws Throwable
     {
         Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
-        testVersions("ma", "mb", "mc", "md");
+        testVersions("ma", "mb", "mc", "md", "me");
     }
 
     @Test
     public void testNVersions() throws Throwable
     {
         Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
-        testVersions("na");
+        testVersions("na", "nb");
     }
 
     @Test
@@ -228,9 +225,14 @@ public class MetadataSerializerTest
     @Test
     public void pendingRepairCompatibility()
     {
-        Version mc = BigFormat.instance.getVersion("mc");
-        assertFalse(mc.hasPendingRepair());
-        Version na = BigFormat.instance.getVersion("na");
-        assertTrue(na.hasPendingRepair());
+        Arrays.asList("ma", "mb", "mc", "md", "me").forEach(v -> assertFalse(BigFormat.instance.getVersion(v).hasPendingRepair()));
+        Arrays.asList("na", "nb").forEach(v -> assertTrue(BigFormat.instance.getVersion(v).hasPendingRepair()));
+    }
+
+    @Test
+    public void originatingHostCompatibility()
+    {
+        Arrays.asList("ma", "mb", "mc", "md", "na").forEach(v -> assertFalse(BigFormat.instance.getVersion(v).hasOriginatingHostId()));
+        Arrays.asList("me", "nb").forEach(v -> assertTrue(BigFormat.instance.getVersion(v).hasOriginatingHostId()));
     }
 }

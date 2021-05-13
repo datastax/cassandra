@@ -92,6 +92,16 @@ public class TableViews extends AbstractCollection<View>
         return Iterables.transform(views, view -> keyspace.getColumnFamilyStore(view.getDefinition().name()));
     }
 
+    public void build()
+    {
+        views.forEach(View::build);
+    }
+
+    public void stopBuild()
+    {
+        views.forEach(View::stopBuild);
+    }
+
     public void forceBlockingFlush(ColumnFamilyStore.FlushReason reason)
     {
         for (ColumnFamilyStore viewCfs : allViewsCfs())

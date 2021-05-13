@@ -208,7 +208,7 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
         UserType apply(KeyspaceMetadata keyspace, UserType userType)
         {
-            throw ire("Alterting field types is no longer supported");
+            throw ire("Altering field types is no longer supported");
         }
     }
 

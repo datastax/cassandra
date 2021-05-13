@@ -410,7 +410,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         try
         {
-            cl.validateForRead(keyspace());
+            cl.validateForRead();
         }
         catch (InvalidRequestException e)
         {
@@ -711,7 +711,7 @@ public abstract class ModificationStatement implements CQLStatement
      *
      * @return list of the mutations
      */
-    private List<? extends IMutation> getMutations(QueryState state, 
+    private List<? extends IMutation> getMutations(QueryState state,
                                                    QueryOptions options,
                                                    boolean local,
                                                    long timestamp,
@@ -749,7 +749,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                            DataLimits.NONE,
                                                            local,
                                                            timestamp,
-                                                           nowInSeconds, 
+                                                           nowInSeconds,
                                                            queryStartNanoTime);
             for (ByteBuffer key : keys)
             {
@@ -817,7 +817,7 @@ public abstract class ModificationStatement implements CQLStatement
 
     private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
                                                   NavigableSet<Clustering<?>> clusterings,
-                                                  QueryState state, 
+                                                  QueryState state,
                                                   QueryOptions options,
                                                   boolean local,
                                                   long timestamp,
@@ -832,7 +832,7 @@ public abstract class ModificationStatement implements CQLStatement
                                         DataLimits.cqlLimits(1),
                                         local,
                                         timestamp,
-                                        nowInSeconds, 
+                                        nowInSeconds,
                                         queryStartNanoTime);
 
         return makeUpdateParameters(keys,
@@ -842,13 +842,13 @@ public abstract class ModificationStatement implements CQLStatement
                                     DataLimits.NONE,
                                     local,
                                     timestamp,
-                                    nowInSeconds, 
+                                    nowInSeconds,
                                     queryStartNanoTime);
     }
 
     private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
                                                   ClusteringIndexFilter filter,
-                                                  QueryState state, 
+                                                  QueryState state,
                                                   QueryOptions options,
                                                   DataLimits limits,
                                                   boolean local,
@@ -872,7 +872,7 @@ public abstract class ModificationStatement implements CQLStatement
                                     options,
                                     getTimestamp(timestamp, options),
                                     nowInSeconds,
-                                    getTimeToLive(options), 
+                                    getTimeToLive(options),
                                     lists);
     }
 

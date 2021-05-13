@@ -221,7 +221,7 @@ public class View
     {
         if (builder != null)
         {
-            logger.debug("Stopping current view builder due to schema change");
+            logger.debug("Stopping current view builder due to schema change or truncate");
             builder.stop();
             builder = null;
         }

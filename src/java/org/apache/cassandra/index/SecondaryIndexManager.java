@@ -1749,7 +1749,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // It is to provide a better UX, compared to throwing UnavailableException when the nodes are actually alive.
         if (initial != filtered)
         {
-            int required = level.blockFor(keyspace);
+            int required = level.blockFor(keyspace.getReplicationStrategy());
             if (required <= initial && required > filtered)
             {
                 Map<InetAddressAndPort, RequestFailureReason> failureReasons = new HashMap<>();

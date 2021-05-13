@@ -577,6 +577,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             buildSeedsList();
             seeds.remove(endpoint);
             logger.info("removed {} from seeds, updated seeds list = {}", endpoint, seeds);
+            if (seeds.isEmpty())
+                logger.warn("Seeds list is now empty!");
         }
 
         liveEndpoints.remove(endpoint);
@@ -994,6 +996,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 {
                     logger.info("FatClient {} has been silent for {}ms, removing from gossip", endpoint, fatClientTimeout);
                     runInGossipStageBlocking(() -> {
+                        if (!isGossipOnlyMember(endpoint))
+                        {
+                            // updating gossip and token metadata are not atomic, but rely on the single threaded gossip stage
+                            // since status checks are done outside the gossip stage, need to confirm the state of the endpoint
+                            // to make sure that the previous read data was correct
+                            logger.info("Race condition marking {} as a FatClient; ignoring", endpoint);
+                            return;
+                        }                        
                         removeEndpoint(endpoint); // will put it in justRemovedEndpoints to respect quarantine delay
                         evictFromMembership(endpoint); // can get rid of the state immediately
                     });
@@ -1969,12 +1979,27 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         return (scheduledGossipTask != null) && (!scheduledGossipTask.isCancelled());
     }
 
+    public boolean sufficientForStartupSafetyCheck(Map<InetAddressAndPort, EndpointState> epStateMap)
+    {
+        // it is possible for a previously queued ack to be sent to us when we come back up in shadow
+        EndpointState localState = epStateMap.get(FBUtilities.getBroadcastAddressAndPort());
+        // return false if response doesn't contain state necessary for safety check
+        return localState == null || isDeadState(localState) || localState.containsApplicationState(ApplicationState.HOST_ID);
+    }
+
     protected void maybeFinishShadowRound(InetAddressAndPort respondent, boolean isInShadowRound, Map<InetAddressAndPort, EndpointState> epStateMap)
     {
         if (inShadowRound)
         {
             if (!isInShadowRound)
             {
+                if (!sufficientForStartupSafetyCheck(epStateMap))
+                {
+                    logger.debug("Not exiting shadow round because received ACK with insufficient states {} -> {}",
+                                 FBUtilities.getBroadcastAddressAndPort(), epStateMap.get(FBUtilities.getBroadcastAddressAndPort()));
+                    return;
+                }
+
                 if (!seeds.contains(respondent))
                     logger.warn("Received an ack from {}, who isn't a seed. Ensure your seed list includes a live node. Exiting shadow round",
                                 respondent);

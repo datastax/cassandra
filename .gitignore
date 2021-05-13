@@ -8,7 +8,10 @@ logs/
 data/
 conf/hotspot_compiler
 doc/cql3/CQL.html
+doc/build/
 lib/
+pylib/src/
+!lib/cassandra-driver-internal-only-*.zip
 
 # C* debs
 build-stamp
@@ -27,7 +30,7 @@ debian/files
 # IntelliJ
 .idea/
 *.eml
-*.iml
+**/*.iml
 *.ipr
 *.iws
 
@@ -71,3 +74,7 @@ doc/source/tools/nodetool
 
 # Python virtual environment
 venv/
+
+# build-scripts will put cassandra-builds into the directory
+cassandra-builds/
+cassandra-dtest/

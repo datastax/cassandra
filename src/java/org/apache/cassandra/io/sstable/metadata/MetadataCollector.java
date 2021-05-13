@@ -35,6 +35,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.MurmurHash;
 import org.apache.cassandra.utils.streamhist.StreamingTombstoneHistogramBuilder;
@@ -86,6 +87,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
                                  -1,
                                  -1,
                                  null,
+                                 null,
                                  false,
                                  Collections.emptyMap());
     }
@@ -132,9 +134,17 @@ public class MetadataCollector implements PartitionStatisticsCollector
     protected ICardinality cardinality = new HyperLogLogPlus(13, 25);
     private final ClusteringComparator comparator;
 
+    private final UUID originatingHostId;
+
     public MetadataCollector(ClusteringComparator comparator)
     {
+        this(comparator, StorageService.instance.getLocalHostUUID());
+    }
+
+    public MetadataCollector(ClusteringComparator comparator, UUID originatingHostId)
+    {
         this.comparator = comparator;
+        this.originatingHostId = originatingHostId;
 
         int clusteringTypesNum = comparator.size();
         this.comparators = new AbstractType[clusteringTypesNum];
@@ -147,11 +157,14 @@ public class MetadataCollector implements PartitionStatisticsCollector
         this(comparator);
 
         IntervalSet.Builder<CommitLogPosition> intervals = new IntervalSet.Builder<>();
-        for (SSTableReader sstable : sstables)
+        if (originatingHostId != null)
         {
-            intervals.addAll(sstable.getSSTableMetadata().commitLogIntervals);
+            for (SSTableReader sstable : sstables)
+            {
+                if (originatingHostId.equals(sstable.getSSTableMetadata().originatingHostId))
+                    intervals.addAll(sstable.getSSTableMetadata().commitLogIntervals);
+            }
         }
-
         commitLogIntervals(intervals.build());
         sstableLevel(level);
     }
@@ -337,6 +350,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
                                                              repairedAt,
                                                              totalColumnsSet,
                                                              totalRows,
+                                                             originatingHostId,
                                                              pendingRepair,
                                                              isTransient,
                                                              Collections.emptyMap()));

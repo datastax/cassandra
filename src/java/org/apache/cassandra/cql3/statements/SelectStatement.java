@@ -241,7 +241,7 @@ public class SelectStatement implements CQLStatement
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
-        cl.validateForRead(keyspace());
+        cl.validateForRead();
         validateQueryOptions(options);
 
         int nowInSec = options.getNowInSeconds(state);
@@ -277,7 +277,7 @@ public class SelectStatement implements CQLStatement
         getPerPartitionLimit(options), options.getPageSize());
     }
 
-    public ReadQuery getQuery(QueryState queryState, 
+    public ReadQuery getQuery(QueryState queryState,
                               QueryOptions options,
                               ColumnFilter columnFilter,
                               int nowInSec,
