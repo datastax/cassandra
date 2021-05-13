@@ -1858,13 +1858,23 @@ drop_compact_storage_enabled: false
 # columns_per_table_warn_threshold: -1
 # columns_per_table_fail_threshold: -1
 #
-# Guardrail to warn or fail when creating more secondary indexes per table than threshold.
+# Guardrail to warn or fail when creating more secondary indexes per table than threshold (does not apply to CUSTOM INDEX StorageAttachedIndex).
 # The two thresholds default to -1 to disable.
 # secondary_indexes_per_table_warn_threshold: -1
 # secondary_indexes_per_table_fail_threshold: -1
 #
 # Guardrail to enable or disable the creation of secondary indexes
 # secondary_indexes_enabled: true
+#
+# Failure threshold for number of StorageAttachedIndex per table (only applies to CUSTOM INDEX StorageAttachedIndex)
+# Default is 10 (same when apply_dbaas_defaults is enabled)
+# sai_indexes_per_table_warn_threshold: -1
+# sai_indexes_per_table_fail_threshold: 10
+#
+# Failure threshold for total number of StorageAttachedIndex across all keyspaces (only applies to CUSTOM INDEX StorageAttachedIndex)
+# Default is 10 (same when apply_dbaas_defaults is enabled)
+# sai_indexes_total_warn_threshold: -1
+# sai_indexes_total_fail_threshold: 100
 #
 # Guardrail to warn or fail when creating more materialized views per table than threshold.
 # The two thresholds default to -1 to disable.

@@ -842,8 +842,16 @@ public class Config
     public volatile int tables_fail_threshold = -1;
     public volatile int columns_per_table_warn_threshold = -1;
     public volatile int columns_per_table_fail_threshold = -1;
+    // Legacy 2i guardrail
     public volatile int secondary_indexes_per_table_warn_threshold = -1;
     public volatile int secondary_indexes_per_table_fail_threshold = -1;
+    public volatile int sasi_indexes_per_table_warn_threshold = -1;
+    public volatile int sasi_indexes_per_table_fail_threshold = -1;
+    // SAI indexes guardrail
+    public volatile int sai_indexes_per_table_warn_threshold = -1;
+    public volatile int sai_indexes_per_table_fail_threshold = -1;
+    public volatile int sai_indexes_total_warn_threshold = -1;
+    public volatile int sai_indexes_total_fail_threshold = -1;
     public volatile int materialized_views_per_table_warn_threshold = -1;
     public volatile int materialized_views_per_table_fail_threshold = -1;
     public volatile int page_size_warn_threshold = -1;

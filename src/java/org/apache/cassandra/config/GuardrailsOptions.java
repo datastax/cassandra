@@ -55,16 +55,31 @@ import static java.util.stream.Collectors.toSet;
 public class GuardrailsOptions implements GuardrailsConfig
 {
     private static final Logger logger = LoggerFactory.getLogger(GuardrailsOptions.class);
+    public static final int UNSET = -2;
 
     private final Config config;
 
     public GuardrailsOptions(Config config)
     {
         this.config = config;
+
+        // SAI Table Failure threshold (may be overridden via system property)
+        int overrideTableFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD.getInt(UNSET);
+        if (overrideTableFailureThreshold != UNSET)
+            config.sai_indexes_per_table_fail_threshold = overrideTableFailureThreshold;
+
+        // SAI Total Failure threshold (may be overridden via system property)
+        int overrideTotalFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD.getInt(UNSET);
+        if (overrideTotalFailureThreshold != UNSET)
+            config.sai_indexes_total_fail_threshold = overrideTotalFailureThreshold;
+
         validateMaxIntThreshold(config.keyspaces_warn_threshold, config.keyspaces_fail_threshold, "keyspaces");
         validateMaxIntThreshold(config.tables_warn_threshold, config.tables_fail_threshold, "tables");
         validateMaxIntThreshold(config.columns_per_table_warn_threshold, config.columns_per_table_fail_threshold, "columns_per_table");
         validateMaxIntThreshold(config.secondary_indexes_per_table_warn_threshold, config.secondary_indexes_per_table_fail_threshold, "secondary_indexes_per_table");
+        validateMaxIntThreshold(config.sai_indexes_per_table_warn_threshold, config.sai_indexes_per_table_fail_threshold, "sai_indexes_per_table");
+        validateMaxIntThreshold(config.sai_indexes_total_warn_threshold, config.sai_indexes_total_fail_threshold, "sai_indexes_total");
+        validateMaxIntThreshold(config.sasi_indexes_per_table_warn_threshold, config.sasi_indexes_per_table_fail_threshold, "sasi_indexes_per_table");
         validateMaxIntThreshold(config.materialized_views_per_table_warn_threshold, config.materialized_views_per_table_fail_threshold, "materialized_views_per_table");
         config.table_properties_warned = validateTableProperties(config.table_properties_warned, "table_properties_warned");
         config.table_properties_ignored = validateTableProperties(config.table_properties_ignored, "table_properties_ignored");
@@ -189,6 +204,81 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   fail,
                                   () -> config.secondary_indexes_per_table_fail_threshold,
                                   x -> config.secondary_indexes_per_table_fail_threshold = x);
+    }
+
+    @Override
+    public int getSasiIndexesPerTableWarnThreshold()
+    {
+        return config.sasi_indexes_per_table_warn_threshold;
+    }
+
+    @Override
+    public int getSasiIndexesPerTableFailThreshold()
+    {
+        return config.sasi_indexes_per_table_fail_threshold;
+    }
+
+    public void setSasiIndexesPerTableThreshold(int warn, int fail)
+    {
+        validateMaxIntThreshold(warn, fail, "sasi_indexes_per_table");
+        updatePropertyWithLogging("sasi_indexes_per_table_warn_threshold",
+                                  warn,
+                                  () -> config.sasi_indexes_per_table_warn_threshold,
+                                  x -> config.sasi_indexes_per_table_warn_threshold = x);
+        updatePropertyWithLogging("sai_indexes_per_table_fail_threshold",
+                                  fail,
+                                  () -> config.sasi_indexes_per_table_fail_threshold,
+                                  x -> config.sasi_indexes_per_table_fail_threshold = x);
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableWarnThreshold()
+    {
+        return config.sai_indexes_per_table_warn_threshold;
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableFailThreshold()
+    {
+        return config.sai_indexes_per_table_fail_threshold;
+    }
+
+    public void setStorageAttachedIndexesPerTableThreshold(int warn, int fail)
+    {
+        validateMaxIntThreshold(warn, fail, "sai_indexes_per_table");
+        updatePropertyWithLogging("sai_indexes_per_table_warn_threshold",
+                                  warn,
+                                  () -> config.sai_indexes_per_table_warn_threshold,
+                                  x -> config.sai_indexes_per_table_warn_threshold = x);
+        updatePropertyWithLogging("sai_indexes_per_table_fail_threshold",
+                                  fail,
+                                  () -> config.sai_indexes_per_table_fail_threshold,
+                                  x -> config.sai_indexes_per_table_fail_threshold = x);
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalWarnThreshold()
+    {
+        return config.sai_indexes_total_warn_threshold;
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalFailThreshold()
+    {
+        return config.sai_indexes_total_fail_threshold;
+    }
+
+    public void setStorageAttachedIndexesTotalThreshold(int warn, int fail)
+    {
+        validateMaxIntThreshold(warn, fail, "sai_indexes_total");
+        updatePropertyWithLogging("sai_indexes_total_warn_threshold",
+                                  warn,
+                                  () -> config.sai_indexes_total_warn_threshold,
+                                  x -> config.sai_indexes_total_warn_threshold = x);
+        updatePropertyWithLogging("sai_indexes_total_fail_threshold",
+                                  fail,
+                                  () -> config.sai_indexes_total_fail_threshold,
+                                  x -> config.sai_indexes_total_fail_threshold = x);
     }
 
     @Override

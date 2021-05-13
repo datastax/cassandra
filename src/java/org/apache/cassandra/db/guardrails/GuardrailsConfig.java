@@ -92,6 +92,36 @@ public interface GuardrailsConfig
     boolean getSecondaryIndexesEnabled();
 
     /**
+     * @return The threshold to warn when creating more SASI indexes per table than threshold.
+     */
+    int getSasiIndexesPerTableWarnThreshold();
+
+    /**
+     * @return The threshold to fail when creating more SASI indexes per table than threshold.
+     */
+    int getSasiIndexesPerTableFailThreshold();
+
+    /**
+     * @return The threshold to warn when creating more SAI indexes per table than threshold.
+     */
+    int getStorageAttachedIndexesPerTableWarnThreshold();
+
+    /**
+     * @return The threshold to fail when creating more SAI indexes per table than threshold.
+     */
+    int getStorageAttachedIndexesPerTableFailThreshold();
+
+    /**
+     * @return The threshold to warn when creating more SAI indexes in total than threshold.
+     */
+    int getStorageAttachedIndexesTotalWarnThreshold();
+
+    /**
+     * @return The threshold to fail when creating more SAI indexes in total than threshold.
+     */
+    int getStorageAttachedIndexesTotalFailThreshold();
+
+    /**
      * @return The threshold to warn when creating more materialized views per table than threshold.
      */
     int getMaterializedViewsPerTableWarnThreshold();
