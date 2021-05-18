@@ -136,7 +136,8 @@ public class SSTableImporter
                     Descriptor newDescriptor = cfs.getUniqueDescriptorFor(entry.getKey(), targetDir);
                     maybeMutateMetadata(entry.getKey(), options);
                     movedSSTables.add(new MovedSSTable(newDescriptor, entry.getKey(), entry.getValue()));
-                    SSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
+                    SSTableReader sstable = newDescriptor.getFormat().getReaderFactory()
+                                                         .moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
                     newSSTablesPerDirectory.add(sstable);
                 }
                 catch (Throwable t)
@@ -181,8 +182,15 @@ public class SSTableImporter
             cfs.getTracker().addSSTables(newSSTables);
             for (SSTableReader reader : newSSTables)
             {
-                if (options.invalidateCaches && cfs.isRowCacheEnabled())
-                    invalidateCachesForSSTable(reader.descriptor);
+                try
+                {
+                    if (options.invalidateCaches && cfs.isRowCacheEnabled())
+                        invalidateCachesForSSTable(reader);
+                }
+                catch (IOException ex)
+                {
+                    throw new RuntimeException(ex);
+                }
             }
 
         }
@@ -208,7 +216,7 @@ public class SSTableImporter
         SSTableReader sstable = null;
         try
         {
-            sstable = SSTableReader.open(descriptor, components, cfs.metadata);
+            sstable = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             targetDirectory = cfs.getDirectories().getLocationForDisk(cfs.diskBoundaryManager.getDiskBoundaries(cfs).getCorrectDiskForSSTable(sstable));
         }
         finally
@@ -311,9 +319,9 @@ public class SSTableImporter
      * Iterates over all keys in the sstable index and invalidates the row cache
      */
     @VisibleForTesting
-    void invalidateCachesForSSTable(Descriptor desc)
+    void invalidateCachesForSSTable(SSTableReader reader) throws IOException
     {
-        try (KeyIterator iter = new KeyIterator(desc, cfs.metadata()))
+        try (KeyIterator iter = KeyIterator.forSSTable(reader))
         {
             while (iter.hasNext())
             {
@@ -335,7 +343,7 @@ public class SSTableImporter
         SSTableReader reader = null;
         try
         {
-            reader = SSTableReader.open(descriptor, components, cfs.metadata);
+            reader = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             Verifier.Options verifierOptions = Verifier.options()
                                                        .extendedVerification(extendedVerify)
                                                        .checkOwnsTokens(verifyTokens)

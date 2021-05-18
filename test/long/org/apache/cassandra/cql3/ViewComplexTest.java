@@ -55,7 +55,8 @@ import org.junit.runners.Parameterized;
 import com.google.common.base.Objects;
 
 @RunWith(Parameterized.class)
-public class ViewComplexTest extends CQLTester
+public class
+ViewComplexTest extends CQLTester
 {
     @Parameterized.Parameter
     public ProtocolVersion version;
@@ -120,7 +121,7 @@ public class ViewComplexTest extends CQLTester
             Thread.sleep(1);
         }
         if (flush)
-            Keyspace.open(keyspace()).flush();
+            Keyspace.open(keyspace()).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     // for now, unselected column cannot be fully supported, SEE CASSANDRA-11500
@@ -139,17 +140,17 @@ public class ViewComplexTest extends CQLTester
 
         updateView("UPDATE %s USING TIMESTAMP 10 SET b=1 WHERE k=1 AND c=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT * from %s"), row(1, 1, null, 1));
         assertRows(execute("SELECT * from mv"), row(1, 1));
         updateView("DELETE b FROM %s USING TIMESTAMP 11 WHERE k=1 AND c=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertEmpty(execute("SELECT * from %s"));
         assertEmpty(execute("SELECT * from mv"));
         updateView("UPDATE %s USING TIMESTAMP 1 SET a=1 WHERE k=1 AND c=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT * from %s"), row(1, 1, 1, null));
         assertRows(execute("SELECT * from mv"), row(1, 1));
 
@@ -287,7 +288,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s SET a = 1 WHERE k = 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"), row(1, 1, null));
         assertRows(execute("SELECT * from mv"), row(1, 1, null));
@@ -295,7 +296,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE a FROM %s WHERE k = 1");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"));
         assertEmpty(execute("SELECT * from mv"));
@@ -303,7 +304,7 @@ public class ViewComplexTest extends CQLTester
         updateView("INSERT INTO %s (k) VALUES (1);");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"), row(1, null, null));
         assertEmpty(execute("SELECT * from mv"));
@@ -311,7 +312,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s USING TTL 5 SET a = 10 WHERE k = 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"), row(1, 10, null));
         assertRows(execute("SELECT * from mv"), row(10, 1, null));
@@ -319,7 +320,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s SET b = 100 WHERE k = 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"), row(1, 10, 100));
         assertRows(execute("SELECT * from mv"), row(10, 1, 100));
@@ -334,7 +335,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE b FROM %s WHERE k=1");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT * from %s"), row(1, null, null));
         assertEmpty(execute("SELECT * from mv"));
@@ -342,7 +343,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE FROM %s WHERE k=1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertEmpty(execute("SELECT * from %s"));
         assertEmpty(execute("SELECT * from mv"));
@@ -377,7 +378,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s USING TIMESTAMP 0 SET v1 = 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0), row(0, 0, 1, null));
         assertRowsIgnoringOrder(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0), row(0, 0));
@@ -385,7 +386,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE v1 FROM %s USING TIMESTAMP 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertEmpty(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0));
         assertEmpty(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0));
@@ -394,7 +395,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s USING TIMESTAMP 1 SET v1 = 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertEmpty(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0));
         assertEmpty(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0));
@@ -402,7 +403,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s USING TIMESTAMP 2 SET v2 = 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0), row(0, 0, null, 1));
         assertRowsIgnoringOrder(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0), row(0, 0));
@@ -410,7 +411,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE v1 FROM %s USING TIMESTAMP 3 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0), row(0, 0, null, 1));
         assertRowsIgnoringOrder(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0), row(0, 0));
@@ -418,7 +419,7 @@ public class ViewComplexTest extends CQLTester
         updateView("DELETE v2 FROM %s USING TIMESTAMP 4 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertEmpty(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0));
         assertEmpty(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0));
@@ -426,7 +427,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s USING TTL 3 SET v2 = 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0), row(0, 0, null, 1));
         assertRowsIgnoringOrder(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0), row(0, 0));
@@ -439,7 +440,7 @@ public class ViewComplexTest extends CQLTester
         updateView("UPDATE %s SET v2 = 1 WHERE p = 0 AND c = 0");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * from %s WHERE c = ? AND p = ?", 0, 0), row(0, 0, null, 1));
         assertRowsIgnoringOrder(execute("SELECT * from mv WHERE c = ? AND p = ?", 0, 0), row(0, 0));
@@ -477,23 +478,23 @@ public class ViewComplexTest extends CQLTester
 
         updateView("UPDATE %s SET l=l+[1,2,3] WHERE k = 1 AND c = 1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
 
         updateView("UPDATE %s SET l=l-[1,2] WHERE k = 1 AND c = 1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
 
         updateView("UPDATE %s SET b=3 WHERE k=1 AND c=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRows(execute("SELECT * from mv"), row(1, 1, null, 3));
 
         updateView("UPDATE %s SET b=null, l=l-[3], s=s-{3} WHERE k = 1 AND c = 1");
         if (flush)
         {
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
         }
         assertRowsIgnoringOrder(execute("SELECT k,c,a,b from %s"));
@@ -501,7 +502,7 @@ public class ViewComplexTest extends CQLTester
 
         updateView("UPDATE %s SET m=m+{3:3}, l=l-[1], s=s-{2} WHERE k = 1 AND c = 1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,c,a,b from %s"), row(1, 1, null, null));
         assertRowsIgnoringOrder(execute("SELECT * from mv"), row(1, 1, null, null));
 
@@ -606,27 +607,27 @@ public class ViewComplexTest extends CQLTester
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) using timestamp 0", 1, 1, 1, 1);
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"), row(1, 1, 1, 1));
 
         // remove view row
         updateView("UPDATE %s using timestamp 1 set b = null WHERE a=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"));
         // remove base row, no view updated generated.
         updateView("DELETE FROM %s using timestamp 2 where a=1");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"));
 
         // restor view row with b,c column. d is still tombstone
         updateView("UPDATE %s using timestamp 3 set b = 1,c = 1 where a=1"); // upsert
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"), row(1, 1, 1, null));
     }
@@ -643,11 +644,11 @@ public class ViewComplexTest extends CQLTester
 
         updateView("INSERT INTO %s (p, c, v) VALUES (0, 0, 0) using timestamp 1;");
 
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         updateView("INSERT INTO %s (p, c, v) VALUES (0, 0, 0) USING TTL 3 and timestamp 1;");
 
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         Thread.sleep(4000);
 
@@ -658,11 +659,11 @@ public class ViewComplexTest extends CQLTester
 
         updateView("INSERT INTO %s (p, c, v) VALUES (0, 0, 0) USING TTL 3 and timestamp 1;");
 
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         updateView("INSERT INTO %s (p, c, v) VALUES (0, 0, 0) USING timestamp 1;");
 
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         Thread.sleep(4000);
 
@@ -701,35 +702,35 @@ public class ViewComplexTest extends CQLTester
         updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3), row(3, 1L));
         // sstable-2
         updateView("Delete from %s using timestamp 2 where p = 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"));
         // sstable-3
         updateView("Insert into %s (p, v1) values (3, 1) using timestamp 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, null, null));
         // sstable-4
         updateView("UPdate %s using timestamp 4 set v1 = 2 where p = 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(2, 3, null, null));
         // sstable-5
         updateView("UPdate %s using timestamp 5 set v1 = 1 where p = 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, null, null));
 
@@ -829,23 +830,23 @@ public class ViewComplexTest extends CQLTester
         // reset value
         updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 6;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
         // increase pk's timestamp to 20
         updateView("Insert into %s (p) values (3) using timestamp 20;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
         // change v1's to 2 and remove existing view row with ts7
         updateView("UPdate %s using timestamp 7 set v1 = 2 where p = 3;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(2, 3, 3, 6L));
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv limit 1"), row(2, 3, 3, 6L));
         // change v1's to 1 and remove existing view row with ts8
         updateView("UPdate %s using timestamp 8 set v1 = 1 where p = 3;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
     }
 
@@ -887,8 +888,8 @@ public class ViewComplexTest extends CQLTester
         }
         if (flush)
         {
-            ks.getColumnFamilyStore("mv1").forceBlockingFlush();
-            ks.getColumnFamilyStore("mv2").forceBlockingFlush();
+            ks.getColumnFamilyStore("mv1").forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+            ks.getColumnFamilyStore("mv2").forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
 
         for (String view : Arrays.asList("mv1", "mv2"))
@@ -936,41 +937,41 @@ public class ViewComplexTest extends CQLTester
         ks.getColumnFamilyStore("mv").disableAutoCompaction();
         updateView("DELETE FROM %s USING TIMESTAMP 0 WHERE k = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // sstable-1, Set initial values TS=1
         updateView("INSERT INTO %s(k, a, b) VALUES (1, 1, 1) USING TIMESTAMP 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 1));
         updateView("UPDATE %s USING TIMESTAMP 10 SET b = 2 WHERE k = 1;");
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
         updateView("UPDATE %s USING TIMESTAMP 2 SET a = 2 WHERE k = 1;");
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 2, 2));
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         ks.getColumnFamilyStore("mv").forceMajorCompaction();
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 2, 2));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv limit 1"), row(1, 2, 2));
         updateView("UPDATE %s USING TIMESTAMP 11 SET a = 1 WHERE k = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, 1, 2));
 
         // set non-key base column as tombstone, view row is removed with shadowable
         updateView("UPDATE %s USING TIMESTAMP 12 SET a = null WHERE k = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, null, 2));
 
         // column b should be alive
         updateView("UPDATE %s USING TIMESTAMP 13 SET a = 1 WHERE k = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, 1, 2));
 
@@ -1005,37 +1006,37 @@ public class ViewComplexTest extends CQLTester
 
         updateView("UPDATE %s USING TIMESTAMP 1 set v1 =1 where p1 = 1 AND p2 = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"), row(1, 1, 1, null));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"), row(1, 1, 1, null));
 
         updateView("UPDATE %s USING TIMESTAMP 2 set v1 = null, v2 = 1 where p1 = 1 AND p2 = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"), row(1, 1, null, 1));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"), row(1, 1, null, 1));
 
         updateView("UPDATE %s USING TIMESTAMP 2 set v2 = null where p1 = 1 AND p2 = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"));
 
         updateView("INSERT INTO %s (p1,p2) VALUES(1,1) USING TIMESTAMP 3;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"), row(1, 1, null, null));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"), row(1, 1, null, null));
 
         updateView("DELETE FROM %s USING TIMESTAMP 4 WHERE p1 =1 AND p2 = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"));
 
         updateView("UPDATE %s USING TIMESTAMP 5 set v2 = 1 where p1 = 1 AND p2 = 1;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"), row(1, 1, null, 1));
         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"), row(1, 1, null, 1));
     }
@@ -1059,7 +1060,7 @@ public class ViewComplexTest extends CQLTester
         assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from mv"), row(1, 1, 1));
 
         updateView("Update %s set v1 = null WHERE p = 1");
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from mv"));
 
         cfs.forceMajorCompaction(); // before gc grace second, strict-liveness tombstoned dead row remains
@@ -1072,7 +1073,7 @@ public class ViewComplexTest extends CQLTester
         assertEquals(0, cfs.getLiveSSTables().size());
 
         updateView("Update %s using ttl 5 set v1 = 1 WHERE p = 1");
-        FBUtilities.waitOnFutures(ks.flush());
+        FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from mv"), row(1, 1, 1));
 
         cfs.forceMajorCompaction(); // before ttl+gc_grace_second, strict-liveness ttled dead row remains
@@ -1119,14 +1120,14 @@ public class ViewComplexTest extends CQLTester
         updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3), row(3, 1L));
         // sstable 2
         updateView("UPdate %s using timestamp 2 set v2 = null where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3),
                                 row(null, null));
@@ -1134,14 +1135,14 @@ public class ViewComplexTest extends CQLTester
         updateView("UPdate %s using timestamp 3 set v1 = 2 where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(2, 3, null, null));
         // sstable 4
         updateView("UPdate %s using timestamp 4 set v1 = 1 where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, null, null));
 
@@ -1192,7 +1193,7 @@ public class ViewComplexTest extends CQLTester
         updateView("Insert into %s (p1, p2, v1, v2) values (1, 2, 3, 4) using timestamp 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, v2, WRITETIME(v2) from mv2 WHERE p1 = ? AND p2 = ?", 1, 2),
                                 row(3, 4, 1L));
@@ -1200,14 +1201,14 @@ public class ViewComplexTest extends CQLTester
         updateView("Delete from %s using timestamp 2 where p1 = 1 and p2 = 2;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // view are empty
         assertRowsIgnoringOrder(execute("SELECT * from mv2"));
         // insert PK with TS=3
         updateView("Insert into %s (p1, p2) values (1, 2) using timestamp 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // deleted column in MV remained dead
         assertRowsIgnoringOrder(execute("SELECT * from mv2"), row(2, 1, null, null));
 
@@ -1217,21 +1218,21 @@ public class ViewComplexTest extends CQLTester
         // reset values
         updateView("Insert into %s (p1, p2, v1, v2) values (1, 2, 3, 4) using timestamp 10;");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, v2, WRITETIME(v2) from mv2 WHERE p1 = ? AND p2 = ?", 1, 2),
                                 row(3, 4, 10L));
 
         updateView("UPDATE %s using timestamp 20 SET v2 = 5 WHERE p1 = 1 and p2 = 2");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, v2, WRITETIME(v2) from mv2 WHERE p1 = ? AND p2 = ?", 1, 2),
                                 row(3, 5, 20L));
 
         updateView("DELETE FROM %s using timestamp 10 WHERE p1 = 1 and p2 = 2");
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, v2, WRITETIME(v2) from mv2 WHERE p1 = ? AND p2 = ?", 1, 2),
                                 row(null, 5, 20L));
@@ -1253,21 +1254,21 @@ public class ViewComplexTest extends CQLTester
         updateView("Insert into %s (p, v1, v2) values (3, 1, 5) using timestamp 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3), row(5, 1L));
         // remove row/mv TS=2
         updateView("Delete from %s using timestamp 2 where p = 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // view are empty
         assertRowsIgnoringOrder(execute("SELECT * from mv"));
         // insert PK with TS=3
         updateView("Insert into %s (p, v1) values (3, 1) using timestamp 3;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // deleted column in MV remained dead
         assertRowsIgnoringOrder(execute("SELECT * from mv"), row(1, 3, null));
 
@@ -1275,7 +1276,7 @@ public class ViewComplexTest extends CQLTester
         updateView("Insert into %s (p, v1, v2) values (3, 1, 5) using timestamp 2;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         // deleted column in MV remained dead
         assertRowsIgnoringOrder(execute("SELECT * from mv"), row(1, 3, null));
         assertRowsIgnoringOrder(execute("SELECT * from mv limit 1"), row(1, 3, null));
@@ -1284,7 +1285,7 @@ public class ViewComplexTest extends CQLTester
         executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET v2 = ? WHERE p = ?", 4, 3);
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         assertRows(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 4, 3L));
 

@@ -17,19 +17,28 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
+import java.io.IOException;
 import java.util.Collection;
+import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.collect.ImmutableSet;
+
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.net.MessagingService;
+
+import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
 /**
  * Legacy bigtable format
@@ -41,9 +50,38 @@ public class BigFormat implements SSTableFormat
     private static final SSTableReader.Factory readerFactory = new ReaderFactory();
     private static final SSTableWriter.Factory writerFactory = new WriterFactory();
 
+    private final static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                              Component.PRIMARY_INDEX,
+                                                                              Component.STATS);
+
+    private final static Set<Component> SUPPORTED_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PRIMARY_INDEX,
+                                                                               Component.FILTER,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.STATS,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC,
+                                                                               Component.SUMMARY,
+                                                                               Component.TOC);
+
+    private final static Set<Component> STREAMING_COMPONENTS = ImmutableSet.of(Component.DATA,
+                                                                               Component.PRIMARY_INDEX,
+                                                                               Component.SUMMARY,
+                                                                               Component.STATS,
+                                                                               Component.COMPRESSION_INFO,
+                                                                               Component.FILTER,
+                                                                               Component.DIGEST,
+                                                                               Component.CRC);
+
     private BigFormat()
     {
 
+    }
+
+    @Override
+    public Type getType()
+    {
+        return Type.BIG;
     }
 
     @Override
@@ -71,13 +109,34 @@ public class BigFormat implements SSTableFormat
     }
 
     @Override
-    public RowIndexEntry.IndexSerializer getIndexSerializer(TableMetadata metadata, Version version, SerializationHeader header)
+    public Set<Component> requiredComponents()
     {
-        return new RowIndexEntry.Serializer(version, header);
+        return REQUIRED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> supportedComponents()
+    {
+        return SUPPORTED_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> streamingComponents()
+    {
+        return STREAMING_COMPONENTS;
     }
 
     static class WriterFactory extends SSTableWriter.Factory
     {
+        @Override
+        public long estimateSize(SSTableWriter.SSTableSizeParameters parameters)
+        {
+            return (long) ((parameters.partitionCount() // index entries
+                            + parameters.partitionCount() // keys in data file
+                            + parameters.dataSize()) // data
+                           * 1.2); // bloom filter and row index overhead
+        }
+
         @Override
         public SSTableWriter open(Descriptor descriptor,
                                   long keyCount,
@@ -88,19 +147,31 @@ public class BigFormat implements SSTableFormat
                                   MetadataCollector metadataCollector,
                                   SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,
-                                  LifecycleNewTracker lifecycleNewTracker)
+                                  LifecycleNewTracker lifecycleNewTracker,
+                                  Set<Component> indexComponents)
         {
             SSTable.validateRepairedMetadata(repairedAt, pendingRepair, isTransient);
-            return new BigTableWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, lifecycleNewTracker);
+            return new BigTableWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers, lifecycleNewTracker, indexComponents);
         }
     }
 
-    static class ReaderFactory extends SSTableReader.Factory
+    static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
         @Override
-        public SSTableReader open(SSTableReaderBuilder builder)
+        public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
-            return new BigTableReader(builder);
+            try (FileHandle iFile = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
+                SerializationHeader.Component headerComponent = (SerializationHeader.Component)
+                                                                descriptor.getMetadataSerializer()
+                                                                          .deserialize(descriptor, MetadataType.HEADER);
+                SerializationHeader header = headerComponent.toHeader(metadata);
+                BigTableRowIndexEntry.Serializer serializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
+                return BigTablePartitionIndexIterator.create(iFile, serializer);
+            }
+            catch (IOException ex)
+            {
+                throw new RuntimeException(ex);
+            }
         }
     }
 
@@ -112,7 +183,7 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "nb";
+        public static final String current_version = "na";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
@@ -180,6 +251,7 @@ public class BigFormat implements SSTableFormat
             return hasCommitLogIntervals;
         }
 
+        @Override
         public boolean hasPendingRepair()
         {
             return hasPendingRepair;
@@ -209,6 +281,19 @@ public class BigFormat implements SSTableFormat
             return hasAccurateMinMax;
         }
 
+        @Override
+        public boolean hasImprovedMinMax()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasPartitionLevelDeletionsPresenceMarker()
+        {
+            return false;
+        }
+
+        @Override
         public boolean isCompatible()
         {
             return version.compareTo(earliest_supported_version) >= 0 && version.charAt(0) <= current_version.charAt(0);
@@ -235,6 +320,24 @@ public class BigFormat implements SSTableFormat
         public boolean hasOldBfFormat()
         {
             return hasOldBfFormat;
+        }
+
+        @Override
+        public boolean hasZeroCopyMetadata()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasIncrementalNodeSyncMetadata()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasMaxColumnValueLengths()
+        {
+            return false;
         }
     }
 }

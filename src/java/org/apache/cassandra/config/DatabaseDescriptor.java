@@ -56,6 +56,7 @@ import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerCDC;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileUtils;
@@ -362,6 +363,14 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContext();
+
+        applyGuardrailsConfig();
+    }
+
+    private static void applyGuardrailsConfig()
+    {
+        conf.guardrails.applyConfig();
+        conf.guardrails.validate();
     }
 
     private static void applySimpleConfig()
@@ -2849,6 +2858,11 @@ public class DatabaseDescriptor
         return conf.memtable_cleanup_threshold;
     }
 
+    public static Map<String, String> getMemtableOptions()
+    {
+        return conf.memtable;
+    }
+
     public static int getIndexSummaryResizeIntervalInMinutes()
     {
         return conf.index_summary_resize_interval_in_minutes;
@@ -3366,5 +3380,39 @@ public class DatabaseDescriptor
         conf.keyspace_count_warn_threshold = value;
     }
 
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
 
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
+    }
+    
+    public static GuardrailsConfig getGuardrailsConfig()
+    {
+        return conf.guardrails;
+    }
+
+    @VisibleForTesting
+    public static boolean setApplyDbaasDefaults(boolean dbaasDefaults)
+    {
+        return conf.apply_dbaas_defaults = dbaasDefaults;
+    }
+
+    public static boolean isApplyDbaasDefaults()
+    {
+        return conf.apply_dbaas_defaults;
+    }
 }

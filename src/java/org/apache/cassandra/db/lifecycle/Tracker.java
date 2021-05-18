@@ -30,7 +30,7 @@ import com.google.common.collect.*;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,15 +74,21 @@ public class Tracker
     public final boolean loadsstables;
 
     /**
+     * @param columnFamilyStore
      * @param memtable Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
      */
-    public Tracker(Memtable memtable, boolean loadsstables)
+    public Tracker(ColumnFamilyStore columnFamilyStore, Memtable memtable, boolean loadsstables)
     {
-        this.cfstore = memtable != null ? memtable.cfs : null;
+        this.cfstore = columnFamilyStore;
         this.view = new AtomicReference<>();
         this.loadsstables = loadsstables;
         this.reset(memtable);
+    }
+
+    public static Tracker newDummyTracker()
+    {
+        return new Tracker(null, null, false);
     }
 
     public LifecycleTransaction tryModify(SSTableReader sstable, OperationType operationType)
@@ -93,7 +99,7 @@ public class Tracker
     /**
      * @return a Transaction over the provided sstables if we are able to mark the given @param sstables as compacted, before anyone else
      */
-    public LifecycleTransaction tryModify(Iterable<SSTableReader> sstables, OperationType operationType)
+    public LifecycleTransaction tryModify(Iterable<? extends SSTableReader> sstables, OperationType operationType)
     {
         if (Iterables.isEmpty(sstables))
             return new LifecycleTransaction(this, operationType, sstables);
@@ -182,6 +188,12 @@ public class Tracker
         return accumulate;
     }
 
+    public void updateSizeTracking(long adjustment)
+    {
+        cfstore.metric.liveDiskSpaceUsed.inc(adjustment);
+        cfstore.metric.totalDiskSpaceUsed.inc(adjustment);
+    }
+
     // SETUP / CLEANUP
 
     public void addInitialSSTables(Iterable<SSTableReader> sstables)
@@ -252,7 +264,7 @@ public class Tracker
      */
     public Throwable dropSSTables(final Predicate<SSTableReader> remove, OperationType operationType, Throwable accumulate)
     {
-        try (LogTransaction txnLogs = new LogTransaction(operationType, this))
+        try (LogTransaction txnLogs = new LogTransaction(operationType))
         {
             Pair<View, View> result = apply(view -> {
                 Set<SSTableReader> toremove = copyOf(filter(view.sstables, and(remove, notIn(view.compacting))));
@@ -265,7 +277,7 @@ public class Tracker
             // It is important that any method accepting/returning a Throwable never throws an exception, and does its best
             // to complete the instructions given to it
             List<LogTransaction.Obsoletion> obsoletions = new ArrayList<>();
-            accumulate = prepareForObsoletion(removed, txnLogs, obsoletions, accumulate);
+            accumulate = prepareForObsoletion(removed, txnLogs, obsoletions, this, accumulate);
             try
             {
                 txnLogs.finish();
@@ -390,14 +402,14 @@ public class Tracker
         return view.get().compacting;
     }
 
-    public Iterable<SSTableReader> getUncompacting()
+    public Iterable<SSTableReader> getNoncompacting()
     {
         return view.get().select(SSTableSet.NONCOMPACTING);
     }
 
-    public Iterable<SSTableReader> getUncompacting(Iterable<SSTableReader> candidates)
+    public Iterable<? extends SSTableReader> getNoncompacting(Iterable<? extends SSTableReader> candidates)
     {
-        return view.get().getUncompacting(candidates);
+        return view.get().getNoncompacting(candidates);
     }
 
     public void maybeIncrementallyBackup(final Iterable<SSTableReader> sstables)

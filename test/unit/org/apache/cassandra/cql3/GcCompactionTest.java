@@ -47,13 +47,13 @@ public class GcCompactionTest extends CQLTester
     // Test needs synchronous table drop to avoid flushes causing flaky failures
 
     @Override
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return super.createTable(KEYSPACE_PER_TEST, query);
     }
 
     @Override
-    protected UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }
@@ -407,11 +407,11 @@ public class GcCompactionTest extends CQLTester
         createTable("create table %s (k int, c1 int, primary key (k, c1)) with compaction = {'class': 'SizeTieredCompactionStrategy', 'provide_overlapping_tombstones':'row'}");
         execute("delete from %s where k = 1");
         Set<SSTableReader> readers = new HashSet<>(getCurrentColumnFamilyStore().getLiveSSTables());
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         SSTableReader oldSSTable = getNewTable(readers);
         Thread.sleep(2000);
         execute("delete from %s where k = 1");
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
         SSTableReader newTable = getNewTable(readers);
 
         CompactionManager.instance.forceUserDefinedCompaction(oldSSTable.getFilename());

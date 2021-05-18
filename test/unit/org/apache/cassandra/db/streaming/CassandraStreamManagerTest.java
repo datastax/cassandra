@@ -114,7 +114,7 @@ public class CassandraStreamManagerTest
     {
         Set<SSTableReader> before = cfs.getLiveSSTables();
         queryable.run();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         Set<SSTableReader> after = cfs.getLiveSSTables();
 
         Set<SSTableReader> diff = Sets.difference(after, before);
@@ -134,7 +134,7 @@ public class CassandraStreamManagerTest
         Set<SSTableReader> sstables = new HashSet<>();
         for (OutgoingStream stream: streams)
         {
-            Ref<SSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
+            Ref<? extends SSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
             sstables.add(ref.get());
             ref.release();
         }

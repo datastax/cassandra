@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -28,6 +29,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.TableParams.Option;
@@ -39,8 +41,19 @@ import static java.lang.String.format;
 public final class TableAttributes extends PropertyDefinitions
 {
     public static final String ID = "id";
-    private static final Set<String> validKeywords;
-    private static final Set<String> obsoleteKeywords;
+    public static final Set<String> validKeywords;
+    private static final Set<String> obsoleteKeywords = ImmutableSet.of(
+        "nodesync",
+        "dse_vertex_label_property",
+        "dse_edge_label_property"
+    );
+
+    private static final Set<String> UNSUPPORTED_DSE_COMPACTION_STRATEGIES = ImmutableSet.of(
+        "org.apache.cassandra.db.compaction.TieredCompactionStrategy",
+        "TieredCompactionStrategy",
+        "org.apache.cassandra.db.compaction.MemoryOnlyStrategy",
+        "MemoryOnlyStrategy"
+    );
 
     static
     {
@@ -49,7 +62,6 @@ public final class TableAttributes extends PropertyDefinitions
             validBuilder.add(option.toString());
         validBuilder.add(ID);
         validKeywords = validBuilder.build();
-        obsoleteKeywords = ImmutableSet.of();
     }
 
     public void validate()
@@ -83,6 +95,29 @@ public final class TableAttributes extends PropertyDefinitions
         }
     }
 
+    /**
+     * Returs `true` if this attributes instance has a COMPACTION option with a recognized unsupported compaction
+     * strategy class (coming from DSE). `false` otherwise.
+     */
+    boolean hasUnsupportedDseCompaction()
+    {
+        if (hasOption(Option.COMPACTION))
+        {
+            Map<String, String> compactionOptions = getMap(Option.COMPACTION);
+            String strategy = compactionOptions.get(CompactionParams.Option.CLASS.toString());
+            return UNSUPPORTED_DSE_COMPACTION_STRATEGIES.contains(strategy);
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    public static Set<String> allKeywords()
+    {
+        return Sets.union(validKeywords, obsoleteKeywords);
+    }
+
     private TableParams build(TableParams.Builder builder)
     {
         if (hasOption(Option.BLOOM_FILTER_FP_CHANCE))
@@ -95,7 +130,12 @@ public final class TableAttributes extends PropertyDefinitions
             builder.comment(getString(Option.COMMENT));
 
         if (hasOption(Option.COMPACTION))
-            builder.compaction(CompactionParams.fromMap(getMap(Option.COMPACTION)));
+        {
+            if (hasUnsupportedDseCompaction())
+                builder.compaction(CompactionParams.DEFAULT);
+            else
+                builder.compaction(CompactionParams.fromMap(getMap(Option.COMPACTION)));
+        }
 
         if (hasOption(Option.COMPRESSION))
         {
@@ -109,6 +149,9 @@ public final class TableAttributes extends PropertyDefinitions
             }
             builder.compression(CompressionParams.fromMap(getMap(Option.COMPRESSION)));
         }
+
+        if (hasOption(Option.MEMTABLE))
+            builder.memtable(MemtableParams.fromMap(getMap(Option.MEMTABLE)));
 
         if (hasOption(Option.DEFAULT_TIME_TO_LIVE))
             builder.defaultTimeToLive(getInt(Option.DEFAULT_TIME_TO_LIVE));

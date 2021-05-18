@@ -234,7 +234,7 @@ public final class SystemKeyspace
                 + "columnfamily_name text,"
                 + "compacted_at timestamp,"
                 + "keyspace_name text,"
-                + "rows_merged map<int, bigint>,"
+                + "rows_merged map<int, bigint>," // Note that we currently store partitions, not rows!
                 + "PRIMARY KEY ((id)))")
                 .defaultTimeToLive((int) TimeUnit.DAYS.toSeconds(7))
                 .build();
@@ -501,25 +501,27 @@ public final class SystemKeyspace
                             DatabaseDescriptor.getStoragePort());
     }
 
-    public static void updateCompactionHistory(String ksname,
+    public static void updateCompactionHistory(UUID id,
+                                               String ksname,
                                                String cfname,
                                                long compactedAt,
                                                long bytesIn,
                                                long bytesOut,
-                                               Map<Integer, Long> rowsMerged)
+                                               Map<Integer, Long> partitionsMerged)
     {
         // don't write anything when the history table itself is compacted, since that would in turn cause new compactions
         if (ksname.equals("system") && cfname.equals(COMPACTION_HISTORY))
             return;
+        // For historical reasons (pre 3.0 refactor) we call the final field rows_merged but we actually store partitions!
         String req = "INSERT INTO system.%s (id, keyspace_name, columnfamily_name, compacted_at, bytes_in, bytes_out, rows_merged) VALUES (?, ?, ?, ?, ?, ?, ?)";
         executeInternal(format(req, COMPACTION_HISTORY),
-                        UUIDGen.getTimeUUID(),
+                        id,
                         ksname,
                         cfname,
                         ByteBufferUtil.bytes(compactedAt),
                         bytesIn,
                         bytesOut,
-                        rowsMerged);
+                        partitionsMerged);
     }
 
     public static TabularData getCompactionHistory() throws OpenDataException
@@ -830,7 +832,9 @@ public final class SystemKeyspace
 
             for (String cfname : cfnames)
             {
-                futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(cfname).forceFlush());
+                futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                    .getColumnFamilyStore(cfname)
+                                    .forceFlush(ColumnFamilyStore.FlushReason.INTERNALLY_FORCED));
             }
             FBUtilities.waitOnFutures(futures);
         }

@@ -18,34 +18,43 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.Downsampling;
+import org.apache.cassandra.io.sstable.IndexSummary;
+import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
+import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import org.apache.cassandra.utils.BloomFilterSerializer;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.IFilter;
 
 public abstract class SSTableReaderBuilder
 {
@@ -113,6 +122,22 @@ public abstract class SSTableReaderBuilder
         return this;
     }
 
+    @SuppressWarnings("resource")
+    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
+    {
+        return new FileHandle.Builder(descriptor.filenameFor(component))
+               .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+               .withChunkCache(ChunkCache.instance);
+    }
+
+    @SuppressWarnings("resource")
+    public static FileHandle.Builder defaultDataHandleBuilder(Descriptor descriptor)
+    {
+        return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
+               .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
+               .withChunkCache(ChunkCache.instance);
+    }
+
     /**
      * Load index summary, first key and last key from Summary.db file if it exists.
      *
@@ -171,47 +196,40 @@ public abstract class SSTableReaderBuilder
         if (!components.contains(Component.PRIMARY_INDEX))
             return;
 
+        if (!recreateBloomFilter && summaryLoaded)
+            return;
+
         if (logger.isDebugEnabled())
             logger.debug("Attempting to build summary for {}", descriptor);
 
-
-        // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
-        try (RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX))))
-        {
-            long indexSize = primaryIndex.length();
+        try (PartitionIndexIterator indexIterator = readerFactory.indexIterator(descriptor, metadata)) {
             long histogramCount = statsMetadata.estimatedPartitionSize.count();
             long estimatedKeys = histogramCount > 0 && !statsMetadata.estimatedPartitionSize.isOverflowed()
                                  ? histogramCount
-                                 : SSTable.estimateRowsFromIndex(primaryIndex, descriptor); // statistics is supposed to be optional
-
+                                 : SSTable.estimateRowsFromIndex(indexIterator); // statistics is supposed to be optional
             if (recreateBloomFilter)
                 bf = FilterFactory.getFilter(estimatedKeys, metadata.params.bloomFilterFpChance);
 
+            // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
             try (IndexSummaryBuilder summaryBuilder = summaryLoaded ? null : new IndexSummaryBuilder(estimatedKeys, metadata.params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL))
             {
-                long indexPosition;
-
-                while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
+                while (!indexIterator.isExhausted())
                 {
-                    ByteBuffer key = ByteBufferUtil.readWithShortLength(primaryIndex);
-                    RowIndexEntry.Serializer.skip(primaryIndex, descriptor.version);
-                    DecoratedKey decoratedKey = metadata.partitioner.decorateKey(key);
+                    DecoratedKey decoratedKey = metadata.partitioner.decorateKey(indexIterator.key());
 
                     if (!summaryLoaded)
                     {
                         if (first == null)
                             first = decoratedKey;
                         last = decoratedKey;
+
+                        summaryBuilder.maybeAddEntry(decoratedKey, indexIterator.keyPosition());
                     }
 
                     if (recreateBloomFilter)
                         bf.add(decoratedKey);
 
-                    // if summary was already read from disk we don't want to re-populate it using primary index
-                    if (!summaryLoaded)
-                    {
-                        summaryBuilder.maybeAddEntry(decoratedKey, indexPosition);
-                    }
+                    indexIterator.advance();
                 }
 
                 if (!summaryLoaded)
@@ -255,7 +273,7 @@ public abstract class SSTableReaderBuilder
         @Override
         public SSTableReader build()
         {
-            SSTableReader reader = readerFactory.open(this);
+            SSTableReader reader = new BigTableReader(this);
 
             reader.setup(true);
             return reader;
@@ -283,12 +301,8 @@ public abstract class SSTableReaderBuilder
             initSummary(dataFilePath, components, statsMetadata);
 
             boolean compression = components.contains(Component.COMPRESSION_INFO);
-            try (FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                    .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
-                    .withChunkCache(ChunkCache.instance);
-                    FileHandle.Builder dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
-                                                                                                                .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
-                                                                                                                .withChunkCache(ChunkCache.instance))
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
+                 FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression))
             {
                 long indexFileLength = new File(descriptor.filenameFor(Component.PRIMARY_INDEX)).length();
                 DiskOptimizationStrategy optimizationStrategy = DatabaseDescriptor.getDiskOptimizationStrategy();
@@ -298,7 +312,7 @@ public abstract class SSTableReaderBuilder
                 dfile = dbuilder.bufferSize(dataBufferSize).complete();
                 bf = FilterFactory.AlwaysPresent;
 
-                SSTableReader sstable = readerFactory.open(this);
+                SSTableReader sstable = new BigTableReader(this);
 
                 sstable.first = first;
                 sstable.last = last;
@@ -362,7 +376,7 @@ public abstract class SSTableReaderBuilder
                 throw new CorruptSSTableException(t, dataFilePath);
             }
 
-            SSTableReader sstable = readerFactory.open(this);
+            SSTableReader sstable = new BigTableReader(this);
 
             sstable.first = first;
             sstable.last = last;
@@ -420,12 +434,9 @@ public abstract class SSTableReaderBuilder
                   StatsMetadata statsMetadata,
                   Set<Component> components) throws IOException
         {
-            try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                    .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
-                    .withChunkCache(ChunkCache.instance);
-                    FileHandle.Builder dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(components.contains(Component.COMPRESSION_INFO))
-                                                                                                                .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
-                                                                                                                .withChunkCache(ChunkCache.instance))
+            boolean compression = components.contains(Component.COMPRESSION_INFO);
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
+                 FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor).compressed(compression))
             {
                 loadSummary();
                 boolean buildSummary = summary == null || recreateBloomFilter;
