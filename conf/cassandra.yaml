@@ -822,7 +822,7 @@ memtable:
 #
 # offheap_objects
 #    off heap objects
-memtable_allocation_type: heap_buffers
+memtable_allocation_type: offheap_objects
 
 # Limit memory usage for Merkle tree calculations during repairs of a certain
 # table and common token range. Repair commands targetting multiple tables or
