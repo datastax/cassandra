@@ -26,4 +26,5 @@ public class DefaultMemtableFactory
 {
     // We can't use SkipListMemtable.FACTORY as that requires DatabaseDescriptor to have been initialized.
     public static final Memtable.Factory INSTANCE = SkipListMemtable::new;
+    //public static final Memtable.Factory INSTANCE = PersistentMemoryMemtable::new;
 }
