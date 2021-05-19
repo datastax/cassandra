@@ -511,7 +511,7 @@ public class Config
 
     public boolean inter_dc_tcp_nodelay = true;
 
-    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.heap_buffers;
+    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
 
     public volatile boolean read_thresholds_enabled = false;
     public volatile DataStorageSpec.LongBytesBound coordinator_read_size_warn_threshold = null;
