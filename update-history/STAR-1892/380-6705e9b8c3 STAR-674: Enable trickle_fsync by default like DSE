@@ -1,0 +1,36 @@
+--- a/conf/cassandra.yaml
++++ b/conf/cassandra.yaml
+@@ -812,14 +812,9 @@
+ # buffers. Enable this to avoid sudden dirty buffer flushing from
+ # impacting read latencies. Almost always a good idea on SSDs; not
+ # necessarily on platters.
+-<<<<<<<
+-trickle_fsync: false
++trickle_fsync: true
+ # Min unit: KiB
+ trickle_fsync_interval: 10240KiB
+-=======
+-trickle_fsync: true
+-trickle_fsync_interval_in_kb: 10240
+->>>>>>>
+ 
+ # TCP port, for commands and data
+ # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
+--- a/src/java/org/apache/cassandra/config/Config.java
++++ b/src/java/org/apache/cassandra/config/Config.java
+@@ -445,14 +445,9 @@
+     public volatile boolean transfer_hints_on_decommission = true;
+ 
+     public volatile boolean incremental_backups = false;
+-<<<<<<<
+-    public boolean trickle_fsync = false;
++    public boolean trickle_fsync = true;
+     @Replaces(oldName = "trickle_fsync_interval_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+     public DataStorageSpec.IntKibibytesBound trickle_fsync_interval = new DataStorageSpec.IntKibibytesBound("10240KiB");
+-=======
+-    public boolean trickle_fsync = true;
+-    public int trickle_fsync_interval_in_kb = 10240;
+->>>>>>>
+ 
+     @Nullable
+     @Replaces(oldName = "sstable_preemptive_open_interval_in_mb", converter = Converters.NEGATIVE_MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
