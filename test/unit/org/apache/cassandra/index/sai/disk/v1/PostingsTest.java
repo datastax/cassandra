@@ -39,6 +39,41 @@ public class PostingsTest extends NdiRandomizedTest
     public final ExpectedException expectedException = ExpectedException.none();
 
     @Test
+    public void testSeekOrdinal() throws Exception
+    {
+        final IndexComponents indexComponents = newIndexComponents();
+        final int blockSize = 2;
+        int[] array = new int[]{ 10, 20, 30, 40, 50, 60 };
+        final ArrayPostingList expectedPostingList = new ArrayPostingList(array);
+
+        long postingPointer;
+        try (PostingsWriter writer = new PostingsWriter(indexComponents, blockSize, false))
+        {
+            postingPointer = writer.write(expectedPostingList);
+            writer.complete();
+        }
+
+        for (int x=0; x < array.length; x++)
+        {
+            IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
+            SAICodecUtils.validate(input);
+            input.seek(postingPointer);
+
+            CountingPostingListEventListener listener = new CountingPostingListEventListener();
+
+            PostingsReader reader = new PostingsReader(input, postingPointer, listener);
+
+            long rowID = reader.seekOrdinal(x);
+
+            assertEquals(array[x], rowID);
+
+            System.out.println("rowID="+rowID);
+
+            reader.close();
+        }
+    }
+
+    @Test
     public void testSingleBlockPostingList() throws Exception
     {
         final IndexComponents indexComponents = newIndexComponents();

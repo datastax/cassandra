@@ -307,7 +307,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         assertNull(intersection);
     }
 
-    private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
+    public static BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
     {
         return new BKDReader.IntersectVisitor()
         {
@@ -326,6 +326,8 @@ public class BKDReaderTest extends NdiRandomizedTest
                 int min = NumericUtils.sortableBytesToInt(minPackedValue, 0);
                 int max = NumericUtils.sortableBytesToInt(maxPackedValue, 0);
                 assert max >= min;
+
+                System.out.println("compare min="+min+" max="+max);
 
                 if (max < queryMin || min > queryMax)
                 {

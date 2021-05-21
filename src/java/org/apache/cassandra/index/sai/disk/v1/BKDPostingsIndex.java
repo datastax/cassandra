@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 
+import com.carrotsearch.hppc.IntIntHashMap;
+import com.carrotsearch.hppc.IntIntMap;
 import com.carrotsearch.hppc.IntLongHashMap;
 import com.carrotsearch.hppc.IntLongMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
@@ -37,6 +39,8 @@ class BKDPostingsIndex
 {
     private final int size;
     public final IntLongMap index = new IntLongHashMap();
+    public final IntLongMap multiLeafIndex = new IntLongHashMap();
+    public final IntIntMap multiLeafBlockIndex = new IntIntHashMap();
 
     @SuppressWarnings("resource")
     BKDPostingsIndex(FileHandle postingsFileHandle, long filePosition) throws IOException
@@ -55,6 +59,18 @@ class BKDPostingsIndex
                 final long filePointer = input.readVLong();
 
                 index.put(node, filePointer);
+            }
+
+            int size2 = input.readVInt();
+
+            for (int x = 0; x < size2; x++)
+            {
+                final int node = input.readVInt();
+                final long filePointer = input.readVLong();
+                final int blockOrdinal = input.readVInt();
+
+                multiLeafIndex.put(node, filePointer);
+                multiLeafBlockIndex.put(node, blockOrdinal);
             }
         }
     }
@@ -86,6 +102,16 @@ class BKDPostingsIndex
     {
         checkArgument(exists(nodeID));
         return index.get(nodeID);
+    }
+
+    long getMultiLeafPostingsFilePointer(int nodeID)
+    {
+        return multiLeafIndex.getOrDefault(nodeID, -1);
+    }
+
+    int getMultiLeafPostingsBlockOrdinal(int nodeID)
+    {
+        return multiLeafBlockIndex.getOrDefault(nodeID, -1);
     }
 
     int size()

@@ -278,11 +278,28 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
         visitDocValues(commonPrefixLengths, scratchPackedValue1, leafInput, count, visitor, null, origIndex);
 
-        if (postingsIndex.exists(nodeID))
+        final long multiLeafPostingsFilePointer = postingsIndex.getMultiLeafPostingsFilePointer(nodeID);
+        final boolean existsPostingIndex = postingsIndex.exists(nodeID);
+
+        if (multiLeafPostingsFilePointer != -1 || existsPostingIndex)
         {
-            final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
+            final long pointer;
+            if (existsPostingIndex)
+            {
+                pointer = postingsIndex.getPostingsFilePointer(nodeID);
+            }
+            else
+            {
+                pointer = multiLeafPostingsFilePointer;
+            }
             final PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(bkdPostingsInput, pointer);
             final PostingsReader postingsReader = new PostingsReader(bkdPostingsInput, summary, QueryEventListener.PostingListEventListener.NO_OP);
+
+            if (multiLeafPostingsFilePointer != -1)
+            {
+                int block = postingsIndex.getMultiLeafPostingsBlockOrdinal(nodeID);
+                postingsReader.seekOrdinal(block * postingsReader.getBlockSize());
+            }
 
             tempPostings.clear();
 
@@ -432,17 +449,39 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             }
         }
 
+        long lastValidFilePointer = -1;
+
         public void collectPostingLists(PriorityQueue<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             context.checkpoint();
 
             final int nodeID = index.getNodeID();
 
-            // if there is pre-built posting for entire subtree
-            if (postingsIndex.exists(nodeID))
+            final long multiLeafFilePointer = postingsIndex.getMultiLeafPostingsFilePointer(nodeID);
+
+            if (multiLeafFilePointer != -1 && multiLeafFilePointer != lastValidFilePointer)
             {
-                postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                lastValidFilePointer = multiLeafFilePointer;
+
+                postingLists.add(initPostingReader(multiLeafFilePointer).peekable());
                 return;
+            }
+            else if (multiLeafFilePointer != -1 && multiLeafFilePointer == lastValidFilePointer)
+            {
+                 // do nothing as the posting list for this leaf node id has already been added to postingLists
+                if (index.isLeafNode())
+                    return;
+            }
+            else
+            {
+                assert postingsIndex.getMultiLeafPostingsFilePointer(nodeID) == -1;
+
+                // if there is pre-built posting for entire subtree
+                if (postingsIndex.exists(nodeID))
+                {
+                    postingLists.add(initPostingReader(postingsIndex.getPostingsFilePointer(nodeID)).peekable());
+                    return;
+                }
             }
 
             Preconditions.checkState(!index.isLeafNode(), "Leaf node %s does not have kd-tree postings.", index.getNodeID());
@@ -665,18 +704,35 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 return;
             }
 
-            if (r == Relation.CELL_INSIDE_QUERY)
-            {
-                // This cell is fully inside of the query shape: recursively add all points in this cell without filtering
-                super.collectPostingLists(postingLists);
-                return;
-            }
+            int nodeID = index.getNodeID();
 
-            if (index.isLeafNode())
+            // the relation only cross the node due to the cellMaxPacked not being correct
+            if (r == Relation.CELL_INSIDE_QUERY || (r == Relation.CELL_CROSSES_QUERY && postingsIndex.getMultiLeafPostingsFilePointer(nodeID) != -1))
             {
-                if (index.nodeExists())
-                    filterLeaf(postingLists);
-                return;
+                // compare using only the cellMinPacked as the cellMaxPacked is actually the min value of the next node
+                Relation r2 = visitor.compare(cellMinPacked, cellMinPacked);
+                if (r2 == Relation.CELL_INSIDE_QUERY)
+                {
+                    // This cell is fully inside of the query shape: recursively add all points in this cell without filtering
+                    super.collectPostingLists(postingLists);
+                    return;
+                }
+                else
+                {
+                    if (index.isLeafNode())
+                    {
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                if (index.isLeafNode())
+                {
+                    if (index.nodeExists())
+                        filterLeaf(postingLists);
+                    return;
+                }
             }
 
             visitNode(postingLists, cellMinPacked, cellMaxPacked);
@@ -721,6 +777,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
             if (postingsIndex.exists(nodeID) && holder[0].cardinality() > 0)
             {
+                assert postingsIndex.getMultiLeafPostingsFilePointer(nodeID) == -1;
+
                 final long pointer = postingsIndex.getPostingsFilePointer(nodeID);
                 postingLists.add(initFilteringPostingReader(pointer, holder[0]).peekable());
             }
@@ -745,6 +803,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             System.arraycopy(splitDimValue.bytes, splitDimValue.offset, splitPackedValue, splitDim * bytesPerDim, bytesPerDim);
 
             index.pushLeft();
+
             collectPostingLists(postingLists, cellMinPacked, splitPackedValue);
             index.pop();
 

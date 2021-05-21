@@ -19,10 +19,10 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import com.google.common.base.MoreObjects;
 
@@ -33,7 +33,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.lucene.codecs.MutablePointValues;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -105,23 +104,16 @@ public class NumericIndexWriter implements Closeable
 
     public static class LeafCallback implements BKDWriter.OneDimensionBKDWriterCallback
     {
-        final List<PackedLongValues> postings = new ArrayList<>();
+        final TreeMap<Long,PackedLongValues> leafFilePointerToPostings = new TreeMap<>();
 
-        public int numLeaves()
+        public int numPostings()
         {
-            return postings.size();
+            return leafFilePointerToPostings.size();
         }
 
-        @Override
-        public void writeLeafDocs(int leafNum, BKDWriter.RowIDAndIndex[] sortedByRowID, int offset, int count)
+        public void add(long leafFilePointer, PackedLongValues postings)
         {
-            final PackedLongValues.Builder builder = PackedLongValues.monotonicBuilder(PackedInts.COMPACT);
-
-            for (int i = offset; i < count; ++i)
-            {
-                builder.add(sortedByRowID[i].rowID);
-            }
-            postings.add(builder.build());
+            leafFilePointerToPostings.put(leafFilePointer, postings);
         }
     }
 
@@ -139,12 +131,16 @@ public class NumericIndexWriter implements Closeable
 
         final LeafCallback leafCallback = new LeafCallback();
 
+        List<List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta>> leafBlockMetaGroups = null;
+
         try (IndexOutput bkdOutput = indexComponents.createOutput(indexComponents.kdTree, true, segmented))
         {
             // The SSTable kd-tree component file is opened in append mode, so our offset is the current file pointer.
             final long bkdOffset = bkdOutput.getFilePointer();
 
             bkdPosition = writer.writeField(bkdOutput, values, leafCallback);
+
+            leafBlockMetaGroups = writer.leafBlockMetaGroups;
 
             // If the bkdPosition is less than 0 then we didn't write any values out
             // and the index is empty
@@ -155,7 +151,7 @@ public class NumericIndexWriter implements Closeable
 
             Map<String, String> attributes = new LinkedHashMap<>();
             attributes.put("max_points_in_leaf_node", Integer.toString(writer.maxPointsInLeafNode));
-            attributes.put("num_leaves", Integer.toString(leafCallback.numLeaves()));
+            attributes.put("num_leaves", Integer.toString(leafCallback.numPostings()));
             attributes.put("num_points", Long.toString(writer.pointCount));
             attributes.put("bytes_per_dim", Long.toString(writer.bytesPerDim));
             attributes.put("num_dims", Long.toString(writer.numDims));
@@ -168,11 +164,11 @@ public class NumericIndexWriter implements Closeable
         {
             final long postingsOffset = postingsOutput.getFilePointer();
 
-            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexComponents);
+            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.leafFilePointerToPostings, config, indexComponents);
             reader.traverse(postingsWriter);
 
             // The kd-tree postings writer already writes its own header & footer.
-            final long postingsPosition = postingsWriter.finish(postingsOutput);
+            final long postingsPosition = postingsWriter.finish(postingsOutput, leafBlockMetaGroups);
 
             Map<String, String> attributes = new LinkedHashMap<>();
             attributes.put("num_leaf_postings", Integer.toString(postingsWriter.numLeafPostings));

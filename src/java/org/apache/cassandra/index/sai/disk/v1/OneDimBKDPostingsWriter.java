@@ -23,7 +23,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -47,7 +46,6 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 
 /**
  * Writes auxiliary posting lists for bkd tree nodes. If a node has a posting list attached, it will contain every row
@@ -66,7 +64,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final List<PackedLongValues> postings;
+    private final TreeMap<Long,PackedLongValues> leafFilePointerToPostings;
     private final TreeMap<Long, Integer> leafOffsetToNodeID = new TreeMap<>(Long::compareTo);
     private final Multimap<Integer, Integer> nodeToChildLeaves = HashMultimap.create();
 
@@ -75,9 +73,11 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
     int numNonLeafPostings = 0;
     int numLeafPostings = 0;
 
-    OneDimBKDPostingsWriter(List<PackedLongValues> postings, IndexWriterConfig config, IndexComponents indexComponents)
+    OneDimBKDPostingsWriter(TreeMap<Long,PackedLongValues> leafFilePointerToPostings,
+                            IndexWriterConfig config,
+                            IndexComponents indexComponents)
     {
-        this.postings = postings;
+        this.leafFilePointerToPostings = leafFilePointerToPostings;
         this.config = config;
         this.components = indexComponents;
     }
@@ -101,19 +101,27 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
     }
 
     @SuppressWarnings("resource")
-    public long finish(IndexOutput out) throws IOException
+    public long finish(IndexOutput out, List<List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta>> leafBlockMetaGroups) throws IOException
     {
-        checkState(postings.size() == leafOffsetToNodeID.size(),
-                   "Expected equal number of postings lists (%s) and leaf offsets (%s).",
-                   postings.size(), leafOffsetToNodeID.size());
+        // TODO: what to put here now?
+//        checkState(postings.size() == leafOffsetToNodeID.size(),
+//                   "Expected equal number of postings lists (%s) and leaf offsets (%s).",
+//                   postings.size(), leafOffsetToNodeID.size());
 
         final PostingsWriter postingsWriter = new PostingsWriter(out);
 
-        final Iterator<PackedLongValues> postingsIterator = postings.iterator();
         final Map<Integer, PackedLongValues> leafToPostings = new HashMap<>();
-        leafOffsetToNodeID.forEach((fp, nodeID) -> leafToPostings.put(nodeID, postingsIterator.next()));
 
-        final long postingsRamBytesUsed = postings.stream()
+        for (Map.Entry<Long, Integer> entry : leafOffsetToNodeID.entrySet())
+        {
+            final long leafFilePointer = entry.getKey();
+            final int leafNodeID = entry.getValue();
+            final PackedLongValues postings = leafFilePointerToPostings.get(leafFilePointer);
+
+            leafToPostings.put(leafNodeID, postings);
+        }
+
+        final long postingsRamBytesUsed = leafFilePointerToPostings.values().stream()
                                                   .mapToLong(PackedLongValues::ramBytesUsed)
                                                   .sum();
 
@@ -130,7 +138,10 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
         final long startFP = out.getFilePointer();
         final Stopwatch flushTime = Stopwatch.createStarted();
+        // TODO: do these need to be TreeMaps?
         final TreeMap<Integer, Long> nodeIDToPostingsFilePointer = new TreeMap<>();
+        final TreeMap<Integer, Long> multiLeafNodeIDToPostingsFilePointer = new TreeMap<>();
+        final TreeMap<Integer, Integer> multiLeafNodeIDToPostingsBlockOrdinal = new TreeMap<>();
         for (int nodeID : Iterables.concat(internalNodeIDs, leafNodeIDs))
         {
             Collection<Integer> leaves = nodeToChildLeaves.get(nodeID);
@@ -147,7 +158,13 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
 
             final PriorityQueue<PostingList.PeekablePostingList> postingLists = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
             for (Integer leaf : leaves)
-                postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)).peekable());
+            {
+                PackedLongValues leafPostings = leafToPostings.get(leaf);
+                if (leafPostings != null) // some leaves may be a part of a multi-leaf postings list, eg, no leaf posting list
+                    postingLists.add(new PackedLongsPostingList(leafPostings).peekable());
+            }
+
+            if (postingLists.isEmpty()) continue;
 
             final PostingList mergedPostingList = MergePostingList.merge(postingLists);
             final long postingFilePosition = postingsWriter.write(mergedPostingList);
@@ -156,14 +173,47 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
             if (postingFilePosition >= 0)
                 nodeIDToPostingsFilePointer.put(nodeID, postingFilePosition);
         }
+
+        // for each list of leaf blocks with the same value write a merged posting list
+        // add to the multiLeafNodeIDToPostingsFilePointer map index
+        if (leafBlockMetaGroups != null)
+        {
+            for (List<BKDWriter.OneDimensionBKDWriter.LeafBlockMeta> leafBlockMetaGroup : leafBlockMetaGroups)
+            {
+                BKDWriter.OneDimensionBKDWriter.LeafBlockMeta firstMeta = leafBlockMetaGroup.get(0);
+                final int firstLeafNodeID = leafOffsetToNodeID.get(firstMeta.leafFilePointer);
+                PackedLongValues postingList = leafToPostings.get(firstLeafNodeID);
+
+                final long postingFilePointer = postingsWriter.write(new PackedLongsPostingList(postingList));
+
+                for (int blockOrdinal = 0; blockOrdinal < leafBlockMetaGroup.size(); blockOrdinal++)
+                {
+                    BKDWriter.OneDimensionBKDWriter.LeafBlockMeta meta = leafBlockMetaGroup.get(blockOrdinal);
+                    final int nodeID = leafOffsetToNodeID.get(meta.leafFilePointer);
+                    multiLeafNodeIDToPostingsFilePointer.put(nodeID, postingFilePointer);
+                    multiLeafNodeIDToPostingsBlockOrdinal.put(nodeID, blockOrdinal);
+                }
+            }
+        }
+
         flushTime.stop();
         logger.debug(components.logMessage("Flushed {} of posting lists for kd-tree nodes in {} ms."),
                      FBUtilities.prettyPrintMemory(out.getFilePointer() - startFP),
                      flushTime.elapsed(TimeUnit.MILLISECONDS));
 
-
         final long indexFilePointer = out.getFilePointer();
         writeMap(nodeIDToPostingsFilePointer, out);
+
+        out.writeVInt(multiLeafNodeIDToPostingsFilePointer.size());
+
+        for (Map.Entry<Integer, Long> e : multiLeafNodeIDToPostingsFilePointer.entrySet())
+        {
+            int blockOrdinal = multiLeafNodeIDToPostingsBlockOrdinal.get(e.getKey());
+            out.writeVInt(e.getKey());
+            out.writeVLong(e.getValue());
+            out.writeVInt(blockOrdinal);
+        }
+
         postingsWriter.complete();
         return indexFilePointer;
     }

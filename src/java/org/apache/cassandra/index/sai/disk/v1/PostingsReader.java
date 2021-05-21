@@ -83,6 +83,35 @@ public class PostingsReader implements OrdinalPostingList
         reBuffer();
     }
 
+    public long seekOrdinal(long position) throws IOException
+    {
+        if (position >= size()) throw new IllegalArgumentException("position="+position+" greater than size="+size());
+
+        final int ordinal = (int) (position % blockSize);
+        final int block = (int) (position / blockSize);
+
+        if (postingsBlockIdx == block + 1)
+        {
+           return advanceN(ordinal);
+        }
+
+        lastPosInBlock(block - 1);
+
+        return advanceN(ordinal);
+    }
+
+    private long advanceN(int ordinal) throws IOException
+    {
+        long segmentRowId = -1;
+        for (int x=0; x <= ordinal; x++)
+        {
+            segmentRowId = peekNext();
+
+            advanceOnePosition(segmentRowId);
+        }
+        return segmentRowId;
+    }
+
     @Override
     public long getOrdinal()
     {
