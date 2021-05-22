@@ -19,6 +19,7 @@
 package org.apache.cassandra.cql3;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -29,6 +30,8 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.junit.Assert;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import org.apache.cassandra.concurrent.SEPExecutor;
@@ -39,9 +42,20 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
+@RunWith(Parameterized.class)
 public class ViewFilteringTest extends CQLTester
 {
-    ProtocolVersion protocolVersion = ProtocolVersion.V4;
+    @Parameterized.Parameter
+    public ProtocolVersion version;
+
+    @Parameterized.Parameters()
+    public static Collection<Object[]> versions()
+    {
+        return ProtocolVersion.SUPPORTED.stream()
+                                        .map(v -> new Object[]{v})
+                                        .collect(Collectors.toList());
+    }
+
     private final List<String> views = new ArrayList<>();
 
     @BeforeClass
@@ -67,14 +81,14 @@ public class ViewFilteringTest extends CQLTester
     public void end() throws Throwable
     {
         for (String viewName : views)
-            executeNet(protocolVersion, "DROP MATERIALIZED VIEW " + viewName);
+            executeNet(version, "DROP MATERIALIZED VIEW " + viewName);
     }
 
     private void createView(String name, String query) throws Throwable
     {
         try
         {
-            executeNet(protocolVersion, String.format(query, name));
+            executeNet(version, String.format(query, name));
             // If exception is thrown, the view will not be added to the list; since it shouldn't have been created, this is
             // the desired behavior
             views.add(name);
@@ -89,7 +103,7 @@ public class ViewFilteringTest extends CQLTester
 
     private void updateView(String query, Object... params) throws Throwable
     {
-        executeNet(protocolVersion, query, params);
+        executeNet(version, query, params);
         while (!(((SEPExecutor) Stage.VIEW_MUTATION.executor()).getPendingTaskCount() == 0
                  && ((SEPExecutor) Stage.VIEW_MUTATION.executor()).getActiveTaskCount() == 0))
         {
@@ -99,7 +113,7 @@ public class ViewFilteringTest extends CQLTester
 
     private void dropMaterializedView(String name) throws Throwable
     {
-        executeNet(protocolVersion, "DROP MATERIALIZED VIEW " + name);
+        executeNet(version, "DROP MATERIALIZED VIEW " + name);
         views.remove(name);
     }
 
@@ -125,7 +139,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         createView("mv_test1",
                    "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL and c = 1  PRIMARY KEY (a, b)");
@@ -335,7 +349,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, l list<int>, s set<int>, m map<int,int>, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         createView("mv_test1",
                    "CREATE MATERIALIZED VIEW %s AS SELECT a,b,c FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL "
@@ -421,7 +435,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, d int, e int, PRIMARY KEY((a, b), c, d))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         // IS NOT NULL is required on all PK statements that are not otherwise restricted
         List<String> badStatements = Arrays.asList(
@@ -471,7 +485,7 @@ public class ViewFilteringTest extends CQLTester
 
             try
             {
-                executeNet(protocolVersion, "ALTER MATERIALIZED VIEW mv" + i + "_test WITH compaction = { 'class' : 'LeveledCompactionStrategy' }");
+                executeNet(version, "ALTER MATERIALIZED VIEW mv" + i + "_test WITH compaction = { 'class' : 'LeveledCompactionStrategy' }");
             }
             catch (Exception e)
             {
@@ -486,7 +500,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering\" int, \"the\"\"Value\" int, PRIMARY KEY (\"theKey\", \"theClustering\"))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 0, 0, 0);
         execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 0, 1, 0);
@@ -512,7 +526,7 @@ public class ViewFilteringTest extends CQLTester
             );
         }
 
-        executeNet(protocolVersion, "ALTER TABLE %s RENAME \"theClustering\" TO \"Col\"");
+        executeNet(version, "ALTER TABLE %s RENAME \"theClustering\" TO \"Col\"");
 
         for (String mvname : Arrays.asList("mv_test", "mv_test2"))
         {
@@ -528,7 +542,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 1, 1);
@@ -547,7 +561,7 @@ public class ViewFilteringTest extends CQLTester
                    row(1, 1, 3)
         );
 
-        executeNet(protocolVersion, "ALTER TABLE %s RENAME a TO foo");
+        executeNet(version, "ALTER TABLE %s RENAME a TO foo");
 
         assertRows(execute("SELECT foo, b, c FROM mv_test"),
                    row(1, 0, 2),
@@ -561,7 +575,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 1, 1);
@@ -580,7 +594,7 @@ public class ViewFilteringTest extends CQLTester
                    row(1, 1, 3)
         );
 
-        executeNet(protocolVersion, "ALTER TABLE %s RENAME a TO foo");
+        executeNet(version, "ALTER TABLE %s RENAME a TO foo");
 
         assertRows(execute("SELECT foo, b, c FROM mv_test"),
                    row(1, 0, 2),
@@ -597,7 +611,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
@@ -702,7 +716,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0,  1, 1);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 10, 1, 2);
@@ -801,7 +815,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
@@ -902,7 +916,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -990,7 +1004,7 @@ public class ViewFilteringTest extends CQLTester
     {
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1079,7 +1093,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1188,7 +1202,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1296,7 +1310,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1413,7 +1427,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1526,7 +1540,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1651,7 +1665,7 @@ public class ViewFilteringTest extends CQLTester
             createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
 
             execute("USE " + keyspace());
-            executeNet(protocolVersion, "USE " + keyspace());
+            executeNet(version, "USE " + keyspace());
 
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
             execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1789,7 +1803,7 @@ public class ViewFilteringTest extends CQLTester
         "PRIMARY KEY (" + columnNames + "))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
 
         createView(
@@ -1845,7 +1859,7 @@ public class ViewFilteringTest extends CQLTester
 
         assert !execute("SELECT * FROM mv_test").isEmpty();
 
-        executeNet(protocolVersion, "ALTER TABLE %s RENAME inetval TO foo");
+        executeNet(version, "ALTER TABLE %s RENAME inetval TO foo");
         assert !execute("SELECT * FROM mv_test").isEmpty();
     }
 
@@ -1855,7 +1869,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         try {
             createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d = 1 PRIMARY KEY (a, b, c)");
@@ -1873,7 +1887,7 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
@@ -1985,28 +1999,28 @@ public class ViewFilteringTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, d int, e int, PRIMARY KEY (a, b))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
         Keyspace ks = Keyspace.open(keyspace());
 
         createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (c, a, b)");
         ks.getColumnFamilyStore("mv").disableAutoCompaction();
 
         //Set initial values TS=0, matching the restriction and verify view
-        executeNet(protocolVersion, "INSERT INTO %s (a, b, c, d) VALUES (0, 0, 1, 0) USING TIMESTAMP 0");
+        executeNet(version, "INSERT INTO %s (a, b, c, d) VALUES (0, 0, 1, 0) USING TIMESTAMP 0");
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
             FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         //update c's timestamp TS=2
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
             FBUtilities.waitOnFutures(ks.flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         //change c's value and TS=3, tombstones c=1 and adds c=0 record
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 0, 0, 0));
 
         if(flush)
@@ -2016,7 +2030,7 @@ public class ViewFilteringTest extends CQLTester
         }
 
         //change c's value back to 1 with TS=4, check we can see d
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
@@ -2027,7 +2041,7 @@ public class ViewFilteringTest extends CQLTester
 
 
         //Add e value @ TS=1
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 1 SET e = ? WHERE a = ? and b = ? ", 1, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 1 SET e = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
@@ -2035,7 +2049,7 @@ public class ViewFilteringTest extends CQLTester
 
 
         //Change d value @ TS=2
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET d = ? WHERE a = ? and b = ? ", 2, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET d = ? WHERE a = ? and b = ? ", 2, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
@@ -2043,17 +2057,17 @@ public class ViewFilteringTest extends CQLTester
 
 
         //Change d value @ TS=3
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? and b = ? ", 1, 0, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(1));
 
 
         //Tombstone c
-        executeNet(protocolVersion, "DELETE FROM %s WHERE a = ? and b = ?", 0, 0);
+        executeNet(version, "DELETE FROM %s WHERE a = ? and b = ?", 0, 0);
         assertRowsIgnoringOrder(execute("SELECT d from mv"));
         assertRows(execute("SELECT d from mv"));
 
         //Add back without D
-        executeNet(protocolVersion, "INSERT INTO %s (a, b, c) VALUES (0, 0, 1)");
+        executeNet(version, "INSERT INTO %s (a, b, c) VALUES (0, 0, 1)");
 
         //Make sure D doesn't pop back in.
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row((Object) null));
@@ -2061,24 +2075,24 @@ public class ViewFilteringTest extends CQLTester
 
         //New partition
         // insert a row with timestamp 0
-        executeNet(protocolVersion, "INSERT INTO %s (a, b, c, d, e) VALUES (?, ?, ?, ?, ?) USING TIMESTAMP 0", 1, 0, 1, 0, 0);
+        executeNet(version, "INSERT INTO %s (a, b, c, d, e) VALUES (?, ?, ?, ?, ?) USING TIMESTAMP 0", 1, 0, 1, 0, 0);
 
         // overwrite pk and e with timestamp 1, but don't overwrite d
-        executeNet(protocolVersion, "INSERT INTO %s (a, b, c, e) VALUES (?, ?, ?, ?) USING TIMESTAMP 1", 1, 0, 1, 0);
+        executeNet(version, "INSERT INTO %s (a, b, c, e) VALUES (?, ?, ?, ?) USING TIMESTAMP 1", 1, 0, 1, 0);
 
         // delete with timestamp 0 (which should only delete d)
-        executeNet(protocolVersion, "DELETE FROM %s USING TIMESTAMP 0 WHERE a = ? AND b = ?", 1, 0);
+        executeNet(version, "DELETE FROM %s USING TIMESTAMP 0 WHERE a = ? AND b = ?", 1, 0);
         assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
                    row(1, 0, 1, null, 0)
         );
 
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? AND b = ?", 1, 1, 1);
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? AND b = ?", 1, 1, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? AND b = ?", 1, 1, 1);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? AND b = ?", 1, 1, 0);
         assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
                    row(1, 0, 1, null, 0)
         );
 
-        executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? AND b = ?", 0, 1, 0);
+        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? AND b = ?", 0, 1, 0);
         assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
                    row(1, 0, 1, 0, 0)
         );
@@ -2095,7 +2109,7 @@ public class ViewFilteringTest extends CQLTester
                     "val int)");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         createView("mv_rctstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (k,c)");
 
@@ -2124,7 +2138,7 @@ public class ViewFilteringTest extends CQLTester
                     "PRIMARY KEY(k, c))");
 
         execute("USE " + keyspace());
-        executeNet(protocolVersion, "USE " + keyspace());
+        executeNet(version, "USE " + keyspace());
 
         createView("mv_tstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL AND val = 'baz' PRIMARY KEY (val,k,c)");
 

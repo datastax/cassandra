@@ -310,7 +310,7 @@ public class TrieIndexFormat implements SSTableFormat
             isLatestVersion = version.compareTo(current_version) == 0;
             hasOldBfFormat = version.compareTo("b") < 0;
             hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
-            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])"); // TODO TBD
+            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
         }

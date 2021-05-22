@@ -598,7 +598,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new RuntimeException(e);
         }
 
-        UUID localHostId = SystemKeyspace.getLocalHostId();
+        UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
 
         if (isReplacingSameAddress())
         {
@@ -638,7 +638,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return bootstrapTokens;
     }
 
-    private synchronized void checkForEndpointCollision(UUID localHostId, Set<InetAddressAndPort> peers) throws ConfigurationException
+    public synchronized void checkForEndpointCollision(UUID localHostId, Set<InetAddressAndPort> peers) throws ConfigurationException
     {
         if (Boolean.getBoolean("cassandra.allow_unsafe_join"))
         {
@@ -906,7 +906,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             MessagingService.instance().listen();
 
-            UUID localHostId = SystemKeyspace.getLocalHostId();
+            UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
 
             if (replacing)
             {
@@ -1003,12 +1003,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             return;
 
         logger.warn(String.format("There are nodes in the cluster with a different schema version than us we did not merged schemas from, " +
-                                  "our version : (%s), outstanding versions -> endpoints : %s",
+                                  "our version : (%s), outstanding versions -> endpoints : %s. Use -Dcassandra.skip_schema_check=true " +
+                                  "to ignore this.",
                                   Schema.instance.getVersion(),
                                   MigrationCoordinator.instance.outstandingVersions()));
 
         if (REQUIRE_SCHEMAS)
-            throw new RuntimeException("Didn't receive schemas for all known versions within the timeout");
+            throw new RuntimeException("Didn't receive schemas for all known versions within the timeout. " +
+                                       "Use -Dcassandra.skip_schema_check=true to skip this check.");
     }
 
     private void joinTokenRing(long schemaTimeoutMillis) throws ConfigurationException
@@ -1747,7 +1749,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             SystemKeyspace.removeEndpoint(DatabaseDescriptor.getReplaceAddress());
         }
         if (!Gossiper.instance.seenAnySeed())
-            throw new IllegalStateException("Unable to contact any seeds!");
+            throw new IllegalStateException("Unable to contact any seeds: " + Gossiper.instance.getSeeds());
 
         if (Boolean.getBoolean("cassandra.reset_bootstrap_progress"))
         {
@@ -2706,7 +2708,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
             else
             {
-                logger.info("Nodes () and {} have the same token {}.  Ignoring {}", endpoint, currentOwner, token, endpoint);
+                logger.info("Nodes {} and {} have the same token {}.  Ignoring {}", endpoint, currentOwner, token, endpoint);
             }
         }
 
@@ -2962,6 +2964,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private void removeEndpoint(InetAddressAndPort endpoint)
     {
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.removeEndpoint(endpoint));
+        MigrationCoordinator.instance.removeVersionInfoForEndpoint(endpoint);
         SystemKeyspace.removeEndpoint(endpoint);
     }
 
@@ -3265,7 +3268,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             onChange(endpoint, entry.getKey(), entry.getValue());
         }
-        MigrationCoordinator.instance.reportEndpointVersion(endpoint, epState);
     }
 
     public void onAlive(InetAddressAndPort endpoint, EndpointState state)

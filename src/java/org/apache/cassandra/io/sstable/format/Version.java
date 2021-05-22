@@ -135,6 +135,5 @@ public abstract class Version
     // TODO TBD
     public abstract boolean hasMaxColumnValueLengths();
 
-    // TODO TBD
     public abstract boolean hasOriginatingHostId();
 }

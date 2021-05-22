@@ -289,8 +289,9 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+            Keyspace ks = Keyspace.open(keyspaceName);
             consistencyForPaxos.validateForCas(keyspaceName, state);
-            consistencyForCommit.validateForCasCommit(keyspaceName, state);
+            consistencyForCommit.validateForCasCommit(ks.getReplicationStrategy(), keyspaceName, state);
 
             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
             {
@@ -433,17 +434,19 @@ public class StorageProxy implements StorageProxyMBean
     {
         int contentions = 0;
         Keyspace keyspace = Keyspace.open(metadata.keyspace);
+        AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
         try
         {
             consistencyForPaxos.validateForCas(metadata.keyspace, queryState);
-            consistencyForReplayCommits.validateForCasCommit(metadata.keyspace, queryState);
-            consistencyForCommit.validateForCasCommit(metadata.keyspace, queryState);
+            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState);
+            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
             while (System.nanoTime() - queryStartNanoTime < timeoutNanos)
             {
                 // for simplicity, we'll do a single liveness check at the start of each attempt
                 ReplicaPlan.ForPaxosWrite replicaPlan = ReplicaPlans.forPaxos(keyspace, key, consistencyForPaxos);
+                latestRs = replicaPlan.replicationStrategy();
                 PaxosBallotAndContention pair = beginAndRepairPaxos(queryStartNanoTime,
                                                                     key,
                                                                     metadata,
@@ -503,7 +506,7 @@ public class StorageProxy implements StorageProxyMBean
             recordCasContention(metadata, key, casMetrics, contentions);
         }
 
-        throw new CasWriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(keyspace), contentions);
+        throw new CasWriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(latestRs), contentions);
     }
 
     /**
@@ -619,7 +622,7 @@ public class StorageProxy implements StorageProxyMBean
             }
         }
 
-        throw new CasWriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)), contentions);
+        throw new CasWriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(paxosPlan.replicationStrategy()), contentions);
     }
 
     /**
@@ -715,7 +718,7 @@ public class StorageProxy implements StorageProxyMBean
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeAll);
         if (shouldBlock)
         {
-            AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
+            AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
             responseHandler = rs.getWriteResponseHandler(replicaPlan, null, WriteType.SIMPLE, queryStartNanoTime);
         }
 
@@ -969,7 +972,8 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     String keyspaceName = mutation.getKeyspaceName();
                     Token tk = mutation.key().getToken();
-                    Optional<Replica> pairedEndpoint = ViewUtils.getViewNaturalEndpoint(keyspaceName, baseToken, tk);
+                    AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
+                    Optional<Replica> pairedEndpoint = ViewUtils.getViewNaturalEndpoint(replicationStrategy, baseToken, tk);
                     EndpointsForToken pendingReplicas = StorageService.instance.getTokenMetadata().pendingEndpointsForToken(tk, keyspaceName);
 
                     // if there are no paired endpoints there are probably range movements going on, so we write to the local batchlog to replay later
@@ -1004,11 +1008,13 @@ public class StorageProxy implements StorageProxyMBean
                     }
                     else
                     {
+                        ReplicaLayout.ForTokenWrite liveAndDown = ReplicaLayout.forTokenWrite(replicationStrategy,
+                                                                                              EndpointsForToken.of(tk, pairedEndpoint.get()),
+                                                                                              pendingReplicas);
                         wrappers.add(wrapViewBatchResponseHandler(mutation,
                                                                   consistencyLevel,
                                                                   consistencyLevel,
-                                                                  EndpointsForToken.of(tk, pairedEndpoint.get()),
-                                                                  pendingReplicas,
+                                                                  liveAndDown,
                                                                   baseComplete,
                                                                   WriteType.BATCH,
                                                                   cleanup,
@@ -1271,11 +1277,10 @@ public class StorageProxy implements StorageProxyMBean
     {
         String keyspaceName = mutation.getKeyspaceName();
         Keyspace keyspace = Keyspace.open(keyspaceName);
-        AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-
         Token tk = mutation.key().getToken();
 
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
+        AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
         AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, queryStartNanoTime);
 
         performer.apply(mutation, replicaPlan, responseHandler, localDataCenter);
@@ -1291,12 +1296,12 @@ public class StorageProxy implements StorageProxyMBean
                                                                         long queryStartNanoTime)
     {
         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-        AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
         Token tk = mutation.key().getToken();
 
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
+        AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
         AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(replicaPlan,null, writeType, queryStartNanoTime);
-        BatchlogResponseHandler<IMutation> batchHandler = new BatchlogResponseHandler<>(writeHandler, batchConsistencyLevel.blockFor(keyspace), cleanup, queryStartNanoTime);
+        BatchlogResponseHandler<IMutation> batchHandler = new BatchlogResponseHandler<>(writeHandler, batchConsistencyLevel.blockFor(rs), cleanup, queryStartNanoTime);
         return new WriteResponseHandlerWrapper(batchHandler, mutation);
     }
 
@@ -1307,24 +1312,20 @@ public class StorageProxy implements StorageProxyMBean
     private static WriteResponseHandlerWrapper wrapViewBatchResponseHandler(Mutation mutation,
                                                                             ConsistencyLevel consistencyLevel,
                                                                             ConsistencyLevel batchConsistencyLevel,
-                                                                            EndpointsForToken naturalEndpoints,
-                                                                            EndpointsForToken pendingEndpoints,
+                                                                            ReplicaLayout.ForTokenWrite liveAndDown,
                                                                             AtomicLong baseComplete,
                                                                             WriteType writeType,
                                                                             BatchlogResponseHandler.BatchlogCleanup cleanup,
                                                                             long queryStartNanoTime)
     {
         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-        AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-
-        ReplicaLayout.ForTokenWrite liveAndDown = ReplicaLayout.forTokenWrite(naturalEndpoints, pendingEndpoints);
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, liveAndDown, ReplicaPlans.writeAll);
-
-        AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(replicaPlan, () -> {
+        AbstractReplicationStrategy replicationStrategy = replicaPlan.replicationStrategy();
+        AbstractWriteResponseHandler<IMutation> writeHandler = replicationStrategy.getWriteResponseHandler(replicaPlan, () -> {
             long delay = Math.max(0, System.currentTimeMillis() - baseComplete.get());
             viewWriteMetrics.viewWriteLatency.update(delay, MILLISECONDS);
         }, writeType, queryStartNanoTime);
-        BatchlogResponseHandler<IMutation> batchHandler = new ViewWriteMetricsWrapped(writeHandler, batchConsistencyLevel.blockFor(keyspace), cleanup, queryStartNanoTime);
+        BatchlogResponseHandler<IMutation> batchHandler = new ViewWriteMetricsWrapped(writeHandler, batchConsistencyLevel.blockFor(replicationStrategy), cleanup, queryStartNanoTime);
         return new WriteResponseHandlerWrapper(batchHandler, mutation);
     }
 
@@ -1619,14 +1620,15 @@ public class StorageProxy implements StorageProxyMBean
     {
         Keyspace keyspace = Keyspace.open(keyspaceName);
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        EndpointsForToken replicas = keyspace.getReplicationStrategy().getNaturalReplicasForToken(key);
+        AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+        EndpointsForToken replicas = replicationStrategy.getNaturalReplicasForToken(key);
 
         // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
         replicas = replicas.filter(replica -> StorageService.instance.isRpcReady(replica.endpoint()));
 
         // TODO have a way to compute the consistency level
         if (replicas.isEmpty())
-            throw UnavailableException.create(cl, cl.blockFor(keyspace), 0);
+            throw UnavailableException.create(cl, cl.blockFor(replicationStrategy), 0);
 
         List<Replica> localReplicas = new ArrayList<>(replicas.size());
 
@@ -1638,7 +1640,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             // If the consistency required is local then we should not involve other DCs
             if (cl.isDatacenterLocal())
-                throw UnavailableException.create(cl, cl.blockFor(keyspace), 0);
+                throw UnavailableException.create(cl, cl.blockFor(replicationStrategy), 0);
 
             // No endpoint in local DC, pick the closest endpoint according to the snitch
             replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
@@ -1741,6 +1743,8 @@ public class StorageProxy implements StorageProxyMBean
         SinglePartitionReadCommand command = group.queries.get(0);
         TableMetadata metadata = command.metadata();
         DecoratedKey key = command.partitionKey();
+        // calculate the blockFor before repair any paxos round to avoid RS being altered in between.
+        int blockForRead = consistencyLevel.blockFor(Keyspace.open(metadata.keyspace).getReplicationStrategy());
 
         PartitionIterator result = null;
         try
@@ -1773,7 +1777,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (WriteTimeoutException e)
             {
-                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false);
+                throw new ReadTimeoutException(consistencyLevel, 0, blockForRead, false);
             }
             catch (WriteFailureException e)
             {

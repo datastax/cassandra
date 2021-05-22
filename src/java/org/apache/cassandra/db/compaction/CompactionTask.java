@@ -149,6 +149,12 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 return new CompactionController(cfs, toCompact, gcBefore, null, tombstoneOption);
             }
+
+            @Override
+            protected int getLevel()
+            {
+                return txn.onlyOne().getSSTableLevel();
+            }
         };
         task.setUserDefined(true);
         task.setCompactionType(OperationType.GARBAGE_COLLECT);

@@ -1,4 +1,27 @@
+4.0-rc2
+ * cqlsh: fix DESC TYPE with non-ascii character in the identifier (CASSANDRA-16400)
+ * Remove drivers dependency and bring cql_keywords_reserved on server side (CASSANDRA-16659)
+ * Fix in-browser "help", Python 3 (CASSANDRA-16658)
+ * Fix DROP COMPACT STORAGE for counters (CASSANDRA-16653)
+ * Add back validation for AlterTableStatements (CASSANDRA-16643)
+ * Fix cqlsh encoding error with unicode in multi-line statement (CASSANDRA-16539)
+ * Fix race in fat client removal (CASSANDRA-16238)
+ * Test org.apache.cassandra.net.AsyncPromiseTest FAILED (CASSANDRA-16596)
+Merged from 3.11:
+ * Maps $CASSANDRA_LOG_DIR to cassandra.logdir java property when executing nodetool (CASSANDRA-16199)
+ * Nodetool garbagecollect should retain SSTableLevel for LCS (CASSANDRA-16634)
+ * Ignore stale acks received in the shadow round (CASSANDRA-16588)
+Merged from 3.0:
+ * Prevent loss of commit log data when moving sstables between nodes (CASSANDRA-16619)
+ * Fix materialized view builders inserting truncated data (CASSANDRA-16567)
+
 4.0-rc1
+ * Allow for setting buffer max capacity to increase it dynamically as needed (CASSANDRA-16524)
+ * Harden internode message resource limit accounting against serialization failures (CASSANDRA-16616)
+ * Add back the source release of python driver in tree to avoid fetching from GitHub APIs (CASSANDRA-16599)
+ * Fix false unavailable for queries due to cluster topology changes (CASSANDRA-16545)
+ * Fixed a race condition issue in nodetool repair where we poll for the error before seeing the error notification, leading to a less meaningful message (CASSANDRA-16585)
+ * Fix mixed cluster GROUP BY queries (CASSANDRA-16582)
  * Upgrade jflex to 1.8.2 (CASSANDRA-16576)
  * Binary releases no longer bundle the apidocs (javadoc) (CASSANDRA-15561)
  * Fix Streaming Repair metrics (CASSANDRA-16190)
@@ -51,11 +74,13 @@
  * Restore sasi dependencies jflex, snowball-stemmer, and concurrent-trees, in the cassandra-all pom (CASSANDRA-16303)
  * Fix DecimalDeserializer#toString OOM (CASSANDRA-14925)
 Merged from 3.11:
+ * Add autocomplete and error messages for provide_overlapping_tombstones (CASSANDRA-16350)
  * Upgrade jackson-databind to 2.9.10.8 (CASSANDRA-16462)
  * Fix digest computation for queries with fetched but non queried columns (CASSANDRA-15962)
  * Reduce amount of allocations during batch statement execution (CASSANDRA-16201)
  * Update jflex-1.6.0.jar to match upstream (CASSANDRA-16393)
 Merged from 3.0:
+ * Don't wait for schema migrations from removed nodes (CASSANDRA-16577)
  * Ignore trailing zeros in hint files (CASSANDRA-16523)
  * Refuse DROP COMPACT STORAGE if some 2.x sstables are in use (CASSANDRA-15897)
  * Fix ColumnFilter::toString not returning a valid CQL fragment (CASSANDRA-16483)

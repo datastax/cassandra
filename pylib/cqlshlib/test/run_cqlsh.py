@@ -276,8 +276,7 @@ class CqlshRunner(ProcRunner):
                  args=(), prompt=DEFAULT_CQLSH_PROMPT, env=None,
                  win_force_colors=True, tty=True, **kwargs):
         if path is None:
-            cqlsh_bin = 'cqlsh'
-            path = normpath(join(basecase.cqlshdir, cqlsh_bin))
+            path = join(basecase.cqlsh_dir, 'cqlsh')
         if host is None:
             host = basecase.TEST_HOST
         if port is None:
@@ -306,6 +305,7 @@ class CqlshRunner(ProcRunner):
         if coverage:
             args += ('--coverage',)
         self.keyspace = keyspace
+        env.setdefault('CQLSH_PYTHON', sys.executable)  # run with the same interpreter as the test
         ProcRunner.__init__(self, path, tty=tty, args=args, env=env, **kwargs)
         self.prompt = prompt
         if self.prompt is None:
