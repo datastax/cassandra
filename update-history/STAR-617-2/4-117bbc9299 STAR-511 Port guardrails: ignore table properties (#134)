@@ -1,0 +1,97 @@
+commit 117bbc92990c7db571320e294990406087bd2fea
+Author:     dan jatnieks <jatnieks@pobox.com>
+AuthorDate: Thu May 13 07:49:50 2021 -0700
+Commit:     GitHub <noreply@github.com>
+CommitDate: Thu May 13 07:49:50 2021 -0700
+
+    STAR-511 Port guardrails: ignore table properties (#134)
+    
+    * STAR-511: Disallow obsolete table properties
+    
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    
+    * STAR-511: Add new guardrail that ignores table properties
+    
+    Co-authored-by: Sylvain Lebresne <lebresne@gmail.com>
+    
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    Co-authored-by: Sylvain Lebresne <lebresne@gmail.com>
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
+@@ -241,13 +241,8 @@
+         ConsistencyLevel cl = options.getConsistency();
+         checkNotNull(cl, "Invalid empty consistency level");
+ 
+-<<<<<<<
+         cl.validateForRead();
+-        validateQueryOptions(options);
+-=======
+-        cl.validateForRead(keyspace());
+         validateQueryOptions(queryState, options);
+->>>>>>>
+ 
+         int nowInSec = options.getNowInSeconds(queryState);
+         int userLimit = getLimit(options);
+--- a/src/java/org/apache/cassandra/db/ConsistencyLevel.java
++++ b/src/java/org/apache/cassandra/db/ConsistencyLevel.java
+@@ -230,11 +230,7 @@
+     }
+ 
+     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
+-<<<<<<<
+-    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy) throws InvalidRequestException
+-=======
+-    public void validateForCasCommit(String keyspaceName, QueryState queryState) throws InvalidRequestException
+->>>>>>>
++    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, QueryState queryState) throws InvalidRequestException
+     {
+         if (SchemaConstants.isUserKeyspace(keyspaceName))
+             Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -436,15 +436,9 @@
+         AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
+         try
+         {
+-<<<<<<<
+-            consistencyForPaxos.validateForCas(metadata.keyspace);
+-            consistencyForReplayCommits.validateForCasCommit(latestRs);
+-            consistencyForCommit.validateForCasCommit(latestRs);
+-=======
+             consistencyForPaxos.validateForCas(metadata.keyspace, queryState);
+-            consistencyForReplayCommits.validateForCasCommit(metadata.keyspace, queryState);
+-            consistencyForCommit.validateForCasCommit(metadata.keyspace, queryState);
+->>>>>>>
++            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState);
++            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState);
+ 
+             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
+             while (System.nanoTime() - queryStartNanoTime < timeoutNanos)
+diff --git a/src/java/org/apache/cassandra/service/StorageProxy.java b/src/java/org/apache/cassandra/service/StorageProxy.java
+index 1f6d7a94b0..92d39c8a0b 100644
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -290,7 +290,7 @@ public class StorageProxy implements StorageProxyMBean
+         {
+             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+             consistencyForPaxos.validateForCas(keyspaceName, state);
+-            consistencyForCommit.validateForCasCommit(keyspaceName, state);
++            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName), keyspaceName, state);
+ 
+             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
+             {
+diff --git a/src/java/org/apache/cassandra/service/StorageProxy.java b/src/java/org/apache/cassandra/service/StorageProxy.java
+index 92d39c8a0b..0cebda4702 100644
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -290,7 +290,7 @@ public class StorageProxy implements StorageProxyMBean
+         {
+             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+             consistencyForPaxos.validateForCas(keyspaceName, state);
+-            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName), keyspaceName, state);
++            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
+ 
+             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
+             {

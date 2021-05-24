@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
@@ -126,6 +127,7 @@ public class Config
     public Integer memtable_heap_space_in_mb;
     public Integer memtable_offheap_space_in_mb;
     public Float memtable_cleanup_threshold = null;
+    public Map<String, String> memtable = null;
 
     // Limit the maximum depth of repair session merkle trees
     @Deprecated
@@ -340,7 +342,7 @@ public class Config
 
     public boolean inter_dc_tcp_nodelay = true;
 
-    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.heap_buffers;
+    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
 
     public volatile int tombstone_warn_threshold = 1000;
     public volatile int tombstone_failure_threshold = 100000;
@@ -504,6 +506,9 @@ public class Config
      */
     public volatile int validation_preview_purge_head_start_in_sec = 60 * 60;
 
+    public boolean apply_dbaas_defaults = false;
+    public GuardrailsConfig guardrails = new GuardrailsConfig();
+
     /**
      * The intial capacity for creating RangeTombstoneList.
      */
@@ -512,6 +517,8 @@ public class Config
      * The growth factor to enlarge a RangeTombstoneList.
      */
     public volatile double range_tombstone_list_growth_factor = 1.5;
+
+    public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

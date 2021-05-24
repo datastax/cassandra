@@ -1,0 +1,21 @@
+diff --git a/test/unit/org/apache/cassandra/db/VerifyTest.java b/test/unit/org/apache/cassandra/db/VerifyTest.java
+index 06a465136b..b6bdab8cb7 100644
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -48,6 +48,7 @@ import org.apache.cassandra.schema.CompressionParams;
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.utils.ByteBufferUtil;
++import org.apache.cassandra.utils.UUIDGen;
+ 
+ import org.apache.commons.lang3.StringUtils;
+ import org.junit.Assume;
+@@ -714,7 +715,7 @@ public class VerifyTest
+         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
+         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
+         // write some bogus to a localpartitioner table
+-        Batch bogus = Batch.createLocal(UUID.randomUUID(), 0, Collections.emptyList());
++        Batch bogus = Batch.createLocal(UUIDGen.getTimeUUID(), 0, Collections.emptyList());
+         BatchlogManager.store(bogus);
+         ColumnFamilyStore cfs = Keyspace.open("system").getColumnFamilyStore("batches");
+         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);

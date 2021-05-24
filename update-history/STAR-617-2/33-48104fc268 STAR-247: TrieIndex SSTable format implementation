@@ -1,0 +1,980 @@
+commit 48104fc268869dffd74eb8382a0daeb97469d97c
+Author:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+AuthorDate: Mon Apr 19 10:08:51 2021 +0200
+Commit:     Jacek Lewandowski <6516951+jacek-lewandowski@users.noreply.github.com>
+CommitDate: Tue Apr 20 07:08:05 2021 +0200
+
+    STAR-247: TrieIndex SSTable format implementation
+    
+    [ddc51ba35cd6312eb2529e48dfd659cf1f39506f] STAR-247: Add bigtable unit test configuration
+    
+    [afbedc62b3cb097901d0eaf11b44900a75721f34] STAR-247: Disable potentiallyUnclosedCloseable in eclipse_compiler.properties
+    
+    [fcd91fb96e42b7010874386f852cebe7e5f20c8c] STAR-247: Minor methods and fields signature changes and non invasive refactorings
+    
+    [a808a209628547049076a64d889010acc14d08df] STAR-247: Move and rename BigTableZeroCopyWriter to SSTableZeroCopyWriter
+    
+    [ffe6182b3bd4dad5d1e4a6bd15ee294b4a97c426] STAR-247: Don't hardcode sets of components of an SSTable
+    Use sets predefined per format instead
+    
+    [a4fb1f14133824cdf62e582775aa02dff0eacfa2] STAR-247: Refactor creation of SSTableReader, use factory where possible
+    Previously SSTableReader was created usually in the following scheme:
+    static openXXX method -> SSTableReaderBuilder -> factory method -> constructor
+    
+    Instead of that, we will use the scheme:
+    factory method -> static method -> builder -> constructor
+    
+    The intermediate static method is left to keep the amount of changes minimal
+    
+    [c27c2b0a64a822aa01e7fe6a7f8335f29545acd7] STAR-247: Update SSTable version - introduce DSE-specific components
+    Those components will be ignored for now, but we don't want to fail loading
+    such SSTables.
+    
+    [f8efff91bd3108230b0b39855a6861eddbf384e9] STAR-247: Change contract of SSTR.keyAt and SSTFO.startPartition
+    The previous contract states that those methods accept a key position
+    in the primary index file. We need to change the contract as
+    primary index is not an obvious component as BTI format does not
+    have it. Instead, those methods will use a key position in data file.
+    
+    [d7a2268265ec939ad97d446f8223beafad88d6cc] STAR-247: Refactor usages of default file handle builder
+    In particular, index file handle builder will take a component as an argument
+    
+    [ce68cb7fe3f90b15ce040ee776fabf25cc93e05f] STAR-247: Fix in Walker (add to STAR-75)
+    
+    [17ad86e983f7f44054eec2c8b6f2d4d15c5ec92f] STAR-247: Use RowIndexEntry where possible
+    
+    [13a6e62550eb0e22ebfe807f01022d7be6d36c37] STAR-247: Bring back ScrubIterator
+    
+    [7e09ae0c948f45783c4ea37aa35faecbb2667d19] STAR-247: Add SSTR.hasIndex() method
+    
+    [6ac6f1f7788627c867bcc850f6d558229d48097c] STAR-247: Refactor Scrubber
+    
+    [b3383b16b07fbd669e974260db1e599bc1e8a0c9] STAR-247: Refactor IndexSummaryManager and IndexSummaryRedistribution
+    so that they are used only for BigTable SSTables
+    
+    [7d18ef94652a91564af3888ed37530a730bc4373] STAR-247: Refactor instance tidier
+    
+    [14429e6b5a3fb60fff483360628bd22f7113b4ae] STAR-247: Don't assume any format in CassandraStreamHeader
+    
+    [9cef1d57193b69202c7655614580f7b326b7bd27] STAR-247: Pull up maybeLogLargePartitionWarning
+    
+    [e80117d52146d6a0f62b13192d4050ec02da5e4e] STAR-247: Refactor SSTableWriter.openEarly
+    
+    [092d615af68f4844a17e6de5edac5936efb62026] STAR-247: Add SequentialWriter.requestSyncOnNextFlush
+    
+    [93ebc76e5a1439c8da99ab8e9188b4e5929a3d3e] STAR-247: Refactor FileHandle
+    
+    [4194c58ec022741276271fa90a9e5b92ce43ea47] STAR-247: Use aligned rebufferrer when it makes sense
+    
+    [b1464106170b512b86ca8ca1439de7652d45f86d] STAR-247: Refactor stats collection
+    
+    [dfa458278cfab40458cf7475c9e6b64285b01c88] STAR-247: Refactor SSTable verfication
+    
+    [36ef55edcf11edf7b1f16ca6b6cdfe14c86855b4] STAR-247: Various small changes and fixes
+    
+    [4cfcb8d3611d655e67d2dd2c30b4cd9ecfe5347b] STAR-247: Assume big table format for big table format specific tests
+    
+    [4090410205d150c69cccf6b94fbd83818d3771c7] STAR-247: Generify some tests to work regardless of sstable format being used
+    
+    [d6dd8ea54c7baf106ce03e8ffee7171a2d2dec83] STAR-247: Exhaust row iterator before going to the next partition in tests
+    
+    [87328ec17dfa907be63610e6310c874ec61d9ff1] STAR-247: Refactor ScrubTest
+    
+    [a693753e5a37fe9de39aa370e9342fb81e3b097e] STAR-247: Comment out a part of one test case in SSTableRewriterTest
+    It is not clear what is the contract - see the comment in the code
+    
+    [d1fb135b4359a802fc556252c59aaf30180f9acf] STAR-247: Other small fixes and changes in tests
+    
+    [0c2095cd333c0638ddb92131f82d0048ad4972ed] STAR-247: Apply changes in OSS for use additional BTI implementation
+    
+    [02df51813dae659cfe40d28b8ae55a37fd6723be] STAR-247: Copy BTI implementation from DSE
+    
+    [10946deec4fcb8c43fbb6c3bfacdae50e99251a4] STAR-247: BTI specific tests
+    
+    [5427eb03d56e4425ba14d9b1aea899bca651f69d] STAR-247: BTI - minor adjustments to OSS
+    - removed notions of reader constraint
+    - removed notions of zero copy metadata
+    - removed notions of file access type
+    - adjusted generic types
+    - renamed usage getSeekPosition to getFilePointer
+    - changed usages of getTempKey to getKey
+    
+    [e80f503759e5e5942486980f3ab434506f95ae91] STAR-247: BTI - Add missing methods to TrieIndexFormat
+    
+    [71b374ebac8dbce78931472209940472b073226f] STAR-247: BTI - Fix inheritance and visibility of some classes
+    
+    [af3475a59b52c4b5b25efde749a6ce73a1ae969f] STAR-247: BTI - Fix TrieIndex version, add missing fields and remove unused
+    
+    [371db79b7464cc741140195a229cd89ff3e0ced5] STAR-247: BTI - Refactor usages of update fileFileHandle
+    
+    [9c7efbd9612081966c1ffee493174b53409a2b2e] STAR-247: BTI - remove index encryption from writer
+    
+    [8d2b9985e479f870c7f36b9ba57ded7a43b5b90f] STAR-247: BTI - refactor usages of some methods which have different names in OSS
+    Also, when using default file handle builder for indexes, don't use compression
+    
+    [7ca897a51bd5bca9a5af1521e5508fc1150a188d] STAR-247: BTI - remove maybeLogLargePartitionWarning as it is defined in parent class
+    
+    [2efbf86d96cb1e77699472b479d1023f37d69832] STAR-247: BTI - update constructors of reader and writer
+    
+    [de983f6d1c41682d24444e589a9a3b73fbbb6b93] STAR-247: BTI - Update clone and internalOpen method, add a new internalOpen method to reader
+    
+    [efae04bca106455197d5874f80bf936dabafa374] STAR-247: BTI - Add bloom filter related methods
+    
+    [c67bc891df77c576e3989dee29dd0c6524f583d1] STAR-247: BTI - rename / remove methods from ReaderFactory
+    
+    [103bb1d5575962b5cdd64c8641b8db29812999cc] STAR-247: BTI - add a new open method for reader
+    The method loads indexes and bloom filter
+    
+    Also add missing methods to the reader factory
+    
+    [4134ab07a33784a454401a228152c90acea6b37f] STAR-247: BTI - add missing clone methods to the reader
+    
+    [575eb7781021d41e92b2d3fd87ca632eb0d01b6c] STAR-247: BTI - add missing iterator and scanner creating methods
+    
+    [6d062208a614225b57d1fbebb44cf953417a157b] STAR-247: BTI - add missing implementations of index summary and cache related methods and remove methods which are not needed from reader
+    
+    [fade402a4f60c32792c3a339f653782541c4061d] STAR-247: BTI - refactor components verification - it is already implemented in the parent class
+    
+    [98da04446b77fbaa143a82c05aa35d0513f152c5] STAR-247: BTI - refactor getExactPosition methods and add missing filterFirst and FilterLast
+    
+    [3a7a1045678d3620cd5b950d0607daf72e6b580b] STAR-247: BTI - add one more implementation of coveredKeysIterator
+    
+    [78d6d9e7b30cf5013f6727cd8d6a5c588f533a4e] STAR-247: BTI - add/remove remaining missing/unused methods in reader
+    
+    [45b76a25aa3950ebb931752d933f63ef79fd0719] STAR-247: BTI - update writer factory
+    
+    [162d580c1f5a619b8afa4f25d9ff7d0c0cdc5f1b] STAR-247: BTI - tidier usage refactoring
+    
+    [0aa9cb1e438be5b7b34c094b2111fe6bbcadba8f] STAR-247: BTI - add missing methods to writer
+    
+    [819ed6a5b363e88e18f352735f35f57120c753b3] STAR-247: BTI - refactor TrieIndexScanner
+    
+    [9bdbcb3262c58dd0104605a2e5e8b8e38ac5587c] STAR-247: BTI - refactor PartitionIterator to conform the interface
+    
+    [0150544fcdc1e66cc47edddfdb273b133a40ee27] STAR-247: BTI - add/remove the remaining missing/unused methods
+    
+    [846414f267f94398c5a4f9fee338af66bfac1d0e] STAR-247: BTI - rename rowIndexCount to columnIndexCount in TrieIndexEntry
+    
+    [2f2539dd2dd6032b0b275ba1c93d201dad249877] STAR-247: BTI - renamed TRIE_INDEX to BTI
+    
+    [29caf8bf4637a924f39c929f3e44b45b4f1767c1] STAR-247: BTI - apply the remaining changes and import optimization
+    
+    [26f797aa86b15dc2bd1064fbf756f488bff88aa7] STAR-247: Review: revert changes in Refs/RefCounted/SelfRefCounted
+    
+    [213c5bdb7c98e97643d813645d944013f41fd006] STAR-247: Review: fix key iterators
+    It was actually a bug that I implemented KeyIterator so that it can returns something quasi-meaningful other than what 'next' call can return. I removed some unused methods and whenever we needed something more than a key, we use PartitionIndexIterator.
+    
+    Also, I've introduced the notion of "preferred component" for keys. This means that SSTableFlushObserver.startPartition, PartitionIndexIterator.keyPosition and SSTableReader.keyAt have documented use of 'position' argument as key position in preferred component according to SSTable implementation. Big table uses index file and Trie Index uses data file. I paid attention to never explicitly say which component it is when operating on abstract level.
+    
+    [f9fedc21c2cfe3431ba5a971ab2c9c5c1b016c0d] STAR-247: Review: fix description in build.xml
+    
+    [d3406a60afeb12abb0de0fd3ad893b9b9fe35e89] STAR-247: Review: remove me and nc formats
+    
+    [fcc7bede4163a52a8f9dcc73b6396aec7e2661c7] STAR-247: Review: fixed releasing a ref
+    According to the suggestion in review comments, regardless of whether closing component readers is successful or not, we continue and try to release a ref
+    
+    Errors are reported accordingly, stashed and eventually thrown after passing them to JVMStabilityInspector.
+    
+    [391073c0a530e1e679ad8631c32cc9ddfea57ee9] STAR-247: Review: fixed indentation in SSTableWriterTest
+    
+    [491b714acd0fd7ae23f7624733be5290ba531315] STAR-247: Review: Add a comment to ScrubTest
+    
+    [90b29e89c8c4216bb9cb041f6814d4960a292235] STAR-247: Review: Removed MetadataCollector.addKeyHash and DecoratedKey.hash2_64
+    
+    [166450cb534752db5e4ad83a26c5fe2dd5868cea] STAR-247: Review: Remove some code related to DB-4159
+    
+    [a9eb3fec6f02e5e7a01ec4908fbab06951255856] STAR-247: Review: Revert some code related to DB-1220
+    
+    [81f19103d9a94f13c7ff0d28ef72703b0d86f082] STAR-247: Review: Reformat TrieIndexSSTableReader
+    
+    [e9f338b46c552172b1b21e50afd4aeff67d0042b] STAR-247: Review: Fix tidying SSTableReader
+    
+    [46aa1fad1846b7f0f45a9aa32e6a35a86205e445] STAR-247: Review: Add assertion on permitMatchPastLast
+    
+    [cb4f3d3fea130785ab6a6f1fc118c0ab530588d1] STAR-247: Review: Add a comment about moving validation to other place
+    
+    [3669667a79b64659464aea43efa9b54619ccc75e] STAR-247: Review: Remove supplier from simpleIterator
+    
+    [e3fbd93d94eb16f7c8d991065585984b75ff38c8] STAR-247: Review: Bring back PartitionIndex.dumpTrie and add some test to ensure coverage
+    
+    [9d3d07e140d4c3aef1562ee79a8e1465f3a9280c] STAR-247: Review: Removed one stupid todo
+    
+    [267447cf95e3c472c05a043f67e9965b094b5148] STAR-247: Review: moved keys.advance method to a separate line
+    
+    [8101526f2da23985ac0445e2062d37d90ef456be] STAR-247: Review: Updated JavaDoc in PartitionIndexIterator
+    
+    [ef9682b8710db624cdeff05533772370ada7e249] STAR-247: Review: Refactored keyAt and added SSTableReader.openKeyComponentReader
+    
+    [8163cbb5a034a1a7835fe87d4379e0c6d2eb507d] STAR-247: Review: Removed notions of NotInCacheException
+    
+    [1db85a55b5db307cef45d766377ba1eb31a37bf4] STAR-247: Review: Hopefully applied the rest of the comments
+    
+    [67ebe91a97e4265fd8136bf3d16a372d855d76e5] STAR-247: fix JMXCompatabilityTest
+    
+    [cf4a3d6ef0a99fd08ec013819df25c17843136b9] STAR-247: Post rebase changes: add missing method to TrieIndexFormat
+    
+    [ef6e7f299a947487c294c08ee792a3aba47d0612] STAR-247: Post rebase changes: fix compilation problem in ScrubTest (does not fix the test though)
+    
+    [c742b4264826494d1dc7ce4e8e7a57dace8771d1] STAR-247 fix ScrubTest
+    
+    [dd264390237b38744249f407a8e799d60d24fe3b] Remove unneeded generic type argument of RowIndexEntry
+    
+    [7b2b269b114e3da1c6c02c5fc7d7594f39402328] Remove the TPC-imposed Reader structure and replace it with iterators
+    
+    [7457283eafede5b45fcc3dad0597092074947199] Combine AbstractBigTableIterator into AbstractSSTableIterator
+    
+    [c73d9bf4e20df81dce2bf8d2bbf27be43d4f689f] Fix forgotten maybeValidateUnfiltered call
+    
+    [bd8d36910d10a229f89d125c87ffadb9714357c8] Fix skipping over blocks with no content and reporting slice end tomsbstone
+    
+    [9ea8af38209069fa71aa3402a3fa1155190610a4] Applied the remaining comments
+    
+    [f566e336df4c16a9995cdd9aeff90e1098db70f1] Applied the remaining comments (2)
+    
+    [d3aa9a46bd63757b27d926bcda21ca8fddbeb17d] Update LegacySSTableTest and add other formats to test
+    
+    [109f509d786cb98c4ad91ecde54a3dba1e927b36] Suppress resource in default handle builder methods
+    
+    Co-authored-by: Jaroslaw Grabowski <jaroslaw.grabowski@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    Co-authored-by: Jacek Lewandowski <jacek.lewandowski@datastax.com>
+
+Resolutions:
+--- a/build.xml
++++ b/build.xml
+@@ -1840,7 +1840,6 @@
+       <property name="all-test-classes" refid="all-test-classes-path"/>
+       <testhelper testdelegate="testlist-cdc"/>
+   </target>
+-<<<<<<<
+   <target name="testclasslist-bigtable" depends="build-test,get-cores,get-mem" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+     <path id="all-test-classes-path">
+       <fileset dir="${test.dir}/${test.classlistprefix}" includesfile="${test.classlistfile}"/>
+@@ -1848,10 +1847,7 @@
+     <property name="all-test-classes" refid="all-test-classes-path"/>
+     <testparallel testdelegate="testlist-bigtable"/>
+   </target>
+-  <target name="testclasslist-system-keyspace-directory" depends="build-test,get-cores,get-mem" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+-=======
+   <target name="testclasslist-system-keyspace-directory" depends="build-test" description="Run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+->>>>>>>
+       <path id="all-test-classes-path">
+           <fileset dir="${test.dir}/${test.classlistprefix}" includesfile="${test.classlistfile}"/>
+       </path>
+--- a/src/java/org/apache/cassandra/db/compaction/Verifier.java
++++ b/src/java/org/apache/cassandra/db/compaction/Verifier.java
+@@ -157,11 +157,6 @@
+ 
+         if (sstable.descriptor.getFormat().supportedComponents().contains(Component.SUMMARY))
+         {
+-<<<<<<<
+-            outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup "+sstable.descriptor.filenameFor(Component.SUMMARY));
+-            outputHandler.warn(t.getMessage());
+-            markAndThrow(t, false);
+-=======
+             try
+             {
+                 outputHandler.debug("Deserializing index summary for " + sstable);
+@@ -171,9 +166,8 @@
+             {
+                 outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup " + sstable.descriptor.filenameFor(Component.SUMMARY));
+                 outputHandler.warn(t.getMessage());
+-                markAndThrow(false);
++            markAndThrow(t, false);
+             }
+->>>>>>>
+         }
+ 
+         try
+--- a/src/java/org/apache/cassandra/io/sstable/format/Version.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/Version.java
+@@ -126,8 +126,6 @@
+         return version != null ? version.hashCode() : 0;
+     }
+ 
+-<<<<<<<
+-=======
+     // the fields below are present only in DSE but we do not use them here; though in order to be able to read
+     // DSE sstables we need to at least skip that data
+     public abstract boolean hasZeroCopyMetadata();
+@@ -137,7 +135,5 @@
+     // TODO TBD
+     public abstract boolean hasMaxColumnValueLengths();
+ 
+-    // TODO TBD
+->>>>>>>
+     public abstract boolean hasOriginatingHostId();
+ }
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
+@@ -356,18 +356,11 @@
+             if (version.hasPartitionLevelDeletionsPresenceMarker())
+                 size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
+ 
+-<<<<<<<
+-            // TODO TBD
+-            if (version.hasOriginatingHostId())
+-            {
+-                size += 1;
+-=======
+             if (version.hasOriginatingHostId())
+             {
+                 size += 1; // boolean: is originatingHostId present
+                 if (component.originatingHostId != null)
+                     size += UUIDSerializer.serializer.serializedSize(component.originatingHostId, version.correspondingMessagingVersion());
+->>>>>>>
+             }
+ 
+             return size;
+@@ -459,12 +452,6 @@
+             if (version.hasPartitionLevelDeletionsPresenceMarker())
+                 out.writeBoolean(component.hasPartitionLevelDeletions);
+ 
+-<<<<<<<
+-            // TODO TBD
+-            if (version.hasOriginatingHostId())
+-            {
+-                out.writeByte(0);
+-=======
+             if (version.hasOriginatingHostId())
+             {
+                 if (component.originatingHostId != null)
+@@ -476,7 +463,6 @@
+                 {
+                     out.writeByte(0);
+                 }
+->>>>>>>
+             }
+         }
+ 
+@@ -597,17 +583,9 @@
+                                                  ? in.readBoolean()
+                                                  : minLocalDeletionTime != Cell.NO_DELETION_TIME;
+ 
+-<<<<<<<
+-            // TODO TBD
+-            if (version.hasOriginatingHostId() && in.readByte() != 0)
+-            {
+-                UUIDSerializer.serializer.deserialize(in, 0);
+-            }
+-=======
+             UUID originatingHostId = null;
+             if (version.hasOriginatingHostId() && in.readByte() != 0)
+                 originatingHostId = UUIDSerializer.serializer.deserialize(in, 0);
+->>>>>>>
+ 
+             return new StatsMetadata(partitionSizes,
+                                      columnCounts,
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-2197210891
+-=======
+-3931972325
+->>>>>>>
++3931972325
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_compact/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_compact/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1745769634
+-=======
+-1855259300
+->>>>>>>
++1855259300
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_compact/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_compact/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-2111053471
+-=======
+-3422432858
+->>>>>>>
++2111053471
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter_compact/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter_compact/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-2558061071
+-=======
+-3412778007
+->>>>>>>
++3412778007
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter_compact/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_clust_counter_compact/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1466506395
+-=======
+-851899881
+->>>>>>>
++1466506395
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_compact/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_compact/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1071552074
+-=======
+-1501267966
+->>>>>>>
++1071552074
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_compact/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_compact/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-3965661326
+-=======
+-662242669
+->>>>>>>
++662242669
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter_compact/md-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter_compact/md-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1788587171
+-=======
+-3252334101
+->>>>>>>
++1788587171
+\ No newline at end of file
+--- a/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter_compact/md-1-big-TOC.txt
++++ b/test/data/legacy-sstables/md/legacy_tables/legacy_md_simple_counter_compact/md-1-big-TOC.txt
+@@ -1,5 +1,4 @@
+ Summary.db
+-<<<<<<<
+ Statistics.db
+ CompressionInfo.db
+ TOC.txt
+@@ -7,12 +6,3 @@
+ Filter.db
+ Data.db
+ Digest.crc32
+-=======
+-TOC.txt
+-Index.db
+-Statistics.db
+-Filter.db
+-Digest.crc32
+-Data.db
+-CompressionInfo.db
+->>>>>>>
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-3395293559
+-=======
+-838423079
+->>>>>>>
++838423079
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_compact/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_compact/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1144661601
+-=======
+-1309320020
+->>>>>>>
++1309320020
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_compact/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_compact/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-703648555
+-=======
+-8898118
+->>>>>>>
++703648555
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter_compact/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter_compact/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1289094579
+-=======
+-2583954533
+->>>>>>>
++2583954533
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter_compact/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_clust_counter_compact/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-1286741344
+-=======
+-2009342709
+->>>>>>>
++1286741344
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_compact/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_compact/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-2684888693
+-=======
+-639291948
+->>>>>>>
++2684888693
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_compact/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_compact/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-3429587850
+-=======
+-809631788
+->>>>>>>
++3429587850
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter_compact/me-1-big-Digest.crc32
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter_compact/me-1-big-Digest.crc32
+@@ -1,5 +1 @@
+-<<<<<<<
+-2519481430
+-=======
+-3673498142
+->>>>>>>
++2519481430
+\ No newline at end of file
+--- a/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter_compact/me-1-big-TOC.txt
++++ b/test/data/legacy-sstables/me/legacy_tables/legacy_me_simple_counter_compact/me-1-big-TOC.txt
+@@ -1,17 +1,8 @@
+-<<<<<<<
+ Data.db
+ Statistics.db
+ CompressionInfo.db
+ Index.db
+ Digest.crc32
+ Filter.db
+-=======
+-Digest.crc32
+-Index.db
+-Data.db
+-Statistics.db
+-Filter.db
+-CompressionInfo.db
+->>>>>>>
+ Summary.db
+ TOC.txt
+--- a/test/long/org/apache/cassandra/cql3/ViewComplexTest.java
++++ b/test/long/org/apache/cassandra/cql3/ViewComplexTest.java
+@@ -54,13 +54,9 @@
+ 
+ import com.google.common.base.Objects;
+ 
+-<<<<<<<
+ @RunWith(Parameterized.class)
+-public class ViewComplexTest extends CQLTester
+-=======
+ public class
+ ViewComplexTest extends CQLTester
+->>>>>>>
+ {
+     @Parameterized.Parameter
+     public ProtocolVersion version;
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -56,11 +56,7 @@
+ import org.junit.runner.RunWith;
+ 
+ import java.io.*;
+-<<<<<<<
+-=======
+-import java.net.InetAddress;
+ import java.net.UnknownHostException;
+->>>>>>>
+ import java.nio.file.Files;
+ import java.util.ArrayList;
+ import java.util.Collections;
+@@ -74,11 +70,8 @@
+ import static org.apache.cassandra.SchemaLoader.createKeyspace;
+ import static org.apache.cassandra.SchemaLoader.loadSchema;
+ import static org.apache.cassandra.SchemaLoader.standardCFMD;
+-<<<<<<<
+ import static org.hamcrest.Matchers.is;
+-=======
+ import static org.junit.Assert.assertEquals;
+->>>>>>>
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+--- a/test/unit/org/apache/cassandra/io/sstable/LegacySSTableTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/LegacySSTableTest.java
+@@ -92,11 +92,7 @@
+      * See {@link #testGenerateSstables()} to generate sstables.
+      * Take care on commit as you need to add the sstable files using {@code git add -f}
+      */
+-<<<<<<<
+-    public static final String[] legacyVersions = {"na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb"};
+-=======
+-    public static final String[] legacyVersions = {"nb", "na", "me", "md", "mc", "mb", "ma"};
+->>>>>>>
++    public static final String[] legacyVersions = {"nb", "na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb"};
+ 
+     // 1200 chars
+     static final String longString = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789" +
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+index a76f24b74d..1a6a236c37 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+@@ -183,7 +183,7 @@ public class BigFormat implements SSTableFormat
+     // we always incremented the major version.
+     static class BigVersion extends Version
+     {
+-        public static final String current_version = "nc";
++        public static final String current_version = "nb";
+         public static final String earliest_supported_version = "ma";
+ 
+         // ma (3.0.0): swap bf hash order
+@@ -338,13 +338,6 @@ public class BigFormat implements SSTableFormat
+             return false;
+         }
+ 
+-        // TODO TBD
+-        @Override
+-        public boolean hasOriginatingHostId()
+-        {
+-            return false;
+-        }
+-
+         // TODO TBD
+         @Override
+         public boolean hasMaxColumnValueLengths()
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java
+index a11f23898b..080ced3113 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java
+@@ -310,7 +310,7 @@ public class TrieIndexFormat implements SSTableFormat
+             isLatestVersion = version.compareTo(current_version) == 0;
+             hasOldBfFormat = version.compareTo("b") < 0;
+             hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
+-            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])"); // TODO TBD
++            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
+             hasMaxColumnValueLengths = version.matches("b[a-z]"); // TODO TBD
+             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
+         }
+diff --git a/build.xml b/build.xml
+index 8439bd4496..736bed5373 100644
+--- a/build.xml
++++ b/build.xml
+@@ -1588,7 +1588,7 @@
+           <fileset dir="${test.unit.src}" includes="**/${test.name}.java" />
+       </path>
+       <property name="all-test-classes" refid="all-test-classes-path"/>
+-      <testparallel testdelegate="testlist-bigtable" />
++      <testhelper testdelegate="testlist-bigtable" />
+   </target>
+ 
+     <target name="test-system-keyspace-directory" depends="build-test" description="Execute unit tests with a system keyspaces directory configured">
+@@ -1840,12 +1840,12 @@
+       <property name="all-test-classes" refid="all-test-classes-path"/>
+       <testhelper testdelegate="testlist-cdc"/>
+   </target>
+-  <target name="testclasslist-bigtable" depends="build-test,get-cores,get-mem" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
++  <target name="testclasslist-bigtable" depends="build-test" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+     <path id="all-test-classes-path">
+       <fileset dir="${test.dir}/${test.classlistprefix}" includesfile="${test.classlistfile}"/>
+     </path>
+     <property name="all-test-classes" refid="all-test-classes-path"/>
+-    <testparallel testdelegate="testlist-bigtable"/>
++    <testhelper testdelegate="testlist-bigtable"/>
+   </target>
+   <target name="testclasslist-system-keyspace-directory" depends="build-test" description="Run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+       <path id="all-test-classes-path">

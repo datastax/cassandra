@@ -30,6 +30,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -135,7 +136,7 @@ public class CustomCassandraIndex implements Index
     public Callable<Void> getBlockingFlushTask()
     {
         return () -> {
-            indexCfs.forceBlockingFlush();
+            indexCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
             return null;
         };
     }
@@ -289,7 +290,8 @@ public class CustomCassandraIndex implements Index
                               final RegularAndStaticColumns columns,
                               final int nowInSec,
                               final WriteContext ctx,
-                              final IndexTransaction.Type transactionType)
+                              final IndexTransaction.Type transactionType,
+                              final Memtable memtable)
     {
         if (!isPrimaryKeyIndex() && !columns.contains(indexedColumn))
             return null;
@@ -461,7 +463,7 @@ public class CustomCassandraIndex implements Index
                                                                cell));
         Row row = BTreeRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
         PartitionUpdate upd = partitionUpdate(valueKey, row);
-        indexCfs.getWriteHandler().write(upd, ctx, UpdateTransaction.NO_OP);
+        indexCfs.getWriteHandler().write(upd, ctx, false);
         logger.debug("Inserted entry into index for value {}", valueKey);
     }
 
@@ -507,7 +509,7 @@ public class CustomCassandraIndex implements Index
     {
         Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);
-        indexCfs.getWriteHandler().write(upd, ctx, UpdateTransaction.NO_OP);
+        indexCfs.getWriteHandler().write(upd, ctx, false);
         logger.debug("Removed index entry for value {}", indexKey);
     }
 
@@ -597,7 +599,7 @@ public class CustomCassandraIndex implements Index
         CompactionManager.instance.interruptCompactionForCFs(cfss, (sstable) -> true, true);
         CompactionManager.instance.waitForCessation(cfss, (sstable) -> true);
         indexCfs.keyspace.writeOrder.awaitNewBarrier();
-        indexCfs.forceBlockingFlush();
+        indexCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         indexCfs.readOrdering.awaitNewBarrier();
         indexCfs.invalidate();
     }
@@ -622,7 +624,7 @@ public class CustomCassandraIndex implements Index
 
     private void buildBlocking()
     {
-        baseCfs.forceBlockingFlush();
+        baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL));
              Refs<SSTableReader> sstables = viewFragment.refs)
@@ -646,7 +648,7 @@ public class CustomCassandraIndex implements Index
                                                                          ImmutableSet.copyOf(sstables));
             Future<?> future = CompactionManager.instance.submitIndexBuild(builder);
             FBUtilities.waitOnFuture(future);
-            indexCfs.forceBlockingFlush();
+            indexCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         logger.info("Index build of {} complete", metadata.name);
     }

@@ -1,0 +1,123 @@
+commit eec063120d7c617a5bc7215234cbaab60d8b78bc
+Author:     Mike Adamson <madamson@datastax.com>
+AuthorDate: Thu Feb 18 13:11:46 2021 +0000
+Commit:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+CommitDate: Tue Apr 13 18:19:29 2021 +0200
+
+    STAR-121: Index group API changes
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -2317,14 +2317,9 @@
+             }
+         };
+ 
+-<<<<<<<
+-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true);
++        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, CompactionInfo.StopTrigger.TRUNCATE);
+ 
+         viewManager.build();
+-
+-=======
+-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, CompactionInfo.StopTrigger.TRUNCATE);
+->>>>>>>
+         logger.info("Truncate of {}.{} is complete", keyspace.getName(), name);
+     }
+ 
+--- a/src/java/org/apache/cassandra/locator/ReplicaPlans.java
++++ b/src/java/org/apache/cassandra/locator/ReplicaPlans.java
+@@ -592,14 +592,9 @@
+      */
+     public static ReplicaPlan.ForTokenRead forRead(Keyspace keyspace, Token token, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, SpeculativeRetryPolicy retry)
+     {
+-<<<<<<<
+         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+-        EndpointsForToken candidates = candidatesForRead(consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural());
++        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural());
+         EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates);
+-=======
+-        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(keyspace, token).natural());
+-        EndpointsForToken contacts = contactForRead(keyspace, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates);
+->>>>>>>
+ 
+         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
+         return new ReplicaPlan.ForTokenRead(keyspace, replicationStrategy, consistencyLevel, candidates, contacts);
+@@ -614,14 +609,9 @@
+      */
+     public static ReplicaPlan.ForRangeRead forRangeRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, int vnodeCount)
+     {
+-<<<<<<<
+         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+-        EndpointsForRange candidates = candidatesForRead(consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural());
++        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural());
+         EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates);
+-=======
+-        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(keyspace, range).natural());
+-        EndpointsForRange contacts = contactForRead(keyspace, consistencyLevel, false, candidates);
+->>>>>>>
+ 
+         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
+         return new ReplicaPlan.ForRangeRead(keyspace, replicationStrategy, consistencyLevel, range, candidates, contacts, vnodeCount);
+diff --git a/src/java/org/apache/cassandra/index/SecondaryIndexManager.java b/src/java/org/apache/cassandra/index/SecondaryIndexManager.java
+index 2e292264aa..95d7f67143 100644
+--- a/src/java/org/apache/cassandra/index/SecondaryIndexManager.java
++++ b/src/java/org/apache/cassandra/index/SecondaryIndexManager.java
+@@ -1747,7 +1747,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
+         // It is to provide a better UX, compared to throwing UnavailableException when the nodes are actually alive.
+         if (initial != filtered)
+         {
+-            int required = level.blockFor(keyspace);
++            int required = level.blockFor(keyspace.getReplicationStrategy());
+             if (required <= initial && required > filtered)
+             {
+                 Map<InetAddressAndPort, RequestFailureReason> failureReasons = new HashMap<>();
+diff --git a/test/unit/org/apache/cassandra/locator/AssureSufficientLiveNodesTest.java b/test/unit/org/apache/cassandra/locator/AssureSufficientLiveNodesTest.java
+index d5f62d7530..903b2f3a4e 100644
+--- a/test/unit/org/apache/cassandra/locator/AssureSufficientLiveNodesTest.java
++++ b/test/unit/org/apache/cassandra/locator/AssureSufficientLiveNodesTest.java
+@@ -150,7 +150,7 @@ public class AssureSufficientLiveNodesTest
+             // alter to
+             KeyspaceParams.nts(DC1, 3, DC2, 3),
+             // test
+-            keyspace -> ReplicaPlans.forRead(keyspace, tk, EACH_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
++            keyspace -> ReplicaPlans.forRead(keyspace, tk, null, EACH_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
+         );
+     }
+ 
+@@ -183,7 +183,7 @@ public class AssureSufficientLiveNodesTest
+             // alter to
+             KeyspaceParams.nts(DC1, 3, DC2, 3),
+             // test
+-            keyspace -> ReplicaPlans.forRead(keyspace, tk, QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
++            keyspace -> ReplicaPlans.forRead(keyspace, tk, null, QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
+         );
+         raceOfReplicationStrategyTest(
+             // init. The # of live endpoints is 3 = 2 + 1
+@@ -191,7 +191,7 @@ public class AssureSufficientLiveNodesTest
+             // alter to. (3 + 3) / 2 + 1 > 3
+             KeyspaceParams.nts(DC1, 2, DC2, 1, DC3, 3),
+             // test
+-            keyspace -> ReplicaPlans.forRead(keyspace, tk, QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
++            keyspace -> ReplicaPlans.forRead(keyspace, tk, null, QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
+         );
+     }
+ 
+@@ -215,7 +215,7 @@ public class AssureSufficientLiveNodesTest
+             // alter to
+             KeyspaceParams.nts(DC1, 3),
+             // test
+-            keyspace -> ReplicaPlans.forRead(keyspace, tk, EACH_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
++            keyspace -> ReplicaPlans.forRead(keyspace, tk, null, EACH_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
+         );
+     }
+ 
+@@ -239,7 +239,7 @@ public class AssureSufficientLiveNodesTest
+             // alter to
+             KeyspaceParams.nts(DC1, 3),
+             // test
+-            keyspace -> ReplicaPlans.forRead(keyspace, tk, LOCAL_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
++            keyspace -> ReplicaPlans.forRead(keyspace, tk, null, LOCAL_QUORUM, NeverSpeculativeRetryPolicy.INSTANCE)
+         );
+     }
+ 

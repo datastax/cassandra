@@ -334,12 +334,13 @@ public class CompactionIteratorTest extends CQLTester
                                                               Lists.transform(content, x -> new Scanner(x)),
                                                               controller, NOW, null))
         {
+            TableOperation op = iter.getOperation();
             assertTrue(iter.hasNext());
             UnfilteredRowIterator rows = iter.next();
             assertTrue(rows.hasNext());
             assertNotNull(rows.next());
 
-            iter.stop();
+            op.stop();
             try
             {
                 // Will call Transformation#applyToRow
@@ -367,7 +368,8 @@ public class CompactionIteratorTest extends CQLTester
                                                               Lists.transform(content, x -> new Scanner(x)),
                                                               controller, NOW, null))
         {
-            iter.stop();
+            TableOperation op = iter.getOperation();
+            op.stop();
             try
             {
                 // Will call Transformation#applyToPartition
@@ -455,6 +457,12 @@ public class CompactionIteratorTest extends CQLTester
         {
             return ImmutableSet.of();
         }
+
+        @Override
+        public int level()
+        {
+            return 0;
+        }
     }
 
     @Test
@@ -466,7 +474,7 @@ public class CompactionIteratorTest extends CQLTester
         createTable("CREATE TABLE %s (pk text, ck1 int, ck2 int, v int, PRIMARY KEY (pk, ck1, ck2))");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (pk, ck1, ck2, v) values (?, ?, ?, ?)", "key", i, i, i);
-        getCurrentColumnFamilyStore().forceBlockingFlush();
+        flush();
 
         DatabaseDescriptor.setSnapshotOnDuplicateRowDetection(true);
         TableMetadata metadata = getCurrentColumnFamilyStore().metadata();

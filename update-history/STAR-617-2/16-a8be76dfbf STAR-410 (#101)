@@ -1,0 +1,150 @@
+commit a8be76dfbf72f46f24d84cc1b62188280deec893
+Author:     Aleksandr Sorokoumov <918393+Gerrrr@users.noreply.github.com>
+AuthorDate: Mon Apr 26 17:04:21 2021 +0200
+Commit:     GitHub <noreply@github.com>
+CommitDate: Mon Apr 26 17:04:21 2021 +0200
+
+    STAR-410 (#101)
+    
+    * STAR-410 Refactor compaction metrics
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 Rename CompactionInfo.Holder to AbstractTableOperation and CompactionInfo to AbstractTableOperation.Progress
+    
+    CompactionInfo.Holder was implemented by all table operations, not just compactions. For example index and view building
+    were reported as compactions. The new naming reflects more correctly the role of this class, which is to report progress or
+    interrupt these table operations.
+    
+    CompactionInfo was a basic class capable of reporting the progress of an operation, for example how many bytes (or keys, or ranges)
+    have been currently processed out of a total number of bytes (or keys, or ranges).
+    
+    The new names should remove the previous confusion, and allow adding further compaction progress statistics.
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 More refactoring of compaction-related code:
+    
+    - Added CompactionProgress and refactored CompactionTask into CompactionOperation
+    - Extracted interfaces from AbstractTableOperation and its progress
+      inner-class, so that they can be extended by CompactionProgress
+    - Added compactions in progress to the abstract strategy for a basic
+      aggregation of compactions in progress, to be extended further
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 New aggregated statistics for compaction strategies added to nodetool compactionstats and compaction logger
+    
+     Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+     Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 Rework compaction strategy code to remove repetition and clarify
+    
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    
+    * STAR-410 Minor refactoring of compaction strategies and fixing of CI failures:
+    
+    - Refactor getEstimatedRemainingTasks() and getMaximalTask for STCS, nits
+    - Fix a possible deadlock in CompactionStrategyManager
+    - Fix strong self-ref loop
+      A strong self-ref loop of SSTableReader was caused by background compactions  because the
+      compaction strategy manager is an observer of the tracker. So long as the txn sstable tidier
+      references the tracker, then the tracker references the csm and the sstables via the background
+      compaction aggregates or picks.
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 fix compaction interruptions, refactor compaction iterator to return a separate table operation
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+    
+    * STAR-410 Undo some changes in ActiveOperations
+    
+    * Store all active operations in the same set instead of a by-table map
+    * ActiveOperations does not extend SchemaChangeListener
+    
+    * fixup! STAR-410 Minor refactoring of compaction strategies and fixing of CI failures:
+    
+    * Review: Use throw Throwables.propagate instead of hrowables.maybeFail when catching exceptions
+    
+    * Review: fix wording in BackgroundCompactions and CompactionTask
+    
+    * Review: Remove unnecessary maybeReloadDiskBoundaries() call
+    
+    * STAR-410 Compaction strategies filter out SSTables that are no longer in the live set
+    
+    Co-authored-by: Stefania Alborghetti <stefania.alborghetti@datastax.com>
+    Co-authored-by: Branimir Lambov <branimir.lambov@datastax.com>
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -2399,13 +2399,9 @@
+             }
+         };
+ 
+-<<<<<<<
+         runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
+-=======
+-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, CompactionInfo.StopTrigger.TRUNCATE);
+ 
+         viewManager.build();
+->>>>>>>
+         logger.info("Truncate of {}.{} is complete", keyspace.getName(), name);
+     }
+ 
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionManager.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionManager.java
+@@ -598,29 +598,10 @@
+             public void execute(LifecycleTransaction txn)
+             {
+                 logger.debug("Garbage collecting {}", txn.originals());
+-<<<<<<<
+                 AbstractCompactionTask task = CompactionTask.forGarbageCollection(cfStore,
+                                                                                   txn,
+                                                                                   getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()),
+                                                                                   tombstoneOption);
+-=======
+-                CompactionTask task = new CompactionTask(cfStore, txn, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()))
+-                {
+-                    @Override
+-                    protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
+-                    {
+-                        return new CompactionController(cfStore, toCompact, gcBefore, null, tombstoneOption);
+-                    }
+-
+-                    @Override
+-                    protected int getLevel()
+-                    {
+-                        return txn.onlyOne().getSSTableLevel();
+-                    }
+-                };
+-                task.setUserDefined(true);
+-                task.setCompactionType(OperationType.GARBAGE_COLLECT);
+->>>>>>>
+                 task.execute(active);
+             }
+         }, jobs, OperationType.GARBAGE_COLLECT);
+diff --git a/src/java/org/apache/cassandra/db/compaction/CompactionTask.java b/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
+index d6a9f497a9..b93fb301df 100644
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
+@@ -149,6 +149,12 @@ public class CompactionTask extends AbstractCompactionTask
+             {
+                 return new CompactionController(cfs, toCompact, gcBefore, null, tombstoneOption);
+             }
++
++            @Override
++            protected int getLevel()
++            {
++                return txn.onlyOne().getSSTableLevel();
++            }
+         };
+         task.setUserDefined(true);
+         task.setCompactionType(OperationType.GARBAGE_COLLECT);

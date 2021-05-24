@@ -1,0 +1,260 @@
+commit 1544bb6f4fb2d14e254c607265e5f76e9647d0bf
+Author:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+AuthorDate: Thu Nov 26 10:11:29 2020 +0100
+Commit:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+CommitDate: Tue Apr 13 18:18:27 2021 +0200
+
+    STAR-1: Read path optimizations
+    
+    Add MetadataCollectorBench
+    
+    Extract AbstractType serialization code into separate serializer class
+    and refactor SerializationHeader to use that
+    
+    Add a new SSTable version which supports partition deletion presence marker
+    and improved min/max
+    
+    Replaced `min/maxClusteringValues` with `coveredClustering` of `Slice` type
+    Added `clusteringTypes` and `hasPartitionLevelDeletions` fields
+    
+    Other refactorings are related to the required code changes due to those
+    new fields in `StatsMetadata`. No semantic changes were made in this commit
+    except that slices intersection will never return `true` if any of the
+    slices is reversed (start > end).
+    
+    Apply read path optimizations when static columns are queried
+    
+    Extend the usage of lower bound opttimizations
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+@@ -141,13 +141,8 @@
+         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
+         // me (3.0.25, 3.11.11): added hostId of the node from which the sstable originated
+ 
+-<<<<<<<
+         // na (4.0-rc1): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
+         // nb (4.0.0): originating host id
+-=======
+-        // na (4.0.0): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
+-        // nb (4.1.0): improved min/max
+->>>>>>>
+         //
+         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
+ 
+@@ -156,12 +151,9 @@
+         private final boolean hasCommitLogLowerBound;
+         private final boolean hasCommitLogIntervals;
+         private final boolean hasAccurateMinMax;
+-<<<<<<<
++        private final boolean hasOriginatingHostId;
+         private final boolean hasImprovedMinMax;
+         private final boolean hasPartitionLevelDeletionPresenceMarker;
+-=======
+-        private final boolean hasOriginatingHostId;
+->>>>>>>
+         public final boolean hasMaxCompressedLength;
+         private final boolean hasPendingRepair;
+         private final boolean hasMetadataChecksum;
+@@ -183,12 +175,9 @@
+             hasCommitLogLowerBound = version.compareTo("mb") >= 0;
+             hasCommitLogIntervals = version.compareTo("mc") >= 0;
+             hasAccurateMinMax = version.compareTo("md") >= 0;
+-<<<<<<<
++            hasOriginatingHostId = version.matches("(m[e-z])|(n[b-z])");
+             hasImprovedMinMax = version.compareTo("nb") >= 0;
+             hasPartitionLevelDeletionPresenceMarker = version.compareTo("nb") >= 0;
+-=======
+-            hasOriginatingHostId = version.matches("(m[e-z])|(n[b-z])");
+->>>>>>>
+             hasMaxCompressedLength = version.compareTo("na") >= 0;
+             hasPendingRepair = version.compareTo("na") >= 0;
+             hasIsTransient = version.compareTo("na") >= 0;
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
+@@ -18,35 +18,24 @@
+ package org.apache.cassandra.io.sstable.metadata;
+ 
+ import java.nio.ByteBuffer;
+-<<<<<<<
+-=======
+-import java.util.ArrayList;
+->>>>>>>
+ import java.util.Collections;
+ import java.util.EnumMap;
+ import java.util.Map;
+ import java.util.UUID;
+ 
+-<<<<<<<
+-=======
+-import com.google.common.base.Preconditions;
+-
+->>>>>>>
+ import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
+ import com.clearspring.analytics.stream.cardinality.ICardinality;
+ import org.apache.cassandra.db.*;
+ import org.apache.cassandra.db.commitlog.CommitLogPosition;
+ import org.apache.cassandra.db.commitlog.IntervalSet;
++import org.apache.cassandra.db.marshal.AbstractType;
+ import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
+ import org.apache.cassandra.db.rows.Cell;
+ import org.apache.cassandra.db.rows.Unfiltered;
+ import org.apache.cassandra.io.sstable.SSTable;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.service.ActiveRepairService;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.service.StorageService;
+->>>>>>>
+ import org.apache.cassandra.utils.EstimatedHistogram;
+ import org.apache.cassandra.utils.MurmurHash;
+ import org.apache.cassandra.utils.streamhist.StreamingTombstoneHistogramBuilder;
+@@ -148,17 +137,15 @@
+         this(comparator, StorageService.instance.getLocalHostUUID());
+     }
+ 
+-<<<<<<<
++    public MetadataCollector(ClusteringComparator comparator, UUID originatingHostId)
++    {
++        this.comparator = comparator;
++
+         int clusteringTypesNum = comparator.size();
+         this.comparators = new AbstractType[clusteringTypesNum];
+         for (int i = 0; i < clusteringTypesNum; i++)
+             comparators[i] = comparator.subtype(i);
+-=======
+-    public MetadataCollector(ClusteringComparator comparator, UUID originatingHostId)
+-    {
+-        this.comparator = comparator;
+         this.originatingHostId = originatingHostId;
+->>>>>>>
+     }
+ 
+     public MetadataCollector(Iterable<SSTableReader> sstables, ClusteringComparator comparator, int level)
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
+@@ -40,19 +40,11 @@
+ import org.apache.cassandra.io.sstable.format.Version;
+ import org.apache.cassandra.io.util.DataInputPlus;
+ import org.apache.cassandra.io.util.DataOutputPlus;
+-<<<<<<<
+-import org.apache.cassandra.net.MessagingService;
+-=======
+ import org.apache.cassandra.serializers.AbstractTypeSerializer;
+->>>>>>>
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.EstimatedHistogram;
+ import org.apache.cassandra.utils.UUIDSerializer;
+-<<<<<<<
+-import org.apache.cassandra.utils.UUIDSerializer;
+-=======
+ import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
+->>>>>>>
+ 
+ /**
+  * SSTable metadata that always stay on heap.
+@@ -340,17 +332,15 @@
+                 size += TypeSizes.sizeof(component.isTransient);
+             }
+ 
+-<<<<<<<
++            if (version.hasPartitionLevelDeletionsPresenceMarker())
++                size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
++
+             if (version.hasOriginatingHostId())
+             {
+                 size += 1; // boolean: is originatingHostId present
+                 if (component.originatingHostId != null)
+                     size += UUIDSerializer.serializer.serializedSize(component.originatingHostId, version.correspondingMessagingVersion());
+             }
+-=======
+-            if (version.hasPartitionLevelDeletionsPresenceMarker())
+-                size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
+->>>>>>>
+ 
+             return size;
+         }
+@@ -420,7 +410,9 @@
+                 out.writeBoolean(component.isTransient);
+             }
+ 
+-<<<<<<<
++            if (version.hasPartitionLevelDeletionsPresenceMarker())
++                out.writeBoolean(component.hasPartitionLevelDeletions);
++
+             if (version.hasOriginatingHostId())
+             {
+                 if (component.originatingHostId != null)
+@@ -433,10 +425,6 @@
+                     out.writeByte(0);
+                 }
+             }
+-=======
+-            if (version.hasPartitionLevelDeletionsPresenceMarker())
+-                out.writeBoolean(component.hasPartitionLevelDeletions);
+->>>>>>>
+         }
+ 
+         public StatsMetadata deserialize(Version version, DataInputPlus in) throws IOException
+@@ -524,17 +512,15 @@
+ 
+             boolean isTransient = version.hasIsTransient() && in.readBoolean();
+ 
+-<<<<<<<
+             // If not recorded, the only time we can guarantee there is no partition level deletion is if there is no
+             // deletion at all. Otherwise, we have to assume there may be some.
+             boolean hasPartitionLevelDeletions = version.hasPartitionLevelDeletionsPresenceMarker()
+                                                  ? in.readBoolean()
+                                                  : minLocalDeletionTime != Cell.NO_DELETION_TIME;
+-=======
++
+             UUID originatingHostId = null;
+             if (version.hasOriginatingHostId() && in.readByte() != 0)
+                 originatingHostId = UUIDSerializer.serializer.deserialize(in, 0);
+->>>>>>>
+ 
+             return new StatsMetadata(partitionSizes,
+                                      columnCounts,
+diff --git a/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java b/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
+index 8eba7673d7..733f594bc7 100755
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
+@@ -18,19 +18,17 @@
+ package org.apache.cassandra.io.sstable.metadata;
+ 
+ import java.nio.ByteBuffer;
+-import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.EnumMap;
+ import java.util.Map;
+ import java.util.UUID;
+ 
+-import com.google.common.base.Preconditions;
+-
+ import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
+ import com.clearspring.analytics.stream.cardinality.ICardinality;
+ import org.apache.cassandra.db.*;
+ import org.apache.cassandra.db.commitlog.CommitLogPosition;
+ import org.apache.cassandra.db.commitlog.IntervalSet;
++import org.apache.cassandra.db.marshal.AbstractType;
+ import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
+ import org.apache.cassandra.db.rows.Cell;
+ import org.apache.cassandra.db.rows.Unfiltered;
+diff --git a/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java b/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
+index 1ed023c5a4..589b13d331 100755
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/StatsMetadata.java
+@@ -41,12 +41,10 @@ import org.apache.cassandra.io.sstable.format.Version;
+ import org.apache.cassandra.io.util.DataInputPlus;
+ import org.apache.cassandra.io.util.DataOutputPlus;
+ import org.apache.cassandra.serializers.AbstractTypeSerializer;
+-import org.apache.cassandra.net.MessagingService;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.EstimatedHistogram;
+ import org.apache.cassandra.utils.UUIDSerializer;
+ import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
+-import org.apache.cassandra.utils.UUIDSerializer;
+ 
+ /**
+  * SSTable metadata that always stay on heap.

@@ -1,0 +1,78 @@
+commit 04b02431b97beaa33366af25e03ce977e09d4c5c
+Author:     Branimir Lambov <branimir.lambov@datastax.com>
+AuthorDate: Wed Jan 20 15:42:36 2021 +0200
+Commit:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+CommitDate: Tue Apr 13 18:31:39 2021 +0200
+
+    STAR-14: Memtable API
+    
+    Defines a pluggable memtable API which permits selection of memtable implementation, which can be selected in cassandra.yaml or individually per table. In addition to replacements of the typical memtable functionality, this also exposes some control over flushing and commit log operation that should make it possible to use persistent memtables.
+    
+    The main API is in Memtable.java, it includes support for altering the implementation of the current memtable functionality, but also expands it with control over flushing and commit log (where support for changed-data-capture and point-in-time restore, which rely on commit log, can be turned on or off), plus implementation of functionality that normally requires a flush (streaming/repair).
+    
+    The API comes with three implementations: the legacy ConcurrentSkipListMap, an initial blocking version of a trie-based one, plus a skeleton for a persistent memory solution that demonstates how one could be attached to effectively replace the storage subsystem.
+    
+    Also adds logged FlushReason to every flush request and improves JMH benchmarks.
+    
+    patch by Branimir Lambov; reviewed by Jakub Żytka
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/db/commitlog/CommitLogReplayer.java
++++ b/src/java/org/apache/cassandra/db/commitlog/CommitLogReplayer.java
+@@ -130,21 +130,16 @@
+                 }
+             }
+ 
+-<<<<<<<
+-            IntervalSet<CommitLogPosition> filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt, localHostId);
+-=======
+             IntervalSet<CommitLogPosition> filter;
+             if (!cfs.memtableWritesAreDurable())
+             {
+-                filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt);
++                filter = persistedIntervals(cfs.getLiveSSTables(), truncatedAt, localHostId);
+             }
+             else
+             {
+                 // everything is persisted and restored by the memtable itself
+                 filter = new IntervalSet<>(CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
+             }
+-
+->>>>>>>
+             cfPersisted.put(cfs.metadata.id, filter);
+         }
+         CommitLogPosition globalPosition = firstNotCovered(cfPersisted.values());
+--- a/src/java/org/apache/cassandra/db/view/TableViews.java
++++ b/src/java/org/apache/cassandra/db/view/TableViews.java
+@@ -92,7 +92,6 @@
+         return Iterables.transform(views, view -> keyspace.getColumnFamilyStore(view.getDefinition().name()));
+     }
+ 
+-<<<<<<<
+     public void build()
+     {
+         views.forEach(View::build);
+@@ -103,10 +102,7 @@
+         views.forEach(View::stopBuild);
+     }
+ 
+-    public void forceBlockingFlush()
+-=======
+     public void forceBlockingFlush(ColumnFamilyStore.FlushReason reason)
+->>>>>>>
+     {
+         for (ColumnFamilyStore viewCfs : allViewsCfs())
+             viewCfs.forceBlockingFlush(reason);
+diff --git a/test/unit/org/apache/cassandra/db/VerifyTest.java b/test/unit/org/apache/cassandra/db/VerifyTest.java
+index 71004d09e4..9ca98b8e75 100644
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -696,7 +696,7 @@ public class VerifyTest
+         Batch bogus = Batch.createLocal(UUID.randomUUID(), 0, Collections.emptyList());
+         BatchlogManager.store(bogus);
+         ColumnFamilyStore cfs = Keyspace.open("system").getColumnFamilyStore("batches");
+-        cfs.forceBlockingFlush();
++        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+         for (SSTableReader sstable : cfs.getLiveSSTables())
+         {
+ 

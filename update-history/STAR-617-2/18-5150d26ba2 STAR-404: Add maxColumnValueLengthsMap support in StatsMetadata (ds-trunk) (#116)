@@ -1,0 +1,217 @@
+commit 5150d26ba2b06c4ae297b2102c9f882e4589ebaf
+Author:     Jacek Lewandowski <6516951+jacek-lewandowski@users.noreply.github.com>
+AuthorDate: Fri Apr 23 11:23:40 2021 +0200
+Commit:     GitHub <noreply@github.com>
+CommitDate: Fri Apr 23 11:23:40 2021 +0200
+
+    STAR-404: Add maxColumnValueLengthsMap support in StatsMetadata (ds-trunk) (#116)
+    
+    * STAR-404: Fix sstable versioning
+    
+    - maxColumnValueLengths is not present any longer in ca
+    - removed nb and nc versions (for OSS compatibility)
+    - update legacy sstables data files for testing
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+@@ -183,11 +183,7 @@
+     // we always incremented the major version.
+     static class BigVersion extends Version
+     {
+-<<<<<<<
+-        public static final String current_version = "na";
+-=======
+         public static final String current_version = "nb";
+->>>>>>>
+         public static final String earliest_supported_version = "ma";
+ 
+         // ma (3.0.0): swap bf hash order
+@@ -197,12 +193,8 @@
+         // md (3.0.18, 3.11.4): corrected sstable min/max clustering
+         // me (3.0.25, 3.11.11): added hostId of the node from which the sstable originated
+ 
+-<<<<<<<
+         // na (4.0-rc1): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
+         // nb (4.0.0): originating host id
+-=======
+-        // na (4.0.0): uncompressed chunks, pending repair session, isTransient, checksummed sstable metadata file, new Bloomfilter format
+->>>>>>>
+         //
+         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
+ 
+@@ -211,12 +203,9 @@
+         private final boolean hasCommitLogLowerBound;
+         private final boolean hasCommitLogIntervals;
+         private final boolean hasAccurateMinMax;
+-<<<<<<<
+-=======
+         private final boolean hasOriginatingHostId;
+         private final boolean hasImprovedMinMax;
+         private final boolean hasPartitionLevelDeletionPresenceMarker;
+->>>>>>>
+         public final boolean hasMaxCompressedLength;
+         private final boolean hasPendingRepair;
+         private final boolean hasMetadataChecksum;
+@@ -238,12 +227,9 @@
+             hasCommitLogLowerBound = version.compareTo("mb") >= 0;
+             hasCommitLogIntervals = version.compareTo("mc") >= 0;
+             hasAccurateMinMax = version.compareTo("md") >= 0;
+-<<<<<<<
+-=======
+             hasOriginatingHostId = version.matches("(m[e-z])|(n[b-z])");
+-            hasImprovedMinMax = version.compareTo("nb") >= 0;
+-            hasPartitionLevelDeletionPresenceMarker = version.compareTo("nb") >= 0;
+->>>>>>>
++            hasImprovedMinMax = false;
++            hasPartitionLevelDeletionPresenceMarker = false;
+             hasMaxCompressedLength = version.compareTo("na") >= 0;
+             hasPendingRepair = version.compareTo("na") >= 0;
+             hasIsTransient = version.compareTo("na") >= 0;
+@@ -302,13 +288,13 @@
+         @Override
+         public boolean hasImprovedMinMax()
+         {
+-            return false;
++            return hasImprovedMinMax;
+         }
+ 
+         @Override
+         public boolean hasPartitionLevelDeletionsPresenceMarker()
+         {
+-            return false;
++            return hasPartitionLevelDeletionPresenceMarker;
+         }
+ 
+         @Override
+@@ -352,17 +338,7 @@
+             return false;
+         }
+ 
+-        // TODO TBD
+-        @Override
+-<<<<<<<
+-=======
+-        public boolean hasOriginatingHostId()
+-        {
+-            return false;
+-        }
+-
+         @Override
+->>>>>>>
+         public boolean hasMaxColumnValueLengths()
+         {
+             return false;
+--- a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexFormat.java
+@@ -310,13 +310,8 @@
+             isLatestVersion = version.compareTo(current_version) == 0;
+             hasOldBfFormat = version.compareTo("b") < 0;
+             hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
+-<<<<<<<
+             hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
+-            hasMaxColumnValueLengths = version.matches("b[a-z]"); // TODO TBD
+-=======
+-            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])"); // TODO TBD
+             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
+->>>>>>>
+             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_40 : MessagingService.VERSION_3014;
+         }
+ 
+--- a/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
++++ b/src/java/org/apache/cassandra/io/sstable/metadata/MetadataCollector.java
+@@ -87,13 +87,9 @@
+                                  -1,
+                                  -1,
+                                  null,
+-<<<<<<<
++                                 null,
+                                  false,
+                                  Collections.emptyMap());
+-=======
+-                                 null,
+-                                 false);
+->>>>>>>
+     }
+ 
+     protected EstimatedHistogram estimatedPartitionSize = defaultPartitionSizeHistogram();
+--- a/test/unit/org/apache/cassandra/io/sstable/LegacySSTableTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/LegacySSTableTest.java
+@@ -92,11 +92,7 @@
+      * See {@link #testGenerateSstables()} to generate sstables.
+      * Take care on commit as you need to add the sstable files using {@code git add -f}
+      */
+-<<<<<<<
+-    public static final String[] legacyVersions = {"na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb", "ca"};
+-=======
+-    public static final String[] legacyVersions = {"nb", "na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb"};
+->>>>>>>
++    public static final String[] legacyVersions = {"nb", "na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb", "ca"};
+ 
+     // 1200 chars
+     static final String longString = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789" +
+--- a/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
+@@ -29,12 +29,6 @@
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.SchemaLoader;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+-import org.apache.cassandra.io.util.FileUtils;
+-import org.apache.cassandra.schema.TableMetadata;
+->>>>>>>
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.db.commitlog.CommitLogPosition;
+@@ -45,6 +39,7 @@
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+ import org.apache.cassandra.io.sstable.format.Version;
+ import org.apache.cassandra.io.sstable.format.big.BigFormat;
++import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+ import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+ import org.apache.cassandra.io.util.DataOutputStreamPlus;
+ import org.apache.cassandra.io.util.FileUtils;
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+index 864fca58a7..20288fb189 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigFormat.java
+@@ -288,13 +288,13 @@ public class BigFormat implements SSTableFormat
+         @Override
+         public boolean hasImprovedMinMax()
+         {
+-            return false;
++            return hasImprovedMinMax;
+         }
+ 
+         @Override
+         public boolean hasPartitionLevelDeletionsPresenceMarker()
+         {
+-            return false;
++            return hasPartitionLevelDeletionPresenceMarker;
+         }
+ 
+         @Override
+diff --git a/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java b/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
+index 904c09fa05..5c0cd5410b 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
+@@ -29,9 +29,6 @@ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.SchemaLoader;
+-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+-import org.apache.cassandra.io.util.FileUtils;
+-import org.apache.cassandra.schema.TableMetadata;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.db.commitlog.CommitLogPosition;
+@@ -42,6 +39,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+ import org.apache.cassandra.io.sstable.format.Version;
+ import org.apache.cassandra.io.sstable.format.big.BigFormat;
++import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+ import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+ import org.apache.cassandra.io.util.DataOutputStreamPlus;
+ import org.apache.cassandra.io.util.FileUtils;

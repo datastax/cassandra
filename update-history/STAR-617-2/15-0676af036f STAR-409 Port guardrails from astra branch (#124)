@@ -1,0 +1,269 @@
+commit 0676af036fc17d1e9d9aa23e1305ea1dcacd2040
+Author:     dan jatnieks <jatnieks@pobox.com>
+AuthorDate: Tue Apr 27 16:02:43 2021 -0700
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Apr 27 16:02:43 2021 -0700
+
+    STAR-409 Port guardrails from astra branch (#124)
+    
+    * CDB-15: Introduce basic framework for Guardrails
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Sylvain Lebresne <lebresne@gmail.com>
+    
+    * CDB-18: Introduce Guardrails for MV/2i
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-19: Introduce guardrails for Table number and Table properties
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-22: Introduce disallowed write consistencies guardrail
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-21: Introduce Guardrail for partition size
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    
+    * CDB-20: Introduce Guardrail for partition keys in a SELECT
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+    
+    * CDB-17: Introduce Guardrails for CollectionSizeWarnThreshold / FieldsPerUDT / ItemsPerCollection
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-3: Redact guardrail user data in error messages that are passed to listeners
+    CDB-16: Introduce disk usage guardrails
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    
+    * CDB-30: Add Guardrail for cartesian product of IN queries
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-31: Add guardrail for user-provided timestamps
+    CDB-23: Introduce Guardrail for read-before-write list operations
+    CDB-3: Generalize/improve conditions on which Guardrails are suspended
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-3: Make sure tablePropertiesDisallowed Guardrail is also applied to MV creation/alteration
+    CDB-3: Fix remaining test failures
+    CDB-3: Fix CompactionStressTest / CQLSSTableWriterTest
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    
+    * CDB-3: Add missing guardrail settings to cassandra.yaml and missing enabled check for tables limit GR
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+    
+    * STAR-409 Fix ClientRequestSizeMetricsTest by ensuring session connected before clearing metrics
+    
+    * STAR-409 Add call to SSTableWriter.guardCollectionSize in PartitionWriter.writePartition
+    
+    Co-authored-by: Eduard Tudenhöfner <etudenhoefner@gmail.com>
+    Co-authored-by: Sylvain Lebresne <lebresne@gmail.com>
+    Co-authored-by: Zhao Yang <jasonstack.zhao@gmail.com>
+    Co-authored-by: Aleksandr Sorokoumov <aleksandr.sorokoumov@gmail.com>
+    Co-authored-by: Andrés de la Peña <adelapena@users.noreply.github.com>
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/cql3/statements/ModificationStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/ModificationStatement.java
+@@ -487,15 +487,8 @@
+             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
+ 
+         ConsistencyLevel cl = options.getConsistency();
+-<<<<<<<
+-        if (isCounter())
+-            cl.validateCounterForWrite(metadata());
+-        else
+-            cl.validateForWrite();
+-=======
+         validateConsistency(cl, queryState);
+         validateDiskUsage(queryState, options);
+->>>>>>>
+ 
+         List<? extends IMutation> mutations =
+             getMutations(queryState,
+@@ -718,7 +711,7 @@
+      *
+      * @return list of the mutations
+      */
+-    private List<? extends IMutation> getMutations(QueryState state, 
++    private List<? extends IMutation> getMutations(QueryState state,
+                                                    QueryOptions options,
+                                                    boolean local,
+                                                    long timestamp,
+@@ -756,7 +749,7 @@
+                                                            DataLimits.NONE,
+                                                            local,
+                                                            timestamp,
+-                                                           nowInSeconds, 
++                                                           nowInSeconds,
+                                                            queryStartNanoTime);
+             for (ByteBuffer key : keys)
+             {
+@@ -824,7 +817,7 @@
+ 
+     private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
+                                                   NavigableSet<Clustering<?>> clusterings,
+-                                                  QueryState state, 
++                                                  QueryState state,
+                                                   QueryOptions options,
+                                                   boolean local,
+                                                   long timestamp,
+@@ -839,7 +832,7 @@
+                                         DataLimits.cqlLimits(1),
+                                         local,
+                                         timestamp,
+-                                        nowInSeconds, 
++                                        nowInSeconds,
+                                         queryStartNanoTime);
+ 
+         return makeUpdateParameters(keys,
+@@ -849,13 +842,13 @@
+                                     DataLimits.NONE,
+                                     local,
+                                     timestamp,
+-                                    nowInSeconds, 
++                                    nowInSeconds,
+                                     queryStartNanoTime);
+     }
+ 
+     private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
+                                                   ClusteringIndexFilter filter,
+-                                                  QueryState state, 
++                                                  QueryState state,
+                                                   QueryOptions options,
+                                                   DataLimits limits,
+                                                   boolean local,
+@@ -879,7 +872,7 @@
+                                     options,
+                                     getTimestamp(timestamp, options),
+                                     nowInSeconds,
+-                                    getTimeToLive(options), 
++                                    getTimeToLive(options),
+                                     lists);
+     }
+ 
+--- a/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
+@@ -241,12 +241,8 @@
+         ConsistencyLevel cl = options.getConsistency();
+         checkNotNull(cl, "Invalid empty consistency level");
+ 
+-<<<<<<<
+         cl.validateForRead();
+-=======
+-        cl.validateForRead(keyspace());
+         validateQueryOptions(options);
+->>>>>>>
+ 
+         int nowInSec = options.getNowInSeconds(state);
+         int userLimit = getLimit(options);
+@@ -281,7 +277,7 @@
+         getPerPartitionLimit(options), options.getPageSize());
+     }
+ 
+-    public ReadQuery getQuery(QueryState queryState, 
++    public ReadQuery getQuery(QueryState queryState,
+                               QueryOptions options,
+                               ColumnFilter columnFilter,
+                               int nowInSec,
+--- a/src/java/org/apache/cassandra/cql3/statements/schema/AlterTableStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/schema/AlterTableStatement.java
+@@ -199,13 +199,9 @@
+             TableMetadata tableMetadata = tableBuilder.build();
+             tableMetadata.validate();
+ 
+-<<<<<<<
+             Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, queryState);
+ 
+-            return keyspace.withSwapped(keyspace.tables.withSwapped(tableBuilder.build()))
+-=======
+             return keyspace.withSwapped(keyspace.tables.withSwapped(tableMetadata))
+->>>>>>>
+                            .withSwapped(viewsBuilder.build());
+         }
+ 
+--- a/src/java/org/apache/cassandra/db/ConsistencyLevel.java
++++ b/src/java/org/apache/cassandra/db/ConsistencyLevel.java
+@@ -216,11 +216,7 @@
+         }
+     }
+ 
+-<<<<<<<
+-    public void validateForWrite() throws InvalidRequestException
+-=======
+     public void validateForWrite(String keyspaceName, QueryState queryState) throws InvalidRequestException
+->>>>>>>
+     {
+         if (SchemaConstants.isUserKeyspace(keyspaceName))
+             Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -436,15 +436,9 @@
+         AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
+         try
+         {
+-<<<<<<<
+-            consistencyForPaxos.validateForCas();
++            consistencyForPaxos.validateForCas(metadata.keyspace);
+             consistencyForReplayCommits.validateForCasCommit(latestRs);
+             consistencyForCommit.validateForCasCommit(latestRs);
+-=======
+-            consistencyForPaxos.validateForCas(metadata.keyspace);
+-            consistencyForReplayCommits.validateForCasCommit(metadata.keyspace);
+-            consistencyForCommit.validateForCasCommit(metadata.keyspace);
+->>>>>>>
+ 
+             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
+             while (System.nanoTime() - queryStartNanoTime < timeoutNanos)
+--- a/test/unit/org/apache/cassandra/SchemaLoader.java
++++ b/test/unit/org/apache/cassandra/SchemaLoader.java
+@@ -749,7 +749,6 @@
+         ServerTestUtils.cleanupSavedCaches();
+     }
+ 
+-<<<<<<<
+     /**
+      * Simple method that allows creating a table given it's CQL definition.
+      *
+@@ -779,7 +778,8 @@
+         Types types = Schema.instance.getKeyspaceMetadata(keyspace).types;
+         TableMetadata metadata = CreateTableStatement.parse(schemaCQL, keyspace, types).build();
+         MigrationManager.announce(SchemaTransformations.addTable(metadata, true), true);
+-=======
++    }
++
+     private static CompressionParams compressionParams(int chunkLength)
+     {
+         String algo = System.getProperty("cassandra.test.compression.algo", "lz4").toLowerCase();
+@@ -800,6 +800,5 @@
+             default:
+                 throw new IllegalArgumentException("Invalid compression algorithm has been provided in cassandra.test.compression system property: " + algo);
+         }
+->>>>>>>
+     }
+ }

@@ -1,0 +1,361 @@
+commit 4520f47729752b78b5a83e71e29cb6ff45ceb599
+Author:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+AuthorDate: Tue Nov 10 13:54:32 2020 +0100
+Commit:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+CommitDate: Mon Apr 12 14:21:39 2021 +0200
+
+    STAR-15: Allow for other implementations of SSTableFormat
+    
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    the SSTableReader.Factory
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    the SSTableReader.Factory
+    
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    the SSTableReader.Factory
+    
+    Added methods to reset the iterator position and set the position
+    to exact value
+    
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    the SSTableReader.Factory
+    
+    Added methods to reset the iterator position and set the position
+    to exact value
+    
+    [402ce9f31313d3c963a845d04bd5e7ee93598119] STAR-15: Refactor explicit usages of BigTableRowIndexEntry.Serializer
+    Use generic PartitionIndexIterator or KeyIterator instead
+    
+    :...skipping...
+    [288dd9e05f037674319b4891cae21c46afe2df2b] STAR-15: Add getType method to SSTableFormat iface
+    
+    [ea53c0104fa704c28640b18ad0a977153269ff32] STAR-15: Remove getIndexSerializer from SSTableFormat
+    This includes introduction of PartitionIndexIterator.
+    
+    Pull down serializer creation to the locations where it is needed.
+    In other locations, we use PartitionIndexIterator abstract
+    
+    [0b18884f7f547248c0fca9c9767d45e691695840] STAR-15: Just moved RowIndexEntry to o.a.c.io.sstable.format.big
+    
+    [bfe955fc702eaba1cf2914642e42cc9d1fb10aef] STAR-15: Extract IndexState to a separate class
+    
+    [044bb012176ccca7300643308e3181ea681c7d84] STAR-15: Move AbstractSSTableIterator to o.a.c.io.sstable.format
+    
+    [9e946e674c6b33aec08174a41c7c7c27b64d052d] STAR-15: SSTableIterator and SSTableReversedIterator moved to a.o.c.io.sstable.format.big
+    
+    [ff574f7e3681e3217125b28de04cf005875dcd77] STAR-15: Refactoring
+    1. Generic RowIndexEntry was extracted
+    2. AbstractSSTableIterator is now typed by row index entry
+    3. In SSTableReader some methods were squashed and some were pulled down
+    4. Test were adjusted to just work (for now)
+    
+    [a9493886af5d1b5c9d4e748b70b0dd3646713023] STAR-15: Moved IndexInfo to o.a.c.io.sstable.format.big
+    
+    [fce4eea79084645c3b9b40c6d915dd88d8a29072] STAR-15: Move ColumnIndex to o.a.c.io.sstable.format.big
+    
+    [91ab2a1b4b271094a8a069fa913401f38798d12c] STAR-15: Get rid of explicit BigTableIndexRowEntry usage in Verifier
+    
+    [0e2ba2923c24c0e5a49b04ce9963d0f626da8f9e] STAR-15: Refactor KeyIterator to use PartitionIndexIterator
+    Also fixed a possible bug in ReducingKeyIterator - when an exception occurred during
+    instantiation of some SSTables passed to the constructor, the index files were left
+    unclosed
+    
+    In SASIIndexBuilder exception transformation from IOE -> FSRE has been moved to the
+    enclosing block - it does not seem to change the semantics
+    
+    In SSTableExport opening the SSTable was moved to the upper level as sstable instance
+    was needed to create PartitionIndexIterator
+    
+    [82f88f6dfb95c3168884d5dc77df5374fb4c97d0] STAR-15: Refactor PartitionIndexIterator
+    Also make it possible to obtain PartitionIndexIterator directly from
+    the SSTableReader.Factory
+    
+    Added methods to reset the iterator position and set the position
+    to exact value
+    
+    [402ce9f31313d3c963a845d04bd5e7ee93598119] STAR-15: Refactor explicit usages of BigTableRowIndexEntry.Serializer
+    Use generic PartitionIndexIterator or KeyIterator instead
+    
+    [ad4535715f117f349c99d98403b3f7c23454d9fd] Apply review comments
+
+Resolutions:
+--- a/src/java/org/apache/cassandra/db/compaction/Verifier.java
++++ b/src/java/org/apache/cassandra/db/compaction/Verifier.java
+@@ -238,17 +238,8 @@
+ 
+         try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
+         {
+-<<<<<<<
+-            ByteBuffer nextIndexKey = ByteBufferUtil.readWithShortLength(indexFile);
+-            {
+-                long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+-                if (firstRowPositionFromIndex != 0)
+-                    markAndThrow(new RuntimeException("firstRowPositionFromIndex != 0: "+firstRowPositionFromIndex));
+-            }
+-=======
+             if (indexIterator.dataPosition() != 0)
+-                markAndThrow();
+->>>>>>>
++                markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
+ 
+             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(cfs.metadata().keyspace));
+             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
+diff --git a/src/java/org/apache/cassandra/db/compaction/Verifier.java b/src/java/org/apache/cassandra/db/compaction/Verifier.java
+index b3a8385122..72a2524d86 100644
+--- a/src/java/org/apache/cassandra/db/compaction/Verifier.java
++++ b/src/java/org/apache/cassandra/db/compaction/Verifier.java
+@@ -239,7 +239,7 @@ public class Verifier implements Closeable
+         try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
+         {
+             if (indexIterator.dataPosition() != 0)
+-                markAndThrow(new RuntimeException("firstRowPositionFromIndex != 0: "+firstRowPositionFromIndex));
++                markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
+ 
+             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(cfs.metadata().keyspace));
+             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
