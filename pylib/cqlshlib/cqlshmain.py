@@ -97,6 +97,7 @@ DEFAULT_PORT = 9042
 DEFAULT_SSL = False
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10
+DEFAULT_NO_FILE_IO = False
 
 DEFAULT_FLOAT_PRECISION = 5
 DEFAULT_DOUBLE_PRECISION = 5
@@ -157,6 +158,8 @@ parser.add_argument("-t", "--tty", action='store_true', dest='tty',
                     help='Force tty mode (command prompt).')
 parser.add_argument('--disable-history', default=False, action='store_true',
                     help='Disable saving of history (existing history will still be loaded)')
+parser.add_argument("--no-file-io", action='store_true', dest='no_file_io',
+                    help='Disable cqlsh commands that perform file I/O.')
 
 # This is a hidden option to suppress the warning when the -p/--password command line option is used.
 # Power users may use this option if they know no other people has access to the system where cqlsh is run or don't care about security.
@@ -363,6 +366,7 @@ class Shell(cmd.Cmd):
     last_hist = None
     shunted_query_out = None
     use_paging = True
+    no_file_io = DEFAULT_NO_FILE_IO
 
     default_page_size = 100
 
@@ -383,6 +387,7 @@ class Shell(cmd.Cmd):
                  request_timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
                  protocol_version=None,
                  connect_timeout=DEFAULT_CONNECT_TIMEOUT_SECONDS,
+                 no_file_io=DEFAULT_NO_FILE_IO,
                  is_subshell=False,
                  auth_provider=None,
                  disable_history=False):
@@ -485,6 +490,7 @@ class Shell(cmd.Cmd):
         self.empty_lines = 0
         self.statement_error = False
         self.single_statement = single_statement
+        self.no_file_io = no_file_io
         self.is_subshell = is_subshell
 
     def check_build_versions(self):
@@ -1473,6 +1479,10 @@ class Shell(cmd.Cmd):
         on a line by itself to end the data input.
         """
 
+        if self.no_file_io:
+            self.printerr('No file I/O permitted')
+            return
+
         ks = self.cql_unprotect_name(parsed.get_binding('ksname', None))
         if ks is None:
             ks = self.current_keyspace
@@ -1566,6 +1576,11 @@ class Shell(cmd.Cmd):
 
         See also the --file option to cqlsh.
         """
+
+        if self.no_file_io:
+            self.printerr('No file I/O permitted')
+            return
+
         fname = parsed.get_binding('fname')
         fname = os.path.expanduser(self.cql_unprotect_value(fname))
         try:
@@ -1589,6 +1604,7 @@ class Shell(cmd.Cmd):
                          max_trace_wait=self.max_trace_wait, ssl=self.ssl,
                          request_timeout=self.session.default_timeout,
                          connect_timeout=self.conn.connect_timeout,
+                         no_file_io=self.no_file_io,
                          is_subshell=True,
                          auth_provider=self.auth_provider)
         # duplicate coverage related settings in subshell
@@ -1625,6 +1641,11 @@ class Shell(cmd.Cmd):
         To inspect the current capture configuration, use CAPTURE with no
         arguments.
         """
+
+        if self.no_file_io:
+            self.printerr('No file I/O permitted')
+            return
+
         fname = parsed.get_binding('fname')
         if fname is None:
             if self.shunted_query_out is not None:
@@ -1822,6 +1843,11 @@ class Shell(cmd.Cmd):
     do_cls = do_clear
 
     def do_debug(self, parsed):
+
+        if self.no_file_io:
+            self.printerr('No file I/O permitted')
+            return
+
         import pdb
         pdb.set_trace()
 
@@ -2119,6 +2145,8 @@ def read_options(cmdlineargs, environment=os.environ):
     argvalues.connect_timeout = option_with_default(configs.getint, 'connection', 'timeout', DEFAULT_CONNECT_TIMEOUT_SECONDS)
     argvalues.request_timeout = option_with_default(configs.getint, 'connection', 'request_timeout', DEFAULT_REQUEST_TIMEOUT_SECONDS)
     argvalues.execute = None
+    argvalues.no_file_io = option_with_default(configs.getboolean, 'ui', 'no_file_io', DEFAULT_NO_FILE_IO)
+    argvalues.disable_history = option_with_default(configs.getboolean, 'history', 'disabled', False)
     argvalues.insecure_password_without_warning = False
     argvalues.disable_history = option_with_default(configs.getboolean, 'history', 'disabled', False)
     options, arguments = parser.parse_known_args(cmdlineargs, argvalues)
@@ -2371,6 +2399,7 @@ def main(cmdline, pkgpath):
                       single_statement=options.execute,
                       request_timeout=options.request_timeout,
                       connect_timeout=options.connect_timeout,
+                      no_file_io=options.no_file_io,
                       encoding=options.encoding,
                       auth_provider=authproviderhandling.load_auth_provider(
                           config_file=CONFIG_FILE,
