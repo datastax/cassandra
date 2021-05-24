@@ -1,0 +1,39 @@
+commit b54130cec96961330ee83cc52b6e6f439f466fa4
+Author:     Branimir Lambov <branimir.lambov@datastax.com>
+AuthorDate: Wed Dec 16 14:49:52 2020 +0200
+Commit:     jacek-lewandowski <jacek.lewandowski@datastax.com>
+CommitDate: Mon Apr 12 14:22:23 2021 +0200
+
+    STAR-17: Implements inverse byte-comparable translation
+    
+    Also adds ValueAccessor support, fixes minor TupleType and DynamicCompositeType problems and adds documentation.
+    
+    patch by Branimir Lambov; reviewed by Dimitar Dimitrov and Jacek Lewandowski
+
+Resolutions:
+diff --git a/test/microbench/org/apache/cassandra/test/microbench/AbstractTypeByteSourceDecodingBench.java b/test/microbench/org/apache/cassandra/test/microbench/AbstractTypeByteSourceDecodingBench.java
+index 2009cea0f8..47b3e08b53 100644
+--- a/test/microbench/org/apache/cassandra/test/microbench/AbstractTypeByteSourceDecodingBench.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/AbstractTypeByteSourceDecodingBench.java
+@@ -1,7 +1,19 @@
+ /*
+- * Copyright DataStax, Inc.
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
+  *
+- * Please see the included license file for details.
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
+  */
+ 
+ package org.apache.cassandra.test.microbench;

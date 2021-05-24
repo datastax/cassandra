@@ -1,0 +1,140 @@
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-CompressionInfo.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-CompressionInfo.db
+index 5c54d59337..023476374d 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-CompressionInfo.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-CompressionInfo.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Data.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Data.db
+index e0c3541d8d..dc64ae36ad 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Data.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Data.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Digest.crc32 b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Digest.crc32
+index 728e0eb6d7..2b22989949 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Digest.crc32
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Digest.crc32
+@@ -1 +1 @@
+-3680048235
+\ No newline at end of file
++2438029640
+\ No newline at end of file
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Rows.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Rows.db
+index 9b640a9bdf..88f2a3b55d 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Rows.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Rows.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Statistics.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Statistics.db
+index 11dba30856..a8ef980b89 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Statistics.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-Statistics.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-TOC.txt b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-TOC.txt
+index 680b56791f..8edd6bb68a 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-TOC.txt
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust/ca-1-bti-TOC.txt
+@@ -1,8 +1,8 @@
+-Statistics.db
+-Partitions.db
+ Data.db
+-Filter.db
++Statistics.db
+ TOC.txt
++Partitions.db
+ CompressionInfo.db
+-Digest.crc32
+ Rows.db
++Filter.db
++Digest.crc32
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-CompressionInfo.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-CompressionInfo.db
+index 281ca41b55..8e305d7a16 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-CompressionInfo.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-CompressionInfo.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Data.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Data.db
+index 3983eefe65..666e28a7c0 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Data.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Data.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Digest.crc32 b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Digest.crc32
+index d7d38d4616..88e7d42325 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Digest.crc32
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Digest.crc32
+@@ -1 +1 @@
+-2188153874
+\ No newline at end of file
++4022876624
+\ No newline at end of file
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Rows.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Rows.db
+index 84eb1052d5..2f8e2aefce 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Rows.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Rows.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Statistics.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Statistics.db
+index b0d9dc736d..21366868f8 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Statistics.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-Statistics.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-TOC.txt b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-TOC.txt
+index 680b56791f..8edd6bb68a 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-TOC.txt
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_clust_counter/ca-1-bti-TOC.txt
+@@ -1,8 +1,8 @@
+-Statistics.db
+-Partitions.db
+ Data.db
+-Filter.db
++Statistics.db
+ TOC.txt
++Partitions.db
+ CompressionInfo.db
+-Digest.crc32
+ Rows.db
++Filter.db
++Digest.crc32
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Data.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Data.db
+index 4604cff90b..15a18fcb1b 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Data.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Data.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Digest.crc32 b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Digest.crc32
+index 76d1c080ec..43ff6368ec 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Digest.crc32
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Digest.crc32
+@@ -1 +1 @@
+-1138287556
+\ No newline at end of file
++786170984
+\ No newline at end of file
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Statistics.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Statistics.db
+index 79eece81ed..b46a624817 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Statistics.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-Statistics.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-TOC.txt b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-TOC.txt
+index 680b56791f..8edd6bb68a 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-TOC.txt
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple/ca-1-bti-TOC.txt
+@@ -1,8 +1,8 @@
+-Statistics.db
+-Partitions.db
+ Data.db
+-Filter.db
++Statistics.db
+ TOC.txt
++Partitions.db
+ CompressionInfo.db
+-Digest.crc32
+ Rows.db
++Filter.db
++Digest.crc32
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Data.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Data.db
+index c2fa7f2f78..80aefbf1d1 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Data.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Data.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Digest.crc32 b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Digest.crc32
+index 3174cec9b1..08abf520f4 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Digest.crc32
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Digest.crc32
+@@ -1 +1 @@
+-2858999920
+\ No newline at end of file
++1825820643
+\ No newline at end of file
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Statistics.db b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Statistics.db
+index b2df50c07a..23c2bd70ee 100644
+Binary files a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Statistics.db and b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-Statistics.db differ
+diff --git a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-TOC.txt b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-TOC.txt
+index 680b56791f..8edd6bb68a 100644
+--- a/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-TOC.txt
++++ b/test/data/legacy-sstables/ca/legacy_tables/legacy_ca_simple_counter/ca-1-bti-TOC.txt
+@@ -1,8 +1,8 @@
+-Statistics.db
+-Partitions.db
+ Data.db
+-Filter.db
++Statistics.db
+ TOC.txt
++Partitions.db
+ CompressionInfo.db
+-Digest.crc32
+ Rows.db
++Filter.db
++Digest.crc32

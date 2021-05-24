@@ -1,0 +1,114 @@
+commit e0c0accb61dede076954f7d39ba494e5f2249551
+Author:     Jacek Lewandowski <6516951+jacek-lewandowski@users.noreply.github.com>
+AuthorDate: Wed May 5 00:09:54 2021 +0200
+Commit:     GitHub <noreply@github.com>
+CommitDate: Wed May 5 00:09:54 2021 +0200
+
+    STAR-539: Fix storing stats metadata for big table format (ds-trunk) (#141)
+    
+    * STAR-539: Fix storing stats metadata for big table format
+    
+    The problem was that at some point we refactored the code a bit and one detail got missed - for the min and max clustering bounds we should store clustering components until first null component is encountered.
+    
+    * Improve test coverage
+
+Resolutions:
+--- a/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/metadata/MetadataSerializerTest.java
+@@ -20,11 +20,7 @@
+ import java.io.File;
+ import java.io.FileOutputStream;
+ import java.io.IOException;
+-<<<<<<<
+-import java.nio.ByteBuffer;
+-=======
+ import java.util.Arrays;
+->>>>>>>
+ import java.util.Collections;
+ import java.util.EnumSet;
+ import java.util.Map;
+@@ -34,36 +30,24 @@
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.SchemaLoader;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.db.Clustering;
+-import org.apache.cassandra.db.marshal.Int32Type;
+-import org.apache.cassandra.db.marshal.UTF8Type;
+-import org.apache.cassandra.io.sstable.SSTable;
+-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+-import org.apache.cassandra.io.util.FileUtils;
+-import org.apache.cassandra.schema.TableMetadata;
+->>>>>>>
+ import org.apache.cassandra.config.DatabaseDescriptor;
++import org.apache.cassandra.db.Clustering;
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.db.commitlog.CommitLogPosition;
+ import org.apache.cassandra.db.commitlog.IntervalSet;
++import org.apache.cassandra.db.marshal.Int32Type;
++import org.apache.cassandra.db.marshal.UTF8Type;
+ import org.apache.cassandra.dht.RandomPartitioner;
+ import org.apache.cassandra.io.sstable.Component;
+ import org.apache.cassandra.io.sstable.Descriptor;
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+ import org.apache.cassandra.io.sstable.format.Version;
+ import org.apache.cassandra.io.sstable.format.big.BigFormat;
+-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+ import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+ import org.apache.cassandra.io.util.DataOutputStreamPlus;
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.io.util.RandomAccessReader;
+-<<<<<<<
+ import org.apache.cassandra.schema.TableMetadata;
+-=======
+-import org.apache.cassandra.serializers.UTF8Serializer;
+->>>>>>>
+ import org.apache.cassandra.utils.Throwables;
+ 
+ import static org.junit.Assert.assertEquals;
+@@ -174,21 +158,20 @@
+         {
+             throw t;
+         }
+-<<<<<<<
+     }
+ 
+     @Test
+     public void testMVersions() throws Throwable
+     {
+         Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
+-        testVersions("ma", "mb", "mc", "md");
++        testVersions("ma", "mb", "mc", "md", "me");
+     }
+ 
+     @Test
+     public void testNVersions() throws Throwable
+     {
+         Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
+-        testVersions("na");
++        testVersions("na", "nb");
+     }
+ 
+     @Test
+@@ -210,20 +193,6 @@
+     {
+         Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BTI);
+         testVersions("ca");
+-=======
+-    }
+-
+-    @Test
+-    public void testMVersions() throws Throwable
+-    {
+-        testVersions("ma", "mb", "mc", "md", "me");
+-    }
+-
+-    @Test
+-    public void testNVersions() throws Throwable
+-    {
+-        testVersions("na", "nb");
+->>>>>>>
+     }
+ 
+     public void testOldReadsNew(String oldV, String newV) throws IOException
