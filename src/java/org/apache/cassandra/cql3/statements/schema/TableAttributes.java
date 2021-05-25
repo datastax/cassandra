@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -24,12 +26,16 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.AutoRepairParams;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableParams;
@@ -66,6 +72,8 @@ public final class TableAttributes extends PropertyDefinitions
         validKeywords = validBuilder.build();
     }
 
+    private final Map<ColumnIdentifier, DroppedColumn.Raw> droppedColumnRecords = new HashMap<>();
+
     public void validate()
     {
         validate(validKeywords, obsoleteKeywords);
@@ -74,6 +82,18 @@ public final class TableAttributes extends PropertyDefinitions
             throw new ConfigurationException("auto_repair option is not supported unless auto-repair is enabled with -Dcassandra.autorepair.enable=true");
 
         build(TableParams.builder()).validate();
+    }
+
+    public void addDroppedColumnRecord(ColumnIdentifier name, CQL3Type.Raw type, boolean isStatic, long timestamp)
+    {
+        DroppedColumn.Raw newRecord = new DroppedColumn.Raw(name, type, isStatic, timestamp);
+        if (droppedColumnRecords.put(name, newRecord) != null)
+            throw new InvalidRequestException(String.format("Cannot have multiple dropped column record for column %s", name));
+    }
+
+    public Collection<DroppedColumn.Raw> droppedColumnRecords()
+    {
+        return droppedColumnRecords.values();
     }
 
     TableParams asNewTableParams()
