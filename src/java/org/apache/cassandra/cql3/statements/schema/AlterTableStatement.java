@@ -52,6 +52,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
@@ -560,7 +561,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             if (!params.compression.isEnabled())
                 Guardrails.uncompressedTablesEnabled.ensureEnabled(state);
 
-            return keyspace.withSwapped(keyspace.tables.withSwapped(table.withSwapped(params)));
+            TableMetadata.Builder builder = table.unbuild().params(params);
+            for (DroppedColumn.Raw record : attrs.droppedColumnRecords())
+                builder.recordColumnDrop(record.prepare(keyspaceName, tableName));
+
+            return keyspace.withSwapped(keyspace.tables.withSwapped(builder.build()));
         }
     }
 
@@ -693,7 +698,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
         // DROP
         private final Set<ColumnIdentifier> droppedColumns = new HashSet<>();
-        private Long timestamp = null; // will use execution timestamp if not provided by query
+        private Long dropTimestamp = null; // will use execution timestamp if not provided by query
 
         // RENAME
         private final Map<ColumnIdentifier, ColumnIdentifier> renamedColumns = new HashMap<>();
@@ -717,7 +722,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 case          ALTER_COLUMN: return new AlterColumn(keyspaceName, tableName, ifTableExists);
                 case           MASK_COLUMN: return new MaskColumn(keyspaceName, tableName, maskedColumn, rawMask, ifTableExists, ifColumnExists);
                 case           ADD_COLUMNS: return new AddColumns(keyspaceName, tableName, addedColumns, ifTableExists, ifColumnNotExists);
-                case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, ifTableExists, ifColumnExists, timestamp);
+                case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, ifTableExists, ifColumnExists, dropTimestamp);
                 case        RENAME_COLUMNS: return new RenameColumns(keyspaceName, tableName, renamedColumns, ifTableExists, ifColumnExists);
                 case         ALTER_OPTIONS: return new AlterOptions(keyspaceName, tableName, attrs, ifTableExists);
                 case  DROP_COMPACT_STORAGE: return new DropCompactStorage(keyspaceName, tableName, ifTableExists);
@@ -765,9 +770,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             kind = Kind.DROP_COMPACT_STORAGE;
         }
 
-        public void timestamp(long timestamp)
+        public void dropTimestamp(long timestamp)
         {
-            this.timestamp = timestamp;
+            this.dropTimestamp = timestamp;
         }
 
         public void rename(ColumnIdentifier from, ColumnIdentifier to)

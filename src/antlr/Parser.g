@@ -807,6 +807,7 @@ tablePartitionKey[CreateTableStatement.Raw stmt]
     ;
 
 tableProperty[CreateTableStatement.Raw stmt]
+    @init { boolean isStatic = false; }
     : property[stmt.attrs]
     | K_COMPACT K_STORAGE { $stmt.setCompactStorage(); }
     | K_CLUSTERING K_ORDER K_BY '(' tableClusteringOrder[stmt] (',' tableClusteringOrder[stmt])* ')'
@@ -815,6 +816,12 @@ tableProperty[CreateTableStatement.Raw stmt]
              K_FROM noncol_ident '(' ident (',' ident)* ')'
              K_TO noncol_ident '(' ident (',' ident)* ')'
              {stmt.attrs.addProperty("dse_edge_label_property", "edge");}
+    | K_DROPPED K_COLUMN K_RECORD
+          k=ident v=comparatorType (K_STATIC {isStatic = true;})?
+          K_USING K_TIMESTAMP t=INTEGER
+      {
+          stmt.attrs.addDroppedColumnRecord(k, v, isStatic, Long.parseLong($t.text));
+      }
     ;
 
 tableClusteringOrder[CreateTableStatement.Raw stmt]
@@ -973,7 +980,7 @@ alterTableStatement returns [AlterTableStatement.Raw stmt]
                (       id=ident { $stmt.drop(id);  }
                | ('('  id1=ident { $stmt.drop(id1); }
                  ( ',' idn=ident { $stmt.drop(idn); } )* ')') )
-               ( K_USING K_TIMESTAMP t=INTEGER { $stmt.timestamp(Long.parseLong(Constants.Literal.integer($t.text).getText())); } )?
+               ( K_USING K_TIMESTAMP t=INTEGER { $stmt.dropTimestamp(Long.parseLong($t.text)); } )?
 
       | K_RENAME ( K_IF K_EXISTS { $stmt.ifColumnExists(true); } )?
                (        id1=ident K_TO toId1=ident { $stmt.rename(id1, toId1); }
@@ -2022,5 +2029,8 @@ basic_unreserved_keyword returns [String str]
         | K_EDGE
         | K_VERTEX
         | K_LABEL
+        | K_DROPPED
+        | K_COLUMN
+        | K_RECORD
         ) { $str = $k.text; }
     ;
