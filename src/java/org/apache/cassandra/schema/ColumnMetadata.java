@@ -38,6 +38,8 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.github.jamm.Unmetered;
 
+import static java.lang.String.format;
+
 @Unmetered
 public final class ColumnMetadata extends ColumnSpecification implements Selectable, Comparable<ColumnMetadata>
 {
@@ -74,6 +76,11 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         }
 
     }
+
+    /**
+     * Whether this is a dropped column.
+     */
+    private final boolean isDropped;
 
     public final Kind kind;
 
@@ -153,6 +160,26 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         return new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, NO_POSITION, Kind.STATIC, null);
     }
 
+    /**
+     * Rebuild the metadata for a dropped column from its recorded data.
+     *
+     * <p>Please note that this method expect that the provided arguments are those of a dropped column, and in
+     * particular that the type uses no UDT (any should have been expanded). If a column is being dropped, prefer
+     * {@link #asDropped()} to transform the existing column to a dropped one as this deal with type expansion directly.
+     */
+    public static ColumnMetadata droppedColumn(String keyspace,
+                                               String table,
+                                               ColumnIdentifier name,
+                                               AbstractType<?> type,
+                                               Kind kind,
+                                               @Nullable ColumnMask mask)
+    {
+        assert !kind.isPrimaryKeyKind();
+        assert !type.referencesUserTypes()
+        : format("In %s.%s, dropped column %s type should not contain UDT; got %s" , keyspace, table, name, type);
+        return new ColumnMetadata(keyspace, table, name, type, NO_POSITION, kind, mask, true);
+    }
+
     public ColumnMetadata(TableMetadata table,
                           ByteBuffer name,
                           AbstractType<?> type,
@@ -178,6 +205,18 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
                           Kind kind,
                           @Nullable ColumnMask mask)
     {
+        this(ksName, cfName, name, type, position, kind, mask, false);
+    }
+
+    public ColumnMetadata(String ksName,
+                          String cfName,
+                          ColumnIdentifier name,
+                          AbstractType<?> type,
+                          int position,
+                          Kind kind,
+                          @Nullable ColumnMask mask,
+                          boolean isDropped)
+    {
         super(ksName, cfName, name, type);
         assert name != null && type != null && kind != null;
         assert (position == NO_POSITION) == !kind.isPrimaryKeyKind(); // The position really only make sense for partition and clustering columns (and those must have one),
@@ -195,6 +234,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         this.asymmetricCellPathComparator = cellPathComparator == null ? null : (a, b) -> cellPathComparator.compare(((Cell<?>)a).path(), (CellPath) b);
         this.comparisonOrder = comparisonOrder(kind, isComplex(), Math.max(0, position), name);
         this.mask = mask;
+        this.isDropped = isDropped;
     }
 
     private static Comparator<CellPath> makeCellPathComparator(Kind kind, AbstractType<?> type)
@@ -224,24 +264,54 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         };
     }
 
+    /**
+     * Whether that is the column metadata of a dropped column.
+     */
+    public boolean isDropped()
+    {
+        return isDropped;
+    }
+
     public ColumnMetadata copy()
     {
-        return new ColumnMetadata(ksName, cfName, name, type, position, kind, mask);
+        return new ColumnMetadata(ksName, cfName, name, type, position, kind, mask, isDropped);
     }
 
     public ColumnMetadata withNewName(ColumnIdentifier newName)
     {
-        return new ColumnMetadata(ksName, cfName, newName, type, position, kind, mask);
+        return new ColumnMetadata(ksName, cfName, newName, type, position, kind, mask, isDropped);
     }
 
     public ColumnMetadata withNewType(AbstractType<?> newType)
     {
-        return new ColumnMetadata(ksName, cfName, name, newType, position, kind, mask);
+        return new ColumnMetadata(ksName, cfName, name, newType, position, kind, mask, isDropped);
     }
 
     public ColumnMetadata withNewMask(@Nullable ColumnMask newMask)
     {
-        return new ColumnMetadata(ksName, cfName, name, type, position, kind, newMask);
+        return new ColumnMetadata(ksName, cfName, name, type, position, kind, newMask, isDropped);
+    }
+
+    /**
+     * Transforms this (non-dropped) column metadata into one suitable when the column is dropped.
+     *
+     * <p>This should be used when a column is dropped to create the relevant {@link DroppedColumn} record.
+     *
+     * @return the transformed metadata. It will be equivalent to {@code this} except that 1) its {@link #isDropped}
+     * method will return {@code true} and 2) any UDT within the column type will have been expanded to tuples (see
+     * {@link AbstractType#expandUserTypes()}).
+     */
+    ColumnMetadata asDropped()
+    {
+        assert !isDropped : this + " was already dropped";
+        return new ColumnMetadata(ksName,
+                                  cfName,
+                                  name,
+                                  type.expandUserTypes(),
+                                  position,
+                                  kind,
+                                  mask,
+                                  true);
     }
 
     public boolean isPartitionKey()
