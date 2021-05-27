@@ -175,7 +175,7 @@ public abstract class AbstractCommitLogService
             {
                 // sync and signal
                 long pollStarted = clock.now();
-                boolean flushToDisk = lastSyncedAt + syncIntervalNanos <= pollStarted || shutdownRequested || syncRequested;
+                boolean flushToDisk = lastSyncedAt + syncIntervalNanos - pollStarted <= 0 || shutdownRequested || syncRequested;
                 if (flushToDisk)
                 {
                     // in this branch, we want to flush the commit log to disk
@@ -199,7 +199,7 @@ public abstract class AbstractCommitLogService
                     return false;
 
                 long wakeUpAt = pollStarted + markerIntervalNanos;
-                if (wakeUpAt > now)
+                if (wakeUpAt - now > 0)
                     LockSupport.parkNanos(wakeUpAt - now);
             }
             catch (Throwable t)
@@ -225,7 +225,7 @@ public abstract class AbstractCommitLogService
 
             // this is the timestamp by which we should have completed the flush
             long maxFlushTimestamp = pollStarted + syncIntervalNanos;
-            if (maxFlushTimestamp > now)
+            if (maxFlushTimestamp - now > 0)
                 return false;
 
             // if we have lagged noticeably, update our lag counter
@@ -236,7 +236,7 @@ public abstract class AbstractCommitLogService
                 syncCount = 1;
                 totalSyncDuration = flushDuration;
             }
-            syncExceededIntervalBy += now - maxFlushTimestamp;
+            syncExceededIntervalBy += Math.abs(now - maxFlushTimestamp);
             lagCount++;
 
             if (firstLagAt > 0)
@@ -248,7 +248,7 @@ public abstract class AbstractCommitLogService
                                                   TimeUnit.MINUTES,
                                                   "Out of {} commit log syncs over the past {}s with average duration of {}ms, {} have exceeded the configured commit interval by an average of {}ms",
                                                   syncCount,
-                                                  String.format("%.2f", (now - firstLagAt) * 1e-9d),
+                                                  String.format("%.2f", Math.abs(now - firstLagAt) * 1e-9d),
                                                   String.format("%.2f", totalSyncDuration * 1e-6d / syncCount),
                                                   lagCount,
                                                   String.format("%.2f", syncExceededIntervalBy * 1e-6d / lagCount));
@@ -299,7 +299,7 @@ public abstract class AbstractCommitLogService
      */
     public void syncBlocking()
     {
-        long requestTime = System.nanoTime();
+        long requestTime = clock.now();
         requestExtraSync();
         awaitSyncAt(requestTime, null);
     }
@@ -309,12 +309,12 @@ public abstract class AbstractCommitLogService
         do
         {
             WaitQueue.Signal signal = context != null ? syncComplete.register(context) : syncComplete.register();
-            if (lastSyncedAt < syncTime)
+            if (lastSyncedAt - syncTime < 0)
                 signal.awaitUninterruptibly();
             else
                 signal.cancel();
         }
-        while (lastSyncedAt < syncTime);
+        while (lastSyncedAt - syncTime < 0);
     }
 
     public void awaitTermination() throws InterruptedException

@@ -34,8 +34,8 @@ class PeriodicCommitLogService extends AbstractCommitLogService
 
     protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
-        long expectedSyncTime = System.nanoTime() - blockWhenSyncLagsNanos;
-        if (lastSyncedAt < expectedSyncTime)
+        long expectedSyncTime = clock.now() - blockWhenSyncLagsNanos;
+        if (lastSyncedAt - expectedSyncTime < 0)
         {
             pending.incrementAndGet();
             awaitSyncAt(expectedSyncTime, commitLog.metrics.waitingOnCommit.time());
