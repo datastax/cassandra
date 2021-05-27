@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.apache.commons.math3.primes.Primes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,8 +67,8 @@ public class SSTableReaderBench extends AbstractSSTableBench
     private final static Logger logger = LoggerFactory.getLogger(SSTableReaderBench.class);
 
     int KEY_SIZE = 8;
-    int P_KEYS = 10000;
-    int C_KEYS = 1000;
+    int P_KEYS = 2 << 14;
+    int C_KEYS = 2 << 10;
     int VAL_SIZE = 1;
 
     public ByteBuffer[] ckeys;
@@ -91,6 +92,8 @@ public class SSTableReaderBench extends AbstractSSTableBench
     @Setup
     public void setup()
     {
+        assert Integer.highestOneBit(P_KEYS) == Integer.lowestOneBit(P_KEYS);
+        assert Integer.highestOneBit(C_KEYS) == Integer.lowestOneBit(C_KEYS);
         Keyspace ks = prepareMetadata();
         table = ks.getColumnFamilyStore(tableName);
         pkeys = prepareDecoratedKeys(0, P_KEYS, KEY_SIZE);
@@ -105,6 +108,9 @@ public class SSTableReaderBench extends AbstractSSTableBench
         sstr = prepareReader(getFormat(formatName), table, txn);
     }
 
+    /**
+     * Generates a quasi random walk over keys but adding a little less than a half and wrapping around.
+     */
     private int nextIdx() {
         idx += step;
         if (idx >= P_KEYS)

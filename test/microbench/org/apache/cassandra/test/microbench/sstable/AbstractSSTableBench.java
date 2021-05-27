@@ -70,6 +70,9 @@ public abstract class AbstractSSTableBench
         return Keyspace.open(KEYSPACE);
     }
 
+    /**
+     * Create partition keys from numbers in range {@code [min; max)} of size in bytes as in {@code keySize}
+     */
     public DecoratedKey[] prepareDecoratedKeys(int min, int max, int keySize)
     {
         int n = max - min;
@@ -84,6 +87,9 @@ public abstract class AbstractSSTableBench
         return keys;
     }
 
+    /**
+     * Create clustering keys from numbers in range {@code [min; max)} of size in bytes as in {@code keySize}
+     */
     public ByteBuffer[] prepareBuffers(int min, int max, int KEY_SIZE)
     {
         int n = max - min;

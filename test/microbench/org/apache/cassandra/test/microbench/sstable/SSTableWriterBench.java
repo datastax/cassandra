@@ -107,7 +107,7 @@ public class SSTableWriterBench extends AbstractSSTableBench
     {
         for (int i = 0; i < P_KEYS; i++)
         {
-            UpdateBuilder builder = UpdateBuilder.create(tableMetadata, pkeys[i++].getKey().duplicate()).withTimestamp(1);
+            UpdateBuilder builder = UpdateBuilder.create(tableMetadata, pkeys[i].getKey().duplicate()).withTimestamp(1);
             if (hasClustering)
                 for (int j = 0; j < C_KEYS; j++)
                     builder.newRow(ckeys[j].duplicate()).add("val", ByteBuffer.allocate(VAL_SIZE));
