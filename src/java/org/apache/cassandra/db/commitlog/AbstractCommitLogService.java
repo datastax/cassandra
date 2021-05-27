@@ -45,7 +45,7 @@ public abstract class AbstractCommitLogService
     private volatile boolean shutdown = false;
 
     // all Allocations written before this time will be synced
-    protected volatile long lastSyncedAt = System.currentTimeMillis();
+    protected volatile long lastSyncedAt;
 
     // counts of total written, and pending, log messages
     private final AtomicLong written = new AtomicLong(0);
@@ -69,6 +69,11 @@ public abstract class AbstractCommitLogService
     final long markerIntervalNanos;
 
     /**
+     * Provides time related functions for commit log syncing scheduling.
+     */
+    protected final MonotonicClock clock;
+
+    /**
      * A flag that callers outside of the sync thread can use to signal they want the commitlog segments
      * to be flushed to disk. Note: this flag is primarily to support commit log's batch mode, which requires
      * an immediate flush to disk on every mutation; see {@link BatchCommitLogService#maybeWaitForSync(Allocation)}.
@@ -83,9 +88,9 @@ public abstract class AbstractCommitLogService
      *
      * Subclasses may be notified when a sync finishes by using the syncComplete WaitQueue.
      */
-    AbstractCommitLogService(final CommitLog commitLog, final String name, long syncIntervalMillis)
+    AbstractCommitLogService(final CommitLog commitLog, final String name, long syncIntervalMillis, MonotonicClock clock)
     {
-        this (commitLog, name, syncIntervalMillis, false);
+        this (commitLog, name, syncIntervalMillis, clock, false);
     }
 
     /**
@@ -96,10 +101,12 @@ public abstract class AbstractCommitLogService
      *
      * @param markHeadersFaster true if the chained markers should be updated more frequently than on the disk sync bounds.
      */
-    AbstractCommitLogService(final CommitLog commitLog, final String name, long syncIntervalMillis, boolean markHeadersFaster)
+    AbstractCommitLogService(final CommitLog commitLog, final String name, long syncIntervalMillis, MonotonicClock clock, boolean markHeadersFaster)
     {
         this.commitLog = commitLog;
         this.name = name;
+        this.clock = clock;
+        this.lastSyncedAt = clock.now();
 
         final long markerIntervalMillis;
         if (markHeadersFaster && syncIntervalMillis > DEFAULT_MARKER_INTERVAL_MILLIS)
@@ -132,7 +139,7 @@ public abstract class AbstractCommitLogService
             throw new IllegalArgumentException(String.format("Commit log flush interval must be positive: %fms",
                                                              syncIntervalNanos * 1e-6));
         shutdown = false;
-        thread = NamedThreadFactory.createThread(new SyncRunnable(MonotonicClock.preciseTime), name);
+        thread = NamedThreadFactory.createThread(new SyncRunnable(clock), name);
         thread.start();
     }
 

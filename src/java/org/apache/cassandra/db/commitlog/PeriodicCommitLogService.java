@@ -20,14 +20,15 @@ package org.apache.cassandra.db.commitlog;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.MonotonicClock;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
 {
     private static final long blockWhenSyncLagsNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getPeriodicCommitLogSyncBlock());
 
-    public PeriodicCommitLogService(final CommitLog commitLog)
+    public PeriodicCommitLogService(final CommitLog commitLog, MonotonicClock clock)
     {
-        super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod(),
+        super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod(), clock,
               !(commitLog.configuration.useCompression() || commitLog.configuration.useEncryption()));
     }
 
