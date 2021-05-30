@@ -336,9 +336,14 @@ public class GuardrailDiskUsageTest extends GuardrailTester
             executeNet(batchStatement);
         };
 
+        // STAR-654 Short delay after grant permissions
+        Thread.sleep(1000);
+
         // default state, write request works fine
-        assertTrue(Guardrails.enabled());
+        assertTrue(Guardrails.ready());
+//        logger.info("danj diskusagetest before select");
         assertValid(select);
+//        logger.info("danj diskusagetest after select");
         assertValid(insert);
         assertValid(batch);
 

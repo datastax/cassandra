@@ -40,25 +40,25 @@ import static junit.framework.Assert.fail;
  */
 public class TombstonesTest extends CQLTester
 {
-    static final int ORIGINAL_FAILURE_THRESHOLD = DatabaseDescriptor.getTombstoneFailureThreshold();
+    static final int ORIGINAL_FAILURE_THRESHOLD = DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold;
     static final int FAILURE_THRESHOLD = 100;
 
-    static final int ORIGINAL_WARN_THRESHOLD = DatabaseDescriptor.getTombstoneFailureThreshold();
+    static final int ORIGINAL_WARN_THRESHOLD = DatabaseDescriptor.getGuardrailsConfig().tombstone_warn_threshold;
     static final int WARN_THRESHOLD = 50;
 
     @BeforeClass
     public static void setUp() throws Throwable
     {
         DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setTombstoneFailureThreshold(FAILURE_THRESHOLD);
-        DatabaseDescriptor.setTombstoneWarnThreshold(WARN_THRESHOLD);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneWarnThreshold(WARN_THRESHOLD);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneFailureThreshold(FAILURE_THRESHOLD);
     }
 
     @AfterClass
     public static void tearDown()
     {
-        DatabaseDescriptor.setTombstoneFailureThreshold(ORIGINAL_FAILURE_THRESHOLD);
-        DatabaseDescriptor.setTombstoneWarnThreshold(ORIGINAL_WARN_THRESHOLD);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneFailureThreshold(ORIGINAL_FAILURE_THRESHOLD);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneWarnThreshold(ORIGINAL_WARN_THRESHOLD);
     }
 
     @Test

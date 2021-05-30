@@ -518,7 +518,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                    columnFamily(),
                                                    request.key,
                                                    request,
-                                                   options.getSerialConsistency(),
+                                                   options.getSerialConsistency(queryState),
                                                    options.getConsistency(),
                                                    queryState,
                                                    options.getNowInSeconds(queryState),

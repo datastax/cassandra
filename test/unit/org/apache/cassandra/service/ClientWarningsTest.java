@@ -18,6 +18,8 @@
 package org.apache.cassandra.service;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -60,7 +62,10 @@ public class ClientWarningsTest extends CQLTester
     public static void setUp()
     {
         requireNetwork();
-        DatabaseDescriptor.setBatchSizeWarnThresholdInKB(1);
+        DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWarnThresholdInKB(1);
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = new HashSet<>();
+        DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed = new HashSet<>();
+        DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_failure_threshold = -1;
     }
 
     @Test
@@ -77,7 +82,7 @@ public class ClientWarningsTest extends CQLTester
             Message.Response resp = client.execute(query);
             assertNull(resp.getWarnings());
 
-            query = new QueryMessage(createBatchStatement2(DatabaseDescriptor.getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
+            query = new QueryMessage(createBatchStatement2(DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
             resp = client.execute(query);
             assertEquals(1, resp.getWarnings().size());
         }
@@ -93,11 +98,11 @@ public class ClientWarningsTest extends CQLTester
         {
             client.connect(false);
 
-            QueryMessage query = new QueryMessage(createBatchStatement2(DatabaseDescriptor.getBatchSizeWarnThreshold() / 2 + 1), QueryOptions.DEFAULT);
+            QueryMessage query = new QueryMessage(createBatchStatement2(DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWarnThreshold() / 2 + 1), QueryOptions.DEFAULT);
             Message.Response resp = client.execute(query);
             assertEquals(1, resp.getWarnings().size());
 
-            query = new QueryMessage(createBatchStatement(DatabaseDescriptor.getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
+            query = new QueryMessage(createBatchStatement(DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
             resp = client.execute(query);
             assertNull(resp.getWarnings());
         }
@@ -153,7 +158,7 @@ public class ClientWarningsTest extends CQLTester
         {
             client.connect(false);
 
-            QueryMessage query = new QueryMessage(createBatchStatement(DatabaseDescriptor.getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
+            QueryMessage query = new QueryMessage(createBatchStatement(DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWarnThreshold()), QueryOptions.DEFAULT);
             Message.Response resp = client.execute(query);
             assertNull(resp.getWarnings());
         }

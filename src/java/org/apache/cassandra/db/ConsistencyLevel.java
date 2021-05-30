@@ -19,6 +19,8 @@ package org.apache.cassandra.db;
 
 import java.util.Locale;
 
+import javax.annotation.Nullable;
+
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
@@ -218,8 +220,7 @@ public enum ConsistencyLevel
 
     public void validateForWrite(String keyspaceName, QueryState queryState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         switch (this)
         {
@@ -232,8 +233,7 @@ public enum ConsistencyLevel
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
     public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, QueryState queryState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         switch (this)
         {
@@ -248,8 +248,7 @@ public enum ConsistencyLevel
 
     public void validateForCas(String keyspaceName, QueryState queryState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
@@ -262,8 +261,8 @@ public enum ConsistencyLevel
 
     public void validateCounterForWrite(TableMetadata metadata, QueryState queryState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(metadata.keyspace))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        // TODO Note from DB-2258
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
@@ -277,5 +276,23 @@ public enum ConsistencyLevel
         if (!(replicationStrategy instanceof NetworkTopologyStrategy))
             throw new InvalidRequestException(String.format("consistency level %s not compatible with replication strategy (%s)",
                                                             this, replicationStrategy.getClass().getName()));
+    }
+
+    // TODO Note DB-3681
+    /**
+     * Returns the strictest consistency level allowed by Guardrails.
+     *
+     * @param state the query state, used to skip the guardrails check if the query is internal or is done by a superuser.
+     * @return the strictest allowed serial consistency level
+     * @throws InvalidRequestException if all serial consistency level are disallowed
+     */
+    public static ConsistencyLevel defaultSerialConsistency(@Nullable QueryState state) throws InvalidRequestException
+    {
+        if (DatabaseDescriptor.getRawConfig() == null || !Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.SERIAL, state))
+            return ConsistencyLevel.SERIAL;
+        else if (!Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.LOCAL_SERIAL, state))
+            return ConsistencyLevel.LOCAL_SERIAL;
+
+        throw new InvalidRequestException("Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");
     }
 }
