@@ -72,13 +72,13 @@ public class TombstonesTest extends CQLTester
 
         // insert exactly the amount of tombstones that shouldn't trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD; i++)
-            execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
+            execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
 
         try
         {
             execute("SELECT * FROM %s WHERE a = 'key';");
             assertEquals(oldFailures, cfs.metric.tombstoneFailures.getCount());
-            assertEquals(oldWarnings, cfs.metric.tombstoneWarnings.getCount());
+            assertEquals(oldWarnings + 1, cfs.metric.tombstoneWarnings.getCount());
         }
         catch (Throwable e)
         {
@@ -96,7 +96,7 @@ public class TombstonesTest extends CQLTester
 
         // insert exactly the amount of tombstones that *SHOULD* trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD + 1; i++)
-            execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
+            execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
 
         try
         {
@@ -218,7 +218,7 @@ public class TombstonesTest extends CQLTester
 
         // insert the number of tombstones that *SHOULD* trigger an Warning
         for (int i = 0; i < WARN_THRESHOLD + 1; i++)
-            execute("INSERT INTO %s (a, b, c ) VALUES ('key', 'cc" + i + "',  null);");
+            execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
         try
         {
             execute("SELECT * FROM %s WHERE a = 'key';");
