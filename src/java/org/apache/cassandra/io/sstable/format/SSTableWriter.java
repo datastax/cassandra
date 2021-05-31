@@ -499,11 +499,5 @@ public abstract class SSTableWriter extends SSTable implements Transactional
             String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
             Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true, null);
         }
-
-        if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
-        {
-            String keyString = metadata().partitionKeyType.getString(key.getKey());
-            logger.warn("Writing large partition {}/{}:{} ({}) to sstable {}", metadata.keyspace, metadata.name, keyString, FBUtilities.prettyPrintMemory(rowSize), getFilename());
-        }
     }
 }

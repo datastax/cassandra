@@ -1263,9 +1263,6 @@ replica_filtering_protection:
     cached_rows_warn_threshold: 2000
     cached_rows_fail_threshold: 32000
 
-# Log a warning when compacting partitions larger than this value
-compaction_large_partition_warning_threshold_mb: 100
-
 # GC Pauses greater than 200 ms will be logged at INFO level
 # This threshold can be adjusted to minimize logging if necessary
 # gc_log_threshold_in_ms: 200
