@@ -736,7 +736,7 @@ public abstract class CassandraIndex implements Index
             TableMetadata.builder(baseCfsMetadata.keyspace, baseCfsMetadata.indexTableName(indexMetadata), baseCfsMetadata.id)
                          .kind(TableMetadata.Kind.INDEX)
                          .partitioner(new LocalPartitioner(indexedValueType))
-                         .addPartitionKeyColumn(indexedColumn.name, isCompatible ? indexedColumn.type : utils.getIndexedPartitionKeyType(indexedColumn))
+                         .addPartitionKeyColumn(indexedColumn.name, isCompatible ? indexedValueType : utils.getIndexedValueType(indexedColumn))
                          .addClusteringColumn("partition_key", isCompatible ? baseCfsMetadata.partitioner.partitionOrdering() : indexedTablePartitionKeyType);
 
         // Adding clustering columns, which depends on the index type.
