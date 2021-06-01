@@ -21,6 +21,7 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.junit.Assert.*;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 public class MonotonicClockTest
@@ -53,5 +54,14 @@ public class MonotonicClockTest
 
             lastConverted = convertedNow;
         }
+    }
+
+    @Test
+    public void testTimestampOverflowComparison()
+    {
+        MonotonicClock clock = MonotonicClock.Global.preciseTime;
+
+        Assert.assertTrue("Overflown long (now) should be after long close to max",
+                          clock.isAfter(Long.MIN_VALUE + 1, Long.MAX_VALUE));
     }
 }
