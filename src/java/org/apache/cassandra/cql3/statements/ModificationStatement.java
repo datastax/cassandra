@@ -34,7 +34,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.ColumnConditions;
@@ -49,7 +48,6 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
 import org.apache.cassandra.service.ClientState;
@@ -252,17 +250,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         if (hasConditions())
             state.ensureTablePermission(metadata, Permission.SELECT);
 
-        // MV updates need to get the current state from the table, and might update the views
-        // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
-        Iterator<ViewMetadata> views = View.findAll(keyspace(), table()).iterator();
-        if (views.hasNext())
-        {
-            state.ensureTablePermission(metadata, Permission.SELECT);
-            do
-            {
-                state.ensureTablePermission(views.next().metadata, Permission.MODIFY);
-            } while (views.hasNext());
-        }
+        // Modification on base table with MV should skip SELECT access control to base table and WRITE access control to view table.
 
         for (Function function : getFunctions())
             state.ensurePermission(Permission.EXECUTE, function);

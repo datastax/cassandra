@@ -1,3 +1,7 @@
+Future version (tbd)
+ * Require only MODIFY permission on base when updating table with MV (STAR-564)
+
+
 5.0-alpha2
  * Remove deprecated properties in CompressionParams (CASSANDRA-18742)
  * Add support for repair coordinator to retry messages that timeout (CASSANDRA-18816)
