@@ -1543,4 +1543,4 @@ enable_transient_replication: false
   # and disk_usage_percentage_failure_threshold. Valid values: (1, max available disk size of all data directories]
   # Default -1 to disable and use the physically available disk size of data directories during calculations.
   # may differ if emulate_dbaas_defaults is enabled
-# disk_usage_max_disk_size_in_gb: -1
+  # disk_usage_max_disk_size_in_gb: -1

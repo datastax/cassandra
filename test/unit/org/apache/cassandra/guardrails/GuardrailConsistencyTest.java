@@ -91,13 +91,6 @@ public class GuardrailConsistencyTest extends GuardrailTester
                                    false,
                                    1,
                                    null,
-//                                   new QueryOptions.PagingOptions(new PageSize(1,
-//                                                                               PageSize.PageUnit.ROWS),
-//                                                                  QueryOptions.PagingOptions.Mechanism.CONTINUOUS,
-//                                                                  null,
-//                                                                  10,
-//                                                                  1,
-//                                                                  1),
                                    serialCl,
                                    ProtocolVersion.CURRENT,
                                    KEYSPACE);

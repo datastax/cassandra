@@ -277,7 +277,6 @@ public class BatchStatement implements CQLStatement
     @Override
     public void validate(QueryState state) throws InvalidRequestException
     {
-        // TODO: Note cndb-338
         if (isLogged())
             Guardrails.loggedBatchEnabled.ensureEnabled(state);
 
@@ -369,7 +368,6 @@ public class BatchStatement implements CQLStatement
                     tableNames.add(update.metadata().toString());
             }
 
-            //TODO: Note from DB-3611
             Guardrails.batchSize.guard(size, tableNames.toString(), false, queryState);
         }
     }

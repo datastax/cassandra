@@ -215,18 +215,14 @@ public class Config
     public int column_index_size_in_kb = 64;
     public volatile int column_index_cache_size_in_kb = 2;
     @Deprecated
-//    @HiddenInformation
     public int batch_size_warn_threshold_in_kb = 0;
     @Deprecated
-//    @HiddenInformation
     public int batch_size_fail_threshold_in_kb = 0;
     @Deprecated
-//    @HiddenInformation
     public Integer unlogged_batch_across_partitions_warn_threshold = 0;
     public volatile Integer concurrent_compactors;
     public volatile int compaction_throughput_mb_per_sec = 16;
     @Deprecated
-//    @HiddenInformation
     public int compaction_large_partition_warning_threshold_mb = 0;
     public int min_free_space_per_drive_in_mb = 50;
 
@@ -353,10 +349,8 @@ public class Config
     public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
 
     @Deprecated
-//    @HiddenInformation
     public int tombstone_warn_threshold = 0;
     @Deprecated
-//    @HiddenInformation
     public int tombstone_failure_threshold = 0;
 
     public final ReplicaFilteringProtectionOptions replica_filtering_protection = new ReplicaFilteringProtectionOptions();

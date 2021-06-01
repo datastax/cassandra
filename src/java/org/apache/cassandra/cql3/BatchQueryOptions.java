@@ -69,7 +69,6 @@ public abstract class BatchQueryOptions
         return wrapped.getKeyspace();
     }
 
-    // TODO Note DB-3681
     public ConsistencyLevel getSerialConsistency(QueryState state)
     {
         return wrapped.getSerialConsistency(state);

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import javax.annotation.Nullable;
 
 import org.junit.After;
@@ -38,11 +37,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 
 import static java.lang.String.format;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

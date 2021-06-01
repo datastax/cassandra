@@ -24,7 +24,6 @@ import javax.annotation.Nullable;
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -261,7 +260,6 @@ public enum ConsistencyLevel
 
     public void validateCounterForWrite(TableMetadata metadata, QueryState queryState) throws InvalidRequestException
     {
-        // TODO Note from DB-2258
         Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         if (this == ConsistencyLevel.ANY)
@@ -278,7 +276,6 @@ public enum ConsistencyLevel
                                                             this, replicationStrategy.getClass().getName()));
     }
 
-    // TODO Note DB-3681
     /**
      * Returns the strictest consistency level allowed by Guardrails.
      *

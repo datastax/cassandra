@@ -28,10 +28,8 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -290,7 +288,6 @@ public class GuardrailsConfig
     public void validateDiskUsageMaxSize()
     {
         long totalDiskSizeInGb = 0L;
-//        for (Directories.DataDirectory directory : ColumnFamilyStore.getInitialDirectories())
         for (Directories.DataDirectory directory : Directories.dataDirectories.getAllDirectories())
         {
             totalDiskSizeInGb += SizeUnit.BYTES.toGigaBytes(directory.getTotalSpace());

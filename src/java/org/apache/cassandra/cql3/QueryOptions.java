@@ -192,8 +192,6 @@ public abstract class QueryOptions
     /**  Serial consistency for conditional updates. */
     public ConsistencyLevel getSerialConsistency(@Nullable QueryState state)
     {
-        // TODO Note DB-3681
-//        return getSpecificOptions().serialConsistency;
         ConsistencyLevel cl = getSpecificOptions().serialConsistency;
         return cl != null ? cl : ConsistencyLevel.defaultSerialConsistency(state);
     }

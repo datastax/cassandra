@@ -400,7 +400,6 @@ public class SerDeserTest
         assertEquals(options.getNowInSeconds(state), decodedOptions.getNowInSeconds(state));
     }
 
-    // TODO Note DB-3681
     @Test
     public void defaultSerialCLGuardrailsTest()
     {

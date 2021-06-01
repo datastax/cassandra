@@ -34,7 +34,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.guardrails.Guardrail;
@@ -64,7 +63,6 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -568,14 +566,9 @@ public abstract class ReadCommand extends AbstractReadQuery
     {
         class MetricRecording extends Transformation<UnfilteredRowIterator>
         {
-//            private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
-//            private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
-
-//            private final boolean respectTombstoneThresholds = !SchemaConstants.isLocalSystemKeyspace(ReadCommand.this.metadata().keyspace);
             private final boolean enforceStrictLiveness = metadata().enforceStrictLiveness();
 
             private int liveRows = 0;
-//            private int tombstones = 0;
             private final Guardrail.Threshold.GuardedCounter tombstones = createTombstoneCounter();
 
             private DecoratedKey currentKey;
