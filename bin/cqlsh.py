@@ -2211,21 +2211,17 @@ def read_options(cmdlineargs, environment):
         cl = cassandra.ConsistencyLevel.name_to_value[options.consistency_level.upper()]
         if cl in serial_levels:
             raise KeyError
+        options.consistency_level = cl
     except KeyError:
-        cl = cassandra.ConsistencyLevel.ONE
-        parser.error('"{}" is not a valid consistency level, falling back to {}'
-                     .format(options.consistency_level, cassandra.ConsistencyLevel.value_to_name[cl]))
-    options.consistency_level = cl
+        parser.error('"{}" is not a valid consistency level'.format(options.consistency_level))
 
     try:
         cl = cassandra.ConsistencyLevel.name_to_value[options.serial_consistency_level.upper()]
         if cl not in serial_levels:
             raise KeyError
+        options.serial_consistency_level = cl
     except KeyError:
-        cl = cassandra.ConsistencyLevel.SERIAL
-        parser.error('"{}" is not a valid serial consistency level, falling back to {}'
-                     .format(options.serial_consistency_level, cassandra.ConsistencyLevel.value_to_name[cl]))
-    options.serial_consistency_level = cl
+        parser.error('"{}" is not a valid serial consistency level'.format(options.serial_consistency_level))
 
     hostname = option_with_default(configs.get, 'connection', 'hostname', DEFAULT_HOST)
     port = option_with_default(configs.get, 'connection', 'port', DEFAULT_PORT)
