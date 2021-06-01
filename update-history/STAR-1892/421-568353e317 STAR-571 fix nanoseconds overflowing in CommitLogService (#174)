@@ -1,0 +1,240 @@
+--- a/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java
++++ b/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java
+@@ -43,9 +43,6 @@
+ import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.SimulatorSafe.SAFE;
+ import static org.apache.cassandra.concurrent.Interruptible.State.NORMAL;
+ import static org.apache.cassandra.concurrent.Interruptible.State.SHUTTING_DOWN;
+-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+-import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
+ import static org.apache.cassandra.utils.concurrent.Semaphore.newSemaphore;
+ import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
+ 
+@@ -60,11 +57,7 @@
+     private volatile Interruptible executor;
+ 
+     // all Allocations written before this time will be synced
+-<<<<<<<
+-    protected volatile long lastSyncedAt = currentTimeMillis();
+-=======
+     protected volatile long lastSyncedAt;
+->>>>>>>
+ 
+     // counts of total written, and pending, log messages
+     private final AtomicLong written = new AtomicLong(0);
+@@ -162,15 +155,9 @@
+         if (syncIntervalNanos < 1 && !(this instanceof BatchCommitLogService)) // permit indefinite waiting with batch, as perfectly sensible
+             throw new IllegalArgumentException(String.format("Commit log flush interval must be positive: %fms",
+                                                              syncIntervalNanos * 1e-6));
+-<<<<<<<
+ 
+-        SyncRunnable sync = new SyncRunnable(preciseTime);
++        SyncRunnable sync = new SyncRunnable(clock);
+         executor = executorFactory().infiniteLoop(name, sync, SAFE, NON_DAEMON, SYNCHRONIZED);
+-=======
+-        shutdown = false;
+-        thread = NamedThreadFactory.createThread(new SyncRunnable(clock), name);
+-        thread.start();
+->>>>>>>
+     }
+ 
+     class SyncRunnable implements Interruptible.Task
+@@ -193,15 +180,10 @@
+             {
+                 // sync and signal
+                 long pollStarted = clock.now();
+-<<<<<<<
+-                boolean flushToDisk = lastSyncedAt + syncIntervalNanos - pollStarted <= 0 || shutdownRequested || syncRequested;
+-                if (flushToDisk)
+-=======
+-                boolean flushToDisk = lastSyncedAt + syncIntervalNanos <= pollStarted || state != NORMAL || syncRequested;
++                boolean flushToDisk = lastSyncedAt + syncIntervalNanos - pollStarted <= 0 || state != NORMAL || syncRequested;
+                 // synchronized to prevent thread interrupts while performing IO operations and also
+                 // clear interrupted status to prevent ClosedByInterruptException in CommitLog::sync
+                 synchronized (this)
+->>>>>>>
+                 {
+                     Thread.interrupted();
+                     if (flushToDisk)
+@@ -234,23 +216,9 @@
+                         maybeLogFlushLag(pollStarted, now);
+ 
+                     long wakeUpAt = pollStarted + markerIntervalNanos;
+-                    if (wakeUpAt > now)
++                    if (wakeUpAt - now > 0)
+                         haveWork.tryAcquireUntil(1, wakeUpAt);
+                 }
+-<<<<<<<
+-=======
+-
+-                long now = clock.now();
+-                if (flushToDisk)
+-                    maybeLogFlushLag(pollStarted, now);
+-
+-                if (shutdownRequested)
+-                    return false;
+-
+-                long wakeUpAt = pollStarted + markerIntervalNanos;
+-                if (wakeUpAt - now > 0)
+-                    LockSupport.parkNanos(wakeUpAt - now);
+->>>>>>>
+             }
+             catch (Throwable t)
+             {
+@@ -346,11 +314,7 @@
+      */
+     public void syncBlocking()
+     {
+-<<<<<<<
+         long requestTime = clock.now();
+-=======
+-        long requestTime = nanoTime();
+->>>>>>>
+         requestExtraSync();
+         awaitSyncAt(requestTime, null);
+     }
+@@ -359,13 +323,8 @@
+     {
+         do
+         {
+-<<<<<<<
+-            WaitQueue.Signal signal = context != null ? syncComplete.register(context) : syncComplete.register();
+-            if (lastSyncedAt - syncTime < 0)
+-=======
+             WaitQueue.Signal signal = context != null ? syncComplete.register(context, Context::stop) : syncComplete.register();
+-            if (lastSyncedAt < syncTime)
+->>>>>>>
++            if (lastSyncedAt - syncTime < 0)
+                 signal.awaitUninterruptibly();
+             else
+                 signal.cancel();
+--- a/src/java/org/apache/cassandra/db/commitlog/BatchCommitLogService.java
++++ b/src/java/org/apache/cassandra/db/commitlog/BatchCommitLogService.java
+@@ -17,11 +17,8 @@
+  */
+ package org.apache.cassandra.db.commitlog;
+ 
+-<<<<<<<
+-import org.apache.cassandra.utils.MonotonicClock;
+-=======
+ import static org.apache.cassandra.config.CassandraRelevantProperties.BATCH_COMMIT_LOG_SYNC_INTERVAL;
+->>>>>>>
++import org.apache.cassandra.utils.MonotonicClock;
+ 
+ class BatchCommitLogService extends AbstractCommitLogService
+ {
+--- a/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
++++ b/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
+@@ -59,11 +59,8 @@
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.MBeanWrapper;
+-<<<<<<<
+-import org.apache.cassandra.utils.MonotonicClock;
+-=======
+ import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+->>>>>>>
++import org.apache.cassandra.utils.MonotonicClock;
+ 
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
+@@ -117,7 +114,7 @@
+         this.archiver = archiver;
+         metrics = new CommitLogMetrics();
+ 
+-        this.clock = MonotonicClock.preciseTime;
++        this.clock = MonotonicClock.Global.preciseTime;
+ 
+         switch (DatabaseDescriptor.getCommitLogSync())
+         {
+--- a/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java
++++ b/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java
+@@ -22,8 +22,6 @@
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.utils.MonotonicClock;
+ 
+-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+-
+ class PeriodicCommitLogService extends AbstractCommitLogService
+ {
+     private static final long blockWhenSyncLagsNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getPeriodicCommitLogSyncBlock());
+@@ -36,13 +34,8 @@
+ 
+     protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
+     {
+-<<<<<<<
+         long expectedSyncTime = clock.now() - blockWhenSyncLagsNanos;
+         if (lastSyncedAt - expectedSyncTime < 0)
+-=======
+-        long expectedSyncTime = nanoTime() - blockWhenSyncLagsNanos;
+-        if (lastSyncedAt < expectedSyncTime)
+->>>>>>>
+         {
+             pending.incrementAndGet();
+             awaitSyncAt(expectedSyncTime, commitLog.metrics.waitingOnCommit.time());
+diff --git a/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java b/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java
+index 38228fca03..8f16c976d7 100644
+--- a/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java
++++ b/src/java/org/apache/cassandra/db/commitlog/AbstractCommitLogService.java
+@@ -43,9 +43,6 @@ import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Interrupts.SY
+ import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.SimulatorSafe.SAFE;
+ import static org.apache.cassandra.concurrent.Interruptible.State.NORMAL;
+ import static org.apache.cassandra.concurrent.Interruptible.State.SHUTTING_DOWN;
+-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+-import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
+ import static org.apache.cassandra.utils.concurrent.Semaphore.newSemaphore;
+ import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
+ 
+diff --git a/src/java/org/apache/cassandra/db/commitlog/CommitLog.java b/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
+index ba74f8ae1c..bd551f2bb6 100644
+--- a/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
++++ b/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
+@@ -114,7 +114,7 @@ public class CommitLog implements CommitLogMBean
+         this.archiver = archiver;
+         metrics = new CommitLogMetrics();
+ 
+-        this.clock = MonotonicClock.preciseTime;
++        this.clock = MonotonicClock.Global.preciseTime;
+ 
+         switch (DatabaseDescriptor.getCommitLogSync())
+         {
+diff --git a/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java b/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java
+index b3291e4d50..2630ec6068 100644
+--- a/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java
++++ b/src/java/org/apache/cassandra/db/commitlog/PeriodicCommitLogService.java
+@@ -22,8 +22,6 @@ import java.util.concurrent.TimeUnit;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.utils.MonotonicClock;
+ 
+-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+-
+ class PeriodicCommitLogService extends AbstractCommitLogService
+ {
+     private static final long blockWhenSyncLagsNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getPeriodicCommitLogSyncBlock());
+diff --git a/test/unit/org/apache/cassandra/db/commitlog/AbstractCommitLogServiceTest.java b/test/unit/org/apache/cassandra/db/commitlog/AbstractCommitLogServiceTest.java
+index f850bb1732..f4379c7217 100644
+--- a/test/unit/org/apache/cassandra/db/commitlog/AbstractCommitLogServiceTest.java
++++ b/test/unit/org/apache/cassandra/db/commitlog/AbstractCommitLogServiceTest.java
+@@ -103,7 +103,7 @@ public class AbstractCommitLogServiceTest
+     {
+         FakeCommitLogService(long syncIntervalMillis)
+         {
+-            super(new FakeCommitLog(), "This is not a real commit log", syncIntervalMillis, MonotonicClock.preciseTime, true);
++            super(new FakeCommitLog(), "This is not a real commit log", syncIntervalMillis, MonotonicClock.Global.preciseTime, true);
+             lastSyncedAt = 0;
+         }
+ 
+diff --git a/test/unit/org/apache/cassandra/utils/MonotonicClockTest.java b/test/unit/org/apache/cassandra/utils/MonotonicClockTest.java
+index df3a30d93f..8d769508a7 100644
+--- a/test/unit/org/apache/cassandra/utils/MonotonicClockTest.java
++++ b/test/unit/org/apache/cassandra/utils/MonotonicClockTest.java
+@@ -59,7 +59,7 @@ public class MonotonicClockTest
+     @Test
+     public void testTimestampOverflowComparison()
+     {
+-        MonotonicClock clock = MonotonicClock.preciseTime;
++        MonotonicClock clock = MonotonicClock.Global.preciseTime;
+ 
+         Assert.assertTrue("Overflown long (now) should be after long close to max",
+                           clock.isAfter(Long.MIN_VALUE + 1, Long.MAX_VALUE));
