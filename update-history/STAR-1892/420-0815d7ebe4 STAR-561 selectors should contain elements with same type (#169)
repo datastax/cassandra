@@ -1,0 +1,64 @@
+--- a/src/java/org/apache/cassandra/cql3/Maps.java
++++ b/src/java/org/apache/cassandra/cql3/Maps.java
+@@ -158,7 +158,6 @@
+         return null;
+     }
+ 
+-<<<<<<<
+     private static <T> AbstractType<?> selectType(AbstractType<?> type, AbstractType<?> otherType)
+     {
+         if (otherType == null)
+@@ -172,7 +171,8 @@
+             throw new InvalidRequestException("Invalid collection literal: all selectors must have the same CQL type inside collection literals");
+         }
+         return otherType;
+-=======
++    }
++    
+     public static <T> MapType<?, ?> getPreferredCompatibleType(List<Pair<T, T>> entries,
+                                                                java.util.function.Function<T, AbstractType<?>> mapper)
+     {
+@@ -187,7 +187,6 @@
+             return null;
+ 
+         return  MapType.getInstance(keyType, valueType, false);
+->>>>>>>
+     }
+ 
+     public static class Literal extends Term.Raw
+diff --git a/src/java/org/apache/cassandra/cql3/Lists.java b/src/java/org/apache/cassandra/cql3/Lists.java
+index 433eba3569..833609275c 100644
+--- a/src/java/org/apache/cassandra/cql3/Lists.java
++++ b/src/java/org/apache/cassandra/cql3/Lists.java
+@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Objects;
+-import java.util.Optional;
+ import java.util.Set;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.stream.Collectors;
+diff --git a/src/java/org/apache/cassandra/cql3/Sets.java b/src/java/org/apache/cassandra/cql3/Sets.java
+index a7cefe655c..596231da67 100644
+--- a/src/java/org/apache/cassandra/cql3/Sets.java
++++ b/src/java/org/apache/cassandra/cql3/Sets.java
+@@ -26,7 +26,6 @@ import java.util.HashSet;
+ import java.util.Iterator;
+ import java.util.List;
+ import java.util.Objects;
+-import java.util.Optional;
+ import java.util.Set;
+ import java.util.SortedSet;
+ import java.util.TreeSet;
+diff --git a/test/unit/org/apache/cassandra/cql3/CQLTester.java b/test/unit/org/apache/cassandra/cql3/CQLTester.java
+index c2f438f276..f06db8eb21 100644
+--- a/test/unit/org/apache/cassandra/cql3/CQLTester.java
++++ b/test/unit/org/apache/cassandra/cql3/CQLTester.java
+@@ -155,7 +155,6 @@ import org.apache.cassandra.schema.SchemaConstants;
+ import org.apache.cassandra.schema.SchemaKeyspace;
+ import org.apache.cassandra.schema.SchemaTestUtil;
+ import org.apache.cassandra.schema.TableMetadata;
+-import org.apache.cassandra.serializers.MarshalException;
+ import org.apache.cassandra.serializers.TypeSerializer;
+ import org.apache.cassandra.service.ClientState;
+ import org.apache.cassandra.service.QueryState;
