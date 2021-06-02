@@ -88,7 +88,8 @@ public class Operation
             ColumnContext columnContext = controller.getContext(e);
             List<Expression> perColumn = analyzed.get(e.column());
 
-            AbstractAnalyzer analyzer = columnContext.getAnalyzer();
+            AbstractAnalyzer analyzer = columnContext.getQueryAnalyzer();
+
             analyzer.reset(e.getIndexValue().duplicate());
 
             // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
@@ -148,9 +149,17 @@ public class Operation
                 }
                 else
                 {
-                    while (analyzer.hasNext())
+                    try
                     {
-                        range.add(e.operator(), analyzer.next());
+                        while (analyzer.hasNext())
+                        {
+                            ByteBuffer term = analyzer.next();
+                            range.add(e.operator(), term);
+                        }
+                    }
+                    finally
+                    {
+                        analyzer.end();
                     }
                 }
             }

@@ -24,6 +24,8 @@
 
 package org.apache.cassandra.index.sai.analyzer;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Map;
@@ -37,8 +39,9 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.lucene.analysis.Analyzer;
 
-public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
+public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>, Closeable
 {
     public static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance);
 
@@ -49,6 +52,18 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
      * @return true if index value is transformed, eg. normalized or lower-cased or tokenized.
      */
     public abstract boolean transformValue();
+
+    /**
+     * Call when tokenization is finished.  Used by the LuceneAnalyzer.
+     */
+    public void end()
+    {
+    }
+
+    @Override
+    public void close() throws IOException
+    {
+    }
 
     /**
      * Note: This method does not advance, as we rely on {@link #hasNext()} to buffer the next value.
@@ -93,8 +108,41 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         resetInternal(input);
     }
 
+    public static boolean hasQueryAnalyzer(Map<String, String> options)
+    {
+       return options.containsKey(LuceneAnalyzer.JSON_QUERY_ANALYZER);
+    }
+
+    public static AbstractAnalyzer fromOptionsQueryAnalyzer(AbstractType<?> type, Map<String, String> options)
+    {
+        try
+        {
+            String json = options.get(LuceneAnalyzer.JSON_QUERY_ANALYZER);
+            Analyzer analyzer = JSONAnalyzerParser.parse(json);
+            return new LuceneAnalyzer(type, analyzer, options);
+        }
+        catch (Exception ex)
+        {
+            throw new RuntimeException(ex);
+        }
+    }
+
     public static AbstractAnalyzer fromOptions(AbstractType<?> type, Map<String, String> options)
     {
+        if (options.containsKey(LuceneAnalyzer.JSON_ANALYZER))
+        {
+            try
+            {
+                String json = options.get(LuceneAnalyzer.JSON_ANALYZER);
+                Analyzer analyzer = JSONAnalyzerParser.parse(json);
+                return new LuceneAnalyzer(type, analyzer, options);
+            }
+            catch (Exception ex)
+            {
+                throw new RuntimeException(ex);
+            }
+        }
+
         if (hasNonTokenizingOptions(options))
         {
             if (TypeUtil.isIn(type, ANALYZABLE_TYPES))

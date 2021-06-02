@@ -163,10 +163,17 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         else
         {
             analyzer.reset(term);
-            while (analyzer.hasNext())
+            try
             {
-                ByteBuffer token = analyzer.next();
-                limiter.increment(currentBuilder.add(token, key, sstableRowId));
+                while (analyzer.hasNext())
+                {
+                    ByteBuffer token = analyzer.next();
+                    limiter.increment(currentBuilder.add(token, key, sstableRowId));
+                }
+            }
+            finally
+            {
+                analyzer.end();
             }
         }
     }

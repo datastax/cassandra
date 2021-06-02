@@ -99,38 +99,45 @@ public class TrieMemoryIndex extends MemoryIndex
         synchronized (writeLock)
         {
             AbstractAnalyzer analyzer = columnContext.getAnalyzer();
-            value = TypeUtil.encode(value, validator);
-            analyzer.reset(value.duplicate());
-            final PrimaryKey primaryKey = PrimaryKey.of(key, clustering);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
-            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
-
-
-            while (analyzer.hasNext())
+            try
             {
-                final ByteBuffer term = analyzer.next();
-                setMinMaxTerm(term);
+                value = TypeUtil.encode(value, validator);
+                analyzer.reset(value.duplicate());
+                final PrimaryKey primaryKey = PrimaryKey.of(key, clustering);
+                final long initialSizeOnHeap = data.sizeOnHeap();
+                final long initialSizeOffHeap = data.sizeOffHeap();
+                final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
-                final ByteComparable encodedTerm = encode(term);
-                try
+                while (analyzer.hasNext())
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
+                    final ByteBuffer term = analyzer.next();
+                    setMinMaxTerm(term);
+
+                    final ByteComparable encodedTerm = encode(term);
+                    try
                     {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                        if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
+                        {
+                            data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
+                        }
+                        else
+                        {
+                            data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        }
                     }
-                    else
+                    catch (MemtableTrie.SpaceExhaustedException e)
                     {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        //TODO Handle this properly
+                        throw new RuntimeException(e);
                     }
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
-                {
-                    //TODO Handle this properly
-                    throw new RuntimeException(e);
-                }
+
+                return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
             }
-            return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
+            finally
+            {
+                analyzer.end();
+            }
         }
     }
 

@@ -113,7 +113,7 @@ public class Expression
     public Expression(ColumnContext columnContext)
     {
         this.context = columnContext;
-        this.analyzer = columnContext.getAnalyzer();
+        this.analyzer = columnContext.getQueryAnalyzer();
         this.validator = columnContext.getValidator();
     }
 
@@ -257,36 +257,42 @@ public class Expression
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
     {
         analyzer.reset(columnValue.duplicate());
-        while (analyzer.hasNext())
+        try
         {
-            ByteBuffer term = analyzer.next();
-
-            boolean isMatch = false;
-            switch (operation)
+            while (analyzer.hasNext())
             {
-                case EQ:
-                case MATCH:
-                // Operation.isSatisfiedBy handles conclusion on !=,
-                // here we just need to make sure that term matched it
-                case CONTAINS_KEY:
-                case CONTAINS_VALUE:
-                case NOT_EQ:
-                    isMatch = validator.compare(term, requestedValue) == 0;
-                    break;
-                case RANGE:
-                    isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
-                    break;
+                final ByteBuffer term = analyzer.next();
 
-                case PREFIX:
-                    isMatch = ByteBufferUtil.startsWith(term, requestedValue);
-                    break;
+                boolean isMatch = false;
+                switch (operation)
+                {
+                    case EQ:
+                    case MATCH:
+                        // Operation.isSatisfiedBy handles conclusion on !=,
+                        // here we just need to make sure that term matched it
+                    case CONTAINS_KEY:
+                    case CONTAINS_VALUE:
+                    case NOT_EQ:
+                        isMatch = validator.compare(term, requestedValue) == 0;
+                        break;
+                    case RANGE:
+                        isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
+                        break;
+
+                    case PREFIX:
+                        isMatch = ByteBufferUtil.startsWith(term, requestedValue);
+                        break;
+                }
+
+                if (isMatch)
+                    return true;
             }
-
-            if (isMatch)
-                return true;
+            return false;
         }
-
-        return false;
+        finally
+        {
+            analyzer.end();
+        }
     }
 
     public Op getOp()
