@@ -18,9 +18,7 @@
 
 package org.apache.cassandra.guardrails;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
@@ -81,9 +79,6 @@ public abstract class GuardrailTester extends CQLTester
         executeNet(format("CREATE USER IF NOT EXISTS %s WITH PASSWORD '%s'", USERNAME, PASSWORD));
         executeNet(format("GRANT ALL ON KEYSPACE %s TO %s", KEYSPACE, USERNAME));
 
-        // STAR-654 Short delay after grant permissions
-//        Thread.sleep(1000);
-        
         useUser(USERNAME, PASSWORD);
 
         listener = new TestListener(null);

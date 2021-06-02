@@ -398,7 +398,7 @@ public abstract class QueryOptions
         {
             this.pageSize = pageSize;
             this.state = state;
-            this.serialConsistency = serialConsistency; // == null ? ConsistencyLevel.SERIAL : serialConsistency;
+            this.serialConsistency = serialConsistency;
             this.timestamp = timestamp;
             this.keyspace = keyspace;
             this.nowInSeconds = nowInSeconds;
