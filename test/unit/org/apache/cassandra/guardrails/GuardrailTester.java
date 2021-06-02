@@ -31,6 +31,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 
 import com.datastax.driver.core.Statement;
+import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -79,6 +80,18 @@ public abstract class GuardrailTester extends CQLTester
         useSuperUser();
         executeNet(format("CREATE USER IF NOT EXISTS %s WITH PASSWORD '%s'", USERNAME, PASSWORD));
         executeNet(format("GRANT ALL ON KEYSPACE %s TO %s", KEYSPACE, USERNAME));
+
+        boolean permissionApplied = false;
+        int attemptsRemaining = 5;
+        while (!permissionApplied && attemptsRemaining > 0)
+        {
+            permissionApplied = !executeNet(new SimpleStatement("LIST ALL OF " + USERNAME)).isExhausted();
+            attemptsRemaining--;
+            if (!permissionApplied)
+            {
+                Thread.sleep(500);
+            }
+        }
 
         useUser(USERNAME, PASSWORD);
 
