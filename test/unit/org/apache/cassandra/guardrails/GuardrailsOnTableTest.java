@@ -25,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -45,8 +46,8 @@ public class GuardrailsOnTableTest extends GuardrailTester
     private static long defaultTablesSoftLimit;
     private static long defaultTableHardLimit;
     private static int defaultMVPerTableFailureThreshold;
-    private static Set<String> defaultTablePropertiesDisallowed;
-    private static Set<String> defaultTablePropertiesIgnored;
+    private static ImmutableSet<String> defaultTablePropertiesDisallowed;
+    private static ImmutableSet<String> defaultTablePropertiesIgnored;
 
     @Before
     public void before()
@@ -64,9 +65,9 @@ public class GuardrailsOnTableTest extends GuardrailTester
         TableAttributes.validKeywords.stream()
                                      .filter(p -> !allowed.contains(p))
                                      .map(String::toUpperCase)
-                                     .collect(Collectors.toSet());
+                                     .collect(ImmutableSet.toImmutableSet());
         // but actually ignore "comment"
-        DatabaseDescriptor.getGuardrailsConfig().table_properties_ignored = new HashSet<>(Arrays.asList("comment"));
+        DatabaseDescriptor.getGuardrailsConfig().table_properties_ignored = ImmutableSet.copyOf(Arrays.asList("comment"));
     }
 
     @After
@@ -206,10 +207,10 @@ public class GuardrailsOnTableTest extends GuardrailTester
     {
         GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
 
-        config.table_properties_disallowed = new HashSet<>(Arrays.asList("ID1", "gc_grace_seconds"));
+        config.table_properties_disallowed = ImmutableSet.copyOf(Arrays.asList("ID1", "gc_grace_seconds"));
         assertConfigFails(config::validate, "[id1]");
 
-        config.table_properties_disallowed = new HashSet<>(Arrays.asList("ID", "Gc_Grace_Seconds"));
+        config.table_properties_disallowed = ImmutableSet.copyOf(Arrays.asList("ID", "Gc_Grace_Seconds"));
         config.validate();
     }
 

@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -56,7 +57,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     ConsistencyLevel.LOCAL_SERIAL.toString()
     ));
 
-    private static Set<String> defaultDisallowedWriteConsistencyLevels;
+    private static ImmutableSet<String> defaultDisallowedWriteConsistencyLevels;
     private Supplier<QueryState> queryState;
 
     @BeforeClass
@@ -81,7 +82,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
 
     private void disableConsistencyLevels(Set<String> consistencyLevels)
     {
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = consistencyLevels;
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(consistencyLevels);
     }
 
     private QueryOptions queryOptions(ConsistencyLevel cl, ConsistencyLevel serialCl)

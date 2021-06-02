@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -87,8 +88,8 @@ public class GuardrailsConfig
 
     public volatile Long tables_warn_threshold;
     public volatile Long tables_failure_threshold;
-    public volatile Set<String> table_properties_disallowed;
-    public volatile Set<String> table_properties_ignored;
+    public volatile ImmutableSet<String> table_properties_disallowed;
+    public volatile ImmutableSet<String> table_properties_ignored;
 
     public volatile Boolean user_timestamps_enabled;
 
@@ -98,7 +99,7 @@ public class GuardrailsConfig
 
     public volatile Boolean counter_enabled;
 
-    public volatile Set<String> write_consistency_levels_disallowed;
+    public volatile ImmutableSet<String> write_consistency_levels_disallowed;
 
     // For paging by bytes having a page bigger than this threshold will result in a failure
     // For paging by rows the result will be silently cut short if it is bigger than the threshold
@@ -167,7 +168,7 @@ public class GuardrailsConfig
 
         // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
         enforceDefault(write_consistency_levels_disallowed,
-                       v -> write_consistency_levels_disallowed = v,
+                       v -> write_consistency_levels_disallowed = ImmutableSet.copyOf(v),
                        Collections.<String>emptySet(),
                        new LinkedHashSet<>(Arrays.asList("ANY", "ONE", "LOCAL_ONE")));
 
@@ -186,12 +187,12 @@ public class GuardrailsConfig
         enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, -1L, 200L);
 
         enforceDefault(table_properties_disallowed,
-                       v -> table_properties_disallowed = v,
+                       v -> table_properties_disallowed = ImmutableSet.copyOf(v),
                        Collections.<String>emptySet(),
                        Collections.<String>emptySet());
 
         enforceDefault(table_properties_ignored,
-                       v -> table_properties_ignored = v,
+                       v -> table_properties_ignored = ImmutableSet.copyOf(v),
                        Collections.<String>emptySet(),
                        new LinkedHashSet<>(TableAttributes.allKeywords().stream()
                                                           .sorted()

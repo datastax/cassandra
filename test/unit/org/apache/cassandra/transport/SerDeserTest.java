@@ -20,6 +20,7 @@ package org.apache.cassandra.transport;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.RandomStringUtils;
 
 import io.netty.buffer.Unpooled;
@@ -424,7 +425,7 @@ public class SerDeserTest
                                                ConsistencyLevel expectedDecodedSerialConsistency)
     {
         Set<String> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed;
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = writeConsistencyLevelsDisallowed;
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(writeConsistencyLevelsDisallowed);
 
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ALL,
                                                         Collections.singletonList(ByteBuffer.wrap(new byte[] { 0x00, 0x01, 0x02 })),
@@ -455,7 +456,7 @@ public class SerDeserTest
             }
         }
 
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = previousConsistencyLevels;
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(previousConsistencyLevels);
     }
 
     @Test
@@ -481,7 +482,7 @@ public class SerDeserTest
                                                  ConsistencyLevel expectedDecodedSerialConsistency)
     {
         Set<String> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed;
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = writeConsistencyLevelsDisallowed;
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(writeConsistencyLevelsDisallowed);
 
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ALL,
                                                         Collections.singletonList(ByteBuffer.wrap(new byte[] { 0x00, 0x01, 0x02 })),
@@ -496,7 +497,7 @@ public class SerDeserTest
         QueryOptions decodedOptions = QueryOptions.codec.decode(buf, version);
         assertEquals(expectedDecodedSerialConsistency, decodedOptions.getSerialConsistency(null));
 
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = previousConsistencyLevels;
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(previousConsistencyLevels);
     }
 
     // return utf8 string that contains no ascii chars

@@ -25,6 +25,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -50,7 +51,7 @@ public abstract class GuardrailTester extends CQLTester
     static final String USERNAME = "guardrail_user";
     static final String PASSWORD = "guardrail_password";
 
-    private static Set<String> tablePropertiesDisallowed;
+    private static ImmutableSet<String> tablePropertiesDisallowed;
 
     protected TestListener listener;
 
@@ -58,7 +59,7 @@ public abstract class GuardrailTester extends CQLTester
     public static void setupGuardrailTester()
     {
         tablePropertiesDisallowed = DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed;
-        DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed = Collections.emptySet();
+        DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed = ImmutableSet.of();
 
         requireAuthentication();
         requireNetwork();

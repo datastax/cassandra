@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
 
 import org.junit.BeforeClass;
@@ -62,8 +63,8 @@ public class ClientWarningsTest extends CQLTester
     {
         requireNetwork();
         DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWarnThresholdInKB(1);
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = new HashSet<>();
-        DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed = new HashSet<>();
+        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.of();
+        DatabaseDescriptor.getGuardrailsConfig().table_properties_disallowed = ImmutableSet.of();
         DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_failure_threshold = -1;
     }
 
