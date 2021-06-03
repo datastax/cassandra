@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -63,8 +64,8 @@ import static java.lang.String.format;
  */
 public class GuardrailsConfig
 {
-    public static final String INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD = "index.guardrails.table_failure_threshold";
-    public static final String INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD = "index.guardrails.total_failure_threshold";
+    public static final String INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD = Config.PROPERTY_PREFIX + "index.guardrails.table_failure_threshold";
+    public static final String INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD = Config.PROPERTY_PREFIX + "index.guardrails.total_failure_threshold";
 
     public static final int NO_LIMIT = -1;
     public static final int UNSET = -2;
