@@ -46,8 +46,8 @@ public class GuardrailsOnTableTest extends GuardrailTester
     private static long defaultTablesSoftLimit;
     private static long defaultTableHardLimit;
     private static int defaultMVPerTableFailureThreshold;
-    private static ImmutableSet<String> defaultTablePropertiesDisallowed;
-    private static ImmutableSet<String> defaultTablePropertiesIgnored;
+    private static Set<String> defaultTablePropertiesDisallowed;
+    private static Set<String> defaultTablePropertiesIgnored;
 
     @Before
     public void before()

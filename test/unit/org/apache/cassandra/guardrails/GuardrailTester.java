@@ -19,6 +19,7 @@
 package org.apache.cassandra.guardrails;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
@@ -49,7 +50,7 @@ public abstract class GuardrailTester extends CQLTester
     static final String USERNAME = "guardrail_user";
     static final String PASSWORD = "guardrail_password";
 
-    private static ImmutableSet<String> tablePropertiesDisallowed;
+    private static Set<String> tablePropertiesDisallowed;
 
     protected TestListener listener;
 

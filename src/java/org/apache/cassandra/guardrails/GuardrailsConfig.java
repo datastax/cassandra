@@ -89,8 +89,8 @@ public class GuardrailsConfig
 
     public volatile Long tables_warn_threshold;
     public volatile Long tables_failure_threshold;
-    public volatile ImmutableSet<String> table_properties_disallowed;
-    public volatile ImmutableSet<String> table_properties_ignored;
+    public volatile Set<String> table_properties_disallowed;
+    public volatile Set<String> table_properties_ignored;
 
     public volatile Boolean user_timestamps_enabled;
 
@@ -100,7 +100,7 @@ public class GuardrailsConfig
 
     public volatile Boolean counter_enabled;
 
-    public volatile ImmutableSet<String> write_consistency_levels_disallowed;
+    public volatile Set<String> write_consistency_levels_disallowed;
 
     // For paging by bytes having a page bigger than this threshold will result in a failure
     // For paging by rows the result will be silently cut short if it is bigger than the threshold

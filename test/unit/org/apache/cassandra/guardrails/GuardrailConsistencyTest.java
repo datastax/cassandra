@@ -57,7 +57,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     ConsistencyLevel.LOCAL_SERIAL.toString()
     ));
 
-    private static ImmutableSet<String> defaultDisallowedWriteConsistencyLevels;
+    private static Set<String> defaultDisallowedWriteConsistencyLevels;
     private Supplier<QueryState> queryState;
 
     @BeforeClass
