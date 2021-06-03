@@ -21,6 +21,7 @@ package org.apache.cassandra.guardrails;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
 
@@ -39,6 +40,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.awaitility.Awaitility;
 
 import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
@@ -81,18 +83,13 @@ public abstract class GuardrailTester extends CQLTester
         executeNet(format("CREATE USER IF NOT EXISTS %s WITH PASSWORD '%s'", USERNAME, PASSWORD));
         executeNet(format("GRANT ALL ON KEYSPACE %s TO %s", KEYSPACE, USERNAME));
 
-        boolean permissionApplied = false;
-        int attemptsRemaining = 5;
-        while (!permissionApplied && attemptsRemaining > 0)
-        {
-            permissionApplied = !executeNet(new SimpleStatement("LIST ALL OF " + USERNAME)).isExhausted();
-            attemptsRemaining--;
-            if (!permissionApplied)
-            {
-                Thread.sleep(500);
-            }
-        }
-
+        // Make sure keyspace permissions have been applied
+        Awaitility.await()
+                  .atMost(10, TimeUnit.SECONDS)
+                  .with()
+                  .pollInterval(500, TimeUnit.MILLISECONDS)
+                  .until(() -> !executeNet(new SimpleStatement("LIST ALL OF " + USERNAME)).all().isEmpty());
+        
         useUser(USERNAME, PASSWORD);
 
         listener = new TestListener(null);
