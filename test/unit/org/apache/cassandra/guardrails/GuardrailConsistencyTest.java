@@ -18,9 +18,7 @@
 
 package org.apache.cassandra.guardrails;
 
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -42,7 +40,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 public class GuardrailConsistencyTest extends GuardrailTester
 {
-    private static Set<String> disallowedConsistencyLevels = new LinkedHashSet<>(Arrays.asList(
+    private static Set<String> disallowedConsistencyLevels = ImmutableSet.of(
     ConsistencyLevel.ANY.toString(),
     ConsistencyLevel.ONE.toString(),
     ConsistencyLevel.TWO.toString(),
@@ -51,11 +49,11 @@ public class GuardrailConsistencyTest extends GuardrailTester
     ConsistencyLevel.ALL.toString(),
     ConsistencyLevel.EACH_QUORUM.toString(),
     ConsistencyLevel.LOCAL_ONE.toString()
-    ));
-    private static Set<String> serialConsistencyLevels = new LinkedHashSet<>(Arrays.asList(
+    );
+    private static Set<String> serialConsistencyLevels = ImmutableSet.of(
     ConsistencyLevel.SERIAL.toString(),
     ConsistencyLevel.LOCAL_SERIAL.toString()
-    ));
+    );
 
     private static Set<String> defaultDisallowedWriteConsistencyLevels;
     private Supplier<QueryState> queryState;
@@ -124,7 +122,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     @Test(expected = InvalidRequestException.class)
     public void testLWTInsertWithDisallowedConsistency1()
     {
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtInsert(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
     }
 
@@ -141,11 +139,11 @@ public class GuardrailConsistencyTest extends GuardrailTester
         // test that it does not throw
         insert(ConsistencyLevel.LOCAL_QUORUM);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtInsert(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
         lwtInsert(ConsistencyLevel.LOCAL_QUORUM, null);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.LOCAL_SERIAL.toString()));
         lwtInsert(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
         lwtInsert(ConsistencyLevel.LOCAL_QUORUM, null);
     }
@@ -169,7 +167,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     @Test(expected = InvalidRequestException.class)
     public void testLWTUpdateWithDisallowedConsistency1()
     {
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
     }
 
@@ -186,11 +184,11 @@ public class GuardrailConsistencyTest extends GuardrailTester
         // test that it does not throw
         update(ConsistencyLevel.LOCAL_QUORUM);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
         lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, null);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.LOCAL_SERIAL.toString()));
         lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
         lwtUpdate(ConsistencyLevel.LOCAL_QUORUM, null);
     }
@@ -214,7 +212,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     @Test(expected = InvalidRequestException.class)
     public void testLWTDeleteWithAllowedConsistency1()
     {
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtDelete(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
     }
 
@@ -231,11 +229,11 @@ public class GuardrailConsistencyTest extends GuardrailTester
         // test that it does not throw
         delete(ConsistencyLevel.LOCAL_QUORUM);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtDelete(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
         lwtDelete(ConsistencyLevel.LOCAL_QUORUM, null);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.LOCAL_SERIAL.toString()));
         lwtDelete(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
         lwtDelete(ConsistencyLevel.LOCAL_QUORUM, null);
     }
@@ -263,7 +261,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
     @Test(expected = InvalidRequestException.class)
     public void testLWTBatchWithDisallowedConsistency1()
     {
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtBatch(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
     }
 
@@ -279,11 +277,11 @@ public class GuardrailConsistencyTest extends GuardrailTester
         // test that it does not throw
         batch(ConsistencyLevel.LOCAL_QUORUM);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.SERIAL.toString()));
         lwtBatch(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.LOCAL_SERIAL);
         lwtBatch(ConsistencyLevel.LOCAL_QUORUM, null);
 
-        disableConsistencyLevels(new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString())));
+        disableConsistencyLevels(ImmutableSet.of(ConsistencyLevel.LOCAL_SERIAL.toString()));
         lwtBatch(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.SERIAL);
         lwtBatch(ConsistencyLevel.LOCAL_QUORUM, null);
     }

@@ -23,7 +23,6 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import org.junit.After;
@@ -67,7 +66,7 @@ public class GuardrailsOnTableTest extends GuardrailTester
                                      .map(String::toUpperCase)
                                      .collect(ImmutableSet.toImmutableSet());
         // but actually ignore "comment"
-        DatabaseDescriptor.getGuardrailsConfig().table_properties_ignored = ImmutableSet.copyOf(Arrays.asList("comment"));
+        DatabaseDescriptor.getGuardrailsConfig().table_properties_ignored = ImmutableSet.of("comment");
     }
 
     @After
@@ -207,10 +206,10 @@ public class GuardrailsOnTableTest extends GuardrailTester
     {
         GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
 
-        config.table_properties_disallowed = ImmutableSet.copyOf(Arrays.asList("ID1", "gc_grace_seconds"));
+        config.table_properties_disallowed = ImmutableSet.of("ID1", "gc_grace_seconds");
         assertConfigFails(config::validate, "[id1]");
 
-        config.table_properties_disallowed = ImmutableSet.copyOf(Arrays.asList("ID", "Gc_Grace_Seconds"));
+        config.table_properties_disallowed = ImmutableSet.of("ID", "Gc_Grace_Seconds");
         config.validate();
     }
 

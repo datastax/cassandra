@@ -166,7 +166,7 @@ public abstract class Guardrails
                   (x, what, v, t) -> format("Tables cannot have more than %s materialized views, failed to create materialized view %s",
                                             t, what));
 
-    // TODO STAR-543: Unused until STAR-762 implements paging by bytes and can port pagesize related DB-3208 guardrails
+    // TODO Unused until STAR-762 implements paging by bytes and can port pagesize related DB-3208 guardrails
     public static final Threshold pageSize =
     new SizeThreshold("page_size",
                       () -> -1L,
@@ -286,9 +286,8 @@ public abstract class Guardrails
      *
      * <p>Listeners should be registered through the {@link #register} method to take effect.
      *
-     * <p>Note: this is primarily target at Insights, to generate events when guardrails are triggered.
+     * <p>Note: this provides a mechanism to generate events when guardrails are triggered.
      */
-    //TODO STAR-543 Only used by Insights in DSE - should it be kept?
     public interface Listener
     {
         /**

@@ -214,14 +214,26 @@ public class Config
     /* if the size of columns or super-columns are more than this, indexing will kick in */
     public int column_index_size_in_kb = 64;
     public volatile int column_index_cache_size_in_kb = 2;
+    /**
+     * @deprecated Migrated to 'guardrails.batch_size_warn_threshold_in_kb'
+     */
     @Deprecated
     public int batch_size_warn_threshold_in_kb = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.batch_size_fail_threshold_in_kb'
+     */
     @Deprecated
     public int batch_size_fail_threshold_in_kb = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.unlogged_batch_across_partitions_warn_threshold'
+     */
     @Deprecated
     public Integer unlogged_batch_across_partitions_warn_threshold = 0;
     public volatile Integer concurrent_compactors;
     public volatile int compaction_throughput_mb_per_sec = 16;
+    /**
+     * @deprecated Migrated to 'guardrails.compaction_large_partition_warning_threshold_mb'
+     */
     @Deprecated
     public int compaction_large_partition_warning_threshold_mb = 0;
     public int min_free_space_per_drive_in_mb = 50;
@@ -348,8 +360,14 @@ public class Config
 
     public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
 
+    /**
+     * @deprecated Migrated to 'guardrails.tombstone_warn_threshold'
+     */
     @Deprecated
     public int tombstone_warn_threshold = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.tombstone_failure_threshold'
+     */
     @Deprecated
     public int tombstone_failure_threshold = 0;
 

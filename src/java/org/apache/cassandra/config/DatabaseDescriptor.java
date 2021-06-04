@@ -180,7 +180,6 @@ public class DatabaseDescriptor
 
         createAllDirectories();
         applyGuardrails(); // requires created directories
-        applyAfterDataDirectoriesAreCreated(); // requires setup Guardrails
 
         AuthConfig.applyAuth();
     }
@@ -374,6 +373,7 @@ public class DatabaseDescriptor
     {
         conf.guardrails.applyConfig();
         conf.guardrails.validate();
+        getGuardrailsConfig().validateAfterDataDirectoriesExist();
     }
 
     private static void applySimpleConfig()
@@ -3401,14 +3401,5 @@ public class DatabaseDescriptor
     public static boolean isEmulateDbaasDefaults()
     {
         return conf.emulate_dbaas_defaults;
-    }
-
-    /**
-     * This should be called after {@link DatabaseDescriptor#createAllDirectories()} is being called as some validation
-     * can only happen after those data directories actually exist
-     */
-    public static void applyAfterDataDirectoriesAreCreated()
-    {
-        getGuardrailsConfig().validateAfterDataDirectoriesExist();
     }
 }

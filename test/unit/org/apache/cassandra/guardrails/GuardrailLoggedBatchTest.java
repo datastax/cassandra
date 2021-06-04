@@ -56,7 +56,7 @@ public class GuardrailLoggedBatchTest extends GuardrailTester
         DatabaseDescriptor.getGuardrailsConfig().logged_batch_enabled = logged_batch_enabled;
     }
 
-    private void insertBatch(boolean loggedBatchEnabled, boolean logged) throws Throwable
+    private void insertBatchAndAssertValid(boolean loggedBatchEnabled, boolean logged) throws Throwable
     {
         setGuardrails(loggedBatchEnabled);
 
@@ -70,19 +70,19 @@ public class GuardrailLoggedBatchTest extends GuardrailTester
     @Test
     public void testInsertUnloggedBatch() throws Throwable
     {
-        insertBatch(false, false);
-        insertBatch(true, false);
+        insertBatchAndAssertValid(false, false);
+        insertBatchAndAssertValid(true, false);
     }
 
     @Test(expected = InvalidQueryException.class)
     public void testDisabledLoggedBatch() throws Throwable
     {
-        insertBatch(false, true);
+        insertBatchAndAssertValid(false, true);
     }
 
     @Test
     public void testEnabledLoggedBatch() throws Throwable
     {
-        insertBatch(true, true);
+        insertBatchAndAssertValid(true, true);
     }
 }
