@@ -24,9 +24,16 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.obs.IBitSet;
+import org.apache.cassandra.utils.obs.MemoryLimiter;
 
 public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
+    private static final long maxMemory = Long.getLong("cassandra.max_bf_memory_mb", 0) << 20;
+    public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
+                                                                        "Allocating %s for Bloom filter would reach max of %s (current %s)");
+
+    public final static BloomFilterSerializer serializer = new BloomFilterSerializer(memoryLimiter);
+
     private final static FastThreadLocal<long[]> reusableIndexes = new FastThreadLocal<long[]>()
     {
         protected long[] initialValue()
@@ -54,7 +61,7 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
 
     public long serializedSize()
     {
-        return BloomFilterSerializer.serializedSize(this);
+        return serializer.serializedSize(this);
     }
 
     // Murmur is faster than an SHA-based approach and provides as-good collision

@@ -235,7 +235,7 @@ public abstract class SSTableReaderBuilder
     {
         try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
         {
-            return BloomFilterSerializer.deserialize(stream, descriptor.version.hasOldBfFormat());
+            return BloomFilter.serializer.deserialize(stream, descriptor.version.hasOldBfFormat());
         }
     }
 
