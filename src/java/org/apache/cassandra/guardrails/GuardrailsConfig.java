@@ -89,6 +89,7 @@ public class GuardrailsConfig
 
     public volatile Long tables_warn_threshold;
     public volatile Long tables_failure_threshold;
+    // N.B. Not safe for concurrent modification
     public volatile Set<String> table_properties_disallowed;
     public volatile Set<String> table_properties_ignored;
 
