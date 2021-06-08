@@ -484,7 +484,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         if (options.getConsistency() == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
-        Guardrails.writeConsistencyLevels.guard(EnumSet.of(options.getConsistency(), options.getSerialConsistency()),
+        Guardrails.writeConsistencyLevels.guard(EnumSet.of(options.getConsistency(), options.getSerialConsistency(queryState)),
                                                 queryState.getClientState());
 
         return hasConditions()
@@ -499,7 +499,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
-        validateConsistency(cl);
+        validateConsistency(cl, queryState.getClientState());
 
         validateDiskUsage(options, queryState.getClientState());
         validateTimestamp(queryState, options);
@@ -522,12 +522,12 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         return null;
     }
 
-    public void validateConsistency(ConsistencyLevel cl)
+    public void validateConsistency(ConsistencyLevel cl, ClientState clientState)
     {
         if (isCounter())
-            cl.validateCounterForWrite(metadata());
+            cl.validateCounterForWrite(metadata(), clientState);
         else
-            cl.validateForWrite();
+            cl.validateForWrite(metadata().keyspace, clientState);
     }
 
     private ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -538,7 +538,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                    table(),
                                                    request.key,
                                                    request,
-                                                   options.getSerialConsistency(),
+                                                   options.getSerialConsistency(queryState),
                                                    options.getConsistency(),
                                                    queryState.getClientState(),
                                                    options.getNowInSeconds(queryState),

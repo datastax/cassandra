@@ -192,6 +192,13 @@ public interface GuardrailsConfig
     boolean getGroupByEnabled();
 
     /**
+     * Returns whether logged batches are allowed
+     *
+     * @return {@code true} if allowed, {@code false} otherwise.
+     */
+    boolean getLoggedBatchEnabled();
+
+    /**
      * Returns whether TRUNCATE or DROP table are allowed
      *
      * @return {@code true} if allowed, {@code false} otherwise.
@@ -466,4 +473,34 @@ public interface GuardrailsConfig
      */
     void setMinimumTimestampThreshold(@Nullable DurationSpec.LongMicrosecondsBound warn,
                                       @Nullable DurationSpec.LongMicrosecondsBound fail);
+
+    /**
+     * @return The threshold to warn when a read scans more tombstones than threshold.
+     */
+    int getTombstoneWarnThreshold();
+
+    /**
+     * @return The threshold to fail when a read scanes more tombstones than threshold.
+     */
+    int getTombstoneFailThreshold();
+
+    /**
+     * @return The threshold to warn when the number of batch mutations is more than threshold.
+     */
+    long getBatchSizeWarnThreshold();
+
+    /**
+     * @return The threshold to fail when the number of batch mutations is more than threshold.
+     */
+    long getBatchSizeFailThreshold();
+
+    /**
+     * @return The threshold to warn when the number of unlogged batch partitions is more than threshold.
+     */
+    long getUnloggedBatchAcrossPartitionsWarnThreshold();
+
+    /**
+     * @return The threshold to fail when the numner of unlogged batch partitions is more than threshold.
+     */
+    long getUnloggedBatchAcrossPartitionsFailThreshold();
 }

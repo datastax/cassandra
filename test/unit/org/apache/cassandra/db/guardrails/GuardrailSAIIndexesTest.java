@@ -76,10 +76,10 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
 //
 //    public void testDefaults(boolean dbaas)
 //    {
-//        boolean previous = DatabaseDescriptor.isApplyDbaasDefaults();
+//        boolean previous = DatabaseDescriptor.isEmulateDbaasDefaults();
 //        try
 //        {
-//            DatabaseDescriptor.setApplyDbaasDefaults(dbaas);
+//            DatabaseDescriptor.setEmulateDbaasDefaults(dbaas);
 //
 //            GuardrailsConfig config = new GuardrailsConfig();
 //            config.applyConfig();
@@ -89,7 +89,7 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
 //        }
 //        finally
 //        {
-//            DatabaseDescriptor.setApplyDbaasDefaults(previous);
+//            DatabaseDescriptor.setEmulateDbaasDefaults(previous);
 //        }
 //    }
 

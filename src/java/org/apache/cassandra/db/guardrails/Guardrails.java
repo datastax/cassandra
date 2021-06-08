@@ -184,6 +184,12 @@ public final class Guardrails implements GuardrailsMBean
                    state -> CONFIG_PROVIDER.getOrCreate(state).getUserTimestampsEnabled(),
                    "User provided timestamps (USING TIMESTAMP)");
 
+    public static final EnableFlag loggedBatchEnabled =
+    new EnableFlag("logged_batch",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getLoggedBatchEnabled(),
+                   "LOGGED batch");
+
     public static final EnableFlag groupByEnabled =
     new EnableFlag("group_by",
                    null,
@@ -519,6 +525,35 @@ public final class Guardrails implements GuardrailsMBean
                      format("The modification to table %s has a timestamp %s before the minimum allowable %s threshold %s",
                             what, value, isWarning ? "warning" : "failure", threshold));
 
+    public static final Threshold scannedTombstones =
+    new MaxThreshold("scanned_tombstones",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getTombstoneWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getTombstoneFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning ?
+                                                 format("Scanned over %s tombstone rows for query %1.512s - more than the warning threshold %s", v, what, t) :
+                                                 format("Scanned over %s tombstone rows during query %1.512s - more than the maximum allowed %s; query aborted", v, what, t));
+
+
+    public static final Threshold batchSize =
+    new MaxThreshold("batch_size",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getBatchSizeWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getBatchSizeFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning
+                                                 ? format("Batch for %s is of size %s, exceeding specified warning threshold %s", what, v, t)
+                                                 : format("Batch for %s is of size %s, exceeding specified failure threshold %s", what, v, t));
+
+    public static final Threshold unloggedBatchAcrossPartitions =
+    new MaxThreshold("unlogged_batch_across_partitions",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getUnloggedBatchAcrossPartitionsWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getUnloggedBatchAcrossPartitionsFailThreshold(),
+                      (x, what, v, t) -> format("Unlogged batch covering %s partitions detected " +
+                                                "against table%s %s. You should use a logged batch for " +
+                                                "atomicity, or asynchronous writes for performance.",
+                                                v, what.contains(", ") ? "s" : "", what));
+
     private Guardrails()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
@@ -831,6 +866,18 @@ public final class Guardrails implements GuardrailsMBean
     public void setGroupByEnabled(boolean enabled)
     {
         DEFAULT_CONFIG.setGroupByEnabled(enabled);
+    }
+
+    @Override
+    public boolean getLoggedBatchEnabled()
+    {
+        return DEFAULT_CONFIG.getLoggedBatchEnabled();
+    }
+
+    @Override
+    public void setLoggedBatchEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setLoggedBatchEnabled(enabled);
     }
 
     @Override
