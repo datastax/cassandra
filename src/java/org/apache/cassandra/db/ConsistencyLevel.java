@@ -17,22 +17,23 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.EnumSet;
 import java.util.Locale;
 
+import javax.annotation.Nullable;
+
 import com.carrotsearch.hppc.ObjectIntHashMap;
-import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InOurDc;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolException;
 
+import static org.apache.cassandra.db.guardrails.Guardrails.CONFIG_PROVIDER;
 import static org.apache.cassandra.locator.Replicas.addToCountPerDc;
 
 public enum ConsistencyLevel
@@ -217,7 +218,7 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForWrite() throws InvalidRequestException
+    public void validateForWrite(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
         switch (this)
         {
@@ -230,9 +231,6 @@ public enum ConsistencyLevel
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
     public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         switch (this)
         {
             case EACH_QUORUM:
@@ -246,9 +244,6 @@ public enum ConsistencyLevel
 
     public void validateForCas(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
     }
@@ -258,7 +253,7 @@ public enum ConsistencyLevel
         return this == SERIAL || this == LOCAL_SERIAL;
     }
 
-    public void validateCounterForWrite(TableMetadata metadata) throws InvalidRequestException
+    public void validateCounterForWrite(TableMetadata metadata, ClientState clientState) throws InvalidRequestException
     {
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
@@ -272,5 +267,23 @@ public enum ConsistencyLevel
         if (!(replicationStrategy instanceof NetworkTopologyStrategy))
             throw new InvalidRequestException(String.format("consistency level %s not compatible with replication strategy (%s)",
                                                             this, replicationStrategy.getClass().getName()));
+    }
+
+    /**
+     * Returns the strictest consistency level allowed by Guardrails.
+     *
+     * @param state the query state, used to skip the guardrails check if the query is internal or is done by a superuser.
+     * @return the strictest allowed serial consistency level
+     * @throws InvalidRequestException if all serial consistency level are disallowed
+     */
+    public static ConsistencyLevel defaultSerialConsistency(@Nullable QueryState state) throws InvalidRequestException
+    {
+        ClientState clientState = state == null ? null : state.getClientState();
+        if (DatabaseDescriptor.getRawConfig() == null || !CONFIG_PROVIDER.getOrCreate(clientState).getWriteConsistencyLevelsDisallowed().contains(ConsistencyLevel.SERIAL))
+            return ConsistencyLevel.SERIAL;
+        else if (!CONFIG_PROVIDER.getOrCreate(clientState).getWriteConsistencyLevelsDisallowed().contains(ConsistencyLevel.LOCAL_SERIAL))
+            return ConsistencyLevel.LOCAL_SERIAL;
+
+        throw new InvalidRequestException("Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");
     }
 }

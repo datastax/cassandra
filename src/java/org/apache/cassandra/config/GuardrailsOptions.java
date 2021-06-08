@@ -427,6 +427,20 @@ public class GuardrailsOptions implements GuardrailsConfig
     }
 
     @Override
+    public boolean getLoggedBatchEnabled()
+    {
+        return config.logged_batch_enabled;
+    }
+
+    public void setLoggedBatchEnabled(boolean enabled)
+    {
+        updatePropertyWithLogging("logged_batch_enabled",
+                                  enabled,
+                                  () -> config.logged_batch_enabled,
+                                  x -> config.logged_batch_enabled = x);
+    }
+
+    @Override
     public boolean getDropTruncateTableEnabled()
     {
         return config.drop_truncate_table_enabled;
@@ -1002,6 +1016,55 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   fail,
                                   () -> config.minimum_timestamp_fail_threshold,
                                   x -> config.minimum_timestamp_fail_threshold = x);
+    }
+
+    @Override
+    public int getTombstoneWarnThreshold()
+    {
+        return config.tombstone_warn_threshold;
+    }
+
+    @Override
+    public int getTombstoneFailThreshold()
+    {
+        return config.tombstone_failure_threshold;
+    }
+
+    public void setTombstonesThreshold(int warn, int fail)
+    {
+        validateMaxLongThreshold(warn, fail, "tombstones", false);
+        updatePropertyWithLogging("tombstones_warn_threshold",
+                                  warn,
+                                  () -> config.tombstone_warn_threshold,
+                                  x -> config.tombstone_warn_threshold = x);
+        updatePropertyWithLogging("tombstones_fail_threshold",
+                                  fail,
+                                  () -> config.tombstone_failure_threshold,
+                                  x -> config.tombstone_failure_threshold = x);
+    }
+
+    @Override
+    public long getBatchSizeWarnThreshold()
+    {
+        return config.batch_size_warn_threshold.toBytesInLong();
+    }
+
+    @Override
+    public long getBatchSizeFailThreshold()
+    {
+        return config.batch_size_fail_threshold.toBytesInLong();
+    }
+
+    @Override
+    public long getUnloggedBatchAcrossPartitionsWarnThreshold()
+    {
+        return config.unlogged_batch_across_partitions_warn_threshold;
+    }
+
+    @Override
+    public long getUnloggedBatchAcrossPartitionsFailThreshold()
+    {
+        return -1;
     }
 
     private static <T> void updatePropertyWithLogging(String propertyName, T newValue, Supplier<T> getter, Consumer<T> setter)

@@ -222,6 +222,7 @@ public enum CassandraRelevantProperties
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
     ENABLE_DC_LOCAL_COMMIT("cassandra.enable_dc_local_commit", "true"),
+    ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER("cassandra.enable_guardrails_for_anonymous_user", "true"),
     /**
      * Whether {@link org.apache.cassandra.db.ConsistencyLevel#NODE_LOCAL} should be allowed.
      */
