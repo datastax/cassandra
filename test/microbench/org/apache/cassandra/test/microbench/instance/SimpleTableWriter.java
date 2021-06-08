@@ -27,6 +27,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -44,6 +46,8 @@ import org.openjdk.jmh.annotations.TearDown;
 @State(Scope.Benchmark)
 public abstract class SimpleTableWriter extends CQLTester
 {
+    private final static Logger logger = LoggerFactory.getLogger(SimpleTableWriter.class);
+
     static String keyspace;
     String table;
     ColumnFamilyStore cfs;
@@ -70,10 +74,9 @@ public abstract class SimpleTableWriter extends CQLTester
     {
         rand = new Random(1);
         executorService = Executors.newFixedThreadPool(threadCount);
-        CQLTester.setUpClass();
-        CQLTester.prepareServer();
         DatabaseDescriptor.setAutoSnapshot(false);
-        System.err.println("setupClass done.");
+        CQLTester.setUpClass();
+        logger.info("setupClass done.");
         String memtableSetup = "";
         if (!memtableClass.isEmpty())
             memtableSetup = String.format(" AND memtable = '%s'", memtableClass);
@@ -88,8 +91,8 @@ public abstract class SimpleTableWriter extends CQLTester
             executeNet(getDefaultVersion(), "use " + keyspace + ";");
         }
         writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
-        System.err.println("Prepared, batch " + BATCH + " threads " + threadCount + extraInfo());
-        System.err.println("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
+        logger.info("Prepared, batch " + BATCH + " threads " + threadCount + extraInfo());
+        logger.info("Disk access mode " + DatabaseDescriptor.getDiskAccessMode() +
                            " index " + DatabaseDescriptor.getIndexAccessMode());
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
@@ -189,7 +192,7 @@ public abstract class SimpleTableWriter extends CQLTester
 
         Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
         Memtable.MemoryUsage usage = Memtable.getMemoryUsage(memtable);
-        System.err.format("\n%s in %s mode: %d ops, %s serialized bytes, %s\n",
+        logger.info("\n{} in {} mode: {} ops, {} serialized bytes, {}\n",
                           memtable.getClass().getSimpleName(),
                           DatabaseDescriptor.getMemtableAllocationType(),
                           memtable.operationCount(),
