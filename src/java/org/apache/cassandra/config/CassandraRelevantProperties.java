@@ -225,6 +225,7 @@ public enum CassandraRelevantProperties
     /** In_JVM dtest property indicating that the test should use "latest" configuration */
     DTEST_JVM_DTESTS_USE_LATEST("jvm_dtests.latest"),
     ENABLE_DC_LOCAL_COMMIT("cassandra.enable_dc_local_commit", "true"),
+    ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER("cassandra.enable_guardrails_for_anonymous_user", "true"),
     /**
      * Whether {@link org.apache.cassandra.db.ConsistencyLevel#NODE_LOCAL} should be allowed.
      */
