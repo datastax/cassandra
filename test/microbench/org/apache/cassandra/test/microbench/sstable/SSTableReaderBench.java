@@ -76,6 +76,7 @@ public class SSTableReaderBench extends AbstractSSTableBench
     public DecoratedKey[] nonpkeys;
 
     private SSTableReader sstr;
+    private SSTableWriter sstw;
 
     private int idx = 0;
 
@@ -89,8 +90,8 @@ public class SSTableReaderBench extends AbstractSSTableBench
     private ColumnFamilyStore table;
     private LifecycleTransaction txn;
 
-    @Setup
-    public void setup()
+    @Setup(Level.Trial)
+    public void setup() throws Exception
     {
         assert Integer.highestOneBit(P_KEYS) == Integer.lowestOneBit(P_KEYS);
         assert Integer.highestOneBit(C_KEYS) == Integer.lowestOneBit(C_KEYS);
@@ -99,13 +100,15 @@ public class SSTableReaderBench extends AbstractSSTableBench
         pkeys = prepareDecoratedKeys(0, P_KEYS, KEY_SIZE);
         nonpkeys = prepareDecoratedKeys(P_KEYS, P_KEYS * 2, KEY_SIZE);
         ckeys = prepareBuffers(0, C_KEYS, KEY_SIZE);
+
+        txn = LifecycleTransaction.offline(OperationType.WRITE);
+        sstw = prepareTable(getFormat(formatName), table, txn);
     }
 
     @Setup(Level.Iteration)
     public void setupIteration() throws Exception
     {
-        txn = LifecycleTransaction.offline(OperationType.WRITE);
-        sstr = prepareReader(getFormat(formatName), table, txn);
+        sstr = prepareReader(getFormat(formatName), sstw);
     }
 
     /**
@@ -177,12 +180,17 @@ public class SSTableReaderBench extends AbstractSSTableBench
     public void tearDownIteration()
     {
         sstr.selfRef().release();
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown()
+    {
         txn.finish();
         txn.close();
         FileUtils.deleteRecursive(sstr.descriptor.directory);
     }
 
-    private SSTableReader prepareReader(SSTableFormat format, ColumnFamilyStore table, LifecycleTransaction txn) throws Exception
+    private SSTableWriter prepareTable(SSTableFormat format, ColumnFamilyStore table, LifecycleTransaction txn) throws Exception
     {
         try (SSTableWriter tableWriter = createWriter(table, format, txn))
         {
@@ -207,8 +215,13 @@ public class SSTableReaderBench extends AbstractSSTableBench
                                                                    .map(f -> f.getName() + " - " + FileUtils.stringifyFileSize(f.length()))
                                                                    .collect(Collectors.joining("\n")));
 
-            return format.getReaderFactory().open(tableWriter.descriptor, SSTable.componentsFor(tableWriter.descriptor), table.metadata, false, true);
+            return tableWriter;
         }
+    }
+
+    private SSTableReader prepareReader(SSTableFormat format, SSTableWriter tableWriter)
+    {
+        return format.getReaderFactory().open(tableWriter.descriptor, SSTable.componentsFor(tableWriter.descriptor), table.metadata, false, true);
     }
 }
 
