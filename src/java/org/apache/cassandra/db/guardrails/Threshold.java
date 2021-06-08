@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.guardrails;
 
+import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 import javax.annotation.Nullable;
 
@@ -33,6 +34,30 @@ import org.apache.cassandra.service.ClientState;
  */
 public abstract class Threshold extends Guardrail
 {
+    /**
+     * A {@link Threshold} with both failure and warning thresholds disabled, so that cannot ever be triggered.
+     */
+    public static final Threshold NEVER_TRIGGERED = new Threshold("never_triggered", null, state -> -1L, state -> -1L, null)
+    {
+        @Override
+        protected boolean compare(long value, long threshold)
+        {
+            return false;
+        }
+
+        @Override
+        protected long failValue(ClientState state)
+        {
+            return Long.MAX_VALUE;
+        }
+
+        @Override
+        protected long warnValue(ClientState state)
+        {
+            return Long.MAX_VALUE;
+        }
+    };
+
     protected ToLongFunction<ClientState> warnThreshold;
     protected ToLongFunction<ClientState> failThreshold;
     protected final ErrorMessageProvider messageProvider;
@@ -169,5 +194,95 @@ public abstract class Threshold extends Guardrail
          * @param threshold The threshold that was passed to trigger the guardrail (as a string).
          */
         String createMessage(boolean isWarning, String what, String value, String threshold);
+    }
+
+    /**
+     * Creates a new {@link GuardedCounter} guarded by this threshold guardrail.
+     *
+     * @param whatFct          a function called when either a warning or failure is triggered by the created counter to
+     *                         describe the value. This is equivalent to the {@code what} argument of {@link #guard} but is a function to
+     *                         allow the output string to be compute lazily (only if a failure/warn ends up being triggered).
+     * @param containsUserData if a warning or failure is triggered by the created counter and the {@code whatFct}
+     *                         is called, indicates whether the create string contains user data. This is the exact equivalent to the
+     *                         similarly named argument of {@link #guard}.
+     * @param clientState      the client state, used to skip the check if the query is internal or is done by a superuser.
+     *                         A {@code null} value means that the check should be done regardless of the query.
+     * @return the newly created guarded counter.
+     */
+    public GuardedCounter newCounter(Supplier<String> whatFct, boolean containsUserData, @Nullable ClientState clientState)
+    {
+        Threshold threshold = enabled(clientState) ? this : NEVER_TRIGGERED;
+        return threshold.new GuardedCounter(whatFct, containsUserData, clientState);
+    }
+
+    /**
+     * A facility for when the value to guard is built incrementally, but we want to trigger failures as soon
+     * as the failure threshold is reached, but only trigger the warning on the final value (and so only if the
+     * failure threshold hasn't also been reached).
+     * <p>
+     * Note that instances are neither thread safe nor reusable.
+     */
+    public class GuardedCounter
+    {
+        private final long warnValue;
+        private final long failValue;
+        private final Supplier<String> what;
+        private final boolean containsUserData;
+
+        private long accumulated;
+
+        private GuardedCounter(Supplier<String> what, boolean containsUserData, ClientState clientState)
+        {
+            // We capture the warn and fail value at the time of the counter construction to ensure we use
+            // stable value during the counter lifetime (and reading a final field is possibly at tad faster).
+            this.warnValue = warnValue(clientState);
+            this.failValue = failValue(clientState);
+            this.what = what;
+            this.containsUserData = containsUserData;
+        }
+
+        /**
+         * The currently accumulated value of the counter.
+         */
+        public long get()
+        {
+            return accumulated;
+        }
+
+        /**
+         * Add the provided increment to the counter, triggering a failure if the counter after this addition
+         * crosses the failure threshold.
+         *
+         * @param increment the increment to add.
+         */
+        public void add(long increment)
+        {
+            accumulated += increment;
+            if (accumulated > failValue)
+            {
+                // Pass any ClientState so GuardrailViolatedException will be thrown by Guardrail#fail
+                ClientState dummyClientState = ClientState.forInternalCalls();
+                triggerFail(accumulated, failValue, what.get(), containsUserData, dummyClientState);
+            }
+        }
+
+        /**
+         * Trigger the warn if the currently accumulated counter value crosses warning threshold and the failure
+         * has not been triggered yet.
+         * <p>
+         * This is generally meant to be called when the guarded value is complete.
+         *
+         * @return {@code true} and trigger a warning if the current counter value is greater than the warning
+         * threshold and less than or equal to the failure threshold, {@code false} otherwise.
+         */
+        public boolean checkAndTriggerWarning()
+        {
+            if (accumulated > warnValue && accumulated <= failValue)
+            {
+                triggerWarn(accumulated, warnValue, what.get(), containsUserData);
+                return true;
+            }
+            return false;
+        }
     }
 }

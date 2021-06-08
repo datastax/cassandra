@@ -490,6 +490,7 @@ public class GuardrailDiskUsageTest extends GuardrailTester
         InetAddressAndPort node2 = InetAddressAndPort.getByName("127.0.0.21");
         InetAddressAndPort node3 = InetAddressAndPort.getByName("127.0.0.31");
 
+        // avoid noise due to test machines
         Guardrails.replicaDiskUsage.resetLastNotifyTime();
         guardrails().setDataDiskUsagePercentageThreshold(98, 99);
 

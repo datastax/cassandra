@@ -106,7 +106,7 @@ public abstract class Sampler<T>
 
     private long endTimeNanos = -1;
 
-    public void addSample(final T item, final int value)
+    public void addSample(final T item, final long value)
     {
         if (isEnabled())
             samplerExecutor.submit(() -> insert(item, value));
