@@ -784,7 +784,7 @@ public class Config
      */
     public volatile boolean log_out_of_token_range_requests = true;
     public volatile boolean reject_out_of_token_range_requests = false;
-    public boolean apply_dbaas_defaults = false;
+    public boolean emulate_dbaas_defaults = false;
 
     /**
      * The intial capacity for creating RangeTombstoneList.
@@ -888,6 +888,7 @@ public class Config
     public volatile boolean user_timestamps_enabled = true;
     public volatile boolean alter_table_enabled = true;
     public volatile boolean group_by_enabled = true;
+    public volatile boolean logged_batch_enabled = true;
     public volatile boolean drop_truncate_table_enabled = true;
     public volatile boolean drop_keyspace_enabled = true;
     public volatile boolean secondary_indexes_enabled = true;
