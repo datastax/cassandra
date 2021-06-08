@@ -325,6 +325,18 @@ public interface GuardrailsMBean
     void setGroupByEnabled(boolean enabled);
 
     /**
+     * Returns whether logged batches are allowed.
+     *
+     * @return {@code true} if allowed, {@code false} otherwise.
+     */
+    boolean getLoggedBatchEnabled();
+
+    /**
+     * Sets whether logged batches are allowed.
+     */
+    void setLoggedBatchEnabled(boolean enabled);
+
+    /**
      * Returns whether users can TRUNCATE or DROP TABLE
      *
      * @return {@code true} if allowed, {@code false} otherwise.
