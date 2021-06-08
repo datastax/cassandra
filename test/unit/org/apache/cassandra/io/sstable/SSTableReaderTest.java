@@ -22,11 +22,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 
 import com.google.common.collect.Sets;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -48,19 +50,28 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner.LocalToken;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.utils.BloomCalculations;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.IFilter;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.junit.Assert.assertEquals;
@@ -77,6 +88,7 @@ public class SSTableReaderTest
     public static final String CF_COMPRESSED = "Compressed";
     public static final String CF_INDEXED = "Indexed1";
     public static final String CF_STANDARDLOWINDEXINTERVAL = "StandardLowIndexInterval";
+    public static final String CF_STANDARDNOBLOOMFILTER = "StandardNoBloomFilter";
 
     private IPartitioner partitioner;
 
@@ -100,13 +112,16 @@ public class SSTableReaderTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARDLOWINDEXINTERVAL)
                                                 .minIndexInterval(8)
                                                 .maxIndexInterval(256)
-                                                .caching(CachingParams.CACHE_NOTHING));
+                                                .caching(CachingParams.CACHE_NOTHING),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARDNOBLOOMFILTER)
+                                                .bloomFilterFpChance(1));
     }
 
     @After
     public void Cleanup() {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
+        BloomFilter.recreateOnFPChanceChange = false;
     }
 
     @Test
@@ -834,13 +849,15 @@ public class SSTableReaderTest
         }
     }
 
-
-
     private SSTableReader getNewSSTable(ColumnFamilyStore cfs)
     {
+        return getNewSSTable(cfs, 100, 2);
+    }
 
+    private SSTableReader getNewSSTable(ColumnFamilyStore cfs, int numKeys, int step)
+    {
         Set<SSTableReader> before = cfs.getLiveSSTables();
-        for (int j = 0; j < 100; j += 2)
+        for (int j = 0; j < numKeys; j += step)
         {
             new RowUpdateBuilder(cfs.metadata(), j, String.valueOf(j))
             .clustering("0")
@@ -913,6 +930,111 @@ public class SSTableReaderTest
         Descriptor desc = setUpForTestVerfiyCompressionInfoExistence();
         Set<Component> components = SSTable.discoverComponentsFor(desc);
         SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
+    }
+
+    @Test
+    public void testBloomFilterIsCreatedOnLoad() throws IOException
+    {
+        BloomFilter.recreateOnFPChanceChange = true;
+
+        final int numKeys = 100;
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARDNOBLOOMFILTER);
+
+        SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
+        Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);
+        Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+
+        // should do nothing
+        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys);
+
+        // should create BF because the FP has changed
+        checkSSTableOpenedWithGivenFPChance(sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys);
+
+        // should deserialize the existing BF
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys);
+        // should create BF because the FP has changed
+        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys);
+        // should install empty filter without changing file or metadata
+        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys);
+
+        // this should fail to deserialize and fall back to recreating it
+        Files.write(Paths.get(sstable.descriptor.filenameFor(Component.FILTER)), new byte[] { 0, 0, 0, 0});
+        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys);
+
+        // this should fail to create a BF and install the empty one
+        new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys);
+    }
+
+    private void checkSSTableOpenedWithGivenFPChance(SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys)
+    {
+        Descriptor desc = sstable.descriptor;
+        TableMetadata metadata = sstable.metadata.get().unbuild().bloomFilterFpChance(fpChance).build();
+        ValidationMetadata prevValidationMetadata = getValidationMetadata(desc);
+        Assert.assertNotNull(prevValidationMetadata);
+        boolean bfExists = new File(desc.filenameFor(Component.FILTER)).exists();
+
+        SSTableReader target = null;
+        try
+        {
+            target = SSTableReader.open(desc,
+                                        SSTableReader.discoverComponentsFor(desc),
+                                        TableMetadataRef.forOfflineTools(metadata),
+                                        false,
+                                        false);
+            IFilter bloomFilter = target.getBloomFilter();
+            ValidationMetadata validationMetadata = getValidationMetadata(desc);
+            Assert.assertNotNull(validationMetadata);
+
+            if (bfShouldExist)
+            {
+                Assert.assertNotEquals(FilterFactory.AlwaysPresent, bloomFilter);
+                Assert.assertTrue(bloomFilter.serializedSize() > 0);
+                Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
+                Assert.assertTrue(new File(desc.filenameFor(Component.FILTER)).exists());
+                Assert.assertEquals(bloomFilter.serializedSize(), new File(desc.filenameFor(Component.FILTER)).length());
+            }
+            else
+            {
+                Assert.assertEquals(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+                Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);
+                Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
+                Assert.assertEquals(bfExists, new File(desc.filenameFor(Component.FILTER)).exists());
+            }
+
+            // verify all keys are present according to the BF
+            Token token = new Murmur3Partitioner.LongToken(0L);
+            for (int i = 0; i < numKeys; i++)
+            {
+                DecoratedKey key = new BufferDecoratedKey(token, ByteBufferUtil.bytes(String.valueOf(i)));
+                Assert.assertTrue("Expected key to be in BF: " + i, bloomFilter.isPresent(key));
+            }
+        }
+        finally
+        {
+            if (target != null)
+                target.selfRef().release();
+        }
+    }
+
+    private static ValidationMetadata getValidationMetadata(Descriptor descriptor)
+    {
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION);
+
+        Map<MetadataType, MetadataComponent> sstableMetadata;
+        try
+        {
+            sstableMetadata = descriptor.getMetadataSerializer().deserialize(descriptor, types);
+        }
+        catch (Throwable t)
+        {
+            throw new CorruptSSTableException(t, descriptor.filenameFor(Component.STATS));
+        }
+
+        return (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
     }
 
     private Descriptor setUpForTestVerfiyCompressionInfoExistence()

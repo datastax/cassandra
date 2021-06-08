@@ -21,6 +21,8 @@ import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.obs.IBitSet;
@@ -28,7 +30,14 @@ import org.apache.cassandra.utils.obs.MemoryLimiter;
 
 public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
-    private static final long maxMemory = Long.getLong("cassandra.max_bf_memory_mb", 0) << 20;
+    private static final long maxMemory = Long.getLong("cassandra.bf.max_memory_mb", 0) << 20;
+
+    @VisibleForTesting
+    public static double fpChanceTolerance = Double.parseDouble(System.getProperty("cassandra.bf.fp_chance_tolerance", "0.000001"));
+
+    @VisibleForTesting
+    public static boolean recreateOnFPChanceChange = Boolean.getBoolean("cassandra.bf.recreate_on_fp_chance_change");
+
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");
 
@@ -156,4 +165,15 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         super.addTo(identities);
         bitset.addTo(identities);
     }
+
+    public static boolean shouldUseBloomFilter(double fpChance)
+    {
+        return Math.abs(1 - fpChance) > BloomFilter.fpChanceTolerance;
+    }
+
+    public static boolean isFPChanceDiffNeglectable(double fpChance1, double fpChance2)
+    {
+        return Math.abs(fpChance1 - fpChance2) <= fpChanceTolerance;
+    }
+
 }
