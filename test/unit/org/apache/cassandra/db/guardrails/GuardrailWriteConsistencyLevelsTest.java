@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.guardrails;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -165,7 +166,7 @@ public class GuardrailWriteConsistencyLevelsTest extends GuardrailConsistencyLev
         disableConsistencyLevels(SERIAL);
         assertFails(query, cl, SERIAL, SERIAL);
         assertValid(query, cl, LOCAL_SERIAL);
-        assertFails(query, cl, null, SERIAL);
+        assertValid(query, cl, null);
 
         disableConsistencyLevels(LOCAL_SERIAL);
         assertValid(query, cl, SERIAL);
@@ -175,7 +176,7 @@ public class GuardrailWriteConsistencyLevelsTest extends GuardrailConsistencyLev
         disableConsistencyLevels(SERIAL, LOCAL_SERIAL);
         assertFails(query, cl, SERIAL, SERIAL);
         assertFails(query, cl, LOCAL_SERIAL, LOCAL_SERIAL);
-        assertFails(query, cl, null, SERIAL);
+        assertThrows(query, cl, null, SERIAL);
     }
 
     private void assertValid(String query, ConsistencyLevel cl, ConsistencyLevel serialCl) throws Throwable
@@ -199,6 +200,13 @@ public class GuardrailWriteConsistencyLevelsTest extends GuardrailConsistencyLev
                            rejectedCl, guardrails().getWriteConsistencyLevelsDisallowed()));
 
         assertExcludedUsers(query, cl, serialCl);
+    }
+
+    private void assertThrows(String query, ConsistencyLevel cl, ConsistencyLevel serialCl, ConsistencyLevel rejectedCl) throws Throwable
+    {
+        assertThrows(() -> execute(userClientState, query, cl, serialCl),
+                InvalidRequestException.class,
+                    "Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");
     }
 
     private void assertExcludedUsers(String query, ConsistencyLevel cl, ConsistencyLevel serialCl) throws Throwable
