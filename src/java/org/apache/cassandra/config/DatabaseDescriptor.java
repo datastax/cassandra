@@ -257,6 +257,10 @@ public class DatabaseDescriptor
 
         setConfig(config.get());
         applyAll();
+
+        createAllDirectories();
+        applyGuardrails(); // requires created directories
+
         AuthConfig.applyAuth();
     }
 
@@ -463,8 +467,6 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContext();
-
-        applyGuardrails();
 
         applyStartupChecks();
     }
@@ -2788,26 +2790,6 @@ public class DatabaseDescriptor
     public static int getMaxMutationSize()
     {
         return conf.max_mutation_size.toBytes();
-    }
-
-    public static int getTombstoneWarnThreshold()
-    {
-        return conf.tombstone_warn_threshold;
-    }
-
-    public static void setTombstoneWarnThreshold(int threshold)
-    {
-        conf.tombstone_warn_threshold = threshold;
-    }
-
-    public static int getTombstoneFailureThreshold()
-    {
-        return conf.tombstone_failure_threshold;
-    }
-
-    public static void setTombstoneFailureThreshold(int threshold)
-    {
-        conf.tombstone_failure_threshold = threshold;
     }
 
     public static int getCachedReplicaRowsWarnThreshold()
@@ -5195,13 +5177,13 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static boolean setApplyDbaasDefaults(boolean dbaasDefaults)
+    public static boolean setEmulateDbaasDefaults(boolean dbaasDefaults)
     {
-        return conf.apply_dbaas_defaults = dbaasDefaults;
+        return conf.emulate_dbaas_defaults = dbaasDefaults;
     }
 
-    public static boolean isApplyDbaasDefaults()
+    public static boolean isEmulateDbaasDefaults()
     {
-        return conf.apply_dbaas_defaults;
+        return conf.emulate_dbaas_defaults;
     }
 }

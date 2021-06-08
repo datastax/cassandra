@@ -58,7 +58,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_QUERY_HANDLER_CLASS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 /**
@@ -570,15 +570,26 @@ public class ClientState
      */
     public boolean isOrdinaryUser()
     {
+        if (ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.getBoolean())
+            return !isSuperIgnoreAnonymousUser() && !isSystem();
         return !isSuper() && !isSystem();
     }
 
     /**
-     * Checks if this user is a super user.
+     * Checks if this user is a super user. When authentication is disabled the anonymous user is considered
+     * a super user.
      */
     public boolean isSuper()
     {
         return !DatabaseDescriptor.getAuthenticator().requireAuthentication() || (user != null && user.isSuper());
+    }
+
+    /**
+     * Checks if this user is a super user. An anonymous user is never considered a super user.
+     */
+    public boolean isSuperIgnoreAnonymousUser()
+    {
+        return user != null && user.isSuper();
     }
 
     /**

@@ -34,6 +34,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +72,7 @@ import org.assertj.core.api.Condition;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Ignore("STAR-543: scannedTombstones guardrail replaces tombstone client warnings from CASSANDRA-16896")
 public class TombstoneCountWarningTest extends TestBaseImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(TombstoneCountWarningTest.class);
