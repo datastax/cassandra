@@ -62,36 +62,36 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
         DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesTotalThreshold(-1, defaultSAITotalFailureThreshold);
     }
 
-//    @Test
-//    public void testDefaultsOnPrem()
-//    {
-//        testDefaults(false);
-//    }
-//
-//    @Test
-//    public void testDefaultsDBAAS()
-//    {
-//        testDefaults(true);
-//    }
-//
-//    public void testDefaults(boolean dbaas)
-//    {
-//        boolean previous = DatabaseDescriptor.isApplyDbaasDefaults();
-//        try
-//        {
-//            DatabaseDescriptor.setApplyDbaasDefaults(dbaas);
-//
-//            GuardrailsConfig config = new GuardrailsConfig();
-//            config.applyConfig();
-//
-//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
-//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
-//        }
-//        finally
-//        {
-//            DatabaseDescriptor.setApplyDbaasDefaults(previous);
-//        }
-//    }
+    @Test
+    public void testDefaultsOnPrem()
+    {
+        testDefaults(false);
+    }
+
+    @Test
+    public void testDefaultsDBAAS()
+    {
+        testDefaults(true);
+    }
+
+    public void testDefaults(boolean dbaas)
+    {
+        boolean previous = DatabaseDescriptor.isEmulateDbaasDefaults();
+        try
+        {
+            DatabaseDescriptor.setEmulateDbaasDefaults(dbaas);
+
+            GuardrailsConfig config = new GuardrailsConfig();
+            config.applyConfig();
+
+            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
+            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
+        }
+        finally
+        {
+            DatabaseDescriptor.setEmulateDbaasDefaults(previous);
+        }
+    }
 
     @Test
     public void testPerTableFailureThreshold() throws Throwable

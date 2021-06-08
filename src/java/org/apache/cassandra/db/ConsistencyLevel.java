@@ -20,6 +20,8 @@ package org.apache.cassandra.db;
 import java.util.EnumSet;
 import java.util.Locale;
 
+import javax.annotation.Nullable;
+
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
@@ -219,6 +221,8 @@ public enum ConsistencyLevel
 
     public void validateForWrite() throws InvalidRequestException
     {
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+
         switch (this)
         {
             case SERIAL:
@@ -260,6 +264,8 @@ public enum ConsistencyLevel
 
     public void validateCounterForWrite(TableMetadata metadata) throws InvalidRequestException
     {
+        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
 
@@ -272,5 +278,22 @@ public enum ConsistencyLevel
         if (!(replicationStrategy instanceof NetworkTopologyStrategy))
             throw new InvalidRequestException(String.format("consistency level %s not compatible with replication strategy (%s)",
                                                             this, replicationStrategy.getClass().getName()));
+    }
+
+    /**
+     * Returns the strictest consistency level allowed by Guardrails.
+     *
+     * @param state the query state, used to skip the guardrails check if the query is internal or is done by a superuser.
+     * @return the strictest allowed serial consistency level
+     * @throws InvalidRequestException if all serial consistency level are disallowed
+     */
+    public static ConsistencyLevel defaultSerialConsistency(@Nullable QueryState state) throws InvalidRequestException
+    {
+        if (DatabaseDescriptor.getRawConfig() == null || !Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.SERIAL, state))
+            return ConsistencyLevel.SERIAL;
+        else if (!Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.LOCAL_SERIAL, state))
+            return ConsistencyLevel.LOCAL_SERIAL;
+
+        throw new InvalidRequestException("Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");
     }
 }

@@ -816,7 +816,7 @@ public class SecondaryIndexTest extends CQLTester
         // (the non-conditional batch doesn't hit this because
         // BatchStatement::executeLocally skips the size check but CAS
         // path does not)
-        long batchSizeThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
+        int batchSizeThreshold = DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb;
         try
         {
             DatabaseDescriptor.setBatchSizeFailThresholdInKiB((TOO_BIG / 1024) * 2);
@@ -869,7 +869,8 @@ public class SecondaryIndexTest extends CQLTester
         // (the non-conditional batch doesn't hit this because
         // BatchStatement::executeLocally skips the size check but CAS
         // path does not)
-        long batchSizeThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
+        int batchSizeThreshold = DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb;
+        int diskUsageThreshold = DatabaseDescriptor.getGuardrailsConfig().disk_usage_percentage_failure_threshold;
         try
         {
             DatabaseDescriptor.setBatchSizeFailThresholdInKiB((TOO_BIG / 1024) * 2);

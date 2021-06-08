@@ -1620,18 +1620,6 @@ transparent_data_encryption_options:
 # SAFETY THRESHOLDS #
 #####################
 
-# When executing a scan, within or across a partition, we need to keep the
-# tombstones seen in memory so we can return them to the coordinator, which
-# will use them to make sure other replicas also know about the deleted rows.
-# With workloads that generate a lot of tombstones, this can cause performance
-# problems and even exaust the server heap.
-# (http://www.datastax.com/dev/blog/cassandra-anti-patterns-queues-and-queue-like-datasets)
-# Adjust the thresholds here if you understand the dangers and want to
-# scan more tombstones anyway.  These thresholds may also be adjusted at runtime
-# using the StorageService mbean.
-tombstone_warn_threshold: 1000
-tombstone_failure_threshold: 100000
-
 # Filtering and secondary index queries at read consistency levels above ONE/LOCAL_ONE use a
 # mechanism called replica filtering protection to ensure that results from stale replicas do
 # not violate consistency. (See CASSANDRA-8272 and CASSANDRA-15907 for more details.) This
@@ -2116,10 +2104,14 @@ drop_compact_storage_enabled: false
 #
 storage_compatibility_mode: CASSANDRA_4
 
-# Apply database-as-a-service defaults.
+# Emulates DataStax Constellation database-as-a-service defaults.
 #
-# When enabled, some guardrails defaults are modified to values that are appropriate for cloud environments.
-# This includes (but is not limited to) stricter guardrails defaults.
+# When enabled, some defaults are modified to match those used by DataStax Constellation (DataStax cloud data
+# platform). This includes (but is not limited to) stricter guardrails defaults.
 #
-# This can be used as an convenience to develop and test applications meant to run in a cloud environment.
-# apply_dbaas_defaults: false
+# This can be used as an convenience to develop and test applications meant to run on DataStax Constellation.
+#
+# Warning: when enabled, the updated defaults reflect those of DataStax Constellation _at the time_ of the currently
+#                 used DSE release. This is a best-effort emulation of said defaults. Further, all nodes must use the same
+#                 config value.
+# emulate_dbaas_defaults: false

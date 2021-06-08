@@ -767,7 +767,7 @@ public class Config
      */
     public ConsistencyLevel denylist_consistency_level = ConsistencyLevel.QUORUM;
 
-    public boolean apply_dbaas_defaults = false;
+    public boolean emulate_dbaas_defaults = false;
 
     /**
      * The intial capacity for creating RangeTombstoneList.

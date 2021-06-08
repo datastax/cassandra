@@ -538,7 +538,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                    table(),
                                                    request.key,
                                                    request,
-                                                   options.getSerialConsistency(),
+                                                   options.getSerialConsistency(queryState),
                                                    options.getConsistency(),
                                                    queryState.getClientState(),
                                                    options.getNowInSeconds(queryState),

@@ -6553,23 +6553,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getTombstoneWarnThreshold()
     {
-        return DatabaseDescriptor.getTombstoneWarnThreshold();
+        return DatabaseDescriptor.getGuardrailsConfig().tombstone_warn_threshold;
     }
 
     public void setTombstoneWarnThreshold(int threshold)
     {
-        DatabaseDescriptor.setTombstoneWarnThreshold(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneWarnThreshold(threshold);
         logger.info("updated tombstone_warn_threshold to {}", threshold);
     }
 
     public int getTombstoneFailureThreshold()
     {
-        return DatabaseDescriptor.getTombstoneFailureThreshold();
+        return DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold;
     }
 
     public void setTombstoneFailureThreshold(int threshold)
     {
-        DatabaseDescriptor.setTombstoneFailureThreshold(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneFailureThreshold(threshold);
         logger.info("updated tombstone_failure_threshold to {}", threshold);
     }
 
