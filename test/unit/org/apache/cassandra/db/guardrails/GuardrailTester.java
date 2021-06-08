@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -59,6 +60,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Clock;
 import org.assertj.core.api.Assertions;
+import org.awaitility.Awaitility;
 
 import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
@@ -140,6 +142,14 @@ public abstract class GuardrailTester extends CQLTester
         useSuperUser();
         executeNet(format("CREATE USER IF NOT EXISTS %s WITH PASSWORD '%s'", USERNAME, PASSWORD));
         executeNet(format("GRANT ALL ON KEYSPACE %s TO %s", KEYSPACE, USERNAME));
+
+        // Make sure keyspace permissions have been applied
+        Awaitility.await()
+                  .atMost(10, TimeUnit.SECONDS)
+                  .with()
+                  .pollInterval(500, TimeUnit.MILLISECONDS)
+                  .until(() -> !executeNet("LIST ALL OF " + USERNAME).all().isEmpty());
+
         useUser(USERNAME, PASSWORD);
 
         String useKeyspaceQuery = "USE " + keyspace();
