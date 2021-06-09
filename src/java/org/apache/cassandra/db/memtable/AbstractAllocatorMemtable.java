@@ -182,7 +182,16 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
                              usage);
     }
 
-    @Override
+    /**
+     * For testing only. Give this memtable too big a size to make it always fail flushing.
+     */
+    @VisibleForTesting
+    public void makeUnflushable()
+    {
+        liveDataSize.addAndGet(1024L * 1024 * 1024 * 1024 * 1024);
+    }
+
+@Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         stats.ownershipRatioOnHeap += getAllocator().onHeap().ownershipRatio();
