@@ -1,0 +1,6 @@
+; Copyright DataStax, Inc.
+;
+; Please see the included license file for details.
+; Sample ~/.cqlshrc file with cloud configuration.
+[connection]
+secure_connect_bundle = /path/to/creds.zip
