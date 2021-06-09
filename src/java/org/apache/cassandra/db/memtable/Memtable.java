@@ -38,6 +38,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
@@ -195,6 +197,20 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
      */
     long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup);
 
+    /**
+     * Get the partition for the specified key. Returns null if no such partition is present.
+     */
+    Partition getPartition(DecoratedKey key);
+
+    interface MemtableUnfilteredPartitionIterator extends UnfilteredPartitionIterator
+    {
+        /**
+         * Returns the minimum local deletion time for all partitions in the range.
+         * Required for the efficiency of partition range read commands.
+         */
+        long getMinLocalDeletionTime();
+    }
+
     // Read operations are provided by the UnfilteredSource interface.
 
     // Statistics
@@ -210,6 +226,9 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
      * executed.
      */
     long operationCount();
+
+    /** Minimum timestamp of all stored data */
+    long getMinTimestamp();
 
     /**
      * The table's definition metadata.
@@ -330,6 +349,7 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
             return memtable().metadata();
         }
 
+        long partitionCount();
         default boolean isEmpty()
         {
             return partitionCount() > 0;
