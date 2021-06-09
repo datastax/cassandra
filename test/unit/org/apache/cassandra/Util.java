@@ -47,6 +47,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -114,6 +115,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
@@ -141,7 +143,9 @@ import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
+import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
 import org.mockito.Mockito;
 import org.mockito.internal.stubbing.defaultanswers.ForwardsInvocations;
@@ -1264,6 +1268,12 @@ public class Util
     public static RuntimeException testMustBeImplementedForSSTableFormat()
     {
         return new UnsupportedOperationException("Test must be implemented for sstable format " + DatabaseDescriptor.getSelectedSSTableFormat().getClass().getName());
+    }
+
+    public static void assertSSTableIds(SSTableId v1, SSTableId v2, IntFunction<Boolean> predicate)
+    {
+        Assertions.assertThat(Pair.create(v1, v2))
+                  .matches(p -> predicate.apply(SSTableIdFactory.COMPARATOR.compare(p.left, p.right)));
     }
 
     private static TimeUnit getSupportedMTimeGranularity() {

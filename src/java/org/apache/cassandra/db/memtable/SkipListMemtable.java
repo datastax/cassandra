@@ -43,7 +43,6 @@ import org.apache.cassandra.db.partitions.BTreePartitionData;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -191,7 +190,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         }
     }
 
-    Partition getPartition(DecoratedKey key)
+    public Partition getPartition(DecoratedKey key)
     {
         return partitions.get(key);
     }
@@ -318,21 +317,33 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     }
 
 
-    private static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements UnfilteredPartitionIterator
+    public static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
     {
         private final TableMetadata metadata;
         private final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter;
+        private final Map<PartitionPosition, AtomicBTreePartition> source;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
 
-        MemtableUnfilteredPartitionIterator(TableMetadata metadata, Map<PartitionPosition, AtomicBTreePartition> map, ColumnFilter columnFilter, DataRange dataRange)
+        public MemtableUnfilteredPartitionIterator(TableMetadata metadata, Map<PartitionPosition, AtomicBTreePartition> map, ColumnFilter columnFilter, DataRange dataRange)
         {
             this.metadata = metadata;
+            this.source = map;
             this.iter = map.entrySet().iterator();
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
         }
 
+        @Override
+        public long getMinLocalDeletionTime()
+        {
+            long minLocalDeletionTime = Long.MAX_VALUE;
+            for (AtomicBTreePartition partition : source.values())
+                minLocalDeletionTime = Math.min(minLocalDeletionTime, partition.stats().minLocalDeletionTime);
+
+            return minLocalDeletionTime;
+        }
+        
         @Override
         public TableMetadata metadata()
         {
