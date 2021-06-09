@@ -41,6 +41,7 @@ import org.github.jamm.Unmetered;
 public abstract class AbstractMemtable implements Memtable
 {
     private final AtomicReference<LifecycleTransaction> flushTransaction = new AtomicReference<>(null);
+    protected final AtomicLong liveDataSize = new AtomicLong(0);
     protected final AtomicLong currentOperations = new AtomicLong(0);
     protected final ColumnsCollector columnsCollector;
     protected final StatsCollector statsCollector = new StatsCollector();
@@ -75,12 +76,24 @@ public abstract class AbstractMemtable implements Memtable
     }
 
     @Override
+    public long getLiveDataSize()
+    {
+        return liveDataSize.get();
+    }
+    @Override
     public long operationCount()
     {
         return currentOperations.get();
     }
 
     @Override
+    /**
+     * Returns the minTS if one available, otherwise NO_MIN_TIMESTAMP.
+     * 
+     * EncodingStats uses a synthetic epoch TS at 2015. We don't want to leak that (CASSANDRA-18118) so we return NO_MIN_TIMESTAMP instead.
+     * 
+     * @return The minTS or NO_MIN_TIMESTAMP if none available
+     */
     public long getMinTimestamp()
     {
         return minTimestamp.get() != EncodingStats.NO_STATS.minTimestamp ? minTimestamp.get() : NO_MIN_TIMESTAMP;
