@@ -237,7 +237,7 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         return iterator;
     }
 
-    private Partition getPartition(DecoratedKey key)
+    public Partition getPartition(DecoratedKey key)
     {
         int shardIndex = boundaries.getShardForKey(key);
         return shards[shardIndex].partitions.get(key);

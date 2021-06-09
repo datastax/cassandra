@@ -51,7 +51,6 @@ import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -322,7 +321,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         // readsListener is ignored as it only accepts sstable signals
     }
 
-    private Partition getPartition(DecoratedKey key)
+    public Partition getPartition(DecoratedKey key)
     {
         int shardIndex = boundaries.getShardForKey(key);
         BTreePartitionData data = shards[shardIndex].data.get(key);
@@ -550,10 +549,11 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements UnfilteredPartitionIterator
+    static class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator
     {
         private final TableMetadata metadata;
         private final EnsureOnHeap ensureOnHeap;
+        private final Trie<BTreePartitionData> source;
         private final Iterator<Map.Entry<ByteComparable, BTreePartitionData>> iter;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
@@ -567,8 +567,18 @@ public class TrieMemtable extends AbstractShardedMemtable
             this.metadata = metadata;
             this.ensureOnHeap = ensureOnHeap;
             this.iter = source.entryIterator();
+            this.source = source;
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
+        }
+
+        public long getMinLocalDeletionTime()
+        {
+            long minLocalDeletionTime = Long.MAX_VALUE;
+            for (BTreePartitionData partition : source.values())
+                minLocalDeletionTime = Math.min(minLocalDeletionTime, partition.stats.minLocalDeletionTime);
+
+            return minLocalDeletionTime;
         }
 
         public TableMetadata metadata()
