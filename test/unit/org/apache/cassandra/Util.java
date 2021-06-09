@@ -86,6 +86,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.awaitility.Awaitility;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -204,7 +205,7 @@ public class Util
             rm.applyUnsafe();
 
         ColumnFamilyStore store = Keyspace.open(keyspaceName).getColumnFamilyStore(tableId);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
         return store;
     }
 
