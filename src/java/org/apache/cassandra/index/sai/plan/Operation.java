@@ -44,6 +44,7 @@ import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -211,16 +212,16 @@ public class Operation extends RangeIterator
     }
 
     @Override
-    protected Token computeNext()
+    protected PrimaryKey computeNext()
     {
         return range != null && range.hasNext() ? range.next() : endOfData();
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
         if (range != null)
-            range.skipTo(nextToken);
+            range.skipTo(nextKey);
     }
 
     @Override

@@ -28,6 +28,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -35,9 +36,12 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableParams;
 
 /**
  * Writes all on-disk index structures attached to a given SSTable.
@@ -47,6 +51,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Descriptor descriptor;
+    private final PrimaryKey.PrimaryKeyFactory primaryKeyFactory;
     private final Collection<StorageAttachedIndex> indices;
     private final Collection<ColumnIndexWriter> columnIndexWriters;
     private final SSTableComponentsWriter sstableComponentsWriter;
@@ -61,24 +66,29 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     public StorageAttachedIndexWriter(Descriptor descriptor,
                                       Collection<StorageAttachedIndex> indices,
-                                      LifecycleNewTracker tracker, CompressionParams compressionParams) throws IOException
+                                      LifecycleNewTracker tracker,
+                                      TableMetadata tableMetadata) throws IOException
     {
-        this(descriptor, indices, tracker, false, compressionParams);
+        this(descriptor, indices, tracker, false, tableMetadata);
     }
 
     public StorageAttachedIndexWriter(Descriptor descriptor,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker tracker,
-                                      boolean perColumnOnly, CompressionParams compressionParams) throws IOException
+                                      boolean perColumnOnly,
+                                      TableMetadata tableMetadata) throws IOException
     {
         this.descriptor = descriptor;
+        this.primaryKeyFactory = PrimaryKey.factory(tableMetadata);
         this.indices = indices;
         this.rowMapping = RowMapping.create(tracker.opType());
-        this.columnIndexWriters = indices.stream().map(i -> i.newIndexWriter(descriptor, tracker, rowMapping, compressionParams))
+        this.columnIndexWriters = indices.stream().map(i -> i.newIndexWriter(descriptor, tracker, rowMapping, tableMetadata.params.compression))
                                          .filter(Objects::nonNull) // a null here means the column had no data to flush
                                          .collect(Collectors.toList());
 
-        this.sstableComponentsWriter = perColumnOnly ? SSTableComponentsWriter.NONE : new SSTableComponentsWriter(descriptor, compressionParams);
+        this.sstableComponentsWriter = perColumnOnly
+                                       ? SSTableComponentsWriter.NONE
+                                       : new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, tableMetadata.params.compression);
     }
 
     @Override
@@ -94,7 +104,6 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         if (aborted) return;
         
         currentKey = key;
-        sstableComponentsWriter.startPartition(key, position);
     }
 
     @Override
@@ -107,15 +116,14 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             // Ignore range tombstones...
             if (unfiltered.isRow())
             {
-                sstableComponentsWriter.nextUnfilteredCluster(unfiltered, position);
-                rowMapping.add(currentKey, unfiltered, sstableRowId);
+                PrimaryKey primaryKey = primaryKeyFactory.createKey(currentKey, ((Row)unfiltered).clustering(), sstableRowId++);
+                sstableComponentsWriter.nextRow(primaryKey);
+                rowMapping.add(primaryKey);
 
                 for (ColumnIndexWriter w : columnIndexWriters)
                 {
-                    w.addRow(currentKey, sstableRowId, (Row) unfiltered);
+                    w.addRow(primaryKey, (Row) unfiltered);
                 }
-
-                sstableRowId++;
             }
         }
         catch (Throwable t)
@@ -141,15 +149,14 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         try
         {
-            sstableComponentsWriter.staticRow(staticRow, position);
-            rowMapping.add(currentKey, staticRow, sstableRowId);
+            PrimaryKey primaryKey = primaryKeyFactory.createKey(currentKey, staticRow.clustering(), sstableRowId++);
+            sstableComponentsWriter.nextRow(primaryKey);
+            rowMapping.add(primaryKey);
 
             for (ColumnIndexWriter w : columnIndexWriters)
             {
-                w.addRow(currentKey, sstableRowId, staticRow);
+                w.addRow(primaryKey, staticRow);
             }
-
-            sstableRowId++;
         }
         catch (Throwable t)
         {

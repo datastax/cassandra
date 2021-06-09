@@ -34,6 +34,7 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 public class MergePostingListTest extends NdiRandomizedTest
 {
@@ -98,8 +99,7 @@ public class MergePostingListTest extends NdiRandomizedTest
         final PostingList merged = MergePostingList.merge(lists);
         final PostingList expected = new ArrayPostingList(new int[]{ 1, 2, 3, 5, 8, 9, 10 });
 
-        assertEquals(expected.advance(9),
-                     merged.advance(9));
+        assertEquals(expected.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(9)), merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(9)));
 
         assertPostingListEquals(expected, merged);
     }
@@ -118,8 +118,8 @@ public class MergePostingListTest extends NdiRandomizedTest
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertEquals(2, merged.advance(2));
-        assertEquals(4, merged.advance(4));
+        assertEquals(2, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(2)));
+        assertEquals(4, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(4)));
         assertPostingListEquals(new ArrayPostingList(new int[]{ 5, 6 }), merged);
     }
 
@@ -136,9 +136,9 @@ public class MergePostingListTest extends NdiRandomizedTest
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertEquals(2, merged.advance(2));
+        assertEquals(2, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(2)));
         assertEquals(3, merged.nextPosting());
-        assertEquals(5, merged.advance(5));
+        assertEquals(5, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(5)));
         assertEquals(6, merged.nextPosting());
     }
 
@@ -157,7 +157,7 @@ public class MergePostingListTest extends NdiRandomizedTest
 
         final PostingList merged = MergePostingList.merge(lists);
         assertEquals(1, merged.nextPosting());
-        assertEquals(2, merged.advance(2));
+        assertEquals(2, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(2)));
         assertEquals(3, merged.nextPosting());
     }
 
@@ -170,8 +170,8 @@ public class MergePostingListTest extends NdiRandomizedTest
 
         final PostingList merged = MergePostingList.merge(lists);
         assertEquals(1, merged.nextPosting());
-        assertEquals(3, merged.advance(3));
-        assertEquals(4, merged.advance(4));
+        assertEquals(3, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(3)));
+        assertEquals(4, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(4)));
     }
 
     @Test
@@ -183,8 +183,8 @@ public class MergePostingListTest extends NdiRandomizedTest
         final PostingList merged = MergePostingList.merge(lists);
         assertEquals(1, merged.nextPosting());
         assertEquals(2, merged.nextPosting());
-        assertEquals(3, merged.advance(3));
-        assertEquals(4, merged.advance(4));
+        assertEquals(3, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(3)));
+        assertEquals(4, merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(4)));
         assertEquals(5, merged.nextPosting());
         assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
     }
@@ -192,7 +192,7 @@ public class MergePostingListTest extends NdiRandomizedTest
     @Test
     public void shouldInterleaveNextAndAdvanceOnRandom() throws IOException
     {
-        for (int i = 0; i < 1000; ++i)
+        for (int i = 0; i < nextInt(100, 500); ++i)
         {
             testAdvancingOnRandom();
         }
@@ -260,7 +260,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                     {
                         try
                         {
-                            return postingList.advance(rowID);
+                            return postingList.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(rowID));
                         }
                         catch (ArrayPostingList.LookupException ignore)
                         {
@@ -306,7 +306,7 @@ public class MergePostingListTest extends NdiRandomizedTest
             {
                 try
                 {
-                    rowID = merged.advance(targetRowID);
+                    rowID = merged.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(targetRowID));
                     break;
                 }
                 catch (ArrayPostingList.LookupException ignore)

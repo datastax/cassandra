@@ -45,6 +45,8 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -55,6 +57,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -64,6 +67,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -146,7 +150,12 @@ public class QueryController
         return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
     }
 
-    public UnfilteredRowIterator getPartition(DecoratedKey key, ReadExecutionController executionController)
+    public boolean needsRow(PrimaryKey key)
+    {
+        return key.hasEmptyClustering() || command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
+    }
+
+    public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new IllegalArgumentException("non-null key required");
@@ -158,8 +167,8 @@ public class QueryController
                                                                                      command.columnFilter(),
                                                                                      RowFilter.NONE,
                                                                                      DataLimits.NONE,
-                                                                                     key,
-                                                                                     command.clusteringIndexFilter(key));
+                                                                                     key.partitionKey(),
+                                                                                     makeFilter(key));
 
             return partition.queryMemtableAndDisk(cfs, executionController);
         }
@@ -184,8 +193,6 @@ public class QueryController
         if (resources.contains(expressions))
             throw new IllegalArgumentException("Can't process the same expressions multiple times.");
 
-        boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(expressions.size());
-
         RangeIterator.Builder builder = op == Operation.OperationType.OR
                                         ? RangeUnionIterator.builder()
                                         : RangeIntersectionIterator.selectiveBuilder();
@@ -197,7 +204,7 @@ public class QueryController
             for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
             {
                 @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
-                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer);
+                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext);
 
                 builder.add(index);
             }
@@ -212,6 +219,15 @@ public class QueryController
 
         resources.add(expressions);
         return builder;
+    }
+
+    private ClusteringIndexFilter makeFilter(PrimaryKey key)
+    {
+        if (key.hasEmptyClustering())
+            return command.clusteringIndexFilter(key.partitionKey());
+        else
+            return new ClusteringIndexNamesFilter(FBUtilities.singleton(key.clustering(), key.clusteringComparator()), false);
+
     }
 
     private static void releaseQuietly(SSTableIndex index)
@@ -243,7 +259,7 @@ public class QueryController
     /**
      * Try to reference all SSTableIndexes before querying on disk indexes.
      *
-     * If we attempt to proceed into {@link TermIterator#build(Expression, Set, AbstractBounds, QueryContext, boolean)}
+     * If we attempt to proceed into {@link TermIterator#build(Expression, Set, AbstractBounds, QueryContext)}
      * without first referencing all indexes, a concurrent compaction may decrement one or more of their backing
      * SSTable {@link Ref} instances. This will allow the {@link SSTableIndex} itself to be released and will fail the query.
      */
