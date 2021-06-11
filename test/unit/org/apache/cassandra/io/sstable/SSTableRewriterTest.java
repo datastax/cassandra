@@ -827,7 +827,10 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             while (!done.get())
             {
                 Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
-                if (Iterables.size(sstables) != 1)
+                // For a short time during the completion of a compaction both the input and output sstables will
+                // be present in the live and canonical sets.
+                int sstablesCount = Iterables.size(sstables);
+                if (sstablesCount == 0 || sstablesCount > 2)
                 {
                     failed.set(true);
                     return;

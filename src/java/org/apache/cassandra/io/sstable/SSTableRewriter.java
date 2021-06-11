@@ -32,6 +32,8 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -175,6 +177,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                     transaction.update(reader, false);
                     currentlyOpenedEarlyAt = writer.getFilePointer();
                     moveStarts(reader, reader.last);
+
                     transaction.checkpoint();
                 }
             }
@@ -255,10 +258,13 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                 continue;
             }
 
-            DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
-            assert newStart != null;
-            SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
-            transaction.update(replacement, true);
+            if (!transaction.isObsolete(latest))
+            {
+                DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
+                assert newStart != null;
+                SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
+                transaction.update(replacement, true);
+            }
         }
     }
 
@@ -310,6 +316,9 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             return;
         }
 
+        // If multiple sstables are written, we can early-open each as soon as it is finished.
+        // There's no point to do this for the last (or only) one, though, as it practically immediately
+        // will be opened as the compaction result.
         if (preemptiveOpenInterval != Long.MAX_VALUE)
         {
             // we leave it as a tmp file, but we open it and add it to the Tracker

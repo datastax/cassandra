@@ -167,12 +167,21 @@ public class Scrubber implements Closeable
         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge);
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {
-            nextIndexKey = indexAvailable() ? ByteBufferUtil.readWithShortLength(indexFile) : null;
-            if (indexAvailable())
+            try
             {
-                // throw away variable so we don't have a side effect in the assert
-                long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
-                assert firstRowPositionFromIndex == 0 : firstRowPositionFromIndex;
+                nextIndexKey = indexAvailable() ? ByteBufferUtil.readWithShortLength(indexFile) : null;
+                if (indexAvailable())
+                {
+                    // throw away variable so we don't have a side effect in the assert
+                    long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+                    assert firstRowPositionFromIndex == 0 : firstRowPositionFromIndex;
+                }
+            } catch (Throwable ex) {
+                throwIfFatal(ex);
+                nextIndexKey = null;
+                nextRowPositionFromIndex = dataFile.length();
+                if (indexFile != null)
+                    indexFile.seek(indexFile.length());
             }
 
             StatsMetadata metadata = sstable.getSSTableMetadata();
@@ -199,17 +208,21 @@ public class Scrubber implements Closeable
                     // check for null key below
                 }
 
-                updateIndexKey();
-
-                long dataStart = dataFile.getFilePointer();
-
                 long dataStartFromIndex = -1;
                 long dataSizeFromIndex = -1;
-                if (currentIndexKey != null)
+
+                updateIndexKey();
+
+                if (indexAvailable())
                 {
-                    dataStartFromIndex = currentRowPositionFromIndex + 2 + currentIndexKey.remaining();
-                    dataSizeFromIndex = nextRowPositionFromIndex - dataStartFromIndex;
+                    if (currentIndexKey != null)
+                    {
+                        dataStartFromIndex = currentRowPositionFromIndex + 2 + currentIndexKey.remaining();
+                        dataSizeFromIndex = nextRowPositionFromIndex - dataStartFromIndex;
+                    }
                 }
+
+                long dataStart = dataFile.getFilePointer();
 
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
@@ -295,12 +308,9 @@ public class Scrubber implements Closeable
             }
 
             // finish obsoletes the old sstable
+            transaction.obsoleteOriginals();
             finished.addAll(writer.setRepairedAt(badRows > 0 ? ActiveRepairService.UNREPAIRED_SSTABLE : sstable.getSSTableMetadata().repairedAt).finish());
             completed = true;
-        }
-        catch (IOException e)
-        {
-            throw Throwables.propagate(e);
         }
         finally
         {
@@ -379,8 +389,8 @@ public class Scrubber implements Closeable
             nextIndexKey = !indexAvailable() ? null : ByteBufferUtil.readWithShortLength(indexFile);
 
             nextRowPositionFromIndex = !indexAvailable()
-                    ? dataFile.length()
-                    : rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+                                       ? dataFile.length()
+                                       : rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
         }
         catch (Throwable th)
         {
@@ -388,6 +398,8 @@ public class Scrubber implements Closeable
             outputHandler.warn("Error reading index file", th);
             nextIndexKey = null;
             nextRowPositionFromIndex = dataFile.length();
+            if (indexFile != null)
+                indexFile.seek(indexFile.length());
         }
     }
 
