@@ -364,6 +364,7 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
             EndpointsForRange neighbors = ctx.repair().getNeighbors(state.keyspace, keyspaceLocalRanges, range,
                                                                            state.options.getDataCenters(),
                                                                            state.options.getHosts());
+            // local RF = 1 or given range is not part of local range, neighbors would be empty.
             if (neighbors.isEmpty())
             {
                 if (state.options.ignoreUnreplicatedKeyspaces())
