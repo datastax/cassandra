@@ -20,10 +20,14 @@ package org.apache.cassandra.io.sstable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -34,14 +38,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Sets;
-import org.junit.Assume;
-import java.nio.file.attribute.FileTime;
-import java.time.Instant;
-import java.util.*;
-
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -89,10 +89,10 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummarySupport;
 import org.apache.cassandra.io.sstable.keycache.KeyCache;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.io.util.PageAware;
@@ -105,9 +105,9 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.BloomCalculations;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.mockito.Mockito;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.mockito.Mockito;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
@@ -980,7 +980,8 @@ public class SSTableReaderTest
     @Test
     public void testGetScannerForNoIntersectingRanges() throws Exception
     {
-        ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD3);
         partitioner = store.getPartitioner();
 
         new RowUpdateBuilder(store.metadata(), 0, "k1")
@@ -990,21 +991,12 @@ public class SSTableReaderTest
             .applyUnsafe();
 
         Util.flush(store);
-        boolean foundScanner = false;
 
         Set<SSTableReader> liveSSTables = store.getLiveSSTables();
         assertEquals("The table should have only one sstable", 1, liveSSTables.size());
 
-        for (SSTableReader s : liveSSTables)
-        {
-            try (ISSTableScanner scanner = s.getScanner(new Range<>(t(0), t(1))))
-            {
-                // Make sure no data is returned and nothing fails for non-intersecting range.
-                assertFalse(scanner.hasNext());
-                foundScanner = true;
-            }
-        }
-        assertTrue(foundScanner);
+        ISSTableScanner scanner = liveSSTables.iterator().next().getScanner(new Range<>(t(0), t(1)));
+        assertFalse(scanner.hasNext());
     }
 
     @Test
