@@ -141,12 +141,10 @@ except ImportError as e:
              'Error: %s\n' % (sys.executable, sys.path, e))
 
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster
 from cassandra.cqltypes import cql_typename
 from cassandra.marshal import int64_unpack
 from cassandra.metadata import (ColumnMetadata, KeyspaceMetadata,
                                 TableMetadata, protect_name, protect_names)
-from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra.query import SimpleStatement, ordered_dict_factory, TraceUnavailable
 from cassandra.util import datetime_from_timestamp
 
@@ -169,7 +167,7 @@ from cqlshlib.util import get_file_encoding_bomsize, trim_if_present
 from cqlshlib.geotypes import patch_geotypes_import_conversion  # nopep8
 from cqlshlib.daterangetype import patch_daterange_import_conversion  # nopep
 
-from cqlshlib.cloud import create_cloud_cluster
+from cqlshlib.driver import cluster_factory
 
 patch_geotypes_import_conversion(ImportConversion)
 patch_daterange_import_conversion(ImportConversion)
@@ -212,7 +210,7 @@ parser.add_option('--ssl', action='store_true', help='Use SSL', default=False)
 parser.add_option("-u", "--username", help="Authenticate as user.")
 parser.add_option("-p", "--password", help="Authenticate using password.")
 parser.add_option('-k', '--keyspace', help='Authenticate to the given keyspace.')
-parser.add_option('-b', '--secure-connect-bundle', 
+parser.add_option('-b', '--secure-connect-bundle',
                   help="Connect using secure connect bundle. If this option is specified host, port settings are ignored.")
 parser.add_option("-f", "--file", help="Execute commands from FILE, then exit")
 parser.add_option('--debug', action='store_true',
@@ -493,21 +491,19 @@ class Shell(cmd.Cmd):
             kwargs = {}
             if protocol_version is not None:
                 kwargs['protocol_version'] = protocol_version
-            ssl_options = sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None
-            if secure_connect_bundle:
-                self.conn = create_cloud_cluster(secure_connect_bundle_path=self.secure_connect_bundle,
-                                                 cql_version=cqlver,
-                                                 auth_provider=self.auth_provider,
-                                                 connect_timeout=connect_timeout,
-                                                 **kwargs)
-            else:
-                self.conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=cqlver,
-                                    auth_provider=self.auth_provider,
-                                    ssl_options=ssl_options,
-                                    load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
-                                    control_connection_timeout=connect_timeout,
-                                    connect_timeout=connect_timeout,
-                                    **kwargs)
+            self.conn = cluster_factory(
+                self.hostname,
+                port=self.port,
+                cql_version=cqlver,
+                auth_provider=self.auth_provider,
+                ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
+                control_connection_timeout=connect_timeout,
+                connect_timeout=connect_timeout,
+                secure_connect_bundle=secure_connect_bundle,
+                application_name=description,
+                application_version=version,
+                **kwargs)
+
         self.owns_connection = not use_conn
 
         if keyspace:
@@ -532,6 +528,7 @@ class Shell(cmd.Cmd):
         self.session.default_timeout = request_timeout
         self.session.row_factory = ordered_dict_factory
         self.session.default_consistency_level = self.consistency_level
+        self.session.default_serial_consistency_level = self.serial_consistency_level
 
         self.get_connection_versions()
         self.set_expanded_cql_version(self.connection_versions['cql'])
@@ -1883,7 +1880,7 @@ class Shell(cmd.Cmd):
 
         LOGIN <username> (<password>)
 
-           Login using the specified username. 
+           Login using the specified username.
            If password is specified it should be wrapped with single quotes.
            If not specified you will be prompted to enter.
         """
@@ -1896,20 +1893,16 @@ class Shell(cmd.Cmd):
 
         auth_provider = PlainTextAuthProvider(username=username, password=password)
 
-        if self.secure_connect_bundle:
-            conn = create_cloud_cluster(secure_connect_bundle_path=self.secure_connect_bundle,
-                                        cql_version=self.conn.cql_version,
-                                        auth_provider=auth_provider,
-                                        connect_timeout=self.conn.connect_timeout,
-                                        protocol_version=self.conn.protocol_version)
-        else:
-            conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=self.conn.cql_version,
-                           protocol_version=self.conn.protocol_version,
-                           auth_provider=auth_provider,
-                           ssl_options=self.conn.ssl_options,
-                           load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
-                           control_connection_timeout=self.conn.connect_timeout,
-                           connect_timeout=self.conn.connect_timeout)
+        conn = cluster_factory(
+            self.hostname,
+            port=self.port,
+            cql_version=self.conn.cql_version,
+            protocol_version=self.conn.protocol_version,
+            auth_provider=auth_provider,
+            ssl_options=self.conn.ssl_options,
+            control_connection_timeout=self.conn.connect_timeout,
+            connect_timeout=self.conn.connect_timeout,
+            secure_connect_bundle=self.secure_connect_bundle)
 
         if self.current_keyspace:
             session = conn.connect(self.current_keyspace)
@@ -1920,6 +1913,7 @@ class Shell(cmd.Cmd):
         session.default_timeout = self.session.default_timeout
         session.row_factory = self.session.row_factory
         session.default_consistency_level = self.session.default_consistency_level
+        session.default_serial_consistency_level = self.session.default_serial_consistency_level
         session.max_trace_wait = self.session.max_trace_wait
 
         # Update after we've connected in case we fail to authenticate
@@ -2364,7 +2358,7 @@ def main(options, hostname, port):
         sys.stderr.write("Using '%s' encoding\n" % (options.encoding,))
         sys.stderr.write("Using ssl: %s\n" % (options.ssl,))
         if options.secure_connect_bundle:
-            sys.stderr.write("Using secure connect bundle: %s\n" % (options.secure_connect_bundle, ) )
+            sys.stderr.write("Using secure connect bundle: %s\n" % (options.secure_connect_bundle, ))
 
     # create timezone based on settings, environment or auto-detection
     timezone = None
