@@ -76,6 +76,7 @@ import org.junit.After;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
+import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -260,6 +261,24 @@ public abstract class CommitLogTest
             testRecovery(new byte[2], CommitLogDescriptor.current_version);
             return null;
         }, CommitLogReplayException.class);
+    }
+
+    @Test
+    public void testRecoveryWithTruncatedFile() throws Exception
+    {
+        CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
+                                                           CommitLogSegment.getNextId(),
+                                                           DatabaseDescriptor.getCommitLogCompression(),
+                                                           DatabaseDescriptor.getEncryptionContext());
+
+        byte[] randomData = new byte[100];
+        (new java.util.Random()).nextBytes(randomData);
+
+        // Set expected end position greater than actual data to simulate truncated file
+        // TODO: Used trial/error to set size; various errors occur if it's "too small", e.g. 2x data
+        int endPosition = randomData.length * 3;
+        
+        testRecovery(desc, endPosition, randomData, true);
     }
 
     @Test
@@ -595,7 +614,7 @@ public abstract class CommitLogTest
         return null;
     }
 
-    protected Void testRecovery(CommitLogDescriptor desc, byte[] logData) throws Exception
+    protected Void testRecovery(CommitLogDescriptor desc, int endPosition, byte[] logData, boolean tolerateTruncation) throws Exception
     {
         File logFile = tmpFile(desc.version);
         CommitLogDescriptor fromFile = CommitLogDescriptor.fromFileName(logFile.getName());
@@ -603,12 +622,28 @@ public abstract class CommitLogTest
         desc = new CommitLogDescriptor(desc.version, fromFile.id, desc.compression, desc.getEncryptionContext());
         ByteBuffer buf = ByteBuffer.allocate(1024);
         CommitLogDescriptor.writeHeader(buf, desc, getAdditionalHeaders(desc.getEncryptionContext()));
+
+        // Save offset
+        // TODO: better descriptive name? "syncMarkerOffset"? "descriptorLength"?
+        int offset = buf.position();
+        
+        // Write expected end position
+        // TODO: is there a more accurate/descriptive name for what this value represents?
+        buf.putInt(endPosition);
+        
+        // Write syncMarker CRC
+        CRC32 crc = new CRC32();
+        updateChecksumInt(crc, (int) (fromFile.id & 0xFFFFFFFFL));
+        updateChecksumInt(crc, (int) (fromFile.id >>> 32));
+        updateChecksumInt(crc, (int) offset);
+        buf.putInt((int) crc.getValue());
+
         try (OutputStream lout = new FileOutputStream(logFile))
         {
             lout.write(buf.array(), 0, buf.position());
             lout.write(logData);
             //statics make it annoying to test things correctly
-            CommitLog.instance.recover(logFile.getPath()); //CASSANDRA-1119 / CASSANDRA-1179 throw on failure*/
+            CommitLog.instance.recoverPath(logFile.getPath(), tolerateTruncation); //CASSANDRA-1119 / CASSANDRA-1179 throw on failure
         }
         return null;
     }
@@ -636,7 +671,7 @@ public abstract class CommitLogTest
     {
         CommitLogDescriptor desc = new CommitLogDescriptor(4, new ParameterizedClass("UnknownCompressor", null), EncryptionContextGenerator.createDisabledContext());
         runExpecting(() -> {
-            testRecovery(desc, new byte[0]);
+            testRecovery(desc, 0, new byte[0], false);
             return null;
         }, CommitLogReplayException.class);
     }
