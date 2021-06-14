@@ -46,14 +46,10 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-
-import static org.apache.cassandra.utils.BloomFilter.fpChanceTolerance;
 
 public abstract class SSTableReaderBuilder
 {
@@ -96,30 +92,6 @@ public abstract class SSTableReaderBuilder
     }
 
     public abstract SSTableReader build();
-
-    public SSTableReaderBuilder dfile(FileHandle dfile)
-    {
-        this.dfile = dfile;
-        return this;
-    }
-
-    public SSTableReaderBuilder ifile(FileHandle ifile)
-    {
-        this.ifile = ifile;
-        return this;
-    }
-
-    public SSTableReaderBuilder bf(IFilter bf)
-    {
-        this.bf = bf;
-        return this;
-    }
-
-    public SSTableReaderBuilder summary(IndexSummary summary)
-    {
-        this.summary = summary;
-        return this;
-    }
 
     /**
      * Load index summary, first key and last key from Summary.db file if it exists.
@@ -272,6 +244,30 @@ public abstract class SSTableReaderBuilder
             super(descriptor, metadataRef, maxDataAge, components, statsMetadata, openReason, header);
         }
 
+        public SSTableReaderBuilder.ForWriter dfile(FileHandle dfile)
+        {
+            this.dfile = dfile;
+            return this;
+        }
+
+        public SSTableReaderBuilder.ForWriter ifile(FileHandle ifile)
+        {
+            this.ifile = ifile;
+            return this;
+        }
+
+        public SSTableReaderBuilder.ForWriter bf(IFilter bf)
+        {
+            this.bf = bf;
+            return this;
+        }
+
+        public SSTableReaderBuilder.ForWriter summary(IndexSummary summary)
+        {
+            this.summary = summary;
+            return this;
+        }
+
         @Override
         public SSTableReader build()
         {
@@ -296,6 +292,7 @@ public abstract class SSTableReaderBuilder
         @Override
         public SSTableReader build()
         {
+            assert dfile == null && ifile == null && summary == null && bf == null;
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
             logger.info("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
@@ -366,6 +363,7 @@ public abstract class SSTableReaderBuilder
         @Override
         public SSTableReader build()
         {
+            assert dfile == null && ifile == null && summary == null && bf == null;
             String dataFilePath = descriptor.filenameFor(Component.DATA);
             long fileLength = new File(dataFilePath).length();
             logger.info("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));

@@ -35,11 +35,11 @@ import org.apache.cassandra.utils.concurrent.Ref;
  */
 public class OffHeapBitSet implements IBitSet
 {
-    /** The maximum memory that can be used by bloom filters, in megabytes, overall.
-     * The default is unlimited, a limit should only be set as a last resort measure. */
+    /**
+     * The maximum memory that can be used by bloom filters, in megabytes, overall.
+     * The default is unlimited, a limit should only be set as a last resort measure.
+     */
     @VisibleForTesting
-//    public static final long maxMemory = SizeUnit.MEGABYTES.toBytes(PropertyConfiguration.getLong("cassandra.max_bf_memory_mb", Long.MAX_VALUE));
-//    private static final AtomicLong memoryAllocated = new AtomicLong(0);
     private final Memory bytes;
     private final MemoryLimiter memoryLimiter;
 
@@ -219,7 +219,7 @@ public class OffHeapBitSet implements IBitSet
     {
         // Similar to open bitset.
         long h = 0;
-        for (long i = bytes.size(); --i >= 0;)
+        for (long i = bytes.size(); --i >= 0; )
         {
             h ^= bytes.getByte(i);
             h = (h << 1) | (h >>> 63); // rotate left

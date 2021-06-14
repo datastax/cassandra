@@ -23,10 +23,13 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -946,40 +949,45 @@ public class SSTableReaderTest
         Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
 
         // should do nothing
-        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys, false);
 
         // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys);
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, true, numKeys);
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys, true);
 
         // should deserialize the existing BF
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys, false);
         // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
         // should install empty filter without changing file or metadata
-        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys, false);
 
-        // this should fail to deserialize and fall back to recreating it
+        // corrupted bf file should fail to deserialize and we should fall back to recreating it
         Files.write(Paths.get(sstable.descriptor.filenameFor(Component.FILTER)), new byte[] { 0, 0, 0, 0});
-        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
 
-        // this should fail to create a BF and install the empty one
+        // missing primary index file should make BF fail to load and we should install the empty one
         new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys);
+        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys, false);
     }
 
-    private void checkSSTableOpenedWithGivenFPChance(SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys)
+    private void checkSSTableOpenedWithGivenFPChance(SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException
     {
         Descriptor desc = sstable.descriptor;
         TableMetadata metadata = sstable.metadata.get().unbuild().bloomFilterFpChance(fpChance).build();
         ValidationMetadata prevValidationMetadata = getValidationMetadata(desc);
         Assert.assertNotNull(prevValidationMetadata);
-        boolean bfExists = new File(desc.filenameFor(Component.FILTER)).exists();
+        File bfFile = new File(desc.filenameFor(Component.FILTER));
 
         SSTableReader target = null;
         try
         {
+            FileTime bf0Time = bfFile.exists() ? Files.getLastModifiedTime(bfFile.toPath()) : FileTime.from(Instant.MIN);
+
+            // make sure we wait enough - some JDK implementations use seconds granularity and we need to wait a bit to actually see the change
+            Uninterruptibles.sleepUninterruptibly(1, Util.supportedMTimeGranularity);
+
             target = SSTableReader.open(desc,
                                         SSTableReader.discoverComponentsFor(desc),
                                         TableMetadataRef.forOfflineTools(metadata),
@@ -988,21 +996,31 @@ public class SSTableReaderTest
             IFilter bloomFilter = target.getBloomFilter();
             ValidationMetadata validationMetadata = getValidationMetadata(desc);
             Assert.assertNotNull(validationMetadata);
+            FileTime bf1Time = bfFile.exists() ? Files.getLastModifiedTime(bfFile.toPath()) : FileTime.from(Instant.MIN);
+
+            if (expectRecreated)
+            {
+                Assert.assertTrue(bf0Time.compareTo(bf1Time) < 0);
+            }
+            else
+            {
+                assertEquals(bf0Time, bf1Time);
+            }
 
             if (bfShouldExist)
             {
                 Assert.assertNotEquals(FilterFactory.AlwaysPresent, bloomFilter);
                 Assert.assertTrue(bloomFilter.serializedSize() > 0);
                 Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
-                Assert.assertTrue(new File(desc.filenameFor(Component.FILTER)).exists());
-                Assert.assertEquals(bloomFilter.serializedSize(), new File(desc.filenameFor(Component.FILTER)).length());
+                Assert.assertTrue(bfFile.exists());
+                Assert.assertEquals(bloomFilter.serializedSize(), bfFile.length());
             }
             else
             {
                 Assert.assertEquals(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
                 Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);
                 Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
-                Assert.assertEquals(bfExists, new File(desc.filenameFor(Component.FILTER)).exists());
+                Assert.assertEquals(bfFile.exists(), bfFile.exists());
             }
 
             // verify all keys are present according to the BF

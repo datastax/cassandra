@@ -33,7 +33,7 @@ public class FilterFactory
 
     /**
      * @return A BloomFilter with the lowest practical false positive
-     * probability for the given number of elements.
+     *         probability for the given number of elements.
      */
     public static IFilter getFilter(long numElements, int targetBucketsPerElem)
     {

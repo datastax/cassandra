@@ -88,11 +88,11 @@ public class BloomFilterTest
     }
 
     @Before
-    public void setupClass()
+    public void setup()
     {
         // Set a high limit so that normal tests won't reach it, but we don't want Long.MAX_VALUE because
         // we want to test what happens when we reach it
-        System.setProperty("cassandra.max_bf_memory_mb", Long.toString(128 << 10));
+        System.setProperty(BloomFilter.MAX_MEMORY_MB_PROP, Long.toString(128 << 10));
         memoryLimiter = new MemoryLimiter(128L << 30, "Allocating %s for bloom filter would reach max of %s (current %s)");
         bfInvHashes = FilterFactory.getFilter(10000L, FilterTestHelper.MAX_FAILURE_RATE);
     }

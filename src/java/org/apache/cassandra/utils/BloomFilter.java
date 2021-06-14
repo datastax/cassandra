@@ -21,8 +21,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
-import org.apache.cassandra.io.sstable.metadata.MetadataType;
-import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.obs.IBitSet;
@@ -30,13 +29,31 @@ import org.apache.cassandra.utils.obs.MemoryLimiter;
 
 public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
-    private static final long maxMemory = Long.getLong("cassandra.bf.max_memory_mb", 0) << 20;
+    /**
+     * The maximum memory to be used by all loaded bloom filters. If the limit is exceeded, pass-through filter will be
+     * used until some filters get unloaded.
+     */
+    public final static String MAX_MEMORY_MB_PROP = Config.PROPERTY_PREFIX + "bf.max_memory_mb";
+
+    /**
+     * A minimal relative change of the fase-positive chance so that it is considered as a reason to recreate the bloom
+     * filter. If the change is smaller than this, it will be ignored.
+     */
+    public final static String FP_CHANCE_TOLERANCE_PROP = Config.PROPERTY_PREFIX + "bf.fp_chance_tolerance";
+
+    /**
+     * If the false-positive chance has changed since the last compaction (for example by alter table statement), and
+     * the node is restarted - the bloom filter can get rebuilt if this property jest set to true.
+     */
+    public final static String RECREATE_ON_FP_CHANCE_CHANGE = Config.PROPERTY_PREFIX + "bf.recreate_on_fp_chance_change";
+
+    private static final long maxMemory = Long.getLong(MAX_MEMORY_MB_PROP, 0) << 20;
 
     @VisibleForTesting
-    public static double fpChanceTolerance = Double.parseDouble(System.getProperty("cassandra.bf.fp_chance_tolerance", "0.000001"));
+    public static double fpChanceTolerance = Double.parseDouble(System.getProperty(FP_CHANCE_TOLERANCE_PROP, "0.000001"));
 
     @VisibleForTesting
-    public static boolean recreateOnFPChanceChange = Boolean.getBoolean("cassandra.bf.recreate_on_fp_chance_change");
+    public static boolean recreateOnFPChanceChange = Boolean.getBoolean(RECREATE_ON_FP_CHANCE_CHANGE);
 
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");

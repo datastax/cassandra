@@ -37,6 +37,7 @@ public class MemoryLimiter
 
     public void increment(long bytesCount) throws ReachedMemoryLimitException
     {
+        assert bytesCount >= 0;
         long bytesCountAfterAllocation = this.currentMemory.addAndGet(bytesCount);
         if (bytesCountAfterAllocation >= maxMemory)
         {
@@ -49,9 +50,10 @@ public class MemoryLimiter
         }
     }
 
-    public void decrement(long value)
+    public void decrement(long bytesCount)
     {
-        long result = this.currentMemory.addAndGet(-value);
+        assert bytesCount >= 0;
+        long result = this.currentMemory.addAndGet(-bytesCount);
         assert result >= 0;
     }
 
