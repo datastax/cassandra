@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -26,9 +27,11 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.ReversePostingList;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.utils.IntArrayReversePostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.IndexInput;
@@ -37,6 +40,154 @@ public class PostingsTest extends NdiRandomizedTest
 {
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();
+
+    @Test
+    public void testRandomReversePostingList() throws Exception
+    {
+       for (int x=0; x < 100; x++)
+       {
+           System.out.println("ROUND "+x);
+           doTestReversePostingList();
+       }
+    }
+
+    private void doTestReversePostingList() throws Exception
+    {
+        final IndexComponents indexComponents = newIndexComponents();
+        final int blockSize = 4;//nextInt(2, 10);
+        System.out.println("blockSize="+blockSize);
+        //long[] array = new long[] {83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83};
+
+        //long[] array = new long[] {36, 125, 212, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258};
+
+        long[] array = new long[nextInt(10, 1000)];
+        long current = nextInt(0, 100);
+
+        for (int x = 0; x < array.length; x++)
+        {
+            array[x] = current;
+            if (nextInt(0, 10) == 0)
+            {
+                int rounds = nextInt(0, Math.min(array.length - x, 10));
+                for (int y = 0; y < rounds || x < array.length; y++)
+                {
+                    x++;
+                    if (x >= array.length) break;
+                    array[x] = current;
+                }
+            }
+            else
+            {
+                current += nextInt(0, 100);
+            }
+        }
+        long start = array[0];
+        System.out.println("array=" + Arrays.toString(array));
+        final ArrayPostingList expectedPostingList = new ArrayPostingList(array);
+
+        IntArrayReversePostingList revExpectedPostingList = new IntArrayReversePostingList(array);
+
+        long postingPointer;
+        try (PostingsWriter writer = new PostingsWriter(indexComponents, blockSize, false))
+        {
+            postingPointer = writer.write(expectedPostingList);
+            writer.complete();
+        }
+
+        // check straight iteration first
+//        IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
+//        input.seek(postingPointer);
+//        CountingPostingListEventListener listener = new CountingPostingListEventListener();
+//        ReversePostingsReader reader = new ReversePostingsReader(input, postingPointer, listener);
+//        //reader.lastPosInBlock(1);
+//        while (true)
+//        {
+//            final long posting1 = revExpectedPostingList.nextPosting();
+//            final long posting2 = reader.nextPosting();
+//            //System.out.println("posting2="+posting2);
+//
+//            System.out.println("posting1="+posting1+" posting2="+posting2);
+//
+//            assertEquals(posting1, posting2);
+//
+//            if (posting2 == ReversePostingList.REVERSE_END_OF_STREAM)
+//            {
+//                break;
+//            }
+//
+//            final long ordinal1 = revExpectedPostingList.getOrdinal();
+//            final long ordinal2 = reader.getOrdinal();
+//
+//            assertEquals(ordinal1, ordinal2);
+//        }
+//
+//        reader.close();
+
+        revExpectedPostingList = new IntArrayReversePostingList(array);
+
+        IndexInput input = indexComponents.openBlockingInput(indexComponents.postingLists);
+        input.seek(postingPointer);
+        CountingPostingListEventListener listener = new CountingPostingListEventListener();
+        ReversePostingsReader reader = new ReversePostingsReader(input, postingPointer, listener);
+        long actualRowID = array[array.length-1];
+        long actualRowID2 = array[array.length-1];
+
+        long target;
+        long ordinal1, ordinal2;
+
+//        long target = 83;
+//        actualRowID = reader.advance(target);
+//        actualRowID2 = revExpectedPostingList.advance(target);
+//
+//        assertEquals(actualRowID2, actualRowID);
+//
+//        long ordinal1 = revExpectedPostingList.getOrdinal();
+//        long ordinal2 = reader.getOrdinal();
+//
+//        //assertEquals(ordinal1, ordinal2);
+//        System.out.println("ordinal1="+actualRowID+" ordinal2="+ordinal2);
+//
+//        System.out.println("advanced actualRowID="+actualRowID);
+
+        int count = 0;
+
+        while (true)
+        {
+            if (nextInt(0, 5) == 0)
+            {
+                System.out.println("random advance actualRowID="+actualRowID);
+                if (actualRowID == -1) break;
+                target = nextLong(start, actualRowID + 1);
+                if (target != actualRowID)
+                {
+                    System.out.println("random advance target=" + target);
+                    actualRowID2 = reader.advance(target);
+                    actualRowID = revExpectedPostingList.advance(target);
+                }
+            }
+            else
+            {
+                actualRowID = revExpectedPostingList.nextPosting();
+
+                actualRowID2 = reader.nextPosting();
+                System.out.println("count="+(count+1)+" actualRowID=" + actualRowID+" actualRowID2=" + actualRowID2);
+            }
+            assertEquals(actualRowID, actualRowID2);
+            count++;
+
+            if (actualRowID == ReversePostingList.REVERSE_END_OF_STREAM)
+            {
+                break;
+            }
+
+            ordinal1 = revExpectedPostingList.getOrdinal();
+            ordinal2 = reader.getOrdinal();
+
+            assertEquals(ordinal1, ordinal2);
+        }
+
+        reader.close();
+    }
 
     @Test
     public void testSingleBlockPostingList() throws Exception

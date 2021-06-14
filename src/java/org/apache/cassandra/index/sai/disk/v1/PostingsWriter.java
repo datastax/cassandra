@@ -24,7 +24,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
@@ -288,24 +287,6 @@ public class PostingsWriter implements Closeable
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
-            }
-            writer.finish();
-        }
-    }
-
-    private void writeSortedFoRBlock(IntArrayList values, IndexOutput output) throws IOException
-    {
-        final int maxValue = values.getInt(values.size() - 1);
-
-        assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
-        output.writeByte((byte) bitsPerValue);
-        if (bitsPerValue > 0)
-        {
-            final DirectWriter writer = DirectWriter.getInstance(output, values.size(), bitsPerValue);
-            for (int i = 0; i < values.size(); ++i)
-            {
-                writer.add(values.getInt(i));
             }
             writer.finish();
         }
