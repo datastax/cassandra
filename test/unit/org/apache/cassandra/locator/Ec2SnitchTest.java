@@ -28,6 +28,7 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -68,10 +69,7 @@ public class Ec2SnitchTest
     {
         GOSSIP_DISABLE_THREAD_VALIDATION.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
-        CommitLog.instance.start();
-        CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
-        mkdirs();
-        cleanup();
+        ServerTestUtils.cleanupAndLeaveDirs();
         Keyspace.setInitialized();
         StorageService.instance.initServer(0);
     }
