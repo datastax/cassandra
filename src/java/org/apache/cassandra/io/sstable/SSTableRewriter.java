@@ -316,9 +316,6 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             return;
         }
 
-        // If multiple sstables are written, we can early-open each as soon as it is finished.
-        // There's no point to do this for the last (or only) one, though, as it practically immediately
-        // will be opened as the compaction result.
         if (preemptiveOpenInterval != Long.MAX_VALUE)
         {
             // we leave it as a tmp file, but we open it and add it to the Tracker

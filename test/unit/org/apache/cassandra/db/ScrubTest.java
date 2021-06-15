@@ -314,19 +314,19 @@ public class ScrubTest
         corrupt.accept(sstable, keys);
 
         // with skipCorrupted == false, the scrub is expected to fail
-//        if (!isFullyRecoverable)
-//        {
-//            try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
-//                 Scrubber scrubber = new Scrubber(cfs, txn, false, true))
-//            {
-//                // with skipCorrupted == true, the corrupt row will be skipped
-//                scrubber.scrub();
-//                fail("Expected a CorruptSSTableException to be thrown");
-//            }
-//            catch (IOError err)
-//            {
-//            }
-//        }
+        if (!isFullyRecoverable)
+        {
+            try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
+                 Scrubber scrubber = new Scrubber(cfs, txn, false, true))
+            {
+                // with skipCorrupted == true, the corrupt row will be skipped
+                scrubber.scrub();
+                fail("Expected a CorruptSSTableException to be thrown");
+            }
+            catch (IOError err)
+            {
+            }
+        }
 
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(ImmutableList.of(sstable), OperationType.SCRUB);
              Scrubber scrubber = new Scrubber(cfs, txn, true, true))
