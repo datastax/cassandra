@@ -29,7 +29,6 @@ import org.junit.Test;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
@@ -38,8 +37,6 @@ import org.apache.cassandra.locator.AbstractCloudMetadataServiceConnector.Defaul
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.ServerTestUtils.cleanup;
-import static org.apache.cassandra.ServerTestUtils.mkdirs;
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
 import static org.apache.cassandra.locator.AbstractCloudMetadataServiceConnector.METADATA_URL_PROPERTY;
 import static org.junit.Assert.assertEquals;
