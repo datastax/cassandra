@@ -19,15 +19,20 @@ package org.apache.cassandra.utils;
 
 import java.io.IOException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IGenericSerializer;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.utils.obs.IBitSet;
+import org.apache.cassandra.utils.obs.MemoryLimiter;
 import org.apache.cassandra.utils.obs.OffHeapBitSet;
 
 public final class BloomFilterSerializer implements IGenericSerializer<BloomFilter, DataInputStreamPlus, DataOutputStreamPlus>
 {
+    private final static Logger logger = LoggerFactory.getLogger(BloomFilterSerializer.class);
     public final static BloomFilterSerializer newFormatInstance = new BloomFilterSerializer(false);
     public final static BloomFilterSerializer oldFormatInstance = new BloomFilterSerializer(true);
 
@@ -70,11 +75,23 @@ public final class BloomFilterSerializer implements IGenericSerializer<BloomFilt
     }
 
     @Override
-    @SuppressWarnings("resource")
     public BloomFilter deserialize(DataInputStreamPlus in) throws IOException
     {
+        return deserialize(in, BloomFilter.memoryLimiter);
+    }
+
+    public BloomFilter deserialize(DataInputStreamPlus in, MemoryLimiter memoryLimiter) throws IOException
+    {
         int hashes = in.readInt();
-        IBitSet bs = OffHeapBitSet.deserialize(in, oldFormat);
+        IBitSet bs;
+        try
+        {
+            bs = OffHeapBitSet.deserialize(in, oldFormat, memoryLimiter);
+        }
+        catch (MemoryLimiter.ReachedMemoryLimitException | OutOfMemoryError e)
+        {
+            throw new RuntimeException("Out of native memory occured, You can avoid it by increasing the system ram space or by increasing bloom_filter_fp_chance.");
+        }
 
         return new BloomFilter(hashes, bs);
     }
