@@ -619,26 +619,6 @@ public abstract class CommitLogTest
         return null;
     }
 
-    protected Void testRecovery(CommitLogDescriptor desc, byte[] logData) throws Exception
-    {
-        File logFile = tmpFile(desc.version);
-        CommitLogDescriptor fromFile = CommitLogDescriptor.fromFileName(logFile.getName());
-        // Change id to match file.
-        desc = new CommitLogDescriptor(desc.version, fromFile.id, desc.compression, desc.getEncryptionContext());
-        
-        ByteBuffer buf = ByteBuffer.allocate(1024);
-        CommitLogDescriptor.writeHeader(buf, desc, getAdditionalHeaders(desc.getEncryptionContext()));
-        
-        try (OutputStream lout = new FileOutputStream(logFile))
-        {
-            lout.write(buf.array(), 0, buf.position());
-            lout.write(logData);
-            //statics make it annoying to test things correctly
-            CommitLog.instance.recoverPath(logFile.getPath(), false); //CASSANDRA-1119 / CASSANDRA-1179 throw on failure
-        }
-        return null;
-    }
-
     protected Void testRecovery(CommitLogDescriptor desc, byte[] logData, int dataLength, boolean tolerateTruncation) throws Exception
     {
         File logFile = tmpFile(desc.version);
@@ -691,7 +671,7 @@ public abstract class CommitLogTest
     {
         CommitLogDescriptor desc = new CommitLogDescriptor(4, new ParameterizedClass("UnknownCompressor", null), EncryptionContextGenerator.createDisabledContext());
         runExpecting(() -> {
-            testRecovery(desc, new byte[0]);
+            testRecovery(desc, new byte[0], 0, false);
             return null;
         }, CommitLogReplayException.class);
     }
