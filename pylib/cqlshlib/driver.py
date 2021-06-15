@@ -25,6 +25,16 @@ from cassandra.pool import HostDistance
 
 
 class EndpointWhiteListRoundRobinPolicy(WhiteListRoundRobinPolicy):
+    """
+    WhileListRoundRobinPolicy dedicated for the cloud connection.
+
+    It is using endpoint instead of host address.
+
+    Note:
+    we want to override _allowed_hosts and _allowed_hosts_resolved which is the reason
+    to not call direct super class init but rather the one from RoundRobinPolicy.
+    """
+
     def __init__(self, hosts):
         self._allowed_hosts = self._allowed_hosts_resolved = tuple(hosts)
         RoundRobinPolicy.__init__(self)
