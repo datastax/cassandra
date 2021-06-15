@@ -23,12 +23,16 @@ import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOError;
+import java.io.*;
+import java.lang.reflect.Field;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.*;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -156,6 +160,8 @@ public class Util
     private static final Logger logger = LoggerFactory.getLogger(Util.class);
 
     private static List<UUID> hostIdPool = new ArrayList<>();
+
+    public final static TimeUnit supportedMTimeGranularity = getSupportedMTimeGranularity();
 
     public static IPartitioner testPartitioner()
     {
@@ -404,7 +410,7 @@ public class Util
             return getAllUnfiltered(command, controller);
         }
     }
-    
+
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
         List<ImmutableBTreePartition> results = new ArrayList<>();
@@ -428,7 +434,7 @@ public class Util
             return getAll(command, controller);
         }
     }
-    
+
     public static List<FilteredPartition> getAll(ReadCommand command, ReadExecutionController controller)
     {
         List<FilteredPartition> results = new ArrayList<>();
@@ -487,7 +493,7 @@ public class Util
             return getOnlyPartitionUnfiltered(cmd, controller);
         }
     }
-    
+
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
@@ -505,7 +511,7 @@ public class Util
     {
         return getOnlyPartition(cmd, false);
     }
-    
+
     public static FilteredPartition getOnlyPartition(ReadCommand cmd, boolean trackRepairedStatus)
     {
         try (ReadExecutionController executionController = cmd.executionController(trackRepairedStatus);
@@ -1260,5 +1266,21 @@ public class Util
     public static RuntimeException testMustBeImplementedForSSTableFormat()
     {
         return new UnsupportedOperationException("Test must be implemented for sstable format " + DatabaseDescriptor.getSelectedSSTableFormat().getClass().getName());
+    }
+
+    private static TimeUnit getSupportedMTimeGranularity() {
+        try
+        {
+            Path p = Files.createTempFile(Util.class.getSimpleName(), "dummy-file");
+            FileTime ft = Files.getLastModifiedTime(p);
+            Files.deleteIfExists(p);
+            Field f = FileTime.class.getDeclaredField("unit");
+            f.setAccessible(true);
+            return (TimeUnit) f.get(ft);
+        }
+        catch (IOException |  NoSuchFieldException | IllegalAccessException e)
+        {
+            throw new AssertionError("Failed to read supported file modification time granularity");
+        }
     }
 }

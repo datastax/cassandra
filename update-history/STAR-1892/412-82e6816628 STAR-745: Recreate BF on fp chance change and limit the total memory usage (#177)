@@ -1,0 +1,539 @@
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
+@@ -535,64 +535,7 @@
+ 
+     public void setupOnline()
+     {
+-<<<<<<<
+          owner().ifPresent(o -> setCrcCheckChance(o.getCrcCheckChance()));
+-=======
+-        // under normal operation we can do this at any time, but SSTR is also used outside C* proper,
+-        // e.g. by BulkLoader, which does not initialize the cache.  As a kludge, we set up the cache
+-        // here when we know we're being wired into the rest of the server infrastructure.
+-        InstrumentingCache<KeyCacheKey, RowIndexEntry> maybeKeyCache = CacheService.instance.keyCache;
+-        if (maybeKeyCache.getCapacity() > 0)
+-            keyCache = maybeKeyCache;
+-
+-        final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata().id);
+-        if (cfs != null)
+-            setCrcCheckChance(cfs.getCrcCheckChance());
+-    }
+-
+-    /**
+-     * Save index summary to Summary.db file.
+-     */
+-    public static void saveSummary(Descriptor descriptor, DecoratedKey first, DecoratedKey last, IndexSummary summary)
+-    {
+-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+-        if (summariesFile.exists())
+-            FileUtils.deleteWithConfirm(summariesFile);
+-
+-        try (DataOutputStreamPlus oStream = new BufferedDataOutputStreamPlus(new FileOutputStream(summariesFile)))
+-        {
+-            IndexSummary.serializer.serialize(summary, oStream);
+-            ByteBufferUtil.writeWithLength(first.getKey(), oStream);
+-            ByteBufferUtil.writeWithLength(last.getKey(), oStream);
+-        }
+-        catch (IOException e)
+-        {
+-            logger.trace("Cannot save SSTable Summary: ", e);
+-
+-            // corrupted hence delete it and let it load it now.
+-            if (summariesFile.exists())
+-                FileUtils.deleteWithConfirm(summariesFile);
+-        }
+-    }
+-
+-    public static void saveBloomFilter(Descriptor descriptor, IFilter filter)
+-    {
+-        File filterFile = new File(descriptor.filenameFor(Component.FILTER));
+-        try (DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(new FileOutputStream(filterFile)))
+-        {
+-            BloomFilter.serializer.serialize((BloomFilter) filter, stream);
+-            stream.flush();
+-        }
+-        catch (IOException e)
+-        {
+-            logger.trace("Cannot save SSTable bloomfilter: ", e);
+-
+-            // corrupted hence delete it and let it load it now.
+-            if (filterFile.exists())
+-                FileUtils.deleteWithConfirm(filterFile);
+-        }
+-
+->>>>>>>
+     }
+ 
+     /**
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigTableWriter.java
+@@ -290,33 +290,7 @@
+             summary.maybeAddEntry(key, indexStart, indexEnd, dataEnd);
+         }
+ 
+-<<<<<<<
+-        /**
+-         * Closes the index and bloomfilter, making the public state of this writer valid for consumption.
+-         */
+-        void flushBf()
+-        {
+-            if (components.contains(Component.FILTER))
+-            {
+-                String path = descriptor.filenameFor(Component.FILTER);
+-                try (FileOutputStream fos = new FileOutputStream(path);
+-                     DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
+-                {
+-                    // bloom filter
+-                    BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+-                    stream.flush();
+-                    SyncUtil.sync(fos);
+-                }
+-                catch (IOException e)
+-                {
+-                    throw new FSWriteError(e, path);
+-                }
+-            }
+-        }
+-
+-=======
+         @Override
+->>>>>>>
+         public void mark()
+         {
+             mark = writer.mark();
+--- a/src/java/org/apache/cassandra/utils/BloomFilter.java
++++ b/src/java/org/apache/cassandra/utils/BloomFilter.java
+@@ -23,11 +23,8 @@
+ 
+ import io.netty.util.concurrent.FastThreadLocal;
+ import net.nicoulaj.compilecommand.annotations.Inline;
+-<<<<<<<
+-import org.apache.cassandra.config.Config;
+-=======
+ import org.apache.cassandra.io.util.DataOutputStreamPlus;
+->>>>>>>
++import org.apache.cassandra.config.Config;
+ import org.apache.cassandra.utils.concurrent.Ref;
+ import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
+ import org.apache.cassandra.utils.obs.IBitSet;
+@@ -94,7 +91,6 @@
+ 
+     public long serializedSize(boolean old)
+     {
+-<<<<<<<
+         return BloomFilterSerializer.forVersion(old).serializedSize(this);
+     }
+ 
+@@ -102,9 +98,6 @@
+     public void serialize(DataOutputStreamPlus out, boolean old) throws IOException
+     {
+         BloomFilterSerializer.forVersion(old).serialize(this, out);
+-=======
+-        return serializer.serializedSize(this);
+->>>>>>>
+     }
+ 
+     // Murmur is faster than an SHA-based approach and provides as-good collision
+--- a/src/java/org/apache/cassandra/utils/BloomFilterSerializer.java
++++ b/src/java/org/apache/cassandra/utils/BloomFilterSerializer.java
+@@ -30,24 +30,12 @@
+ import org.apache.cassandra.utils.obs.MemoryLimiter;
+ import org.apache.cassandra.utils.obs.OffHeapBitSet;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.utils.FilterFactory.AlwaysPresent;
+ 
+-public final class BloomFilterSerializer
++public final class BloomFilterSerializer implements IGenericSerializer<BloomFilter, DataInputStreamPlus, DataOutputStreamPlus>
+ {
+     private final static Logger logger = LoggerFactory.getLogger(BloomFilterSerializer.class);
+-
+     private final MemoryLimiter memoryLimiter;
+-
+-    public BloomFilterSerializer(MemoryLimiter memoryLimiter)
+-    {
+-        this.memoryLimiter = memoryLimiter;
+-    }
+-
+-    public void serialize(BloomFilter bf, DataOutputPlus out) throws IOException
+-=======
+-public final class BloomFilterSerializer implements IGenericSerializer<BloomFilter, DataInputStreamPlus, DataOutputStreamPlus>
+-{
+     public final static BloomFilterSerializer newFormatInstance = new BloomFilterSerializer(false);
+     public final static BloomFilterSerializer oldFormatInstance = new BloomFilterSerializer(true);
+ 
+@@ -58,8 +46,12 @@
+         this.oldFormat = oldFormat;
+     }
+ 
++    public BloomFilterSerializer(MemoryLimiter memoryLimiter)
++    {
++        this.memoryLimiter = memoryLimiter;
++    }
++
+     public static BloomFilterSerializer forVersion(boolean oldSerializationFormat)
+->>>>>>>
+     {
+         if (oldSerializationFormat)
+             return oldFormatInstance;
+@@ -75,8 +67,6 @@
+         bf.bitset.serialize(out);
+     }
+ 
+-<<<<<<<
+-=======
+     @SuppressWarnings("resource")
+     public IFilter deserialize(DataInputStream in, boolean oldBfFormat) throws IOException
+     {
+@@ -96,7 +86,6 @@
+         return new BloomFilter(hashes, bs);
+     }
+ 
+->>>>>>>
+     /**
+      * Calculates a serialized size of the given Bloom Filter
+      *
+@@ -104,10 +93,7 @@
+      * @return serialized size of the given bloom filter
+      * @see org.apache.cassandra.io.ISerializer#serialize(Object, org.apache.cassandra.io.util.DataOutputPlus)
+      */
+-<<<<<<<
+-=======
+     @Override
+->>>>>>>
+     public long serializedSize(BloomFilter bf)
+     {
+         int size = TypeSizes.sizeof(bf.hashCount); // hash count
+--- a/src/java/org/apache/cassandra/utils/FilterFactory.java
++++ b/src/java/org/apache/cassandra/utils/FilterFactory.java
+@@ -72,11 +72,7 @@
+     {
+         assert maxFalsePosProbability <= 1.0 : "Invalid probability";
+         if (maxFalsePosProbability == 1.0)
+-<<<<<<<
+-            return AlwaysPresent;
+-=======
+             return FilterFactory.AlwaysPresent;
+->>>>>>>
+         int bucketsPerElement = BloomCalculations.maxBucketsPerElement(numElements);
+         BloomCalculations.BloomSpecification spec = BloomCalculations.computeBloomSpec(bucketsPerElement, maxFalsePosProbability);
+         return createFilter(spec.K, numElements, spec.bucketsPerElement, memoryLimiter);
+--- a/src/java/org/apache/cassandra/utils/obs/OffHeapBitSet.java
++++ b/src/java/org/apache/cassandra/utils/obs/OffHeapBitSet.java
+@@ -17,12 +17,9 @@
+  */
+ package org.apache.cassandra.utils.obs;
+ 
+-<<<<<<<
+ import java.io.*;
+-=======
+ import java.io.DataInputStream;
+ import java.io.IOException;
+->>>>>>>
+ 
+ import com.google.common.annotations.VisibleForTesting;
+ 
+@@ -176,11 +173,7 @@
+     }
+ 
+     @SuppressWarnings("resource")
+-<<<<<<<
+-    public static <I extends InputStream & DataInput> OffHeapBitSet deserialize(I in, boolean oldBfFormat) throws IOException
+-=======
+-    public static OffHeapBitSet deserialize(DataInputStream in, boolean oldBfFormat, MemoryLimiter memoryLimiter) throws IOException, MemoryLimiter.ReachedMemoryLimitException
+->>>>>>>
++    public static <I extends InputStream & DataInput> OffHeapBitSet deserialize(DataInputStream in, boolean oldBfFormat, MemoryLimiter memoryLimiter) throws IOException, MemoryLimiter.ReachedMemoryLimitException
+     {
+         long byteCount = in.readInt() * 8L;
+         Memory memory = allocate(byteCount, memoryLimiter);
+--- a/test/microbench/org/apache/cassandra/test/microbench/BloomFilterSerializerBench.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/BloomFilterSerializerBench.java
+@@ -79,21 +79,12 @@
+             if (oldBfFormat)
+                 SerializationsTest.serializeOldBfFormat(filter, out);
+             else
+-<<<<<<<
+-                BloomFilter.serializer.serialize(filter, out);
+-            out.close();
+-            filter.close();
+-
+-            DataInputStream in = new DataInputStream(new FileInputStream(file));
+-            IFilter filter2 = BloomFilter.serializer.deserialize(in, oldBfFormat);
+-=======
+                 serializer.serialize(filter, out);
+             out.close();
+             filter.close();
+ 
+             FileInputStreamPlus in = new FileInputStreamPlus(file);
+             BloomFilter filter2 = BloomFilterSerializer.forVersion(oldBfFormat).deserialize(in);
+->>>>>>>
+             FileUtils.closeQuietly(in);
+             filter2.close();
+         }
+--- a/test/unit/org/apache/cassandra/Util.java
++++ b/test/unit/org/apache/cassandra/Util.java
+@@ -19,26 +19,20 @@
+  *
+  */
+ 
+-<<<<<<<
+-import java.io.*;
+-import java.lang.reflect.Field;
+-=======
+ import java.io.Closeable;
+ import java.io.DataInputStream;
+ import java.io.EOFException;
+ import java.io.IOError;
+->>>>>>>
++import java.io.*;
++import java.lang.reflect.Field;
+ import java.io.IOException;
+ import java.io.InputStream;
+ import java.math.BigInteger;
+ import java.net.UnknownHostException;
+ import java.nio.ByteBuffer;
+-<<<<<<<
+ import java.nio.channels.FileChannel;
+-=======
+ import java.nio.file.*;
+ import java.nio.file.attribute.FileTime;
+->>>>>>>
+ import java.nio.file.Path;
+ import java.time.Duration;
+ import java.util.ArrayList;
+@@ -1220,23 +1214,6 @@
+         return new File(targetBasePath.toPath().resolve(relative));
+     }
+ 
+-<<<<<<<
+-    private static TimeUnit getSupportedMTimeGranularity() {
+-        try
+-        {
+-            Path p = Files.createTempFile(Util.class.getSimpleName(), "dummy-file");
+-            FileTime ft = Files.getLastModifiedTime(p);
+-            Files.deleteIfExists(p);
+-            Field f = FileTime.class.getDeclaredField("unit");
+-            f.setAccessible(true);
+-            return (TimeUnit) f.get(ft);
+-        }
+-        catch (IOException |  NoSuchFieldException | IllegalAccessException e)
+-        {
+-            throw new AssertionError("Failed to read supported file modification time granularity");
+-        }
+-    }
+-=======
+     public static void flush(ColumnFamilyStore cfs)
+     {
+         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+@@ -1290,5 +1267,20 @@
+     {
+         return new UnsupportedOperationException("Test must be implemented for sstable format " + DatabaseDescriptor.getSelectedSSTableFormat().getClass().getName());
+     }
+->>>>>>>
++
++    private static TimeUnit getSupportedMTimeGranularity() {
++        try
++        {
++            Path p = Files.createTempFile(Util.class.getSimpleName(), "dummy-file");
++            FileTime ft = Files.getLastModifiedTime(p);
++            Files.deleteIfExists(p);
++            Field f = FileTime.class.getDeclaredField("unit");
++            f.setAccessible(true);
++            return (TimeUnit) f.get(ft);
++        }
++        catch (IOException |  NoSuchFieldException | IllegalAccessException e)
++        {
++            throw new AssertionError("Failed to read supported file modification time granularity");
++        }
++    }
+ }
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -20,18 +20,6 @@
+ import java.io.IOException;
+ import java.nio.ByteBuffer;
+ import java.nio.file.Files;
+-<<<<<<<
+-import java.nio.file.Path;
+-import java.nio.file.Paths;
+-import java.nio.file.attribute.FileTime;
+-import java.time.Instant;
+-import java.util.*;
+-import java.util.concurrent.*;
+-import java.util.stream.Stream;
+-
+-import com.google.common.collect.Sets;
+-import com.google.common.util.concurrent.Uninterruptibles;
+-=======
+ import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.Collections;
+@@ -47,7 +35,16 @@
+ 
+ import com.google.common.collect.Sets;
+ import org.junit.Assume;
+->>>>>>>
++import java.nio.file.Path;
++import java.nio.file.Paths;
++import java.nio.file.attribute.FileTime;
++import java.time.Instant;
++import java.util.*;
++import java.util.concurrent.*;
++import java.util.stream.Stream;
++
++import com.google.common.collect.Sets;
++import com.google.common.util.concurrent.Uninterruptibles;
+ import org.junit.After;
+ import org.junit.Assert;
+ import org.junit.BeforeClass;
+@@ -86,7 +83,6 @@
+ import org.apache.cassandra.io.FSReadError;
+ import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+-<<<<<<<
+ import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
+ import org.apache.cassandra.io.sstable.format.big.BigFormat;
+ import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
+@@ -97,11 +93,9 @@
+ import org.apache.cassandra.io.sstable.keycache.KeyCache;
+ import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+ import org.apache.cassandra.io.util.File;
+-=======
+ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+ import org.apache.cassandra.io.sstable.metadata.MetadataType;
+ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+->>>>>>>
+ import org.apache.cassandra.io.util.FileDataInput;
+ import org.apache.cassandra.io.util.MmappedRegions;
+ import org.apache.cassandra.io.util.PageAware;
+@@ -114,12 +108,9 @@
+ import org.apache.cassandra.utils.BloomCalculations;
+ import org.apache.cassandra.utils.BloomFilter;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+-<<<<<<<
++import org.mockito.Mockito;
+ import org.apache.cassandra.utils.FilterFactory;
+ import org.apache.cassandra.utils.IFilter;
+-=======
+-import org.mockito.Mockito;
+->>>>>>>
+ 
+ import static java.lang.String.format;
+ import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+--- a/test/unit/org/apache/cassandra/utils/BloomFilterTest.java
++++ b/test/unit/org/apache/cassandra/utils/BloomFilterTest.java
+@@ -19,13 +19,10 @@
+ package org.apache.cassandra.utils;
+ 
+ import java.io.ByteArrayInputStream;
+-<<<<<<<
+-=======
+ import java.io.DataInputStream;
+ import java.io.File;
+ import java.io.FileInputStream;
+ import java.io.FileOutputStream;
+->>>>>>>
+ import java.io.IOException;
+ import java.nio.ByteBuffer;
+ import java.text.NumberFormat;
+@@ -74,19 +71,11 @@
+         }
+         else
+         {
+-<<<<<<<
+-            BloomFilter.serializer.serialize((BloomFilter) f, out);
+-        }
+-
+-        ByteArrayInputStream in = new ByteArrayInputStream(out.getData(), 0, out.getLength());
+-        IFilter f2 = BloomFilter.serializer.deserialize(new DataInputStream(in), oldBfFormat);
+-=======
+             BloomFilterSerializer.forVersion(false).serialize((BloomFilter) f, out);
+         }
+ 
+         ByteArrayInputStream in = new ByteArrayInputStream(out.getData(), 0, out.getLength());
+         IFilter f2 = BloomFilterSerializer.forVersion(oldBfFormat).deserialize(Util.DataInputStreamPlusImpl.wrap(in));
+->>>>>>>
+ 
+         assert f2.isPresent(FilterTestHelper.bytes("a"));
+         assert !f2.isPresent(FilterTestHelper.bytes("b"));
+@@ -241,16 +230,6 @@
+         File file = FileUtils.createDeletableTempFile("bloomFilterTest-", ".dat");
+         BloomFilter filter = (BloomFilter) FilterFactory.getFilter(((long) Integer.MAX_VALUE / 8) + 1, 0.01d);
+         filter.add(FilterTestHelper.wrap(test));
+-<<<<<<<
+-        DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(new FileOutputStream(file));
+-        BloomFilter.serializer.serialize(filter, out);
+-        out.close();
+-        filter.close();
+-
+-        DataInputStream in = new DataInputStream(new FileInputStream(file));
+-        IFilter filter2 = BloomFilter.serializer.deserialize(in, false);
+-        assertTrue(filter2.isPresent(FilterTestHelper.wrap(test)));
+-=======
+         FileOutputStreamPlus out = file.newOutputStream(File.WriteMode.OVERWRITE);
+         BloomFilterSerializer serializer = BloomFilterSerializer.forVersion(false);
+         serializer.serialize(filter, out);
+@@ -260,7 +239,6 @@
+         FileInputStreamPlus in = file.newInputStream();
+         BloomFilter filter2 = BloomFilterSerializer.forVersion(false).deserialize(in);
+         Assert.assertTrue(filter2.isPresent(FilterTestHelper.wrap(test)));
+->>>>>>>
+         FileUtils.closeQuietly(in);
+         filter2.close();
+     }
+--- a/test/unit/org/apache/cassandra/utils/SerializationsTest.java
++++ b/test/unit/org/apache/cassandra/utils/SerializationsTest.java
+@@ -63,11 +63,7 @@
+                 if (oldBfFormat)
+                     serializeOldBfFormat((BloomFilter) bf, out);
+                 else
+-<<<<<<<
+-                    BloomFilter.serializer.serialize((BloomFilter) bf, out);
+-=======
+                     BloomFilterSerializer.forVersion(false).serialize((BloomFilter) bf, out);
+->>>>>>>
+             }
+         }
+     }
+@@ -81,13 +77,8 @@
+             testBloomFilterWrite1000(true);
+         }
+ 
+-<<<<<<<
+-        try (DataInputStream in = getInput("4.0", "utils.BloomFilter1000.bin");
+-             IFilter filter = BloomFilter.serializer.deserialize(in, false))
+-=======
+         try (FileInputStreamPlus in = getInput("4.0", "utils.BloomFilter1000.bin");
+              IFilter filter = BloomFilterSerializer.forVersion(false).deserialize(in))
+->>>>>>>
+         {
+             boolean present;
+             for (int i = 0 ; i < 1000 ; i++)
+@@ -102,13 +93,8 @@
+             }
+         }
+ 
+-<<<<<<<
+-        try (DataInputStream in = getInput("3.0", "utils.BloomFilter1000.bin");
+-             IFilter filter = BloomFilter.serializer.deserialize(in, true))
+-=======
+         try (FileInputStreamPlus in = getInput("3.0", "utils.BloomFilter1000.bin");
+              IFilter filter = BloomFilterSerializer.forVersion(true).deserialize(in))
+->>>>>>>
+         {
+             boolean present;
+             for (int i = 0 ; i < 1000 ; i++)
+@@ -134,13 +120,8 @@
+     {
+         Murmur3Partitioner partitioner = new Murmur3Partitioner();
+ 
+-<<<<<<<
+-        try (DataInputStream in = new DataInputStream(new FileInputStream(new File(file)));
+-             IFilter filter = BloomFilter.serializer.deserialize(in, oldBfFormat))
+-=======
+         try (FileInputStreamPlus in = new File(file).newInputStream();
+              IFilter filter = BloomFilterSerializer.forVersion(oldBfFormat).deserialize(in))
+->>>>>>>
+         {
+             for (int i = 1; i <= 10; i++)
+             {
