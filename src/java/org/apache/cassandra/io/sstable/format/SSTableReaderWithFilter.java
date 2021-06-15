@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 
 import org.apache.cassandra.db.DecoratedKey;
@@ -121,6 +122,12 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
     public long getFilterOffHeapSize()
     {
         return filter.offHeapSize();
+    }
+    
+    @VisibleForTesting
+    public IFilter getFilter()
+    {
+        return filter;
     }
 
     public abstract SSTableReaderWithFilter cloneAndReplace(IFilter filter);
