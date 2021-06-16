@@ -176,7 +176,9 @@ public class Scrubber implements Closeable
                     long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
                     assert firstRowPositionFromIndex == 0 : firstRowPositionFromIndex;
                 }
-            } catch (Throwable ex) {
+            }
+            catch (Throwable ex)
+            {
                 throwIfFatal(ex);
                 nextIndexKey = null;
                 nextRowPositionFromIndex = dataFile.length();

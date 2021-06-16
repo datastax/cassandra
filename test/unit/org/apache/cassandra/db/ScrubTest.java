@@ -310,7 +310,6 @@ public class ScrubTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         // overwrite one row with garbage
-        // overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
         corrupt.accept(sstable, keys);
 
         // with skipCorrupted == false, the scrub is expected to fail
@@ -795,7 +794,7 @@ public class ScrubTest
     /**
      * Tests with invalid sstables (containing duplicate entries in 2.0 and 3.0 storage format),
      * that were caused by upgrading from 2.x with duplicate range tombstones.
-     * <p>
+     *
      * See CASSANDRA-12144 for details.
      */
     @Test

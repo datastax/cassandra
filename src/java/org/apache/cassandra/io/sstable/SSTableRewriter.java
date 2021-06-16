@@ -32,8 +32,6 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -177,7 +175,6 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                     transaction.update(reader, false);
                     currentlyOpenedEarlyAt = writer.getFilePointer();
                     moveStarts(reader, reader.last);
-
                     transaction.checkpoint();
                 }
             }
@@ -260,10 +257,10 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
             if (!transaction.isObsolete(latest))
             {
-            DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
-            assert newStart != null;
-            SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
-            transaction.update(replacement, true);
+                DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
+                assert newStart != null;
+                SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
+                transaction.update(replacement, true);
             }
         }
     }

@@ -147,9 +147,9 @@ public class View
                 // and is otherwise worked around by opening early the last sstable in the result set (which pushes it
                 // in the compacting set with EARLY openReason) and the !compacting.contains(sstable) check in the
                 // second loop below.
-                // Unfortunately there does not appear to be way to avoid this workaround. Filtering the compacting set
-                // through having an early-open version in live does not work because source are fully removed from the
-                // live set when they are completely exhausted.
+                // Unfortunately there does not appear to be a way to avoid this workaround. Filtering the compacting
+                // set through having an early-open version in live does not work because sources are fully removed from
+                // the live set when they are completely exhausted.
 
                 // Add the compacting versions first because they will be the canonical versions of compaction sources.
                 Set<SSTableReader> canonicalSSTables = new HashSet<>();
