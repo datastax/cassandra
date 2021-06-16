@@ -34,11 +34,9 @@ from uuid import UUID
 
 import cassandra
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster
 from cassandra.cqltypes import cql_typename
 from cassandra.marshal import int64_unpack
 from cassandra.metadata import (ColumnMetadata, KeyspaceMetadata, TableMetadata)
-from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra.query import SimpleStatement, ordered_dict_factory, TraceUnavailable
 from cassandra.util import datetime_from_timestamp
 
@@ -57,6 +55,7 @@ except ImportError:
     build_version = 'UNKNOWN'
 from cqlshlib.geotypes import patch_geotypes_import_conversion  # nopep8
 from cqlshlib.daterangetype import patch_daterange_import_conversion  # nopep
+from cqlshlib.driver import cluster_factory
 
 patch_geotypes_import_conversion(ImportConversion)
 patch_daterange_import_conversion(ImportConversion)
@@ -133,6 +132,8 @@ parser.add_argument('--ssl', action='store_true', help='Use SSL', default=False)
 parser.add_argument("-u", "--username", help="Authenticate as user.")
 parser.add_argument("-p", "--password", help="Authenticate using password.")
 parser.add_argument('-k', '--keyspace', help='Authenticate to the given keyspace.')
+parser.add_argument('-b', '--secure-connect-bundle',
+                    help="Connect using secure connect bundle. If this option is specified host, port settings are ignored.")
 parser.add_argument("-f", "--file", help="Execute commands from FILE, then exit")
 parser.add_argument('--debug', action='store_true',
                     help='Show additional debugging information')
@@ -364,6 +365,7 @@ class Shell(cmd.Cmd):
                  username=None, encoding=None, stdin=None, tty=True,
                  completekey=DEFAULT_COMPLETEKEY, browser=None, use_conn=None,
                  cqlver=None, keyspace=None,
+                 secure_connect_bundle=None,
                  consistency_level=None, serial_consistency_level=None,
                  tracing_enabled=False, expand_enabled=False,
                  display_nanotime_format=DEFAULT_NANOTIME_FORMAT,
@@ -380,8 +382,10 @@ class Shell(cmd.Cmd):
                  connect_timeout=DEFAULT_CONNECT_TIMEOUT_SECONDS,
                  no_file_io=DEFAULT_NO_FILE_IO,
                  is_subshell=False,
-                 auth_provider=None):
+                 auth_provider=None,
+                 debug=False):
         cmd.Cmd.__init__(self, completekey=completekey)
+        self.debug = debug
         self.hostname = hostname
         self.port = port
         self.auth_provider = auth_provider
@@ -407,19 +411,26 @@ class Shell(cmd.Cmd):
         self.consistency_level = consistency_level
         self.serial_consistency_level = serial_consistency_level
 
+        self.secure_connect_bundle = secure_connect_bundle
+
         if use_conn:
             self.conn = use_conn
         else:
             kwargs = {}
             if protocol_version is not None:
                 kwargs['protocol_version'] = protocol_version
-            self.conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=cqlver,
-                                auth_provider=self.auth_provider,
-                                ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
-                                load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
-                                control_connection_timeout=connect_timeout,
-                                connect_timeout=connect_timeout,
-                                **kwargs)
+            self.conn = cluster_factory(self.hostname,
+                                        port=self.port,
+                                        cql_version=cqlver,
+                                        auth_provider=self.auth_provider,
+                                        ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
+                                        control_connection_timeout=connect_timeout,
+                                        connect_timeout=connect_timeout,
+                                        secure_connect_bundle=secure_connect_bundle,
+                                        application_name=description,
+                                        application_version=version,
+                                        **kwargs)
+
         self.owns_connection = not use_conn
 
         if keyspace:
@@ -443,7 +454,9 @@ class Shell(cmd.Cmd):
 
         self.session.default_timeout = request_timeout
         self.session.row_factory = ordered_dict_factory
-        self.session.default_consistency_level = cassandra.ConsistencyLevel.ONE
+        self.session.default_consistency_level = self.consistency_level
+        self.session.default_serial_consistency_level = self.serial_consistency_level
+
         self.get_connection_versions()
         self.set_expanded_cql_version(self.connection_versions['cql'])
 
@@ -1775,8 +1788,9 @@ class Shell(cmd.Cmd):
 
         LOGIN <username> (<password>)
 
-           Login using the specified username. If password is specified, it will be used
-           otherwise, you will be prompted to enter.
+           Login using the specified username.
+           If password is specified it should be wrapped with single quotes.
+           If not specified you will be prompted to enter.
         """
         username = parsed.get_binding('username')
         password = parsed.get_binding('password')
@@ -1787,13 +1801,15 @@ class Shell(cmd.Cmd):
 
         auth_provider = PlainTextAuthProvider(username=username, password=password)
 
-        conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=self.conn.cql_version,
-                       protocol_version=self.conn.protocol_version,
-                       auth_provider=auth_provider,
-                       ssl_options=self.conn.ssl_options,
-                       load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
-                       control_connection_timeout=self.conn.connect_timeout,
-                       connect_timeout=self.conn.connect_timeout)
+        conn = cluster_factory(self.hostname,
+                               port=self.port,
+                               cql_version=self.conn.cql_version,
+                               protocol_version=self.conn.protocol_version,
+                               auth_provider=auth_provider,
+                               ssl_options=self.conn.ssl_options,
+                               control_connection_timeout=self.conn.connect_timeout,
+                               connect_timeout=self.conn.connect_timeout,
+                               secure_connect_bundle=self.secure_connect_bundle)
 
         if self.current_keyspace:
             session = conn.connect(self.current_keyspace)
@@ -1804,6 +1820,7 @@ class Shell(cmd.Cmd):
         session.default_timeout = self.session.default_timeout
         session.row_factory = self.session.row_factory
         session.default_consistency_level = self.session.default_consistency_level
+        session.default_serial_consistency_level = self.session.default_serial_consistency_level
         session.max_trace_wait = self.session.max_trace_wait
 
         # Update after we've connected in case we fail to authenticate
@@ -2100,6 +2117,7 @@ def read_options(cmdlineargs, environment=os.environ):
     argvalues.credentials = os.path.expanduser(option_with_default(configs.get, 'authentication', 'credentials',
                                                                    os.path.join(CQL_DIR, 'credentials')))
     argvalues.keyspace = option_with_default(configs.get, 'authentication', 'keyspace')
+    argvalues.secure_connect_bundle = option_with_default(configs.get, 'connection', 'secure_connect_bundle')
     argvalues.browser = option_with_default(configs.get, 'ui', 'browser', None)
     argvalues.completekey = option_with_default(configs.get, 'ui', 'completekey',
                                                 DEFAULT_COMPLETEKEY)
@@ -2129,7 +2147,7 @@ def read_options(cmdlineargs, environment=os.environ):
     argvalues.ssl = option_with_default(configs.getboolean, 'connection', 'ssl', DEFAULT_SSL)
     argvalues.encoding = option_with_default(configs.get, 'ui', 'encoding', UTF8)
 
-    argvalues.consistency_level = option_with_default(configs.get, 'cql', 'consistency_level', 'ONE')
+    argvalues.consistency_level = option_with_default(configs.get, 'cql', 'consistency_level', None)
     argvalues.serial_consistency_level = option_with_default(configs.get, 'cql', 'serial_consistency_level', 'SERIAL')
 
     argvalues.tty = option_with_default(configs.getboolean, 'ui', 'tty', sys.stdin.isatty())
@@ -2191,6 +2209,11 @@ def read_options(cmdlineargs, environment=os.environ):
     options.keyspace = maybe_ensure_text(options.keyspace)
 
     serial_levels = [cassandra.ConsistencyLevel.SERIAL, cassandra.ConsistencyLevel.LOCAL_SERIAL]
+
+    # If unspecified, set the proper defaut CL
+    default_cl = 'LOCAL_QUORUM' if options.secure_connect_bundle else 'ONE'
+    if options.consistency_level is None:
+        options.consistency_level = default_cl
 
     try:
         cl = cassandra.ConsistencyLevel.name_to_value[options.consistency_level.upper()]
@@ -2335,8 +2358,11 @@ def main(cmdline, pkgpath):
     if options.debug:
         sys.stderr.write("Using CQL driver: %s\n" % (cassandra,))
         sys.stderr.write("Using connect timeout: %s seconds\n" % (options.connect_timeout,))
+        sys.stderr.write("Using consistency level: %s\n" % (cassandra.ConsistencyLevel.value_to_name[options.consistency_level],))
         sys.stderr.write("Using '%s' encoding\n" % (options.encoding,))
         sys.stderr.write("Using ssl: %s\n" % (options.ssl,))
+        if options.secure_connect_bundle:
+            sys.stderr.write("Using secure connect bundle: %s\n" % (options.secure_connect_bundle, ))
 
     # create timezone based on settings, environment or auto-detection
     timezone = None
@@ -2396,9 +2422,11 @@ def main(cmdline, pkgpath):
                       tty=options.tty,
                       completekey=options.completekey,
                       browser=options.browser,
+                      debug=options.debug,
                       protocol_version=options.protocol_version,
                       cqlver=options.cqlversion,
                       keyspace=options.keyspace,
+                      secure_connect_bundle=options.secure_connect_bundle,
                       consistency_level=options.consistency_level,
                       serial_consistency_level=options.serial_consistency_level,
                       display_timestamp_format=options.time_format,
@@ -2425,8 +2453,6 @@ def main(cmdline, pkgpath):
         sys.exit('Connection error: %s' % (e,))
     except VersionNotSupported as e:
         sys.exit('Unsupported CQL version: %s' % (e,))
-    if options.debug:
-        shell.debug = True
     if options.coverage:
         shell.coverage = True
         import signal
