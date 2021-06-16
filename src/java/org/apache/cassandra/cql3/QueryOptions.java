@@ -75,18 +75,20 @@ public abstract class QueryOptions
                                       List<ByteBuffer> values,
                                       boolean skipMetadata,
                                       int pageSize,
+                                      boolean pageSizeInBytes,
                                       PagingState pagingState,
                                       ConsistencyLevel serialConsistency,
                                       ProtocolVersion version,
                                       String keyspace)
     {
-        return create(consistency, values, skipMetadata, pageSize, pagingState, serialConsistency, version, keyspace, Long.MIN_VALUE, Integer.MIN_VALUE);
+        return create(consistency, values, skipMetadata, pageSize, pageSizeInBytes, pagingState, serialConsistency, version, keyspace, Long.MIN_VALUE, Integer.MIN_VALUE);
     }
 
     public static QueryOptions create(ConsistencyLevel consistency,
                                       List<ByteBuffer> values,
                                       boolean skipMetadata,
                                       int pageSize,
+                                      boolean pageSizeInBytes,
                                       PagingState pagingState,
                                       ConsistencyLevel serialConsistency,
                                       ProtocolVersion version,
@@ -97,7 +99,7 @@ public abstract class QueryOptions
         return new DefaultQueryOptions(consistency,
                                        values,
                                        skipMetadata,
-                                       new SpecificOptions(pageSize, pagingState, serialConsistency, timestamp, keyspace, nowInSeconds),
+                                       new SpecificOptions(pageSize, pageSizeInBytes, pagingState, serialConsistency, timestamp, keyspace, nowInSeconds),
                                        version);
     }
 
@@ -177,10 +179,16 @@ public abstract class QueryOptions
         throw new UnsupportedOperationException();
     }
 
-    /**  The pageSize for this query. Will be {@code <= 0} if not relevant for the query.  */
+    /** The pageSize for this query. Will be {@code <= 0} if not relevant for the query.  */
     public int getPageSize()
     {
         return getSpecificOptions().pageSize;
+    }
+
+    /** If {@code true}, the page size returned by {@link #getPageSize()} is in bytes, otherwise the unit is a row. */
+    public boolean isPageSizeInBytes()
+    {
+        return getSpecificOptions().pageSizeInBytes;
     }
 
     /** The paging state for this query, or null if not relevant. */
@@ -380,7 +388,7 @@ public abstract class QueryOptions
     // Options that are likely to not be present in most queries
     static class SpecificOptions
     {
-        private static final SpecificOptions DEFAULT = new SpecificOptions(-1, null, null, Long.MIN_VALUE, null, Integer.MIN_VALUE);
+        private static final SpecificOptions DEFAULT = new SpecificOptions(-1, false, null, null, Long.MIN_VALUE, null, Integer.MIN_VALUE);
 
         private final int pageSize;
         private final PagingState state;
@@ -388,8 +396,10 @@ public abstract class QueryOptions
         private final long timestamp;
         private final String keyspace;
         private final int nowInSeconds;
+        private final boolean pageSizeInBytes;
 
         private SpecificOptions(int pageSize,
+                                boolean pageSizeInBytes,
                                 PagingState state,
                                 ConsistencyLevel serialConsistency,
                                 long timestamp,
@@ -397,6 +407,7 @@ public abstract class QueryOptions
                                 int nowInSeconds)
         {
             this.pageSize = pageSize;
+            this.pageSizeInBytes = pageSizeInBytes;
             this.state = state;
             this.serialConsistency = serialConsistency;
             this.timestamp = timestamp;
@@ -418,7 +429,30 @@ public abstract class QueryOptions
             TIMESTAMP,
             NAMES_FOR_VALUES,
             KEYSPACE,
-            NOW_IN_SECONDS;
+            NOW_IN_SECONDS,
+            UNUSED_9,
+            UNUSED_10,
+            UNUSED_11,
+            UNUSED_12,
+            UNUSED_13,
+            UNUSED_14,
+            UNUSED_15,
+            UNUSED_16,
+            UNUSED_17,
+            UNUSED_18,
+            UNUSED_19,
+            UNUSED_20,
+            UNUSED_21,
+            UNUSED_22,
+            UNUSED_23,
+            UNUSED_24,
+            UNUSED_25,
+            UNUSED_26,
+            UNUSED_27,
+            UNUSED_28,
+            UNUSED_29,
+            PAGE_SIZE_IN_BYTES,
+            UNUSED_31;
 
             private static final Flag[] ALL_VALUES = values();
 
@@ -473,6 +507,7 @@ public abstract class QueryOptions
             if (!flags.isEmpty())
             {
                 int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
+                boolean pageSizeInBytes = flags.contains(Flag.PAGE_SIZE_IN_BYTES);
                 PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version) : null;
                 ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : null;
                 long timestamp = Long.MIN_VALUE;
@@ -485,7 +520,7 @@ public abstract class QueryOptions
                 }
                 String keyspace = flags.contains(Flag.KEYSPACE) ? CBUtil.readString(body) : null;
                 int nowInSeconds = flags.contains(Flag.NOW_IN_SECONDS) ? body.readInt() : Integer.MIN_VALUE;
-                options = new SpecificOptions(pageSize, pagingState, serialConsistency, timestamp, keyspace, nowInSeconds);
+                options = new SpecificOptions(pageSize, pageSizeInBytes, pagingState, serialConsistency, timestamp, keyspace, nowInSeconds);
             }
 
             DefaultQueryOptions opts = new DefaultQueryOptions(consistency, values, skipMetadata, options, version);
@@ -571,6 +606,8 @@ public abstract class QueryOptions
                     flags.add(Flag.KEYSPACE);
                 if (options.getSpecificOptions().nowInSeconds != Integer.MIN_VALUE)
                     flags.add(Flag.NOW_IN_SECONDS);
+                if (options.getSpecificOptions().pageSizeInBytes)
+                    flags.add(Flag.PAGE_SIZE_IN_BYTES);
             }
 
             return flags;
