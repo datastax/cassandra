@@ -41,6 +41,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.tools.StandaloneScrubber;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
@@ -76,6 +77,7 @@ public class ScrubToolTest
 
     String ksName;
     Keyspace keyspace;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
@@ -110,7 +112,7 @@ public class ScrubToolTest
         fillCF(cfs, 1);
         assertOrderedAll(cfs, 1);
 
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, ksName, CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, ksName, CF);
         Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
         Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
         tool.assertOnCleanExit();
@@ -133,7 +135,7 @@ public class ScrubToolTest
         ScrubTest.overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte) 0x7A);
 
         // with skipCorrupted == true, the corrupt rows will be skipped
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-s", ksName, COUNTER_CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-s", ksName, COUNTER_CF);
         Assertions.assertThat(tool.getStdout()).contains("0 empty");
         Assertions.assertThat(tool.getStdout()).contains("partitions that were skipped");
         tool.assertOnCleanExit();
@@ -177,7 +179,7 @@ public class ScrubToolTest
         fillCF(cfs, 10);
         assertOrderedAll(cfs, 10);
 
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-n", ksName, CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-n", ksName, CF);
         Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
         Assertions.assertThat(tool.getStdout()).contains("10 partitions in new sstable and 0 empty");
         tool.assertOnCleanExit();
@@ -194,7 +196,7 @@ public class ScrubToolTest
         fillCF(cfs, 1);
         assertOrderedAll(cfs, 1);
 
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "validate", ksName, CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "validate", ksName, CF);
         Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
         Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
         // TODO cleaner that ignores
@@ -210,7 +212,7 @@ public class ScrubToolTest
         fillCF(cfs, 1);
         assertOrderedAll(cfs, 1);
 
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "fix", ksName, CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "fix", ksName, CF);
         Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
         Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
         tool.assertOnCleanExit(CLEANERS);
@@ -225,7 +227,7 @@ public class ScrubToolTest
         fillCF(cfs, 1);
         assertOrderedAll(cfs, 1);
 
-        ToolRunner.ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "off", ksName, CF);
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "off", ksName, CF);
         Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
         Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
         tool.assertOnCleanExit(CLEANERS);
