@@ -45,24 +45,27 @@ import configparser
 from queue import Queue
 
 from cassandra import OperationTimedOut
-from cassandra.cluster import Cluster, DefaultConnection
+from cassandra.cluster import DefaultConnection
+from cassandra.connection import SniEndPoint
 from cassandra.cqltypes import ReversedType, UserType, VarcharType
 from cassandra.metadata import protect_name, protect_names, protect_value
-from cassandra.policies import RetryPolicy, WhiteListRoundRobinPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
+from cassandra.policies import RetryPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
 from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory
 from cassandra.util import Date, Time
-from cqlshlib.util import profile_on, profile_off
 
 from cqlshlib.cql3handling import CqlRuleSet
 from cqlshlib.displaying import NO_COLOR_MAP
+from cqlshlib.driver import cluster_factory
 from cqlshlib.formatting import format_value_default, CqlType, DateTimeFormat, EMPTY, get_formatter, BlobType
 from cqlshlib.sslhandling import ssl_settings
+from cqlshlib.util import profile_on, profile_off
 
 PROFILE_ON = False
 STRACE_ON = False
 DEBUG = False  # This may be set to True when initializing the task
 # TODO: review this for MacOS, maybe use in ('Linux', 'Darwin')
 IS_LINUX = platform.system() == 'Linux'
+IS_WINDOWS = platform.system() == 'Windows'
 
 CopyOptions = namedtuple('CopyOptions', 'copy dialect unrecognized')
 
@@ -495,6 +498,7 @@ class CopyTask(object):
                     port=shell.port,
                     ssl=shell.ssl,
                     auth_provider=shell.auth_provider,
+                    parent_cluster=shell.conn if not IS_WINDOWS else None,
                     cql_version=shell.conn.cql_version,
                     config_file=self.config_file,
                     protocol_version=self.protocol_version,
@@ -717,9 +721,9 @@ class ExportTask(CopyTask):
         def make_range_data(replicas=None):
             hosts = []
             if replicas:
-                for r in replicas:
-                    if r.is_up is not False and r.datacenter == local_dc:
-                        hosts.append(r.address)
+                # when connected to a cloud cluster r.address is the proxy
+                # so we need to use host_id as correct in both cloud/not cloud
+                hosts = [r.host_id for r in replicas if r.is_up is not False and r.datacenter == local_dc]
             if not hosts:
                 hosts.append(hostname)  # fallback to default host if no replicas in current dc
             return {'hosts': tuple(hosts), 'attempts': 0, 'rows': 0, 'workerno': -1}
@@ -1414,6 +1418,7 @@ class ChildProcess(mp.Process):
         self.connect_timeout = params['connect_timeout']
         self.cql_version = params['cql_version']
         self.auth_provider = params['auth_provider']
+        self.parent_cluster = params['parent_cluster']
         self.ssl = params['ssl']
         self.protocol_version = params['protocol_version']
         self.config_file = params['config_file']
@@ -1681,22 +1686,35 @@ class ExportProcess(ChildProcess):
             session.add_request()
             return session
 
-        new_cluster = Cluster(
-            contact_points=(host,),
+        endpoint = self._endpoint_for_host(host)
+
+        new_cluster = cluster_factory(
+            endpoint,
+            whitelist_lbp=endpoint,
+            cloud=self.parent_cluster.cloud,
             port=self.port,
             cql_version=self.cql_version,
             protocol_version=self.protocol_version,
             auth_provider=self.auth_provider,
-            ssl_options=ssl_settings(host, self.config_file) if self.ssl else None,
-            load_balancing_policy=WhiteListRoundRobinPolicy([host]),
+            ssl_options=ssl_settings(endpoint, self.config_file) if self.ssl else None,
             default_retry_policy=ExpBackoffRetryPolicy(self),
             compression=None,
             control_connection_timeout=self.connect_timeout,
             connect_timeout=self.connect_timeout,
             idle_heartbeat_interval=0)
+
         session = ExportSession(new_cluster, self)
         self.hosts_to_sessions[host] = session
         return session
+
+    def _endpoint_for_host(self, host):
+        endpoint = host
+        if isinstance(host, UUID):
+            for h in self.parent_cluster.metadata.all_hosts():
+                if h.host_id == host:
+                    endpoint = h.endpoint if isinstance(h.endpoint, SniEndPoint) else h.endpoint.address
+                    break
+        return endpoint
 
     def attach_callbacks(self, token_range, future, session):
         metadata = session.cluster.metadata
@@ -2353,8 +2371,9 @@ class ImportProcess(ChildProcess):
     @property
     def session(self):
         if not self._session:
-            cluster = Cluster(
-                contact_points=(self.hostname,),
+            cluster = cluster_factory(
+                self.hostname,
+                whitelist_lbp=False,
                 port=self.port,
                 cql_version=self.cql_version,
                 protocol_version=self.protocol_version,
@@ -2366,6 +2385,7 @@ class ImportProcess(ChildProcess):
                 control_connection_timeout=self.connect_timeout,
                 connect_timeout=self.connect_timeout,
                 idle_heartbeat_interval=0,
+                cloud=self.parent_cluster.cloud,
                 connection_class=ConnectionWrapper)
 
             self._session = cluster.connect(self.ks)
