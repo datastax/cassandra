@@ -27,14 +27,17 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -829,42 +832,71 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
     }
 
     @Test
-    public void testCanonicalSSTables() throws ExecutionException, InterruptedException
+    public void testCanonicalSSTablesWithEarlyOpen() throws ExecutionException, InterruptedException
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE);
-        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
-        truncate(cfs);
+        testCanonicalSSTables(1);
+    }
 
-        cfs.addSSTable(writeFile(cfs, 100));
-        Collection<SSTableReader> allSSTables = cfs.getLiveSSTables();
-        assertEquals(1, allSSTables.size());
-        final AtomicBoolean done = new AtomicBoolean(false);
-        final AtomicBoolean failed = new AtomicBoolean(false);
-        Runnable r = () -> {
-            while (!done.get())
-            {
-                Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
-                if (Iterables.size(sstables) != 1)
-                {
-                    failed.set(true);
-                    return;
-                }
-            }
-        };
-        Thread t = NamedThreadFactory.createAnonymousThread(r);
+    @Test
+    public void testCanonicalSSTablesWithFinalEarlyOpen() throws ExecutionException, InterruptedException
+    {
+        testCanonicalSSTables(1000000);
+    }
+
+    @Test
+    @Ignore // This does not currently work. See View.select.
+    public void testCanonicalSSTablesNoEarlyOpen() throws ExecutionException, InterruptedException
+    {
+        testCanonicalSSTables(-1);
+    }
+
+
+    public void testCanonicalSSTables(int preemptiveOpenInterval) throws ExecutionException, InterruptedException
+    {
+        int prevPreemptiveOpenInterval = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMiB();
         try
         {
-            t.start();
-            cfs.forceMajorCompaction();
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(preemptiveOpenInterval);
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+            truncate(cfs);
+
+            cfs.addSSTable(writeFile(cfs, 2000));
+            Collection<SSTableReader> allSSTables = cfs.getLiveSSTables();
+            assertEquals(1, allSSTables.size());
+            final AtomicBoolean done = new AtomicBoolean(false);
+            final AtomicBoolean gotZero = new AtomicBoolean(false);
+            final AtomicInteger maxValue = new AtomicInteger(0);
+            Runnable r = () -> {
+                while (!done.get())
+                {
+                    Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
+                    int sstablesCount = Iterables.size(sstables);
+                    if (sstablesCount == 0)
+                        gotZero.set(true);
+                    else
+                        maxValue.updateAndGet(prev -> Math.max(prev, sstablesCount));
+                }
+            };
+            Thread t = NamedThreadFactory.createAnonymousThread(r);
+            try
+            {
+                t.start();
+                cfs.forceMajorCompaction();
+            }
+            finally
+            {
+                done.set(true);
+                t.join(20);
+            }
+            // Note: the checks below can falsely succeed. Flaky failures should be treated as genuine problems.
+            assertFalse("No sstables", gotZero.get());
+            assertEquals("Too many sstables", 1, maxValue.get());
         }
         finally
         {
-            done.set(true);
-            t.join(20);
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(prevPreemptiveOpenInterval);
         }
-        assertFalse(failed.get());
-
-
     }
 
     /**
