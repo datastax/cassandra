@@ -198,6 +198,7 @@ public class CustomNowInSecondsTest extends CQLTester
                                    Collections.emptyList(),
                                    false,
                                    Integer.MAX_VALUE,
+                                   false,
                                    null,
                                    null,
                                    ProtocolVersion.CURRENT,

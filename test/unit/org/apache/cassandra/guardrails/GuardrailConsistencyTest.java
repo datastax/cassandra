@@ -89,6 +89,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
                                    Collections.emptyList(),
                                    false,
                                    1,
+                                   false,
                                    null,
                                    serialCl,
                                    ProtocolVersion.CURRENT,
