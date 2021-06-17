@@ -1,0 +1,19 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,13 +1,11 @@
+-<<<<<<<
++Future version (tbd)
++ * Require only MODIFY permission on base when updating table with MV (STAR-564)
++
+ 4.0.1
+  * Cleanup dependency scopes (CASSANDRA-16704)
+  * Make JmxHistogram#getRecentValues() and JmxTimer#getRecentValues() thread-safe (CASSANDRA-16707)
+ Merged from 3.0:
+  * Clean transaction log leftovers at the beginning of sstablelevelreset and sstableofflinerelevel (CASSANDRA-12519)
+-=======
+-Future version (tbd)
+- * Require only MODIFY permission on base when updating table with MV (STAR-564)
+->>>>>>>
+ 
+ 4.0-rc2
+  * Obfuscate passwords in statements in QueryEvents (CASSANDRA-16669)
