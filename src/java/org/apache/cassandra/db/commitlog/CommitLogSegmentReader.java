@@ -143,6 +143,13 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                     handleUnrecoverableError(e, tolerateErrorsInSection);
                     // if no exception is thrown, the while loop will continue
                 }
+
+                // if we've not been able to read the sync marker, or the file is truncated,
+                // then return end of data, otherwise continue the loop
+                if (currentStart == end)
+                {
+                    return endOfData();
+                }
             }
         }
     }
