@@ -182,9 +182,15 @@ public class CassandraRoleManager implements IRoleManager
                               AuthKeyspace.ROLES,
                               escape(role.getRoleName())),
                 consistencyForRole(role.getRoleName()));
-        removeAllMembers(role.getRoleName());
+        removeAllMembers(role);
     }
 
+    private void invalidateRoles(Collection<RoleResource> roles)
+    {
+        Roles.invalidate(roles);
+        AuthenticatedUser.invalidate(roles, null);
+    }
+    
     public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
     {
         // Unlike most of the other data access methods here, this does not use a
@@ -220,6 +226,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName()),
                               escape(grantee.getRoleName())),
                 consistencyForRole(role.getRoleName()));
+        invalidateRoles(Collections.singleton(grantee));
     }
 
     public void revokeRole(AuthenticatedUser performer, RoleResource role, RoleResource revokee)
@@ -237,6 +244,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName()),
                               escape(revokee.getRoleName())),
                 consistencyForRole(role.getRoleName()));
+        invalidateRoles(Collections.singleton(revokee));
     }
 
     public Set<RoleResource> getRoles(RoleResource grantee, boolean includeInherited)
@@ -441,27 +449,36 @@ public class CassandraRoleManager implements IRoleManager
     /*
      * Clear the membership list of the given role
      */
-    private void removeAllMembers(String role) throws RequestValidationException, RequestExecutionException
+    private void removeAllMembers(RoleResource role) throws RequestValidationException, RequestExecutionException
     {
+        Set<RoleResource> roles = new HashSet<>();
+        roles.add(role);
+
         // Get the membership list of the the given role
         UntypedResultSet rows = process(String.format("SELECT member FROM %s.%s WHERE role = '%s'",
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
                                                       AuthKeyspace.ROLE_MEMBERS,
-                                                      escape(role)),
-                                        consistencyForRole(role));
+                                                      escape(role.getRoleName())),
+                                        consistencyForRole(role.getRoleName()));
         if (rows.isEmpty())
             return;
 
         // Update each member in the list, removing this role from its own list of granted roles
         for (UntypedResultSet.Row row : rows)
-            modifyRoleMembership(row.getString("member"), role, "-");
+        {
+            String member = row.getString("member");
+            modifyRoleMembership(member, role.getRoleName(), "-");
+            roles.add(RoleResource.role(member));
+        }
 
         // Finally, remove the membership list for the dropped role
         process(String.format("DELETE FROM %s.%s WHERE role = '%s'",
                               SchemaConstants.AUTH_KEYSPACE_NAME,
                               AuthKeyspace.ROLE_MEMBERS,
-                              escape(role)),
-                consistencyForRole(role));
+                              escape(role.getRoleName())),
+                consistencyForRole(role.getRoleName()));
+        
+        invalidateRoles(roles);
     }
 
     /*

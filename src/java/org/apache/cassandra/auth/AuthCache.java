@@ -18,12 +18,20 @@
 
 package org.apache.cassandra.auth;
 
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,6 +133,13 @@ public class AuthCache<K, V> implements AuthCacheMBean
         return cache.get(k);
     }
 
+    @Nullable
+    @VisibleForTesting
+    protected V getIfPresent(K k)
+    {
+        return cache == null ? null : cache.getIfPresent(k);
+    }
+
     /**
      * Invalidate the entire cache.
      */
@@ -141,6 +156,19 @@ public class AuthCache<K, V> implements AuthCacheMBean
     {
         if (cache != null)
             cache.invalidate(k);
+    }
+
+    public void maybeInvalidateByFilter(Predicate<? super Map.Entry<K,V>> filter)
+    {
+        if (cache != null)
+        {
+            Collection<K> iterable = cache.asMap().entrySet()
+                                          .stream()
+                                          .filter(filter)
+                                          .map(entry -> entry.getKey())
+                                          .collect(Collectors.toSet());
+            cache.invalidateAll(iterable);
+        }
     }
 
     /**

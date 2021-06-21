@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Collection;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -39,7 +41,8 @@ public class AuthenticatedUser
     public static final AuthenticatedUser ANONYMOUS_USER = new AuthenticatedUser(ANONYMOUS_USERNAME);
 
     // User-level permissions cache.
-    private static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getAuthorizer());
+    @VisibleForTesting
+    static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getAuthorizer());
     private static final NetworkAuthCache networkAuthCache = new NetworkAuthCache(DatabaseDescriptor.getNetworkAuthorizer());
 
     private final String name;
@@ -115,7 +118,22 @@ public class AuthenticatedUser
     {
         return permissionsCache.getPermissions(this, resource);
     }
+    
+    @VisibleForTesting
+    public static void clearCache()
+    {
+        permissionsCache.invalidate();
+    }
 
+    public static void invalidate(Collection<RoleResource> roles, IResource resource)
+    {
+        if (roles == null || roles.isEmpty())
+            permissionsCache.invalidate();
+        else
+            for (RoleResource role: roles)
+                permissionsCache.invalidate(new AuthenticatedUser(role.getRoleName()), resource);
+    }
+    
     /**
      * Check whether this user has login privileges.
      * LOGIN is not inherited from granted roles, so must be directly granted to the primary role for this user

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -38,7 +39,8 @@ public class Roles
 
     private static final Role NO_ROLE = new Role("", false, false, Collections.emptyMap(), Collections.emptySet());
 
-    private static RolesCache cache;
+    @VisibleForTesting
+    static RolesCache cache;
     static
     {
         initRolesCache(DatabaseDescriptor.getRoleManager(),
@@ -57,6 +59,17 @@ public class Roles
     public static void clearCache()
     {
         cache.invalidate();
+    }
+    
+    public static void invalidate(Collection<RoleResource> roles)
+    {
+        if (roles == null || roles.isEmpty())
+        {
+            cache.invalidate();
+        }
+        else
+            for (RoleResource role: roles)
+                cache.invalidate(role);
     }
 
     /**

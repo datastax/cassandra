@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,5 +41,14 @@ public class PermissionsCache extends AuthCache<Pair<AuthenticatedUser, IResourc
     public Set<Permission> getPermissions(AuthenticatedUser user, IResource resource)
     {
         return get(Pair.create(user, resource));
+    }
+    
+    public void invalidate(AuthenticatedUser user, IResource resource)
+    {
+        if (resource != null)
+            invalidate(Pair.create(user, resource));
+        else
+            // Invalidate all entries associated with the user
+            maybeInvalidateByFilter((entry) -> Objects.equals(entry.getKey().left, user));
     }
 }

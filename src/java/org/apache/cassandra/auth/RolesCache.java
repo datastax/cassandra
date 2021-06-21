@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -61,5 +62,14 @@ public class RolesCache extends AuthCache<RoleResource, Set<Role>>
     Set<Role> getRoles(RoleResource primaryRole)
     {
         return get(primaryRole);
+    }
+    
+    public void invalidate(RoleResource primaryRole)
+    {
+        super.invalidate(primaryRole);
+        // Invalidate entries with role resources containing this role
+        super.maybeInvalidateByFilter((entry) -> entry.getValue().stream()
+                                                      .anyMatch(role -> Objects.equals(role.resource, primaryRole))
+        );
     }
 }
