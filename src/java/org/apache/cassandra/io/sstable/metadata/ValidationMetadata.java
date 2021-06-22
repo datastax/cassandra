@@ -69,6 +69,11 @@ public class ValidationMetadata extends MetadataComponent
         return result;
     }
 
+    public ValidationMetadata withBloomFilterFPChance(double bloomFilterFpChance)
+    {
+        return new ValidationMetadata(partitioner, bloomFilterFpChance);
+    }
+
     public static class ValidationMetadataSerializer implements IMetadataComponentSerializer<ValidationMetadata>
     {
         public int serializedSize(Version version, ValidationMetadata component) throws IOException

@@ -34,12 +34,6 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
     private static final long maxMemory = CassandraRelevantProperties.BF_MAX_MEMORY_MB.getLong() << 20;
 
-    @VisibleForTesting
-    public static double fpChanceTolerance = CassandraRelevantProperties.BF_FP_CHANCE_TOLERANCE.getDouble();
-
-    @VisibleForTesting
-    public static boolean recreateOnFPChanceChange = CassandraRelevantProperties.BF_RECREATE_ON_FP_CHANCE_CHANGE.getBoolean();
-
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");
 
@@ -183,16 +177,6 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
     {
         super.addTo(identities);
         bitset.addTo(identities);
-    }
-
-    public static boolean shouldUseBloomFilter(double fpChance)
-    {
-        return Math.abs(1 - fpChance) > BloomFilter.fpChanceTolerance;
-    }
-
-    public static boolean isFPChanceDiffNeglectable(double fpChance1, double fpChance2)
-    {
-        return Math.abs(fpChance1 - fpChance2) <= fpChanceTolerance;
     }
 
 }
