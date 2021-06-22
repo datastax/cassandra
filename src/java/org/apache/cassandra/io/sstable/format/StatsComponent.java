@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
 
@@ -36,9 +37,6 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
-import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.SequentialWriter;
-import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
 
 public class StatsComponent
@@ -108,18 +106,22 @@ public class StatsComponent
         return (StatsMetadata) metadata.get(MetadataType.STATS);
     }
 
+    public StatsComponent with(ValidationMetadata validationMetadata)
+    {
+        Map<MetadataType, MetadataComponent> newMetadata = new EnumMap<>(metadata);
+        newMetadata.put(MetadataType.VALIDATION, validationMetadata);
+        return new StatsComponent(newMetadata);
+    }
+
     public void save(Descriptor desc)
     {
-        File file = desc.fileFor(Components.STATS);
-        try (SequentialWriter out = new SequentialWriter(file, SequentialWriterOption.DEFAULT))
+        try
         {
-            desc.getMetadataSerializer().serialize(metadata, out, desc.version);
-            out.finish();
+            desc.getMetadataSerializer().rewriteSSTableMetadata(desc, metadata);
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, file.path());
+            throw new FSWriteError(e);
         }
     }
-
 }
