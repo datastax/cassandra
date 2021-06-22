@@ -32,6 +32,8 @@ import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
 import org.apache.cassandra.io.sstable.format.FilterComponent;
 import org.apache.cassandra.io.sstable.format.SortedTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.StatsComponent;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -105,7 +107,16 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                 IFilter filter = buildBloomFilter(statsComponent.statsMetadata());
                 builder.setFilter(filter);
                 FilterComponent.save(filter, descriptor, false);
+                if (validationMetadata.bloomFilterFPChance != tableMetadataRef.getLocal().params.bloomFilterFpChance)
+                {
+                    StatsComponent.load(descriptor, MetadataType.values())
+                                  .with(validationMetadata.withBloomFilterFPChance(tableMetadataRef.getLocal().params.bloomFilterFpChance))
+                                  .save(descriptor);
+                }
+                if (descriptor.fileFor(Components.FILTER).exists())
+                    TOCComponent.maybeAdd(descriptor, BigFormat.Components.FILTER);
             }
+
 
             if (builder.getFilter() == null)
                 builder.setFilter(FilterFactory.AlwaysPresent);
