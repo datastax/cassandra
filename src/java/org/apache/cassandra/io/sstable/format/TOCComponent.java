@@ -132,4 +132,11 @@ public class TOCComponent
             logger.error("Failed to delete TOC component for " + descriptor);
         appendTOC(descriptor, components);
     }
+
+    public static void maybeAdd(Descriptor descriptor, Component component) throws IOException
+    {
+        Set<Component> toc = TOCComponent.loadOrCreate(descriptor);
+        if (!toc.isEmpty() && toc.add(component))
+            TOCComponent.rewriteTOC(descriptor, toc);
+    }
 }

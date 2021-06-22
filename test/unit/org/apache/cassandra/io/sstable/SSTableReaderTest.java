@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -103,13 +104,14 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.BloomCalculations;
-import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.mockito.Mockito;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.BF_FP_CHANCE_TOLERANCE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.BF_RECREATE_ON_FP_CHANCE_CHANGE;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
@@ -171,7 +173,7 @@ public class SSTableReaderTest
     public void Cleanup() {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
-        BloomFilter.recreateOnFPChanceChange = false;
+        BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
     }
 
     @Test
@@ -1326,7 +1328,7 @@ public class SSTableReaderTest
     @Test
     public void testBloomFilterIsCreatedOnLoad() throws IOException
     {
-        BloomFilter.recreateOnFPChanceChange = true;
+        BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(true);
 
         final int numKeys = 100;
         final Keyspace keyspace = Keyspace.open(KEYSPACE1);
@@ -1347,16 +1349,21 @@ public class SSTableReaderTest
         // should deserialize the existing BF
         checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, false);
         // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
         // should install empty filter without changing file or metadata
         checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
 
         // corrupted bf file should fail to deserialize and we should fall back to recreating it
         Files.write(sstable.descriptor.fileFor(Components.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
-        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BF_FP_CHANCE_TOLERANCE.getDouble(), true, numKeys, true);
 
         // missing primary index file should make BF fail to load and we should install the empty one
-        sstable.descriptor.fileFor(Components.PRIMARY_INDEX).delete();
+        HashSet<Component> nonDataPrimaryComponents = new HashSet<>(sstable.descriptor.getFormat().primaryComponents());
+        nonDataPrimaryComponents.remove(Components.DATA);
+        nonDataPrimaryComponents.remove(Components.COMPRESSION_INFO);
+        nonDataPrimaryComponents.remove(Components.STATS);
+        for (Component component : nonDataPrimaryComponents)
+            sstable.descriptor.fileFor(component).delete();
         checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
     }
 
@@ -1400,7 +1407,7 @@ public class SSTableReaderTest
             {
                 Assert.assertNotEquals(FilterFactory.AlwaysPresent, bloomFilter);
                 Assert.assertTrue(bloomFilter.serializedSize(false) > 0);
-                Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
+                Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BF_FP_CHANCE_TOLERANCE.getDouble());
                 Assert.assertTrue(bfFile.exists());
                 Assert.assertEquals(bloomFilter.serializedSize(false), bfFile.length());
             }
@@ -1408,7 +1415,7 @@ public class SSTableReaderTest
             {
                 Assert.assertEquals(FilterFactory.AlwaysPresent, getFilter(sstable));
                 Assert.assertTrue(getFilterSize(sstable) == 0);
-                Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
+                Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BF_FP_CHANCE_TOLERANCE.getDouble());
                 Assert.assertEquals(bfFile.exists(), bfFile.exists());
             }
 
