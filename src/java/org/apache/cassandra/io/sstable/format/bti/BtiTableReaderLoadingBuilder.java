@@ -105,6 +105,12 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                 IFilter filter = buildBloomFilter(statsComponent.statsMetadata());
                 builder.setFilter(filter);
                 FilterComponent.save(filter, descriptor, false);
+                if (validationMetadata.bloomFilterFPChance != tableMetadataRef.getLocal().params.bloomFilterFpChance)
+                {
+                    validationMetadata = validationMetadata.withBloomFilterFPChance(tableMetadataRef.getLocal().params.bloomFilterFpChance);
+                    statsComponent = statsComponent.with(validationMetadata);
+                    statsComponent.save(descriptor);
+                }
             }
 
             if (builder.getFilter() == null)

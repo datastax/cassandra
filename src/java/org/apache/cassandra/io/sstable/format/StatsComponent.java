@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
 
@@ -108,6 +109,13 @@ public class StatsComponent
         return (StatsMetadata) metadata.get(MetadataType.STATS);
     }
 
+    public StatsComponent with(ValidationMetadata validationMetadata)
+    {
+        Map<MetadataType, MetadataComponent> newMetadata = new EnumMap<>(metadata);
+        newMetadata.put(MetadataType.VALIDATION, validationMetadata);
+        return new StatsComponent(newMetadata);
+    }
+
     public void save(Descriptor desc)
     {
         File file = desc.fileFor(Components.STATS);
@@ -121,5 +129,4 @@ public class StatsComponent
             throw new FSWriteError(e, file.path());
         }
     }
-
 }

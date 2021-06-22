@@ -143,7 +143,17 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
             }
 
             if (builder.getFilter() == null)
+            {
                 builder.setFilter(FilterFactory.AlwaysPresent);
+                logger.warn("Could not recreate or deserialize existing bloom filter, continuing with a pass-through " +
+                            "bloom filter but this will significantly impact reads performance");
+            }
+            else if (rebuildFilter && validationMetadata.bloomFilterFPChance != tableMetadataRef.getLocal().params.bloomFilterFpChance)
+            {
+                validationMetadata = validationMetadata.withBloomFilterFPChance(tableMetadataRef.getLocal().params.bloomFilterFpChance);
+                statsComponent = statsComponent.with(validationMetadata);
+                statsComponent.save(descriptor);
+            }
 
             if (builder.getComponents().contains(Components.PRIMARY_INDEX))
                 builder.setIndexFile(indexFileBuilder(builder.getIndexSummary()).complete());
