@@ -36,12 +36,12 @@ import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.BF_FP_CHANCE_TOLERANCE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.BF_RECREATE_ON_FP_CHANCE_CHANGE;
+
 public class FilterComponent
 {
     private static final Logger logger = LoggerFactory.getLogger(FilterComponent.class);
-
-    final static boolean rebuildFilterOnFPChanceChange = false;
-    final static double filterFPChanceTolerance = 0d;
 
     private FilterComponent()
     {
@@ -116,7 +116,7 @@ public class FilterComponent
 
             return null;
         }
-        else if (!isFPChanceDiffNegligible(desiredFPChance, currentFPChance) && rebuildFilterOnFPChanceChange)
+        else if (!isFPChanceDiffNegligible(desiredFPChance, currentFPChance) && BF_RECREATE_ON_FP_CHANCE_CHANGE.getBoolean())
         {
             if (logger.isTraceEnabled())
                 logger.trace("Bloom filter for {} will not be loaded because fpChance has changed from {} to {} and the filter should be recreated", descriptor, currentFPChance, desiredFPChance);
@@ -140,11 +140,11 @@ public class FilterComponent
 
     static boolean shouldUseBloomFilter(double fpChance)
     {
-        return !(Math.abs(1 - fpChance) <= filterFPChanceTolerance);
+        return !(Math.abs(1 - fpChance) <= BF_FP_CHANCE_TOLERANCE.getDouble());
     }
 
     static boolean isFPChanceDiffNegligible(double fpChance1, double fpChance2)
     {
-        return Math.abs(fpChance1 - fpChance2) <= filterFPChanceTolerance;
+        return Math.abs(fpChance1 - fpChance2) <= BF_FP_CHANCE_TOLERANCE.getDouble();
     }
 }
