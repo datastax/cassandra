@@ -35,6 +35,7 @@ import org.apache.cassandra.io.sstable.format.FilterComponent;
 import org.apache.cassandra.io.sstable.format.IndexComponent;
 import org.apache.cassandra.io.sstable.format.SortedTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.StatsComponent;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummary;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummaryBuilder;
@@ -143,7 +144,25 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
             }
 
             if (builder.getFilter() == null)
+            {
                 builder.setFilter(FilterFactory.AlwaysPresent);
+                logger.warn("Could not recreate or deserialize existing bloom filter, continuing with a pass-through " +
+                            "bloom filter but this will significantly impact reads performance");
+            }
+            else if (rebuildFilter)
+            {
+                if (validationMetadata.bloomFilterFPChance != tableMetadataRef.getLocal().params.bloomFilterFpChance)
+                {
+                    StatsComponent.load(descriptor, MetadataType.values())
+                                  .with(validationMetadata.withBloomFilterFPChance(tableMetadataRef.getLocal().params.bloomFilterFpChance))
+                                  .save(descriptor);
+                }
+                if (descriptor.fileFor(Components.FILTER).exists())
+                    TOCComponent.maybeAdd(descriptor, Components.FILTER);
+            }
+
+            if (rebuildSummary && descriptor.fileFor(Components.SUMMARY).exists())
+                TOCComponent.maybeAdd(descriptor, Components.SUMMARY);
 
             if (builder.getComponents().contains(Components.PRIMARY_INDEX))
                 builder.setIndexFile(indexFileBuilder(builder.getIndexSummary()).complete());
