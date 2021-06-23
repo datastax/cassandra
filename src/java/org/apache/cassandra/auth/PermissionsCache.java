@@ -45,10 +45,13 @@ public class PermissionsCache extends AuthCache<Pair<AuthenticatedUser, IResourc
     
     public void invalidate(AuthenticatedUser user, IResource resource)
     {
-        if (resource != null)
-            invalidate(Pair.create(user, resource));
-        else
-            // Invalidate all entries associated with the user
-            maybeInvalidateByFilter((entry) -> Objects.equals(entry.getKey().left, user));
+        // Invalidate all entries associated with the resource part of the cache key
+        maybeInvalidateByFilter((entry) -> Objects.equals(entry.getKey().right, resource));
+    }
+
+    public void invalidateByAuthenticatedUser(AuthenticatedUser user)
+    {
+        // Invalidate all entries associated with the user part of the cache key
+        maybeInvalidateByFilter((entry) -> Objects.equals(entry.getKey().left, user));
     }
 }

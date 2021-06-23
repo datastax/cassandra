@@ -88,13 +88,25 @@ public class CassandraAuthorizer implements IAuthorizer
     {
         modifyRolePermissions(permissions, resource, grantee, "+");
         addLookupEntry(resource, grantee);
-        invalidateRoles(Collections.singleton(grantee), resource);
+        invalidateRolesAndPermissions(Collections.singleton(grantee), resource);
     }
 
-    private void invalidateRoles(Collection<RoleResource> roles, IResource resource)
+    private void invalidateRolesAndPermissions(Collection<RoleResource> roles, IResource resource)
     {
-        Roles.invalidate(roles);
-        AuthenticatedUser.invalidate(roles, resource);
+        if (!roles.isEmpty())
+        {
+            Roles.invalidate(roles);
+            AuthenticatedUser.invalidate(roles, resource);
+        }
+    }
+
+    private void invalidateRolesAndPermissions(Collection<RoleResource> roles)
+    {
+        if (!roles.isEmpty())
+        {
+            Roles.invalidate(roles);
+            AuthenticatedUser.invalidate(roles);
+        }
     }
 
     public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
@@ -102,7 +114,7 @@ public class CassandraAuthorizer implements IAuthorizer
     {
         modifyRolePermissions(permissions, resource, revokee, "-");
         removeLookupEntry(resource, revokee);
-        invalidateRoles(Collections.singleton(revokee), resource);
+        invalidateRolesAndPermissions(Collections.singleton(revokee), resource);
     }
 
     // Called when deleting a role with DROP ROLE query.
@@ -139,7 +151,8 @@ public class CassandraAuthorizer implements IAuthorizer
                                                        ClientState.forInternalCalls()));
 
             executeLoggedBatch(statements);
-            invalidateRoles(Collections.singleton(revokee), null);
+            
+            invalidateRolesAndPermissions(Collections.singleton(revokee));
         }
         catch (RequestExecutionException | RequestValidationException e)
         {
@@ -180,8 +193,8 @@ public class CassandraAuthorizer implements IAuthorizer
                                                       ClientState.forInternalCalls()));
 
             executeLoggedBatch(statements);
-            if (!roles.isEmpty()) 
-                invalidateRoles(roles, droppedResource);
+
+            invalidateRolesAndPermissions(roles, droppedResource);
         }
         catch (RequestExecutionException | RequestValidationException e)
         {

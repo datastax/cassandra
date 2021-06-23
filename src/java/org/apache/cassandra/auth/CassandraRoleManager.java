@@ -185,10 +185,10 @@ public class CassandraRoleManager implements IRoleManager
         removeAllMembers(role);
     }
 
-    private void invalidateRoles(Collection<RoleResource> roles)
+    private void invalidateRolesAndPermissions(Collection<RoleResource> roles)
     {
         Roles.invalidate(roles);
-        AuthenticatedUser.invalidate(roles, null);
+        AuthenticatedUser.invalidate(roles);
     }
     
     public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
@@ -226,7 +226,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName()),
                               escape(grantee.getRoleName())),
                 consistencyForRole(role.getRoleName()));
-        invalidateRoles(Collections.singleton(grantee));
+        invalidateRolesAndPermissions(Collections.singleton(grantee));
     }
 
     public void revokeRole(AuthenticatedUser performer, RoleResource role, RoleResource revokee)
@@ -244,7 +244,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName()),
                               escape(revokee.getRoleName())),
                 consistencyForRole(role.getRoleName()));
-        invalidateRoles(Collections.singleton(revokee));
+        invalidateRolesAndPermissions(Collections.singleton(revokee));
     }
 
     public Set<RoleResource> getRoles(RoleResource grantee, boolean includeInherited)
@@ -478,7 +478,7 @@ public class CassandraRoleManager implements IRoleManager
                               escape(role.getRoleName())),
                 consistencyForRole(role.getRoleName()));
         
-        invalidateRoles(roles);
+        invalidateRolesAndPermissions(roles);
     }
 
     /*

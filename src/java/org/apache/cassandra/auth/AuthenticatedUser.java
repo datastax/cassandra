@@ -127,11 +127,14 @@ public class AuthenticatedUser
 
     public static void invalidate(Collection<RoleResource> roles, IResource resource)
     {
-        if (roles == null || roles.isEmpty())
-            permissionsCache.invalidate();
-        else
-            for (RoleResource role: roles)
-                permissionsCache.invalidate(new AuthenticatedUser(role.getRoleName()), resource);
+        for (RoleResource role : roles)
+            permissionsCache.invalidate(new AuthenticatedUser(role.getRoleName()), resource);
+    }
+
+    public static void invalidate(Collection<RoleResource> roles)
+    {
+        for (RoleResource role : roles)
+            permissionsCache.invalidateByAuthenticatedUser(new AuthenticatedUser(role.getRoleName()));
     }
     
     /**

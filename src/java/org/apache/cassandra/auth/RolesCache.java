@@ -66,8 +66,10 @@ public class RolesCache extends AuthCache<RoleResource, Set<Role>>
     
     public void invalidate(RoleResource primaryRole)
     {
+        // Invalidate the primary role
         super.invalidate(primaryRole);
-        // Invalidate entries with role resources containing this role
+        
+        // Invalidate roles containing this role
         super.maybeInvalidateByFilter((entry) -> entry.getValue().stream()
                                                       .anyMatch(role -> Objects.equals(role.resource, primaryRole))
         );
