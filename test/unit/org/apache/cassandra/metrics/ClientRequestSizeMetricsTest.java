@@ -70,6 +70,9 @@ public class ClientRequestSizeMetricsTest extends CQLTester
         try
         {
             reinitializeNetwork(builder -> builder.withQueryOptions(new QueryOptions().setMetadataEnabled(false)));
+            // Establish session before executing queries
+            sessionNet(version);
+            
             // We want to ignore all the messages sent by the driver upon connection as well as
             // the event sent upon schema updates
             clearMetrics();
