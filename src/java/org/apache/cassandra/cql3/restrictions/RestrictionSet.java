@@ -399,10 +399,16 @@ public abstract class RestrictionSet implements Restrictions
 
             if (isDisjunction)
             {
+                // If this restriction is part of a disjunction query then we don't want
+                // to merge the restrictions (if that is possible), we just add the
+                // restriction to the set of restrictions for the column.
                 addRestrictionForColumns(columnDefs, restriction, false);
             }
             else
             {
+                // If this restriction isn't part of a disjunction then we need to get
+                // the set of existing restrictions for the column and merge them with the
+                // new restriction
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
                 if (existingRestrictions.isEmpty())
@@ -421,7 +427,7 @@ public abstract class RestrictionSet implements Restrictions
             }
         }
 
-        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction, boolean clear)
+        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction, boolean replace)
         {
             for (int i = 0; i < columnDefs.size(); i++)
             {
@@ -431,7 +437,9 @@ public abstract class RestrictionSet implements Restrictions
                     lastRestrictionColumn = column;
                     lastRestriction = restriction;
                 }
-                if (clear)
+                // If the restriction is a merger of new restriction and existing restrictions then
+                // we need to remove the existing restrictions for the column before adding it
+                if (replace)
                     newRestrictions.removeAll(column);
                 newRestrictions.put(column, restriction);
             }

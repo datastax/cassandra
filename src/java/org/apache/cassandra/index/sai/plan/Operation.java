@@ -202,11 +202,6 @@ public class Operation
     {
         ListMultimap<ColumnMetadata, Expression> expressionMap;
 
-        ListMultimap<ColumnMetadata, Expression> expressionMap()
-        {
-            return expressionMap;
-        }
-
         boolean canFilter()
         {
             return (expressionMap != null && !expressionMap.isEmpty()) || !children().isEmpty() ;

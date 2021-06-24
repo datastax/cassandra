@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.cql3.restrictions;
+package org.apache.cassandra.cql3;
 
 import org.junit.Test;
 
@@ -27,7 +27,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 
 import static org.junit.Assert.assertEquals;
 
-public class ExpressionTreeTest
+public class WhereClauseExpressionTreeTest
 {
     @Test(expected = SyntaxException.class)
     public void cannotHaveEmptyWhereClause() throws Throwable

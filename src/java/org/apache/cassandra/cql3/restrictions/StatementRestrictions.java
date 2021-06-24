@@ -218,29 +218,51 @@ public class StatementRestrictions
         this.children = children;
     }
 
-    public static StatementRestrictions.Builder builder(StatementType type,
-                                                        TableMetadata table,
-                                                        WhereClause whereClause,
-                                                        VariableSpecifications boundNames,
-                                                        boolean selectsOnlyStaticColumns,
-                                                        boolean allowFiltering,
-                                                        boolean forView)
+    public static StatementRestrictions create(StatementType type,
+                                               TableMetadata table,
+                                               WhereClause whereClause,
+                                               VariableSpecifications boundNames,
+                                               boolean selectsOnlyStaticColumns,
+                                               boolean allowFiltering,
+                                               boolean forView)
     {
-        return new StatementRestrictions.Builder(type, table, whereClause, boundNames, selectsOnlyStaticColumns, type.allowUseOfSecondaryIndices(), allowFiltering, forView);
+        return new Builder(type,
+                           table,
+                           whereClause,
+                           boundNames,
+                           selectsOnlyStaticColumns,
+                           type.allowUseOfSecondaryIndices(),
+                           allowFiltering,
+                           forView).build();
     }
 
-    public static StatementRestrictions.Builder builder(StatementType type,
-                                                        TableMetadata table,
-                                                        WhereClause whereClause,
-                                                        VariableSpecifications boundNames,
-                                                        boolean selectsOnlyStaticColumns,
-                                                        boolean allowUseOfSecondaryIndices,
-                                                        boolean allowFiltering,
-                                                        boolean forView)
+    public static StatementRestrictions create(StatementType type,
+                                               TableMetadata table,
+                                               WhereClause whereClause,
+                                               VariableSpecifications boundNames,
+                                               boolean selectsOnlyStaticColumns,
+                                               boolean allowUseOfSecondaryIndices,
+                                               boolean allowFiltering,
+                                               boolean forView)
     {
-        return new StatementRestrictions.Builder(type, table, whereClause, boundNames, selectsOnlyStaticColumns, allowUseOfSecondaryIndices, allowFiltering, forView);
+        return new Builder(type,
+                           table,
+                           whereClause,
+                           boundNames,
+                           selectsOnlyStaticColumns,
+                           allowUseOfSecondaryIndices,
+                           allowFiltering,
+                           forView).build();
     }
 
+    /**
+     * Build a <code>StatementRestrictions</code> from a <code>WhereClause</code> for a given
+     * <code>StatementType</code>, <code>TableMetadata</code> and <code>VariableSpecifications</code>
+     *
+     * The validation rules for whether the <code>StatementRestrictions</code> are valid depend on a
+     * number of considerations, including whether indexes are being used and whether filtering is being
+     * used.
+     */
     public static class Builder
     {
         private final StatementType type;
@@ -283,22 +305,13 @@ public class StatementRestrictions
             return doBuild(whereClause.root(), indexRegistry);
         }
 
-        StatementRestrictions doBuild(ExpressionTree.ExpressionElement element, IndexRegistry indexRegistry)
+        StatementRestrictions doBuild(WhereClause.ExpressionElement element, IndexRegistry indexRegistry)
         {
             PartitionKeySingleRestrictionSet.Builder partitionKeyRestrictionSet = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator());
             ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry);
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
-            /*
-             * WHERE clause. For a given entity, rules are:
-             *   - EQ relation conflicts with anything else (including a 2nd EQ)
-             *   - Can't have more than one LT(E) relation (resp. GT(E) relation)
-             *   - IN relation are restricted to row keys (for now) and conflicts with anything else (we could
-             *     allow two IN for the same entity but that doesn't seem very useful)
-             *   - The value_alias cannot be restricted in any way (we don't support wide rows with indexed value
-             *     in CQL so far)
-             */
             for (Relation relation : element.relations())
             {
                 if (relation.operator() == Operator.IS_NOT)
@@ -512,7 +525,7 @@ public class StatementRestrictions
 
             ImmutableList.Builder<StatementRestrictions> children = ImmutableList.builder();
 
-            for (ExpressionTree.ContainerElement container : element.operations())
+            for (WhereClause.ContainerElement container : element.operations())
                 children.add(doBuild(container, indexRegistry));
 
             return new StatementRestrictions(table,

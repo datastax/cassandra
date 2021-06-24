@@ -1086,13 +1086,13 @@ public class SelectStatement implements CQLStatement
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
-            return StatementRestrictions.builder(StatementType.SELECT,
-                                                 metadata,
-                                                 whereClause,
-                                                 boundNames,
-                                                 selectsOnlyStaticColumns,
-                                                 parameters.allowFiltering,
-                                                 forView).build();
+            return StatementRestrictions.create(StatementType.SELECT,
+                                                metadata,
+                                                whereClause,
+                                                boundNames,
+                                                selectsOnlyStaticColumns,
+                                                parameters.allowFiltering,
+                                                forView);
         }
 
         /** Returns a Term for the limit or null if no limit is set */

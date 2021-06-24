@@ -40,7 +40,6 @@ import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Relation;
 import org.apache.cassandra.cql3.SingleColumnRelation;
 import org.apache.cassandra.cql3.WhereClause;
-import org.apache.cassandra.cql3.restrictions.ExpressionTree;
 import org.apache.cassandra.index.sai.SAITester;
 import org.assertj.core.util.Lists;
 
@@ -276,7 +275,7 @@ public class RandomisedComplexQueryTest extends SAITester
             return expected.toArray(new Object[][]{});
         }
 
-        Filter buildFilter(ExpressionTree.ExpressionElement element)
+        Filter buildFilter(WhereClause.ExpressionElement element)
         {
             Filter filter = new Filter();
             filter.isDisjunction = element.isDisjunction();
@@ -284,7 +283,7 @@ public class RandomisedComplexQueryTest extends SAITester
             {
                 filter.expressions.add(new Expression(schema, relation));
             }
-            for (ExpressionTree.ExpressionElement child : element.operations())
+            for (WhereClause.ExpressionElement child : element.operations())
                 filter.children.add(buildFilter(child));
             return filter;
         }
