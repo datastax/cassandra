@@ -1,0 +1,46 @@
+--- a/src/java/org/apache/cassandra/db/ConsistencyLevel.java
++++ b/src/java/org/apache/cassandra/db/ConsistencyLevel.java
+@@ -230,11 +230,7 @@
+     }
+ 
+     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
+-<<<<<<<
+-    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName) throws InvalidRequestException
+-=======
+     public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, QueryState queryState) throws InvalidRequestException
+->>>>>>>
+     {
+         if (SchemaConstants.isUserKeyspace(keyspaceName))
+             Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -289,13 +289,8 @@
+         try
+         {
+             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+-<<<<<<<
+-            consistencyForPaxos.validateForCas(keyspaceName);
+-            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
+-=======
+             consistencyForPaxos.validateForCas(keyspaceName, state);
+             consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
+->>>>>>>
+ 
+             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
+             {
+@@ -441,15 +436,9 @@
+         AbstractReplicationStrategy latestRs = keyspace.getReplicationStrategy();
+         try
+         {
+-<<<<<<<
+-            consistencyForPaxos.validateForCas(metadata.keyspace);
+-            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace);
+-            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace);
+-=======
+             consistencyForPaxos.validateForCas(metadata.keyspace, queryState);
+             consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState);
+             consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState);
+->>>>>>>
+ 
+             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
+             while (System.nanoTime() - queryStartNanoTime < timeoutNanos)

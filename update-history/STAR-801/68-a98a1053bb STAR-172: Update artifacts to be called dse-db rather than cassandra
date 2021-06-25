@@ -1,0 +1,44 @@
+--- a/build.xml
++++ b/build.xml
+@@ -561,13 +561,9 @@
+           <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.21" scope="test"/>
+           <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.21" scope="test"/>
+ 
+-<<<<<<<
+-          <dependency groupId="com.datastax.dse" artifactId="dse-db-all" version="${version}" />
+-=======
+           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.9.7" scope="test"/>
+ 
+-          <dependency groupId="org.apache.cassandra" artifactId="cassandra-all" version="${version}" />
+->>>>>>>
++          <dependency groupId="com.datastax.dse" artifactId="dse-db-all" version="${version}" />
+           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.5" />
+           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.1.5" />
+           <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.1.5" />
+@@ -728,26 +724,12 @@
+         <dependency groupId="org.apache.ant" artifactId="ant-junit"/>
+         <!-- adding this dependency is necessary for assertj. When updating assertj, need to also update the version of
+              this that the new assertj's `assertj-parent-pom` depends on. -->
+-<<<<<<<
+-          <dependency groupId="org.junit" artifactId="junit-bom" type="pom" scope="test"/>
+-          <dependency groupId="org.assertj" artifactId="assertj-core" scope="test"/>
+-          <dependency groupId="org.awaitility" artifactId="awaitility" scope="test"/>
+-          <dependency groupId="org.hamcrest" artifactId="hamcrest" scope="test"/>
+-          <!-- coverage debs -->
+-          <dependency groupId="org.jacoco" artifactId="org.jacoco.agent" scope="test"/>
+-          <dependency groupId="org.jacoco" artifactId="org.jacoco.ant" scope="test"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-install" scope="test"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman" scope="test"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-submit" scope="test"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit" scope="test"/>
+-=======
+         <dependency groupId="org.junit" artifactId="junit-bom" type="pom"/>
+         <dependency groupId="org.awaitility" artifactId="awaitility"/>
+         <dependency groupId="org.hamcrest" artifactId="hamcrest"/>
+         <!-- coverage debs -->
+         <dependency groupId="org.jacoco" artifactId="org.jacoco.agent"/>
+         <dependency groupId="org.jacoco" artifactId="org.jacoco.ant"/>
+->>>>>>>
+       </artifact:pom>
+ 
+       <!-- now the pom's for artifacts being deployed to Maven Central -->

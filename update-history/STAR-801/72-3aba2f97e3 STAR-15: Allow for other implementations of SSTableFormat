@@ -1,0 +1,212 @@
+--- a/src/java/org/apache/cassandra/db/compaction/Scrubber.java
++++ b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+@@ -168,28 +168,7 @@
+         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge);
+              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
+         {
+-<<<<<<<
+             assert !indexAvailable() || indexIterator.dataPosition() == 0 : indexIterator.dataPosition();
+-=======
+-            try
+-            {
+-                nextIndexKey = indexAvailable() ? ByteBufferUtil.readWithShortLength(indexFile) : null;
+-                if (indexAvailable())
+-                {
+-                    // throw away variable so we don't have a side effect in the assert
+-                    long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+-                    assert firstRowPositionFromIndex == 0 : firstRowPositionFromIndex;
+-                }
+-            }
+-            catch (Throwable ex)
+-            {
+-                throwIfFatal(ex);
+-                nextIndexKey = null;
+-                nextRowPositionFromIndex = dataFile.length();
+-                if (indexFile != null)
+-                    indexFile.seek(indexFile.length());
+-            }
+->>>>>>>
+ 
+             StatsMetadata metadata = sstable.getSSTableMetadata();
+             writer.switchWriter(CompactionManager.createWriter(cfs, destination, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction));
+@@ -215,7 +194,6 @@
+                     // check for null key below
+                 }
+ 
+-<<<<<<<
+                 long dataStart = dataFile.getFilePointer();
+ 
+                 long dataStartFromIndex = -1;
+@@ -226,24 +204,8 @@
+                     dataStartFromIndex = indexIterator.dataPosition() + TypeSizes.SHORT_SIZE + currentIndexKey.remaining();
+                     if (advanceIndexNoThrow())
+                         dataSizeFromIndex = indexIterator.dataPosition() - dataStartFromIndex;
+-=======
+-                long dataStartFromIndex = -1;
+-                long dataSizeFromIndex = -1;
+-
+-                updateIndexKey();
+-
+-                if (indexAvailable())
+-                {
+-                    if (currentIndexKey != null)
+-                    {
+-                        dataStartFromIndex = currentRowPositionFromIndex + 2 + currentIndexKey.remaining();
+-                        dataSizeFromIndex = nextRowPositionFromIndex - dataStartFromIndex;
+-                    }
+->>>>>>>
+                 }
+ 
+-                long dataStart = dataFile.getFilePointer();
+-
+                 // avoid an NPE if key is null
+                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
+                 outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSizeFromIndex)));
+@@ -404,29 +366,14 @@
+     {
+         try
+         {
+-<<<<<<<
+-            nextIndexKey = !indexAvailable() ? null : ByteBufferUtil.readWithShortLength(indexFile);
+-
+-            nextRowPositionFromIndex = !indexAvailable()
+-                                       ? dataFile.length()
+-                                       : rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+-=======
+             return indexAvailable() && indexIterator.advance();
+->>>>>>>
+         }
+         catch (Throwable th)
+         {
+             JVMStabilityInspector.inspectThrowable(th);
+             outputHandler.warn("Error reading index file", th);
+-<<<<<<<
+             indexIterator.close();
+             return false;
+-=======
+-            nextIndexKey = null;
+-            nextRowPositionFromIndex = dataFile.length();
+-            if (indexFile != null)
+-                indexFile.seek(indexFile.length());
+->>>>>>>
+         }
+     }
+ 
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
+@@ -1671,9 +1671,6 @@
+         return bloomFilterTracker.getRecentTruePositiveCount();
+     }
+ 
+-<<<<<<<
+-    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
+-=======
+     public long getBloomFilterTrueNegativeCount()
+     {
+         return bloomFilterTracker.getTrueNegativeCount();
+@@ -1684,8 +1681,7 @@
+         return bloomFilterTracker.getRecentTrueNegativeCount();
+     }
+ 
+-    public InstrumentingCache<KeyCacheKey, RowIndexEntry> getKeyCache()
+->>>>>>>
++    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
+     {
+         return keyCache;
+     }
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
+@@ -24,11 +24,7 @@
+ import org.apache.cassandra.db.DecoratedKey;
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.io.sstable.*;
+-<<<<<<<
+-import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+-=======
+ import org.apache.cassandra.io.sstable.metadata.MetadataType;
+->>>>>>>
+ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+ import org.apache.cassandra.io.util.DiskOptimizationStrategy;
+@@ -45,7 +41,6 @@
+ import java.io.DataInputStream;
+ import java.io.File;
+ import java.io.IOException;
+-import java.nio.ByteBuffer;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+@@ -96,47 +91,20 @@
+ 
+     public abstract SSTableReader build();
+ 
+-<<<<<<<
+-=======
+-    public SSTableReaderBuilder dfile(FileHandle dfile)
+-    {
+-        this.dfile = dfile;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder ifile(FileHandle ifile)
+-    {
+-        this.ifile = ifile;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder bf(IFilter bf)
+-    {
+-        this.bf = bf;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder summary(IndexSummary summary)
+-    {
+-        this.summary = summary;
+-        return this;
+-    }
+-
+     public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor)
+     {
+         return new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
+-               .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+-               .withChunkCache(ChunkCache.instance);
++                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
++                .withChunkCache(ChunkCache.instance);
+     }
+ 
+     public static FileHandle.Builder defaultDataHandleBuilder(Descriptor descriptor)
+     {
+         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
+-               .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
+-               .withChunkCache(ChunkCache.instance);
++                .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
++                .withChunkCache(ChunkCache.instance);
+     }
+ 
+->>>>>>>
+     /**
+      * Load index summary, first key and last key from Summary.db file if it exists.
+      *
+diff --git a/src/java/org/apache/cassandra/db/compaction/Scrubber.java b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+index 26133dcb13..b0d601937a 100644
+--- a/src/java/org/apache/cassandra/db/compaction/Scrubber.java
++++ b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+@@ -206,8 +206,6 @@ public class Scrubber implements Closeable
+                         dataSizeFromIndex = indexIterator.dataPosition() - dataStartFromIndex;
+                 }
+ 
+-                long dataStart = dataFile.getFilePointer();
+-
+                 // avoid an NPE if key is null
+                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
+                 outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSizeFromIndex)));
+@@ -376,8 +374,6 @@ public class Scrubber implements Closeable
+             outputHandler.warn("Error reading index file", th);
+             indexIterator.close();
+             return false;
+-            if (indexFile != null)
+-                indexFile.seek(indexFile.length());
+         }
+     }
+ 

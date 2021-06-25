@@ -1,0 +1,348 @@
+--- a/src/java/org/apache/cassandra/db/compaction/Verifier.java
++++ b/src/java/org/apache/cassandra/db/compaction/Verifier.java
+@@ -157,10 +157,6 @@
+ 
+         if (sstable.descriptor.getFormat().supportedComponents().contains(Component.SUMMARY))
+         {
+-<<<<<<<
+-            outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup "+sstable.descriptor.filenameFor(Component.SUMMARY));
+-            outputHandler.warn(t);
+-=======
+             try
+             {
+                 outputHandler.debug("Deserializing index summary for " + sstable);
+@@ -169,8 +165,7 @@
+             catch (Throwable t)
+             {
+                 outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup " + sstable.descriptor.filenameFor(Component.SUMMARY));
+-                outputHandler.warn(t.getMessage());
+->>>>>>>
++                outputHandler.warn(t);
+             markAndThrow(t, false);
+             }
+         }
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
+@@ -23,10 +23,12 @@
+ import java.io.File;
+ import java.io.IOException;
+ import java.nio.file.Files;
++import java.nio.file.Path;
+ import java.nio.file.Paths;
+ import java.util.Set;
+ import java.util.concurrent.TimeUnit;
+ 
++import com.google.common.collect.ImmutableMap;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -35,19 +37,9 @@
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.DecoratedKey;
+ import org.apache.cassandra.db.SerializationHeader;
+-<<<<<<<
+ import org.apache.cassandra.io.sstable.*;
+-import org.apache.cassandra.io.sstable.metadata.MetadataType;
+-=======
+-import org.apache.cassandra.io.sstable.Component;
+-import org.apache.cassandra.io.sstable.CorruptSSTableException;
+-import org.apache.cassandra.io.sstable.Descriptor;
+-import org.apache.cassandra.io.sstable.Downsampling;
+-import org.apache.cassandra.io.sstable.IndexSummary;
+-import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
+-import org.apache.cassandra.io.sstable.SSTable;
+ import org.apache.cassandra.io.sstable.format.big.BigTableReader;
+->>>>>>>
++import org.apache.cassandra.io.sstable.metadata.MetadataType;
+ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+ import org.apache.cassandra.io.util.DiskOptimizationStrategy;
+@@ -55,29 +47,7 @@
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.schema.TableMetadata;
+ import org.apache.cassandra.schema.TableMetadataRef;
+-<<<<<<<
+ import org.apache.cassandra.utils.*;
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-
+-import java.io.BufferedInputStream;
+-import java.io.DataInputStream;
+-import java.io.File;
+-import java.io.IOException;
+-import java.nio.file.Files;
+-import java.nio.file.Path;
+-import java.nio.file.Paths;
+-import java.util.Set;
+-import java.util.concurrent.TimeUnit;
+-=======
+-import org.apache.cassandra.utils.BloomFilterSerializer;
+-import org.apache.cassandra.utils.ByteBufferUtil;
+-import org.apache.cassandra.utils.FBUtilities;
+-import org.apache.cassandra.utils.FilterFactory;
+-import org.apache.cassandra.utils.IFilter;
+->>>>>>>
+-
+-import com.google.common.collect.ImmutableMap;
+ 
+ public abstract class SSTableReaderBuilder
+ {
+@@ -121,44 +91,12 @@
+ 
+     public abstract SSTableReader build();
+ 
+-<<<<<<<
+-    public SSTableReaderBuilder dfile(FileHandle dfile)
+-    {
+-        this.dfile = dfile;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder ifile(FileHandle ifile)
+-    {
+-        this.ifile = ifile;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder bf(IFilter bf)
+-    {
+-        this.bf = bf;
+-        return this;
+-    }
+-
+-    public SSTableReaderBuilder summary(IndexSummary summary)
+-    {
+-        this.summary = summary;
+-        return this;
+-    }
+-
+     @SuppressWarnings("resource")
+     public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
+     {
+         return new FileHandle.Builder(descriptor.filenameFor(component))
+-               .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+-               .withChunkCache(ChunkCache.instance);
+-=======
+-    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor)
+-    {
+-        return new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
+                 .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                 .withChunkCache(ChunkCache.instance);
+->>>>>>>
+     }
+ 
+     @SuppressWarnings("resource")
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -38,13 +38,9 @@
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.atomic.AtomicInteger;
+ 
+-<<<<<<<
+-
+-=======
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Sets;
+ import org.apache.commons.lang3.ArrayUtils;
+->>>>>>>
+ import org.junit.AfterClass;
+ import org.junit.Assume;
+ import org.junit.Before;
+@@ -319,23 +315,11 @@
+         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+ 
+         // overwrite one row with garbage
+-<<<<<<<
+         corrupt.accept(sstable, keys);
+-=======
+-        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte)0x7A);
+->>>>>>>
+ 
+         // with skipCorrupted == false, the scrub is expected to fail
+         if (!isFullyRecoverable)
+         {
+-<<<<<<<
+-            // with skipCorrupted == true, the corrupt row will be skipped
+-            scrubber.scrub();
+-            fail("Expected a CorruptSSTableException to be thrown");
+-        }
+-        catch (IOError err) {
+-            // no assertion on the cause since caused may be different for different SSTable formats
+-=======
+             try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
+                  Scrubber scrubber = new Scrubber(cfs, txn, false, true))
+             {
+@@ -346,7 +330,6 @@
+             catch (IOError err)
+             {
+             }
+->>>>>>>
+         }
+ 
+         try (LifecycleTransaction txn = cfs.getTracker().tryModify(ImmutableList.of(sstable), OperationType.SCRUB);
+@@ -526,7 +509,7 @@
+         }
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2, byte junk) throws IOException
++    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2) throws IOException
+     {
+         overrideWithGarbage(sstable, key1, key2, (byte) 'z');
+     }
+@@ -561,7 +544,7 @@
+         overrideWithGarbage(sstable, startPosition, endPosition, junk);
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition, byte junk) throws IOException
++    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition) throws IOException
+     {
+         overrideWithGarbage(sstable, startPosition, endPosition, (byte) 'z');
+     }
+@@ -576,17 +559,10 @@
+         try (RandomAccessFile file = new RandomAccessFile(path, "rw"))
+         {
+             file.seek(startPosition);
+-<<<<<<<
+-            int length = (int) (endPosition - startPosition);
++            int length = (int)(endPosition - startPosition);
+             byte[] buff = new byte[length];
+             Arrays.fill(buff, junk);
+             file.write(buff, 0, length);
+-=======
+-            int length = (int)(endPosition - startPosition);
+-        byte[] buff = new byte[length];
+-        Arrays.fill(buff, junk);
+-        file.write(buff, 0, length);
+->>>>>>>
+         }
+         if (ChunkCache.instance != null)
+             ChunkCache.instance.invalidateFile(path);
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -31,13 +31,10 @@
+ 
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Sets;
+-<<<<<<<
+ import com.google.common.util.concurrent.Uninterruptibles;
+-=======
+-import org.junit.Assume;
+->>>>>>>
+ import org.junit.After;
+ import org.junit.Assert;
++import org.junit.Assume;
+ import org.junit.BeforeClass;
+ import org.junit.Rule;
+ import org.junit.Test;
+@@ -64,14 +61,11 @@
+ import org.apache.cassandra.dht.Token;
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.io.FSReadError;
+-import org.apache.cassandra.io.sstable.format.SSTableReader;
+-<<<<<<<
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+-=======
++import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+ import org.apache.cassandra.io.sstable.metadata.MetadataType;
+ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+->>>>>>>
+ import org.apache.cassandra.io.util.FileDataInput;
+ import org.apache.cassandra.io.util.MmappedRegions;
+ import org.apache.cassandra.schema.CachingParams;
+@@ -84,11 +78,8 @@
+ import org.apache.cassandra.utils.BloomFilter;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.FilterFactory;
+-<<<<<<<
+ import org.apache.cassandra.utils.IFilter;
+-=======
+ import org.apache.cassandra.utils.PageAware;
+->>>>>>>
+ 
+ import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+ import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java b/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
+index 470d2cd39f..f7e34a25cc 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
+@@ -520,7 +520,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
+      * @return {@link SSTableReader}
+      * @throws IOException
+      */
+-    private static SSTableReader open(Descriptor descriptor,
++    @VisibleForTesting
++    public static SSTableReader open(Descriptor descriptor,
+                                       Set<Component> components,
+                                       TableMetadataRef metadata,
+                                       boolean validate,
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java b/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
+index 43146fe9cd..4b2248612b 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReaderBuilder.java
+@@ -92,7 +92,7 @@ public abstract class SSTableReaderBuilder
+     public abstract SSTableReader build();
+ 
+     @SuppressWarnings("resource")
+-    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor)
++    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
+     {
+         return new FileHandle.Builder(descriptor.filenameFor(component))
+                 .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
+index a4eb0c91f9..88fcb5e1e5 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
+@@ -872,7 +872,7 @@ public class TrieIndexSSTableReader extends SSTableReader
+     {
+         try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
+         {
+-            return BloomFilterSerializer.deserialize(stream, oldBfFormat);
++            return BloomFilter.serializer.deserialize(stream, oldBfFormat);
+         }
+         catch (Throwable t)
+         {
+@@ -912,7 +912,7 @@ public class TrieIndexSSTableReader extends SSTableReader
+             try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                  DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
+             {
+-                BloomFilterSerializer.serialize((BloomFilter) bf, stream);
++                BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+                 stream.flush();
+                 SyncUtil.sync((FileChannel) fos);
+             }
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableWriter.java b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableWriter.java
+index 96438ae7c5..3248001f4c 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableWriter.java
+@@ -495,7 +495,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
+                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
+                 {
+                     // bloom filter
+-                    BloomFilterSerializer.serialize((BloomFilter) bf, stream);
++                    BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+                     stream.flush();
+                     SyncUtil.sync((FileChannel) fos);
+                 }
+diff --git a/test/unit/org/apache/cassandra/db/ScrubTest.java b/test/unit/org/apache/cassandra/db/ScrubTest.java
+index aa28c246ef..53bf6b4d55 100644
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -509,7 +509,7 @@ public class ScrubTest
+         }
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2, byte junk) throws IOException
++    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2) throws IOException
+     {
+         overrideWithGarbage(sstable, key1, key2, (byte) 'z');
+     }
+@@ -544,7 +544,7 @@ public class ScrubTest
+         overrideWithGarbage(sstable, startPosition, endPosition, junk);
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition, byte junk) throws IOException
++    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition) throws IOException
+     {
+         overrideWithGarbage(sstable, startPosition, endPosition, (byte) 'z');
+     }

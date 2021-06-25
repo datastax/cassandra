@@ -1,0 +1,27 @@
+--- a/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
++++ b/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
+@@ -3366,7 +3366,6 @@
+         conf.keyspace_count_warn_threshold = value;
+     }
+ 
+-<<<<<<<
+     public static int getConsecutiveMessageErrorsThreshold()
+     {
+         return conf.consecutive_message_errors_threshold;
+@@ -3375,7 +3374,8 @@
+     public static void setConsecutiveMessageErrorsThreshold(int value)
+     {
+         conf.consecutive_message_errors_threshold = value;
+-=======
++    }
++
+     public static int getSAISegmentWriteBufferSpace()
+     {
+         return conf.sai_options.segment_write_buffer_space_mb;
+@@ -3394,6 +3394,5 @@
+     public static void setSAIZeroCopyUsedThreshold(double threshold)
+     {
+         conf.sai_options.zerocopy_used_threshold = threshold;
+->>>>>>>
+     }
+ }
