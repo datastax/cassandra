@@ -55,23 +55,6 @@ public class Roles
         cache = new RolesCache(roleManager, enableCache);
     }
 
-    @VisibleForTesting
-    public static void clearCache()
-    {
-        cache.invalidate();
-    }
-    
-    public static void invalidate(Collection<RoleResource> roles)
-    {
-        if (roles == null || roles.isEmpty())
-        {
-            cache.invalidate();
-        }
-        else
-            for (RoleResource role: roles)
-                cache.invalidate(role);
-    }
-
     /**
      * Identify all roles granted to the supplied Role, including both directly granted
      * and inherited roles.

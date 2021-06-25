@@ -187,8 +187,8 @@ public class CassandraRoleManager implements IRoleManager
 
     private void invalidateRolesAndPermissions(Collection<RoleResource> roles)
     {
-        Roles.invalidate(roles);
-        AuthenticatedUser.invalidate(roles);
+        Roles.cache.invalidate(roles);
+        AuthenticatedUser.permissionsCache.invalidate(roles);
     }
     
     public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)

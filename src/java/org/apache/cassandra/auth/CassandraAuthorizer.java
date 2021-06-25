@@ -93,20 +93,16 @@ public class CassandraAuthorizer implements IAuthorizer
 
     private void invalidateRolesAndPermissions(Collection<RoleResource> roles, IResource resource)
     {
-        if (!roles.isEmpty())
-        {
-            Roles.invalidate(roles);
-            AuthenticatedUser.invalidate(roles, resource);
-        }
+        Roles.cache.invalidate(roles);
+        // All permission entries associated with the resource need to be cleared as they may be
+        // transitively applied to user/roles besides those directly affected by the grant/revoke/drop operation 
+        AuthenticatedUser.permissionsCache.invalidate(resource);
     }
 
     private void invalidateRolesAndPermissions(Collection<RoleResource> roles)
     {
-        if (!roles.isEmpty())
-        {
-            Roles.invalidate(roles);
-            AuthenticatedUser.invalidate(roles);
-        }
+        Roles.cache.invalidate(roles);
+        AuthenticatedUser.permissionsCache.invalidate(roles);
     }
 
     public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)

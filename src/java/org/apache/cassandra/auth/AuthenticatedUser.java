@@ -119,24 +119,6 @@ public class AuthenticatedUser
         return permissionsCache.getPermissions(this, resource);
     }
     
-    @VisibleForTesting
-    public static void clearCache()
-    {
-        permissionsCache.invalidate();
-    }
-
-    public static void invalidate(Collection<RoleResource> roles, IResource resource)
-    {
-        for (RoleResource role : roles)
-            permissionsCache.invalidate(new AuthenticatedUser(role.getRoleName()), resource);
-    }
-
-    public static void invalidate(Collection<RoleResource> roles)
-    {
-        for (RoleResource role : roles)
-            permissionsCache.invalidateByAuthenticatedUser(new AuthenticatedUser(role.getRoleName()));
-    }
-    
     /**
      * Check whether this user has login privileges.
      * LOGIN is not inherited from granted roles, so must be directly granted to the primary role for this user

@@ -96,8 +96,8 @@ public class AuthCacheInvalidationTest extends CQLTester
         executeNet("GRANT MODIFY ON TABLE " + ks + '.' + tab + " TO " + role1.getRoleName());
         executeNet("GRANT MODIFY ON KEYSPACE " + ks + " TO " + role2.getRoleName());
 
-        Roles.clearCache();
-        AuthenticatedUser.clearCache();
+        Roles.cache.invalidate();
+        AuthenticatedUser.permissionsCache.invalidate();
     }
 
     private void createRole(RoleResource role) throws Throwable

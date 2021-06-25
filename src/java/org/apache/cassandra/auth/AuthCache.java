@@ -165,7 +165,7 @@ public class AuthCache<K, V> implements AuthCacheMBean
             Collection<K> iterable = cache.asMap().entrySet()
                                           .stream()
                                           .filter(filter)
-                                          .map(entry -> entry.getKey())
+                                          .map(Map.Entry::getKey)
                                           .collect(Collectors.toSet());
             cache.invalidateAll(iterable);
         }

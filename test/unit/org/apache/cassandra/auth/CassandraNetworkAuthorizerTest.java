@@ -160,7 +160,7 @@ public class CassandraNetworkAuthorizerTest
         AuthenticationStatement authStmt = (AuthenticationStatement) statement;
 
         // invalidate roles cache so that any changes to the underlying roles are picked up
-        Roles.clearCache();
+        Roles.cache.invalidate();
         authStmt.execute(getClientState());
     }
 
@@ -231,7 +231,7 @@ public class CassandraNetworkAuthorizerTest
         assertDcPermRow(username, "dc1");
 
         // clear the roles cache to lose the (non-)superuser status for the user
-        Roles.clearCache();
+        Roles.cache.invalidate();
         auth("ALTER ROLE %s WITH superuser = true", username);
         Assert.assertEquals(DCPermissions.all(), dcPerms(username));
     }
