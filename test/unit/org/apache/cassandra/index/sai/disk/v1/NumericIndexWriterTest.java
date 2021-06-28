@@ -18,10 +18,13 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.nio.ByteBuffer;
+import java.util.Comparator;
+import java.util.List;
+import java.util.PriorityQueue;
 
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.ImmutableOneDimPointValues;
@@ -88,11 +91,12 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                                               kdtree,
                                               indexMetas.get(indexComponents.kdTree.ndiType).root,
                                               kdtreePostings,
-                                              indexMetas.get(indexComponents.kdTreePostingLists.ndiType).root
+                                              indexMetas.get(indexComponents.kdTreePostingLists.ndiType).root,
+                                              null
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+            try (final PostingList ignored = intersect(reader.intersect(new BKDReader.IntersectVisitor()
             {
                 @Override
                 public boolean visit(byte[] packedValue)
@@ -108,7 +112,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                 {
                     return PointValues.Relation.CELL_CROSSES_QUERY;
                 }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext())))
             {
                 assertEquals(numRows, visited.get());
             }
@@ -141,11 +145,12 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                                               kdtree,
                                               indexMetas.get(indexComponents.kdTree.ndiType).root,
                                               kdtreePostings,
-                                              indexMetas.get(indexComponents.kdTreePostingLists.ndiType).root
+                                              indexMetas.get(indexComponents.kdTreePostingLists.ndiType).root,
+                                              null
         ))
         {
             final Counter visited = Counter.newCounter();
-            try (final PostingList ignored = reader.intersect(new BKDReader.IntersectVisitor()
+            try (final PostingList ignored = intersect(reader.intersect(new BKDReader.IntersectVisitor()
             {
                 @Override
                 public boolean visit(byte[] packedValue)
@@ -164,7 +169,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                 {
                     return PointValues.Relation.CELL_CROSSES_QUERY;
                 }
-            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext()))
+            }, QueryEventListeners.NO_OP_BKD_LISTENER, new QueryContext())))
             {
                 assertEquals(maxSegmentRowId, visited.get());
             }
@@ -176,20 +181,20 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractIterator<Pair<ByteComparable, LongArrayList>> iterator = new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, LongArrayList> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                final IntArrayList postings = new IntArrayList();
+                final LongArrayList postings = new LongArrayList();
                 postings.add(currentRowId++);
                 final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS41);
                 return Pair.create(v -> encoded, postings);
@@ -197,5 +202,16 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
         };
 
         return new MemtableTermsIterator(minTerm, maxTerm, iterator);
+    }
+
+    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
+    {
+        if (postings == null || postings.isEmpty())
+            return null;
+
+        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        queue.addAll(postings);
+
+        return MergePostingList.merge(queue);
     }
 }

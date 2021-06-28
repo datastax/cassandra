@@ -23,6 +23,7 @@ import java.util.HashMap;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.junit.Assert.assertEquals;
@@ -30,7 +31,6 @@ import static org.junit.Assert.assertEquals;
 // This test is primarily handling edge conditions, error conditions
 // and basic functionality. Comprehensive type testing of collections
 // is in the cql/types/collections package
-//TODO Sort out statement restrictions assertion
 public class CollectionIndexingTest extends SAITester
 {
     @Before
@@ -255,7 +255,7 @@ public class CollectionIndexingTest extends SAITester
 
     private void assertUnsupportedIndexOperator(String query, Object... values) throws Throwable
     {
-//        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "value"),
-//                query, values);
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "value"),
+                query, values);
     }
 }

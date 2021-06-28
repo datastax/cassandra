@@ -50,18 +50,18 @@ public class RangeConcatIterator extends RangeIterator
 
     @Override
     @SuppressWarnings("resource")
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
         while (!ranges.isEmpty())
         {
-            if (ranges.peek().getCurrent().compareTo(nextToken) >= 0)
+            if (ranges.peek().getCurrent().compareTo(nextKey) >= 0)
                 break;
 
             RangeIterator head = ranges.poll();
 
-            if (head.getMaximum().compareTo(nextToken) >= 0)
+            if (head.getMaximum().compareTo(nextKey) >= 0)
             {
-                head.skipTo(nextToken);
+                head.skipTo(nextKey);
                 ranges.add(head);
                 break;
             }
@@ -77,14 +77,14 @@ public class RangeConcatIterator extends RangeIterator
 
     @Override
     @SuppressWarnings("resource")
-    protected Token computeNext()
+    protected PrimaryKey computeNext()
     {
         while (!ranges.isEmpty())
         {
             RangeIterator current = ranges.poll();
             if (current.hasNext())
             {
-                Token next = current.next();
+                PrimaryKey next = current.next();
                 // hasNext will update RangeIterator's current which is used to sort in PQ
                 if (current.hasNext())
                     ranges.add(current);

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -31,6 +32,9 @@ import java.util.stream.Stream;
 import org.junit.Assert;
 
 import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
@@ -44,10 +48,12 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.LongArrays;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Pair;
@@ -64,30 +70,17 @@ public class KDTreeIndexBuilder
 {
     private final IndexComponents indexComponents;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, IntArrayList>> terms;
+    private final AbstractIterator<Pair<ByteComparable, LongArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
     private final LongArray segmentRowIdToToken = LongArrays.identity().build();
     private final LongArray segmentRowIdToOffset = LongArrays.identity().build();
-    private final SSTableContext.KeyFetcher keyFetcher = new SSTableContext.KeyFetcher() {
-        @Override
-        public DecoratedKey apply(RandomAccessReader reader, long keyOffset)
-        {
-            return dk(String.format("pkvalue_%07d", keyOffset));
-        }
-
-        @Override
-        public RandomAccessReader createReader()
-        {
-            return null;
-        }
-    };
     private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
 
     public KDTreeIndexBuilder(IndexComponents indexComponents,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, IntArrayList>> terms,
+                              AbstractIterator<Pair<ByteComparable, LongArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -114,8 +107,8 @@ public class KDTreeIndexBuilder
                                            minSegmentRowId,
                                            maxSegmentRowId,
                                            // min/max is unused for now
-                                           Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")),
-                                           Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")),
+                                           PrimaryKey.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a"))),
+                                           PrimaryKey.factory().createKey(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b"))),
                                            UTF8Type.instance.fromString("c"),
                                            UTF8Type.instance.fromString("d"),
                                            indexMetas);
@@ -123,7 +116,7 @@ public class KDTreeIndexBuilder
 
         try (SSTableIndex.PerIndexFiles indexFiles = new SSTableIndex.PerIndexFiles(indexComponents, false))
         {
-            Segment segment = new Segment(() -> segmentRowIdToToken, () -> segmentRowIdToOffset, keyFetcher, indexFiles, metadata, type);
+            Segment segment = new Segment(PrimaryKeyMap.IDENTITY, indexFiles, metadata, type);
             KDTreeIndexSearcher searcher = IndexSearcher.open(segment, QueryEventListeners.NO_OP_BKD_LISTENER);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
@@ -224,22 +217,22 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, LongArrayList> computeNext()
             {
                 if (currentTerm++ >= size)
                 {
                     return endOfData();
                 }
 
-                IntArrayList postings = new IntArrayList();
+                LongArrayList postings = new LongArrayList();
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 

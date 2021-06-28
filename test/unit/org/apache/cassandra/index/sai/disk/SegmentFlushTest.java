@@ -37,12 +37,14 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
@@ -114,31 +116,27 @@ public class SegmentFlushTest
 
         SSTableIndexWriter writer = new SSTableIndexWriter(descriptor, context, StorageAttachedIndex.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, null);
 
-        List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
+        List<DecoratedKey> keys = Arrays.asList(makeDecoratedKey("1"), makeDecoratedKey("2"));
         Collections.sort(keys);
 
         DecoratedKey key1 = keys.get(0);
         ByteBuffer term1 = UTF8Type.instance.decompose("a");
         Row row1 = createRow(column, term1);
-        writer.addRow(key1, sstableRowId1, row1);
+        writer.addRow(PrimaryKey.factory().createKey(key1, Clustering.EMPTY, sstableRowId1), row1);
 
         // expect a flush if exceed max rowId per segment
         DecoratedKey key2 = keys.get(1);
         ByteBuffer term2 = UTF8Type.instance.decompose("b");
         Row row2 = createRow(column, term2);
-        writer.addRow(key2, sstableRowId2, row2);
+        writer.addRow(PrimaryKey.factory().createKey(key2, Clustering.EMPTY, sstableRowId2), row2);
 
         writer.flush();
 
         IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, null);
         MetadataSource source = MetadataSource.loadColumnMetadata(components);
 
-        // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, null);
-        assertEquals(segments, segmentMetadatas.size());
+        SegmentMetadata segmentMetadata = SegmentMetadata.load(source, PrimaryKey.factory(), null);
 
-        // verify segment metadata
-        SegmentMetadata segmentMetadata = segmentMetadatas.get(0);
         segmentRowIdOffset = 0;
         posting1 = 0;
         posting2 = (int) (sstableRowId2 - segmentRowIdOffset);
@@ -151,6 +149,11 @@ public class SegmentFlushTest
         verifyStringIndex(components, segmentMetadata);
     }
 
+    private DecoratedKey makeDecoratedKey(String key)
+    {
+        return Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.decompose(key));
+    }
+
     private void verifyStringIndex(IndexComponents components, SegmentMetadata segmentMetadata) throws IOException
     {
         FileHandle termsData = components.createFileHandle(components.termsData);
@@ -158,7 +161,7 @@ public class SegmentFlushTest
 
         long termsFooterPointer = Long.parseLong(segmentMetadata.componentMetadatas.get(IndexComponents.NDIType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
-        try (TermsReader reader = new TermsReader(components, termsData, postingLists,
+        try (TermsReader reader = new TermsReader(components, null, termsData, postingLists,
                                                   segmentMetadata.componentMetadatas.get(components.termsData.ndiType).root, termsFooterPointer))
         {
             TermsIterator iterator = reader.allTerms(0, QueryEventListeners.NO_OP_TRIE_LISTENER);
@@ -188,8 +191,8 @@ public class SegmentFlushTest
     private void verifySegmentMetadata(SegmentMetadata segmentMetadata)
     {
         assertEquals(segmentRowIdOffset, segmentMetadata.segmentRowIdOffset);
-        assertEquals(minKey, segmentMetadata.minKey);
-        assertEquals(maxKey, segmentMetadata.maxKey);
+        assertEquals(PrimaryKey.factory().createKey(minKey), segmentMetadata.minKey);
+        assertEquals(PrimaryKey.factory().createKey(maxKey), segmentMetadata.maxKey);
         assertEquals(minTerm, segmentMetadata.minTerm);
         assertEquals(maxTerm, segmentMetadata.maxTerm);
         assertEquals(numRows, segmentMetadata.numRows);

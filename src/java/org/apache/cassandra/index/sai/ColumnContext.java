@@ -1,10 +1,4 @@
 /*
- * All changes to the original code are Copyright DataStax, Inc.
- *
- * Please see the included license file for details.
- */
-
-/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -42,6 +36,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -68,6 +63,7 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -107,6 +103,7 @@ public class ColumnContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
+    private final PrimaryKey.PrimaryKeyFactory primaryKeyFactory;
 
     public ColumnContext(TableMetadata tableMeta, IndexMetadata metadata)
     {
@@ -125,6 +122,7 @@ public class ColumnContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(getIndexName(), tableMeta)
                                               : new ColumnQueryMetrics.BKDIndexMetrics(getIndexName(), tableMeta);
 
+        this.primaryKeyFactory = PrimaryKey.factory(tableMeta);
         logger.info(logMessage("Initialized column context with index writer config: {}"),
                 this.indexWriterConfig.toString());
     }
@@ -149,6 +147,7 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = indexWriterConfig;
+        this.primaryKeyFactory = PrimaryKey.factory(DatabaseDescriptor.getPartitioner(), clusteringComparator);
     }
 
     public ColumnContext(TableMetadata table, ColumnMetadata column)
@@ -164,6 +163,7 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
+        this.primaryKeyFactory = PrimaryKey.immutableFactory(table);
     }
 
     public AbstractType<?> keyValidator()
@@ -174,6 +174,11 @@ public class ColumnContext
     public ClusteringComparator clusteringComparator()
     {
         return clusteringComparator;
+    }
+
+    public PrimaryKey.PrimaryKeyFactory keyFactory()
+    {
+        return primaryKeyFactory;
     }
 
     public IndexMetrics getIndexMetrics()

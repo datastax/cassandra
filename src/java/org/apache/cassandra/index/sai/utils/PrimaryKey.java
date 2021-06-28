@@ -17,156 +17,299 @@
  */
 package org.apache.cassandra.index.sai.utils;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Objects;
+import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 /**
  * The primary key of a row, composed by the partition key and the clustering key.
  */
-public abstract class PrimaryKey
+public class PrimaryKey implements Comparable<PrimaryKey>
 {
-    private final DecoratedKey partitionKey;
+    private static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    /**
-     * Returns a new primary key composed by the specified partition and clustering keys.
-     *
-     * @param partitionKey a partition key
-     * @param clustering a clustering key
-     * @return a new primary key composed by {@code partitionKey} and {@code ClusteringKey}
-     */
-    public static PrimaryKey of(DecoratedKey partitionKey, Clustering clustering)
+    private AtomicLong mutableCounter = new AtomicLong();
+
+
+    public enum Kind
     {
-        if (clustering == Clustering.EMPTY)
-            return new Skinny(partitionKey);
-        else if (clustering == Clustering.STATIC_CLUSTERING)
-            return new Static(partitionKey);
-        else
-            return new Wide(partitionKey, clustering);
+        TOKEN,
+        MAPPED,
+        UNMAPPED,
     }
 
-    private PrimaryKey(DecoratedKey partitionKey)
+    private Kind kind;
+    private DecoratedKey partitionKey;
+    private Clustering clustering;
+    private ClusteringComparator clusteringComparator;
+    private long sstableRowId;
+    private boolean mutable = false;
+    private long mutableId;
+
+    public static class PrimaryKeyFactory
     {
+        private final IPartitioner partitioner;
+        private final ClusteringComparator comparator;
+        private final PrimaryKey mutablePrimaryKey;
+        private final boolean mutable;
+
+        PrimaryKeyFactory(IPartitioner partitioner, ClusteringComparator comparator, boolean mutable)
+        {
+            this.partitioner = partitioner;
+            this.comparator = comparator;
+            this.mutablePrimaryKey = new PrimaryKey();
+            this.mutable = mutable;
+        }
+
+        public PrimaryKeyFactory copyOf()
+        {
+            return new PrimaryKeyFactory(partitioner, comparator, mutable);
+        }
+
+        public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
+        {
+            return makeMutableKey(partitionKey, clustering, sstableRowId);
+        }
+
+        public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering)
+        {
+            return makeMutableKey(partitionKey, clustering, -1);
+        }
+
+        public PrimaryKey createKey(ByteComparable comparable, long sstableRowId)
+        {
+            return createKeyFromPeekable(comparable.asPeekableBytes(ByteComparable.Version.OSS41), sstableRowId);
+        }
+
+        public PrimaryKey createKey(byte[] bytes)
+        {
+            return createKeyFromPeekable(ByteSource.peekable(ByteSource.fixedLength(bytes)), -1);
+        }
+
+        @VisibleForTesting
+        public PrimaryKey createKey(DecoratedKey key)
+        {
+            return new PrimaryKey(key, Clustering.EMPTY, EMPTY_COMPARATOR);
+        }
+
+        public PrimaryKey createKey(Token token)
+        {
+            return new PrimaryKey(token);
+        }
+
+        public PrimaryKey createKey(Token token, long sstableRowId)
+        {
+            return new PrimaryKey(token, sstableRowId);
+        }
+
+        private PrimaryKey createKeyFromPeekable(ByteSource.Peekable peekable, long sstableRowId)
+        {
+            Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), ByteComparable.Version.OSS41);
+            byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+            DecoratedKey key =  new BufferDecoratedKey(token, ByteBuffer.wrap(keyBytes));
+
+            if ((comparator.size() == 0) || peekable.peek() == ByteSource.TERMINATOR)
+                return new PrimaryKey(key, Clustering.EMPTY, comparator, sstableRowId);
+
+            ByteBuffer[] values = new ByteBuffer[comparator.size()];
+
+            byte[] clusteringKeyBytes;
+            int index = 0;
+
+            while ((clusteringKeyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable))) != null)
+            {
+                values[index++] = ByteBuffer.wrap(clusteringKeyBytes);
+                if (peekable.peek() == ByteSource.TERMINATOR)
+                    break;
+            }
+
+            Clustering clustering = Clustering.make(values);
+
+            return makeMutableKey(key, clustering, sstableRowId);
+        }
+
+        private PrimaryKey makeMutableKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
+        {
+//            if (mutable)
+//            {
+//                mutablePrimaryKey.kind = sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED;
+//                mutablePrimaryKey.partitionKey = partitionKey;
+//                mutablePrimaryKey.clustering = clustering;
+//                mutablePrimaryKey.clusteringComparator = comparator;
+//                mutablePrimaryKey.sstableRowId = sstableRowId;
+//                return mutablePrimaryKey;
+//            }
+            return new PrimaryKey(partitionKey, clustering, comparator, sstableRowId);
+        }
+    }
+
+    public static PrimaryKeyFactory immutableFactory(TableMetadata tableMetadata)
+    {
+        return new PrimaryKeyFactory(tableMetadata.partitioner, tableMetadata.comparator, false);
+    }
+
+    public static PrimaryKeyFactory factory(TableMetadata tableMetadata)
+    {
+        return new PrimaryKeyFactory(tableMetadata.partitioner, tableMetadata.comparator, true);
+    }
+
+    @VisibleForTesting
+    public static PrimaryKeyFactory factory(IPartitioner partitioner, ClusteringComparator comparator)
+    {
+        return new PrimaryKeyFactory(partitioner, comparator, false);
+    }
+
+    public static PrimaryKeyFactory factory()
+    {
+        return new PrimaryKeyFactory(Murmur3Partitioner.instance, EMPTY_COMPARATOR, false);
+    }
+
+    private PrimaryKey()
+    {
+        mutable = true;
+        mutableId = mutableCounter.getAndIncrement();
+    }
+
+    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator)
+    {
+        this(partitionKey, clustering, comparator, -1);
+    }
+
+    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
+    {
+        this(sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
+    }
+
+    private PrimaryKey(Token token)
+    {
+        this(Kind.TOKEN, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, -1);
+    }
+
+    private PrimaryKey(Token token, long sstableRowId)
+    {
+        this(Kind.MAPPED, new BufferDecoratedKey(token, ByteBufferUtil.EMPTY_BYTE_BUFFER), Clustering.EMPTY, EMPTY_COMPARATOR, sstableRowId);
+    }
+
+    private PrimaryKey(Kind kind, DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator, long sstableRowId)
+    {
+        this.kind = kind;
         this.partitionKey = partitionKey;
+        this.clustering = clustering;
+        this.clusteringComparator = clusteringComparator;
+        this.sstableRowId = sstableRowId;
     }
 
-    /**
-     * Returns the {@link Token} of the partition key.
-     *
-     * @return the partitioning token of the partition key
-     */
-    public Token token()
+    public int size()
     {
-        return partitionKey.getToken();
-    }
-
-    /**
-     * Returns the partition key.
-     *
-     * @return the partition key
-     */
-    public DecoratedKey partitionKey()
-    {
-        return partitionKey;
-    }
-
-    /**
-     * Returns the clustering key.
-     *
-     * @return the clustering key
-     */
-    public abstract Clustering clustering();
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        PrimaryKey that = (PrimaryKey) o;
-        return Objects.equal(partitionKey, that.partitionKey) && Objects.equal(clustering(), that.clustering());
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hashCode(partitionKey, clustering());
-    }
-
-    public String toString(TableMetadata metadata)
-    {
-        return String.format("PrimaryKey: { partition : %s, clustering: %s}",
-                             metadata.partitionKeyType.getString(partitionKey.getKey()),
-                             clustering().toString(metadata));
+        return partitionKey.getKey().remaining() + clustering.dataSize();
     }
 
     @Override
     public String toString()
     {
-        return String.format("PrimaryKey: { partition : %s, clustering: %s} "+getClass().getSimpleName(),
-                             ByteBufferUtil.bytesToHex(partitionKey.getKey()),
-                             String.join(",", Arrays.stream(clustering().getBufferArray())
+        return String.format("PrimaryKey: { partition : %s, clustering: %s, sstableRowId: %s} ",
+                             partitionKey,
+                             String.join(",", Arrays.stream(clustering.getBufferArray())
                                                     .map(ByteBufferUtil::bytesToHex)
-                                                    .collect(Collectors.toList())));
+                                                    .collect(Collectors.toList())),
+                             sstableRowId);
     }
 
-    /**
-     * {@link PrimaryKey} implementation for rows in tables without a defined clustering key.
-     */
-    static class Skinny extends PrimaryKey
+    public byte[] asBytes()
     {
-        Skinny(DecoratedKey partitionKey)
-        {
-            super(partitionKey);
-        }
+        ByteSource source = asComparableBytes(ByteComparable.Version.OSS41);
 
-        @Override
-        public Clustering clustering()
-        {
-            return Clustering.EMPTY;
-        }
+        return ByteSourceInverse.readBytes(source);
     }
 
-    /**
-     * {@link PrimaryKey} implementation for static rows in tables with a defined clustering key.
-     */
-    static class Static extends PrimaryKey
+    public ByteSource asComparableBytes(ByteComparable.Version version)
     {
-        Static(DecoratedKey partitionKey)
+        ByteSource[] sources = new ByteSource[clustering.size() + 2];
+        sources[0] = partitionKey.getToken().asComparableBytes(version);
+        sources[1] = ByteSource.of(partitionKey.getKey(), version);
+        for (int index = 0; index < clustering.size(); index++)
         {
-            super(partitionKey);
+            sources[index + 2] = ByteSource.of(clustering.bufferAt(index), version);
         }
-
-        @Override
-        public Clustering clustering()
-        {
-            return Clustering.STATIC_CLUSTERING;
-        }
+        return ByteSource.withTerminator(version == ByteComparable.Version.LEGACY
+                                         ? ByteSource.END_OF_STREAM
+                                         : ByteSource.TERMINATOR,
+                                         sources);
     }
 
-    /**
-     * {@link PrimaryKey} implementation for regular rows in tables with a defined clustering key.
-     */
-    static class Wide extends PrimaryKey
+    public DecoratedKey partitionKey()
     {
-        private final Clustering clustering;
+        return partitionKey;
+    }
 
-        Wide(DecoratedKey partitionKey, Clustering clustering)
-        {
-            super(partitionKey);
-            this.clustering = clustering;
-        }
+    public Clustering clustering()
+    {
+        assert clustering != null && kind != Kind.TOKEN;
+        return clustering;
+    }
 
-        @Override
-        public Clustering clustering()
-        {
-            return clustering;
-        }
+    public boolean hasEmptyClustering()
+    {
+        return clustering == null || clustering.isEmpty();
+    }
+
+    public ClusteringComparator clusteringComparator()
+    {
+        assert clusteringComparator != null && kind != Kind.TOKEN;
+        return clusteringComparator;
+    }
+
+    public long sstableRowId(LongArray tokenToRowId)
+    {
+        return tokenToRowId.findTokenRowID(partitionKey.getToken().getLongValue());
+    }
+
+    public long sstableRowId()
+    {
+        assert kind == Kind.MAPPED : "Should be MAPPED to read sstableRowId but was " + kind;
+        return sstableRowId;
+    }
+
+    @Override
+    public int compareTo(PrimaryKey o)
+    {
+//        assert this.mutable && o.mutable && this.mutableId == o.mutableId : "Trying to compare the mutable primary key for a mapped value";
+        if (kind == Kind.TOKEN || o.kind == Kind.TOKEN)
+            return partitionKey.getToken().compareTo(o.partitionKey.getToken());
+        int cmp = partitionKey.compareTo(o.partitionKey);
+        if (clustering.isEmpty() || o.clustering.isEmpty())
+            return cmp;
+        return (cmp != 0) ? cmp : clusteringComparator().compare(clustering, o.clustering);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(partitionKey, clustering, clusteringComparator);
+    }
+
+    @Override
+    public boolean equals(Object obj)
+    {
+        if (obj instanceof PrimaryKey)
+            return compareTo((PrimaryKey)obj) == 0;
+        return false;
     }
 }
