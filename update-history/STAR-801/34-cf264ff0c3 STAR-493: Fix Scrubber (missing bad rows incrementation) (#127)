@@ -1,0 +1,37 @@
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -94,7 +94,6 @@
+ import org.apache.cassandra.tools.ToolRunner;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+-import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.Throwables;
+ import org.assertj.core.api.Assertions;
+ 
+@@ -209,14 +208,9 @@
+             scrubber.scrub();
+             fail("Expected a CorruptSSTableException to be thrown");
+         }
+-<<<<<<<
+         catch (IOError err)
+         {
+-            assertTrue(err.getCause() instanceof CorruptSSTableException);
+-=======
+-        catch (IOError err) {
+             assertTrue(Throwables.isCausedBy(err, CorruptSSTableException.class));
+->>>>>>>
+         }
+ 
+         // with skipCorrupted == true, the corrupt rows will be skipped
+diff --git a/test/unit/org/apache/cassandra/db/ScrubTest.java b/test/unit/org/apache/cassandra/db/ScrubTest.java
+index 7de5f6945d..c93d3f4116 100644
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -94,7 +94,6 @@ import org.apache.cassandra.tools.StandaloneScrubber;
+ import org.apache.cassandra.tools.ToolRunner;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+-import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.Throwables;
+ import org.assertj.core.api.Assertions;
+ 

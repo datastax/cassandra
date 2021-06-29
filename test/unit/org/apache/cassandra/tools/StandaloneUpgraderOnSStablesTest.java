@@ -53,7 +53,7 @@ import static org.junit.Assert.assertEquals;
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class StandaloneUpgraderOnSStablesTest
 {
-    String legacyId = LegacySSTableTest.legacyVersions[LegacySSTableTest.legacyVersions.length - 1];
+    String legacyId = "ma";
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -139,7 +139,7 @@ public class StandaloneUpgraderOnSStablesTest
     private List<String> getSStableFiles(String ks, String table) throws StartupException
     {
         ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(table);
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());
 
         Set<SSTableReader> sstables = cfs.getLiveSSTables();

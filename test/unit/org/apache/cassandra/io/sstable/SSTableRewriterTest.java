@@ -23,14 +23,17 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -39,6 +42,8 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionController;
@@ -80,7 +85,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                 .build()
                 .apply();
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         Set<SSTableReader> sstables = new HashSet<>(cfs.getLiveSSTables());
         assertEquals(1, sstables.size());
         assertEquals(sstables.iterator().next().bytesOnDisk(), cfs.metric.liveDiskSpaceUsed.getCount());
@@ -620,7 +625,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
              CompactionController controller = new CompactionController(cfs, compacting, 0);
              LifecycleTransaction txn = offline ? LifecycleTransaction.offline(OperationType.UNKNOWN, compacting)
                                        : cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN);
-             SSTableRewriter rewriter = new SSTableRewriter(txn, 100, 10000000, false, true);
+             SSTableRewriter rewriter = new SSTableRewriter(txn, 100, 10000000, offline, true);
              CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, Collections.singletonList(scanner), controller, FBUtilities.nowInSeconds(), UUIDGen.getTimeUUID())
         )
         {
@@ -697,7 +702,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     .build()
                     .apply();
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         cfs.forceMajorCompaction();
         validateKeys(keyspace);
 
@@ -812,42 +817,71 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
     }
 
     @Test
-    public void testCanonicalSSTables() throws ExecutionException, InterruptedException
+    public void testCanonicalSSTablesWithEarlyOpen() throws ExecutionException, InterruptedException
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE);
-        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
-        truncate(cfs);
+        testCanonicalSSTables(1);
+    }
 
-        cfs.addSSTable(writeFile(cfs, 100));
-        Collection<SSTableReader> allSSTables = cfs.getLiveSSTables();
-        assertEquals(1, allSSTables.size());
-        final AtomicBoolean done = new AtomicBoolean(false);
-        final AtomicBoolean failed = new AtomicBoolean(false);
-        Runnable r = () -> {
-            while (!done.get())
-            {
-                Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
-                if (Iterables.size(sstables) != 1)
-                {
-                    failed.set(true);
-                    return;
-                }
-            }
-        };
-        Thread t = NamedThreadFactory.createThread(r);
+    @Test
+    public void testCanonicalSSTablesWithFinalEarlyOpen() throws ExecutionException, InterruptedException
+    {
+        testCanonicalSSTables(1000000);
+    }
+
+    @Test
+    @Ignore // This does not currently work. See View.select.
+    public void testCanonicalSSTablesNoEarlyOpen() throws ExecutionException, InterruptedException
+    {
+        testCanonicalSSTables(-1);
+    }
+
+
+    public void testCanonicalSSTables(int preemptiveOpenInterval) throws ExecutionException, InterruptedException
+    {
+        int prevPreemptiveOpenInterval = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB();
         try
         {
-            t.start();
-            cfs.forceMajorCompaction();
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMB(preemptiveOpenInterval);
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+            truncate(cfs);
+
+            cfs.addSSTable(writeFile(cfs, 2000));
+            Collection<SSTableReader> allSSTables = cfs.getLiveSSTables();
+            assertEquals(1, allSSTables.size());
+            final AtomicBoolean done = new AtomicBoolean(false);
+            final AtomicBoolean gotZero = new AtomicBoolean(false);
+            final AtomicInteger maxValue = new AtomicInteger(0);
+            Runnable r = () -> {
+                while (!done.get())
+                {
+                    Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
+                    int sstablesCount = Iterables.size(sstables);
+                    if (sstablesCount == 0)
+                        gotZero.set(true);
+                    else
+                        maxValue.updateAndGet(prev -> Math.max(prev, sstablesCount));
+                }
+            };
+            Thread t = NamedThreadFactory.createThread(r);
+            try
+            {
+                t.start();
+                cfs.forceMajorCompaction();
+            }
+            finally
+            {
+                done.set(true);
+                t.join(20);
+            }
+            // Note: the checks below can falsely succeed. Flaky failures should be treated as genuine problems.
+            assertFalse("No sstables", gotZero.get());
+            assertEquals("Too many sstables", 1, maxValue.get());
         }
         finally
         {
-            done.set(true);
-            t.join(20);
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMB(prevPreemptiveOpenInterval);
         }
-        assertFalse(failed.get());
-
-
     }
 
     /**
@@ -862,6 +896,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         File dir = cfs.getDirectories().getDirectoryForNewSSTables();
+        Row staticRow = Rows.EMPTY_STATIC_ROW;
 
         // Can't update a writer that is eagerly cleared on switch
         boolean eagerWriterMetaRelease = true;
@@ -877,6 +912,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                 UnfilteredRowIterator uri = mock(UnfilteredRowIterator.class);
                 when(uri.partitionLevelDeletion()).thenReturn(new DeletionTime(0,0));
                 when(uri.partitionKey()).thenReturn(bopKeyFromInt(0));
+                when(uri.staticRow()).thenReturn(staticRow);
                 // should not be able to append after buffer release on switch
                 firstWriter.append(uri);
                 fail("Expected AssertionError was not thrown.");
@@ -887,27 +923,33 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             }
         }
 
-        // Can update a writer that is not eagerly cleared on switch
-        eagerWriterMetaRelease = false;
-        try (LifecycleTransaction txn = cfs.getTracker().tryModify(new HashSet<>(), OperationType.UNKNOWN);
-             SSTableRewriter rewriter = new SSTableRewriter(txn, 1000, 1000000, false, eagerWriterMetaRelease)
-        )
-        {
-            SSTableWriter firstWriter = getWriter(cfs, dir, txn);
-            rewriter.switchWriter(firstWriter);
+        // The check below has been commented out as it is not clear what is the contract it attempts to verify
+        // In particular, SSTableRewriter.switchWriter calls openFinalEarly on the previous instance of writer
+        // which implies that the writer is done, as following the intuition, we should not be able to add any more
+        // data to that writer - but the below check attempts to do that
 
-            // At least one write so it's not aborted when switched out.
-            UnfilteredRowIterator uri = mock(UnfilteredRowIterator.class);
-            when(uri.partitionLevelDeletion()).thenReturn(new DeletionTime(0,0));
-            when(uri.partitionKey()).thenReturn(bopKeyFromInt(0));
-            rewriter.append(uri);
-
-            rewriter.switchWriter(getWriter(cfs, dir, txn));
-
-            // should be able to append after switch, and assert is not tripped
-            when(uri.partitionKey()).thenReturn(bopKeyFromInt(1));
-            firstWriter.append(uri);
-        }
+//        // Can update a writer that is not eagerly cleared on switch
+//        eagerWriterMetaRelease = false;
+//        try (LifecycleTransaction txn = cfs.getTracker().tryModify(new HashSet<>(), OperationType.UNKNOWN);
+//             SSTableRewriter rewriter = new SSTableRewriter(txn, 1000, 1000000, false, eagerWriterMetaRelease)
+//        )
+//        {
+//            SSTableWriter firstWriter = getWriter(cfs, dir, txn);
+//            rewriter.switchWriter(firstWriter);
+//
+//            // At least one write so it's not aborted when switched out.
+//            UnfilteredRowIterator uri = mock(UnfilteredRowIterator.class);
+//            when(uri.partitionLevelDeletion()).thenReturn(new DeletionTime(0,0));
+//            when(uri.partitionKey()).thenReturn(bopKeyFromInt(0));
+//            when(uri.staticRow()).thenReturn(staticRow);
+//            rewriter.append(uri);
+//
+//            rewriter.switchWriter(getWriter(cfs, dir, txn));
+//
+//            // should be able to append after switch, and assert is not tripped
+//            when(uri.partitionKey()).thenReturn(bopKeyFromInt(1));
+//            firstWriter.append(uri);
+//        }
     }
 
     static DecoratedKey bopKeyFromInt(int i)

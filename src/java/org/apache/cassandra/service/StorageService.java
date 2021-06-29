@@ -52,6 +52,7 @@ import org.apache.cassandra.dht.RangeStreamer.FetchReplica;
 import org.apache.cassandra.fql.FullQueryLogger;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptionsCompositeData;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
 import org.apache.commons.lang3.StringUtils;
 
@@ -101,6 +102,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ViewMetadata;
+import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ClientResourceLimits;
@@ -976,6 +978,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
             Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
+            DiskUsageBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
             BatchlogManager.instance.start();
         }
@@ -2376,6 +2379,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
                         break;
+                    case INDEX_STATUS:
+                        updateIndexStatus(endpoint, value);
+                        break;
                 }
             }
         }
@@ -2384,6 +2390,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static String[] splitValue(VersionedValue value)
     {
         return value.value.split(VersionedValue.DELIMITER_STR, -1);
+    }
+
+    private void updateIndexStatus(InetAddressAndPort endpoint, VersionedValue versionedValue)
+    {
+        SecondaryIndexManager.receivePeerIndexStatus(endpoint, versionedValue);
     }
 
     private void updateNetVersion(InetAddressAndPort endpoint, VersionedValue value)
@@ -3970,7 +3981,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         for (ColumnFamilyStore cfStore : getValidColumnFamilies(true, false, keyspaceName, tableNames))
         {
             logger.debug("Forcing flush on keyspace {}, CF {}", keyspaceName, cfStore.name);
-            cfStore.forceBlockingFlush();
+            cfStore.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
         }
     }
 
@@ -4001,8 +4012,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Iterables.addAll(option.getRanges(), getLocalReplicas(keyspace).onlyFull().ranges());
             }
         }
-        if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor().allReplicas < 2)
+        if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor().allReplicas < 2
+            || tokenMetadata.getAllEndpoints().size() < 2)
+        {
             return Pair.create(0, Futures.immediateFuture(null));
+        }
 
         int cmd = nextRepairCommand.incrementAndGet();
         return Pair.create(cmd, ActiveRepairService.repairCommandExecutor().submit(createRepairTask(cmd, keyspace, option, listeners)));
@@ -4386,7 +4400,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (operationMode != Mode.LEAVING) // If we're already decommissioning there is no point checking RF/pending ranges
             {
                 int rf, numNodes;
-                for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+                for (String keyspaceName : Schema.instance.getPartitionedKeyspaces())
                 {
                     if (!force)
                     {
@@ -4922,7 +4936,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.nonSystem())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
+                    flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.SHUTDOWN));
             }
             // wait for the flushes.
             // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
@@ -4954,7 +4968,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.system())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
+                    flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.SHUTDOWN));
             }
             FBUtilities.waitOnFutures(flushes);
 
@@ -5632,23 +5646,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getTombstoneWarnThreshold()
     {
-        return DatabaseDescriptor.getTombstoneWarnThreshold();
+        return DatabaseDescriptor.getGuardrailsConfig().tombstone_warn_threshold;
     }
 
     public void setTombstoneWarnThreshold(int threshold)
     {
-        DatabaseDescriptor.setTombstoneWarnThreshold(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneWarnThreshold(threshold);
         logger.info("updated tombstone_warn_threshold to {}", threshold);
     }
 
     public int getTombstoneFailureThreshold()
     {
-        return DatabaseDescriptor.getTombstoneFailureThreshold();
+        return DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold;
     }
 
     public void setTombstoneFailureThreshold(int threshold)
     {
-        DatabaseDescriptor.setTombstoneFailureThreshold(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setTombstoneFailureThreshold(threshold);
         logger.info("updated tombstone_failure_threshold to {}", threshold);
     }
 
@@ -5687,23 +5701,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getBatchSizeFailureThreshold()
     {
-        return DatabaseDescriptor.getBatchSizeFailThresholdInKB();
+        return DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb;
     }
 
     public void setBatchSizeFailureThreshold(int threshold)
     {
-        DatabaseDescriptor.setBatchSizeFailThresholdInKB(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setBatchSizeFailThresholdInKB(threshold);
         logger.info("updated batch_size_fail_threshold_in_kb to {}", threshold);
     }
 
     public int getBatchSizeWarnThreshold()
     {
-        return DatabaseDescriptor.getBatchSizeWarnThresholdInKB();
+        return DatabaseDescriptor.getGuardrailsConfig().batch_size_warn_threshold_in_kb;
     }
 
     public void setBatchSizeWarnThreshold(int threshold)
     {
-        DatabaseDescriptor.setBatchSizeWarnThresholdInKB(threshold);
+        DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWarnThresholdInKB(threshold);
         logger.info("Updated batch_size_warn_threshold_in_kb to {}", threshold);
     }
 

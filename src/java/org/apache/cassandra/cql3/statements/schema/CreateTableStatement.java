@@ -33,19 +33,21 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
-import static java.util.Comparator.comparing;
-
 import static com.google.common.collect.Iterables.concat;
+import static java.util.Comparator.comparing;
 
 public final class CreateTableStatement extends AlterSchemaStatement
 {
@@ -90,6 +92,37 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
         this.ifNotExists = ifNotExists;
         this.useCompactStorage = useCompactStorage;
+    }
+
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
+        // require the server to be initialized, so skipping them if it isn't.
+        if (Guardrails.ready())
+        {
+            // Guardrails on table properties
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+            Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
+
+            // Guardrail on counter
+            if (rawColumns.values().stream().anyMatch(CQL3Type.Raw::isCounter))
+                Guardrails.counterEnabled.ensureEnabled(state);
+
+            // Guardrail on columns per table
+            Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, false, state);
+
+            if (Guardrails.tablesLimit.enabled(state))
+            {
+                // guardrails on number of tables
+                int totalUserTables = Schema.instance.getNonInternalKeyspaces().stream().map(Keyspace::open)
+                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                     .sum();
+                Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, false, state);
+            }
+        }
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -291,6 +324,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
                     builder.addRegularColumn(column, type.getType());
             });
         }
+        for (DroppedColumn.Raw record : attrs.droppedColumnRecords())
+            builder.recordColumnDrop(record.prepare(keyspaceName, tableName));
         return builder;
     }
 
@@ -372,6 +407,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
     @Override
     public Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        ImmutableSet.Builder<String> warnings = ImmutableSet.builder();
+
         int tableCount = Schema.instance.getNumberOfTables();
         if (tableCount > DatabaseDescriptor.tableCountWarnThreshold())
         {
@@ -379,9 +416,35 @@ public final class CreateTableStatement extends AlterSchemaStatement
                                        tableCount,
                                        Schema.instance.getKeyspaces().size());
             logger.warn(msg);
-            return ImmutableSet.of(msg);
+            warnings.add(msg);
         }
-        return ImmutableSet.of();
+
+        if (attrs.hasUnsupportedDseCompaction())
+        {
+            Map<String, String> compactionOptions = attrs.getMap(TableParams.Option.COMPACTION.toString());
+            String strategy = compactionOptions.get(CompactionParams.Option.CLASS.toString());
+            warnings.add(String.format("The given compaction strategy (%s) is not supported. ", strategy) +
+                         "The compaction strategy parameter was overridden with the default " +
+                         String.format("(%s). ", CompactionParams.DEFAULT.klass().getCanonicalName()) +
+                         "Inspect your schema and adjust other table properties if needed.");
+        }
+
+        if (attrs.hasProperty("nodesync"))
+        {
+            warnings.add("The unsupported 'nodesync' table option was ignored.");
+        }
+
+        if (attrs.hasProperty("dse_vertex_label_property"))
+        {
+            warnings.add("The unsupported graph table property was ignored (VERTEX LABEL).");
+        }
+
+        if (attrs.hasProperty("dse_edge_label_property"))
+        {
+            warnings.add("The unsupported graph table property was ignored (EDGE LABEL).");
+        }
+
+        return warnings.build();
     }
 
     private static class DefaultNames
@@ -423,10 +486,15 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
     public static TableMetadata.Builder parse(String cql, String keyspace)
     {
+        return parse(cql, keyspace, Types.none());
+    }
+
+    public static TableMetadata.Builder parse(String cql, String keyspace, Types types)
+    {
         return CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE")
-                                .keyspace(keyspace)
-                                .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
-                                .builder(Types.none());
+                         .keyspace(keyspace)
+                         .prepare(null) // works around a messy ClientState/QueryProcessor class init deadlock
+                         .builder(types);
     }
 
     public final static class Raw extends CQLStatement.Raw

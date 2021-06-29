@@ -161,6 +161,7 @@ public class CompactionStrategyManagerTest
         logger.debug("Boundaries for {} disks is {}", numDisks, Arrays.toString(boundaries));
         CompactionStrategyManager csm = new CompactionStrategyManager(cfs, mockBoundaryManager::getBoundaries,
                                                                       true);
+        csm.reload(cfs.metadata().params.compaction);
 
         // Check that SSTables are assigned to the correct Compaction Strategy
         for (SSTableReader reader : cfs.getLiveSSTables())
@@ -364,6 +365,7 @@ public class CompactionStrategyManagerTest
                                                        10, 10);
 
         CompactionStrategyManager csm = new CompactionStrategyManager(cfs, () -> boundaries, true);
+        csm.reload(cfs.metadata().params.compaction);
 
         List<GroupedSSTableContainer> grouped = csm.groupSSTables(Iterables.concat( transientRepairs, pendingRepair, repaired, unrepaired));
 
@@ -511,7 +513,7 @@ public class CompactionStrategyManagerTest
         .build()
         .applyUnsafe();
         Set<SSTableReader> before = cfs.getLiveSSTables();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         Set<SSTableReader> after = cfs.getLiveSSTables();
         return Iterables.getOnlyElement(Sets.difference(after, before));
     }

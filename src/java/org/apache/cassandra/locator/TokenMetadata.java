@@ -564,11 +564,11 @@ public class TokenMetadata
     public Collection<Token> getTokens(InetAddressAndPort endpoint)
     {
         assert endpoint != null;
-        assert isMember(endpoint); // don't want to return nulls
 
         lock.readLock().lock();
         try
         {
+            assert isMember(endpoint); // don't want to return nulls
             return new ArrayList<>(tokenToEndpointMap.inverse().get(endpoint));
         }
         finally
@@ -1119,6 +1119,19 @@ public class TokenMetadata
         try
         {
             return movingEndpoints.size();
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    public Set<InetAddressAndPort> getAllRingMembers()
+    {
+        lock.readLock().lock();
+        try
+        {
+            return ImmutableSet.copyOf(tokenToEndpointMap.valueSet());
         }
         finally
         {

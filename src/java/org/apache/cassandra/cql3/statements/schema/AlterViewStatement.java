@@ -22,9 +22,11 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -33,12 +35,21 @@ public final class AlterViewStatement extends AlterSchemaStatement
 {
     private final String viewName;
     private final TableAttributes attrs;
+    private QueryState state;
 
     public AlterViewStatement(String keyspaceName, String viewName, TableAttributes attrs)
     {
         super(keyspaceName);
         this.viewName = viewName;
         this.attrs = attrs;
+    }
+
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // save the query state to use it for guardrails validation in #apply
+        this.state = state;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -54,6 +65,9 @@ public final class AlterViewStatement extends AlterSchemaStatement
 
         attrs.validate();
 
+        Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+        Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
+
         TableParams params = attrs.asAlteredTableParams(view.metadata.params);
 
         if (params.gcGraceSeconds == 0)
@@ -66,8 +80,9 @@ public final class AlterViewStatement extends AlterSchemaStatement
         if (params.defaultTimeToLive > 0)
         {
             throw ire("Cannot set or alter default_time_to_live for a materialized view. " +
-                      "Data in a materialized view always expire at the same time than " +
-                      "the corresponding data in the parent table.");
+                      "Data in a materialized view always expires at the same time as " +
+                      "the corresponding data in the parent table. default_time_to_live " +
+                      "must be set to zero, see CASSANDRA-12868 for more information.");
         }
 
         ViewMetadata newView = view.copy(view.metadata.withSwapped(params));

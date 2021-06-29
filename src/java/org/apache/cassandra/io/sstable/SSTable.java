@@ -23,6 +23,7 @@ import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
@@ -33,7 +34,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.lifecycle.Tracker;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -71,7 +73,7 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
 
     public final Descriptor descriptor;
-    protected final Set<Component> components;
+    public final Set<Component> components;
     public final boolean compression;
 
     public DecoratedKey first;
@@ -79,6 +81,8 @@ public abstract class SSTable
 
     protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
+    private static final int SAMPLES_CAP = 10000;
+    private static final int BYTES_CAP = 10000000;
 
     protected SSTable(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, DiskOptimizationStrategy optimizationStrategy)
     {
@@ -157,11 +161,6 @@ public abstract class SSTable
         return descriptor.filenameFor(Component.DATA);
     }
 
-    public String getIndexFilename()
-    {
-        return descriptor.filenameFor(Component.PRIMARY_INDEX);
-    }
-
     public String getColumnFamilyName()
     {
         return descriptor.cfname;
@@ -170,6 +169,11 @@ public abstract class SSTable
     public String getKeyspaceName()
     {
         return descriptor.ksname;
+    }
+
+    public int getGeneration()
+    {
+        return descriptor.generation;
     }
 
     public List<String> getAllFilePaths()
@@ -265,21 +269,24 @@ public abstract class SSTable
     }
 
     /** @return An estimate of the number of keys contained in the given index file. */
-    public static long estimateRowsFromIndex(RandomAccessReader ifile, Descriptor descriptor) throws IOException
+    public static long estimateRowsFromIndex(PartitionIndexIterator iterator) throws IOException
     {
         // collect sizes for the first 10000 keys, or first 10 megabytes of data
-        final int SAMPLES_CAP = 10000, BYTES_CAP = (int)Math.min(10000000, ifile.length());
-        int keys = 0;
-        while (ifile.getFilePointer() < BYTES_CAP && keys < SAMPLES_CAP)
+        try
         {
-            ByteBufferUtil.skipShortLength(ifile);
-            RowIndexEntry.Serializer.skip(ifile, descriptor.version);
-            keys++;
+            int keys = 0;
+            while (!iterator.isExhausted() && iterator.indexPosition() < BYTES_CAP && keys < SAMPLES_CAP)
+            {
+                iterator.advance();
+                keys++;
+            }
+            assert keys > 0 && iterator.indexPosition() > 0 && iterator.indexLength() > 0 : "Unexpected empty index file";
+            return iterator.indexLength() / (iterator.indexPosition() / keys);
         }
-        assert keys > 0 && ifile.getFilePointer() > 0 && ifile.length() > 0 : "Unexpected empty index file: " + ifile;
-        long estimatedRows = ifile.length() / (ifile.getFilePointer() / keys);
-        ifile.seek(0);
-        return estimatedRows;
+        finally
+        {
+            iterator.reset();
+        }
     }
 
     public long bytesOnDisk()
@@ -304,7 +311,8 @@ public abstract class SSTable
      * Reads the list of components from the TOC component.
      * @return set of components found in the TOC
      */
-    protected static Set<Component> readTOC(Descriptor descriptor) throws IOException
+    @VisibleForTesting
+    public static Set<Component> readTOC(Descriptor descriptor) throws IOException
     {
         return readTOC(descriptor, true);
     }
@@ -328,6 +336,17 @@ public abstract class SSTable
                 components.add(component);
         }
         return components;
+    }
+
+    /**
+     * Rewrite TOC components by deleting existing TOC file and append new components
+     */
+    private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Component.TOC);
+        if (!tocFile.delete())
+            logger.error("Failed to delete TOC component for " + descriptor);
+        appendTOC(descriptor, components);
     }
 
     /**
@@ -355,9 +374,48 @@ public abstract class SSTable
      */
     public synchronized void addComponents(Collection<Component> newComponents)
     {
-        Collection<Component> componentsToAdd = Collections2.filter(newComponents, Predicates.not(Predicates.in(components)));
+        registerComponents(newComponents, null);
+    }
+
+    /**
+     * Registers new custom components into sstable and update size tracking
+     * @param newComponents collection of components to be added
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
         appendTOC(descriptor, componentsToAdd);
         components.addAll(componentsToAdd);
+
+        if (tracker == null)
+            return;
+
+        for (Component component : componentsToAdd)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(file.length());
+        }
+    }
+
+    /**
+     * Unregisters custom components from sstable and update size tracking
+     * @param removeComponents collection of components to be remove
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components.removeAll(componentsToRemove);
+        rewriteTOC(descriptor, components);
+
+        for (Component component : componentsToRemove)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(-file.length());
+        }
     }
 
     public AbstractBounds<Token> getBounds()
@@ -372,5 +430,15 @@ public abstract class SSTable
         Preconditions.checkArgument(!isTransient || (pendingRepair != NO_PENDING_REPAIR),
                                     "isTransient can only be true for sstables pending repair");
 
+    }
+
+    public DecoratedKey getFirst()
+    {
+        return first;
+    }
+
+    public DecoratedKey getLast()
+    {
+        return last;
     }
 }

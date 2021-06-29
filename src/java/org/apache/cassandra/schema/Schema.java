@@ -317,11 +317,30 @@ public final class Schema implements SchemaProvider
     }
 
     /**
+     * @return a collection of keyspaces that partition data across the ring
+     */
+    public List<String> getPartitionedKeyspaces()
+    {
+        return keyspaces.stream()
+                        .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
+                        .map(keyspace -> keyspace.name)
+                        .collect(Collectors.toList());
+    }
+
+    /**
      * @return collection of the user defined keyspaces
      */
     public List<String> getUserKeyspaces()
     {
         return ImmutableList.copyOf(Sets.difference(getNonSystemKeyspacesSet(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+    }
+
+    /**
+     * @return collection of the user defined keyspaces, excluding DSE internal keyspaces.
+     */
+    public List<String> getNonInternalKeyspaces()
+    {
+        return getUserKeyspaces().stream().filter(ks -> !SchemaConstants.isInternalKeyspace(ks)).collect(Collectors.toList());
     }
 
     /**

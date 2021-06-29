@@ -29,8 +29,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -192,7 +194,7 @@ public class SelectStatement implements CQLStatement
                                    VariableSpecifications.empty(),
                                    defaultParameters,
                                    selection,
-                                   StatementRestrictions.empty(StatementType.SELECT, table),
+                                   StatementRestrictions.empty(table),
                                    false,
                                    null,
                                    null,
@@ -222,32 +224,40 @@ public class SelectStatement implements CQLStatement
             state.ensurePermission(Permission.EXECUTE, function);
     }
 
-    public void validate(ClientState state) throws InvalidRequestException
+    @Override
+    public void validate(QueryState state) throws InvalidRequestException
     {
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    private void validateQueryOptions(QueryState queryState, QueryOptions options)
+    {
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(options.getConsistency(), queryState);
+    }
+
+    public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead();
+        validateQueryOptions(queryState, options);
 
-        int nowInSec = options.getNowInSeconds(state);
+        int nowInSec = options.getNowInSeconds(queryState);
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
         if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
-            return execute(query, options, state, selectors, nowInSec, userLimit, queryStartNanoTime);
+            return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
 
-        return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()),
+        return execute(Pager.forDistributedQuery(pager, cl, queryState),
                        options,
                        selectors,
                        pageSize,
@@ -256,42 +266,43 @@ public class SelectStatement implements CQLStatement
                        queryStartNanoTime);
     }
 
-    public ReadQuery getQuery(QueryOptions options, int nowInSec) throws RequestValidationException
+    public ReadQuery getQuery(QueryState state, QueryOptions options, int nowInSec) throws RequestValidationException
     {
         Selectors selectors = selection.newSelectors(options);
-        return getQuery(options,
-                        selectors.getColumnFilter(),
-                        nowInSec,
-                        getLimit(options),
-                        getPerPartitionLimit(options),
-                        options.getPageSize());
+        return getQuery(state,
+        options,
+        selectors.getColumnFilter(),
+        nowInSec,
+        getLimit(options),
+        getPerPartitionLimit(options), options.getPageSize());
     }
 
-    public ReadQuery getQuery(QueryOptions options,
+    public ReadQuery getQuery(QueryState queryState,
+                              QueryOptions options,
                               ColumnFilter columnFilter,
                               int nowInSec,
                               int userLimit,
                               int perPartitionLimit,
                               int pageSize)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
+        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
         DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize);
 
         if (isPartitionRangeQuery)
-            return getRangeCommand(options, columnFilter, limit, nowInSec);
+            return getRangeCommand(options, columnFilter, limit, nowInSec, queryState);
 
-        return getSliceCommands(options, columnFilter, limit, nowInSec);
+        return getSliceCommands(queryState, options, columnFilter, limit, nowInSec);
     }
 
     private ResultMessage.Rows execute(ReadQuery query,
                                        QueryOptions options,
-                                       QueryState state,
+                                       QueryState queryState,
                                        Selectors selectors,
                                        int nowInSec,
                                        int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        try (PartitionIterator data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime))
+        try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
             return processResults(data, options, selectors, nowInSec, userLimit);
         }
@@ -318,9 +329,9 @@ public class SelectStatement implements CQLStatement
             return new InternalPager(pager, executionController);
         }
 
-        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
+        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, QueryState queryState)
         {
-            return new NormalPager(pager, consistency, clientState);
+            return new NormalPager(pager, consistency, queryState);
         }
 
         public boolean isExhausted()
@@ -338,18 +349,18 @@ public class SelectStatement implements CQLStatement
         public static class NormalPager extends Pager
         {
             private final ConsistencyLevel consistency;
-            private final ClientState clientState;
+            private final QueryState queryState;
 
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
+            private NormalPager(QueryPager pager, ConsistencyLevel consistency, QueryState queryState)
             {
                 super(pager);
                 this.consistency = consistency;
-                this.clientState = clientState;
+                this.queryState = queryState;
             }
 
             public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
             {
-                return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime);
+                return pager.fetchPage(pageSize, consistency, queryState, queryStartNanoTime);
             }
         }
 
@@ -438,7 +449,7 @@ public class SelectStatement implements CQLStatement
         int pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
         try (ReadExecutionController executionController = query.executionController())
         {
@@ -505,13 +516,15 @@ public class SelectStatement implements CQLStatement
         return restrictions;
     }
 
-    private ReadQuery getSliceCommands(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getSliceCommands(QueryState queryState, QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
     {
-        Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
+        Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, queryState);
         if (keys.isEmpty())
             return ReadQuery.empty(table);
 
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
+        Guardrails.partitionKeysInSelectQuery.guard(keys.size(), "Select query", false, queryState);
+
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, queryState);
         if (filter == null || filter.isEmpty(table.comparator))
             return ReadQuery.empty(table);
 
@@ -537,9 +550,10 @@ public class SelectStatement implements CQLStatement
      */
     public Slices clusteringIndexFilterAsSlices()
     {
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, state);
         if (filter instanceof ClusteringIndexSliceFilter)
             return ((ClusteringIndexSliceFilter)filter).requestedSlices();
 
@@ -555,9 +569,10 @@ public class SelectStatement implements CQLStatement
      */
     public SinglePartitionReadCommand internalReadForView(DecoratedKey key, int nowInSec)
     {
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, state);
         RowFilter rowFilter = getRowFilter(options);
         return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
     }
@@ -570,9 +585,9 @@ public class SelectStatement implements CQLStatement
         return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()));
     }
 
-    private ReadQuery getRangeCommand(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getRangeCommand(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec, QueryState queryState)
     {
-        ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter);
+        ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter, queryState);
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
 
@@ -593,7 +608,7 @@ public class SelectStatement implements CQLStatement
         return command;
     }
 
-    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter)
+    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter, QueryState queryState)
     {
         if (parameters.isDistinct)
         {
@@ -607,6 +622,11 @@ public class SelectStatement implements CQLStatement
             return new ClusteringIndexSliceFilter(Slices.ALL, false);
         }
 
+        if (restrictions.isDisjunction())
+        {
+            return new ClusteringIndexSliceFilter(Slices.ALL, false);
+        }
+
         if (restrictions.isColumnRange())
         {
             Slices slices = makeSlices(options);
@@ -616,7 +636,7 @@ public class SelectStatement implements CQLStatement
             return new ClusteringIndexSliceFilter(slices, isReversed);
         }
 
-        NavigableSet<Clustering<?>> clusterings = getRequestedRows(options);
+        NavigableSet<Clustering<?>> clusterings = getRequestedRows(options, queryState);
         // We can have no clusterings if either we're only selecting the static columns, or if we have
         // a 'IN ()' for clusterings. In that case, we still want to query if some static columns are
         // queried. But we're fine otherwise.
@@ -748,12 +768,12 @@ public class SelectStatement implements CQLStatement
         return userLimit;
     }
 
-    private NavigableSet<Clustering<?>> getRequestedRows(QueryOptions options) throws InvalidRequestException
+    private NavigableSet<Clustering<?>> getRequestedRows(QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
         // Note: getRequestedColumns don't handle static columns, but due to CASSANDRA-5762
         // we always do a slice for CQL3 tables, so it's ok to ignore them here
         assert !restrictions.isColumnRange();
-        return restrictions.getClusteringColumns(options);
+        return restrictions.getClusteringColumns(options, queryState);
     }
 
     /**
@@ -975,7 +995,9 @@ public class SelectStatement implements CQLStatement
                     orderingComparator = Collections.reverseOrder(orderingComparator);
             }
 
-            checkNeedsFiltering(restrictions);
+            checkDisjunctionIsSupported(table, restrictions);
+
+            checkNeedsFiltering(table, restrictions);
 
             return new SelectStatement(table,
                                        bindVariables,
@@ -1064,13 +1086,13 @@ public class SelectStatement implements CQLStatement
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
-            return new StatementRestrictions(StatementType.SELECT,
-                                             metadata,
-                                             whereClause,
-                                             boundNames,
-                                             selectsOnlyStaticColumns,
-                                             parameters.allowFiltering,
-                                             forView);
+            return StatementRestrictions.create(StatementType.SELECT,
+                                                metadata,
+                                                whereClause,
+                                                boundNames,
+                                                selectsOnlyStaticColumns,
+                                                parameters.allowFiltering,
+                                                forView);
         }
 
         /** Returns a Term for the limit or null if no limit is set */
@@ -1233,16 +1255,29 @@ public class SelectStatement implements CQLStatement
             return isReversed;
         }
 
+        /**
+         * This verifies that if the expression contains a disjunction - "value = 1 or value = 2" or "value in (1, 2)"
+         * the indexes involved in the query support disjunction.
+         */
+        private void checkDisjunctionIsSupported(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
+        {
+            if (restrictions.usesSecondaryIndexing())
+                if (restrictions.needsDisjunctionSupport(table))
+                    restrictions.throwsRequiresIndexSupportingDisjunctionError(table);
+        }
+
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
-        private void checkNeedsFiltering(StatementRestrictions restrictions) throws InvalidRequestException
+        private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
         {
             // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
             {
-                // We will potentially filter data if either:
-                //  - Have more than one IndexExpression
-                //  - Have no index expression and the row filter is not the identity
-                checkFalse(restrictions.needFiltering(), StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                // We will potentially filter data if the row filter is not the identity and there isn't any index group
+                // supporting all the expressions in the filter.
+                if (restrictions.needFiltering(table))
+                {
+                    restrictions.throwRequiresAllowFilteringError(table);
+                }
             }
         }
 

@@ -19,13 +19,11 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.Map.Entry;
 
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +38,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.github.jamm.Unmetered;
 
@@ -698,6 +697,65 @@ public class TableMetadata implements SchemaElement
                           .toString();
     }
 
+    /**
+     * Returns a string representation of a partition in a CQL-friendly format.
+     * <p>
+     * For non-composite types it returns the result of {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral}
+     * applied to the partition key.
+     * For composite types it applies {@link org.apache.cassandra.cql3.CQL3Type#toCQLLiteral} to each subkey and combines
+     * the results into a tuple.
+     *
+     * @param partitionKey
+     * @return CQL-like string representation of a partition key
+     */
+    public String partitionKeyAsCQLLiteral(ByteBuffer partitionKey)
+    {
+        return primaryKeyAsCQLLiteral(partitionKey, Clustering.EMPTY);
+    }
+
+    /**
+     * Returns a string representation of a primary key in a CQL-friendly format.
+     *
+     * @param partitionKey the partition key part of the primary key
+     * @param clustering   the clustering key part of the primary key
+     * @return a CQL-like string representation of the specified primary key
+     */
+    public String primaryKeyAsCQLLiteral(ByteBuffer partitionKey, Clustering clustering)
+    {
+        int clusteringSize = clustering.size();
+
+        String[] literals;
+        int i = 0;
+
+        if (partitionKeyType instanceof CompositeType)
+        {
+            ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);
+            int size = ((CompositeType) partitionKeyType).types.size();
+            literals = new String[size + clusteringSize];
+            for (i = 0; i < size; i++)
+            {
+                literals[i] = asCQLLiteral(((CompositeType) partitionKeyType).types.get(i), values[i]);
+            }
+        }
+        else
+        {
+            literals = new String[1 + clusteringSize];
+            literals[i++] = asCQLLiteral(partitionKeyType, partitionKey);
+        }
+
+        for (int j = 0; j < clusteringSize; j++)
+        {
+            literals[i++] = asCQLLiteral(clusteringColumns().get(j).type, clustering.bufferAt(j));
+        }
+
+        return i == 1 ? literals[0] : "(" + String.join(", ", literals) + ")";
+    }
+
+    private static String asCQLLiteral(AbstractType<?> type, ByteBuffer value)
+    {
+        return type.asCQL3Type().toCQLLiteral(value, ProtocolVersion.CURRENT);
+    }
+
     public static final class Builder
     {
         final String keyspace;
@@ -861,6 +919,13 @@ public class TableMetadata implements SchemaElement
             return this;
         }
 
+        public Builder memtable(MemtableParams val)
+        {
+            params.memtable(val);
+            return this;
+        }
+
+
         public Builder isCounter(boolean val)
         {
             return flag(Flag.COUNTER, val);
@@ -975,13 +1040,30 @@ public class TableMetadata implements SchemaElement
 
         public Builder recordColumnDrop(ColumnMetadata column, long timeMicros)
         {
-            droppedColumns.put(column.name.bytes, new DroppedColumn(column.withNewType(column.type.expandUserTypes()), timeMicros));
+            return recordColumnDrop(new DroppedColumn(column.asDropped(), timeMicros));
+        }
+
+        public Builder recordColumnDrop(DroppedColumn dropped)
+        {
+            DroppedColumn previous = droppedColumns.get(dropped.column.name.bytes);
+            if (previous != null && previous.droppedTime > dropped.droppedTime)
+                throw new ConfigurationException(String.format("Invalid dropped column record for column %s in %s at "
+                                                               + "%d: pre-existing record at %d is newer",
+                                                               dropped.column.name, this.name, previous.droppedTime,
+                                                               dropped.droppedTime));
+
+            droppedColumns.put(dropped.column.name.bytes, dropped);
             return this;
         }
 
         public Iterable<ColumnMetadata> columns()
         {
             return columns.values();
+        }
+
+        public int numColumns()
+        {
+            return columns.size();
         }
 
         public Set<String> columnNames()
@@ -1190,7 +1272,7 @@ public class TableMetadata implements SchemaElement
         builder.append(" WITH ")
                .increaseIndent();
 
-        appendTableOptions(builder, internals);
+        appendTableOptions(builder, internals, includeDroppedColumns);
 
         builder.decreaseIndent();
 
@@ -1199,9 +1281,6 @@ public class TableMetadata implements SchemaElement
             builder.newLine()
                    .append("*/");
         }
-
-        if (includeDroppedColumns)
-            appendDropColumns(builder);
     }
 
     private void appendColumnDefinitions(CqlBuilder builder,
@@ -1212,36 +1291,15 @@ public class TableMetadata implements SchemaElement
         while (iter.hasNext())
         {
             ColumnMetadata column = iter.next();
-            // If the column has been re-added after a drop, we don't include it right away. Instead, we'll add the
-            // dropped one first below, then we'll issue the DROP and then the actual ADD for this column, thus
-            // simulating the proper sequence of events.
-            if (includeDroppedColumns && droppedColumns.containsKey(column.name.bytes))
-                continue;
-
             column.appendCqlTo(builder);
 
             if (hasSingleColumnPrimaryKey && column.isPartitionKey())
                 builder.append(" PRIMARY KEY");
 
-            if (!hasSingleColumnPrimaryKey || (includeDroppedColumns && !droppedColumns.isEmpty()) || iter.hasNext())
+            if (!hasSingleColumnPrimaryKey || iter.hasNext())
                 builder.append(',');
 
             builder.newLine();
-        }
-
-        if (includeDroppedColumns)
-        {
-            Iterator<DroppedColumn> iterDropped = droppedColumns.values().iterator();
-            while (iterDropped.hasNext())
-            {
-                DroppedColumn dropped = iterDropped.next();
-                dropped.column.appendCqlTo(builder);
-
-                if (!hasSingleColumnPrimaryKey || iter.hasNext())
-                    builder.append(',');
-
-                builder.newLine();
-            }
         }
     }
 
@@ -1273,7 +1331,7 @@ public class TableMetadata implements SchemaElement
                .newLine();
     }
 
-    void appendTableOptions(CqlBuilder builder, boolean internals)
+    void appendTableOptions(CqlBuilder builder, boolean internals, boolean includeDroppedColumns)
     {
         if (internals)
             builder.append("ID = ")
@@ -1297,6 +1355,8 @@ public class TableMetadata implements SchemaElement
         }
         else
         {
+            if (includeDroppedColumns)
+                appendDropColumns(builder);
             params.appendCqlTo(builder);
         }
         builder.append(";");
@@ -1304,31 +1364,11 @@ public class TableMetadata implements SchemaElement
 
     private void appendDropColumns(CqlBuilder builder)
     {
-        for (Entry<ByteBuffer, DroppedColumn> entry : droppedColumns.entrySet())
+        for (DroppedColumn dropped : droppedColumns.values())
         {
-            DroppedColumn dropped = entry.getValue();
-
-            builder.newLine()
-                   .append("ALTER TABLE ")
-                   .append(toString())
-                   .append(" DROP ")
-                   .append(dropped.column.name)
-                   .append(" USING TIMESTAMP ")
-                   .append(dropped.droppedTime)
-                   .append(';');
-
-            ColumnMetadata column = getColumn(entry.getKey());
-            if (column != null)
-            {
-                builder.newLine()
-                       .append("ALTER TABLE ")
-                       .append(toString())
-                       .append(" ADD ");
-
-                column.appendCqlTo(builder);
-
-                builder.append(';');
-            }
+            builder.append(dropped.toCQLString())
+                   .newLine()
+                   .append("AND ");
         }
     }
 
@@ -1501,13 +1541,13 @@ public class TableMetadata implements SchemaElement
                    .append("*/");
         }
 
-        void appendTableOptions(CqlBuilder builder, boolean internals)
+        void appendTableOptions(CqlBuilder builder, boolean internals, boolean includeDroppedColumns)
         {
             builder.append("COMPACT STORAGE")
                    .newLine()
                    .append("AND ");
 
-            super.appendTableOptions(builder, internals);
+            super.appendTableOptions(builder, internals, includeDroppedColumns);
         }
 
         public static ColumnMetadata getCompactValueColumn(RegularAndStaticColumns columns)

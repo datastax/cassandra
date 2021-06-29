@@ -159,7 +159,7 @@ public class CleanupTest
         while (!cfs.getBuiltIndexes().contains(indexName) && System.nanoTime() - start < TimeUnit.SECONDS.toNanos(10))
             Thread.sleep(10);
 
-        RowFilter cf = RowFilter.create();
+        RowFilter.Builder cf = RowFilter.builder();
         cf.add(cdef, Operator.EQ, VALUE);
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).filterOn("birthdate", Operator.EQ, VALUE).build()).size());
 
@@ -272,7 +272,7 @@ public class CleanupTest
             .add("val", VALUE)
             .build()
             .applyUnsafe();
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
 
         Set<SSTableReader> beforeFirstCleanup = Sets.newHashSet(cfs.getLiveSSTables());
@@ -407,7 +407,7 @@ public class CleanupTest
                     .applyUnsafe();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     protected List<Long> getMaxTimestampList(ColumnFamilyStore cfs)
