@@ -30,6 +30,7 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -81,6 +82,7 @@ public class CassandraStreamManager implements TableStreamManager
         return new CassandraStreamReceiver(cfs, session, totalStreams);
     }
 
+    @SuppressWarnings("resource")   // references placed onto returned collection or closed on error
     @Override
     public Collection<OutgoingStream> createOutgoingStreams(StreamSession session, RangesAtEndpoint replicas, UUID pendingRepair, PreviewKind previewKind)
     {
@@ -126,6 +128,8 @@ public class CassandraStreamManager implements TableStreamManager
                 return sstables;
             }).refs);
 
+            // Persistent memtables will not flush, make an sstable with their data.
+            cfs.writeAndAddMemtableRanges(session.getPendingRepair(), () -> Range.normalize(keyRanges), refs);
 
             List<Range<Token>> normalizedFullRanges = Range.normalize(replicas.onlyFull().ranges());
             List<Range<Token>> normalizedAllRanges = Range.normalize(replicas.ranges());
@@ -134,9 +138,9 @@ public class CassandraStreamManager implements TableStreamManager
             for (SSTableReader sstable : refs)
             {
                 List<Range<Token>> ranges = sstable.isRepaired() ? normalizedFullRanges : normalizedAllRanges;
-                List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
+                List<BigTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
 
-                Ref<SSTableReader> ref = refs.get(sstable);
+                Ref<? extends SSTableReader> ref = refs.get(sstable);
                 if (sections.isEmpty())
                 {
                     ref.release();

@@ -34,7 +34,6 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -766,7 +765,7 @@ public class SecondaryIndexManagerTest extends CQLTester
         {
             return new CollatedViewIndexBuildingSupport()
             {
-                public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables)
+                public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild)
                 {
                     try
                     {
@@ -775,7 +774,7 @@ public class SecondaryIndexManagerTest extends CQLTester
                             buildWaitLatch.countDown();
                             buildLatch.await();
                         }
-                        final SecondaryIndexBuilder builder = super.getIndexBuildTask(cfs, indexes, sstables);
+                        final SecondaryIndexBuilder builder = super.getIndexBuildTask(cfs, indexes, sstables, isFullRebuild);
                         return new SecondaryIndexBuilder()
                         {
 
@@ -792,9 +791,9 @@ public class SecondaryIndexManagerTest extends CQLTester
                             }
 
                             @Override
-                            public CompactionInfo getCompactionInfo()
+                            public OperationProgress getProgress()
                             {
-                                return builder.getCompactionInfo();
+                                return builder.getProgress();
                             }
                         };
                     }

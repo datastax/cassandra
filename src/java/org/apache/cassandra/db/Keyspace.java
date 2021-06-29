@@ -413,7 +413,7 @@ public class Keyspace
     // disassociate a cfs from this keyspace instance.
     private void unloadCf(ColumnFamilyStore cfs)
     {
-        cfs.forceBlockingFlush();
+        cfs.unloadCf();
         cfs.invalidate();
     }
 
@@ -626,7 +626,6 @@ public class Keyspace
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
-        int nowInSec = FBUtilities.nowInSeconds();
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
@@ -655,10 +654,7 @@ public class Keyspace
                     }
                 }
 
-                UpdateTransaction indexTransaction = updateIndexes
-                                                     ? cfs.indexManager.newUpdateTransaction(upd, ctx, nowInSec)
-                                                     : UpdateTransaction.NO_OP;
-                cfs.getWriteHandler().write(upd, ctx, indexTransaction);
+                cfs.getWriteHandler().write(upd, ctx, updateIndexes);
 
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
@@ -685,11 +681,11 @@ public class Keyspace
         return replicationStrategy;
     }
 
-    public List<Future<?>> flush()
+    public List<Future<?>> flush(ColumnFamilyStore.FlushReason reason)
     {
         List<Future<?>> futures = new ArrayList<>(columnFamilyStores.size());
         for (ColumnFamilyStore cfs : columnFamilyStores.values())
-            futures.add(cfs.forceFlush());
+            futures.add(cfs.forceFlush(reason));
         return futures;
     }
 

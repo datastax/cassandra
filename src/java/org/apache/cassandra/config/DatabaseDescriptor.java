@@ -56,6 +56,7 @@ import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerCDC;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.FileUtils;
@@ -176,6 +177,10 @@ public class DatabaseDescriptor
 
         setConfig(config.get());
         applyAll();
+
+        createAllDirectories();
+        applyGuardrails(); // requires created directories
+
         AuthConfig.applyAuth();
     }
 
@@ -364,6 +369,13 @@ public class DatabaseDescriptor
         applySslContext();
     }
 
+    private static void applyGuardrails()
+    {
+        conf.guardrails.applyConfig();
+        conf.guardrails.validate();
+        getGuardrailsConfig().validateAfterDataDirectoriesExist();
+    }
+
     private static void applySimpleConfig()
     {
         //Doing this first before all other things in case other pieces of config want to construct
@@ -411,7 +423,7 @@ public class DatabaseDescriptor
         /* evaluate the DiskAccessMode Config directive, which also affects indexAccessMode selection */
         if (conf.disk_access_mode == Config.DiskAccessMode.auto)
         {
-            conf.disk_access_mode = hasLargeAddressSpace() ? Config.DiskAccessMode.mmap : Config.DiskAccessMode.standard;
+            conf.disk_access_mode = Config.DiskAccessMode.standard;
             indexAccessMode = conf.disk_access_mode;
             logger.info("DiskAccessMode 'auto' determined to be {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
         }
@@ -754,6 +766,48 @@ public class DatabaseDescriptor
 
         if (conf.user_defined_function_fail_timeout < conf.user_defined_function_warn_timeout)
             throw new ConfigurationException("user_defined_function_warn_timeout must less than user_defined_function_fail_timeout", false);
+
+        if (conf.compaction_large_partition_warning_threshold_mb != 0)
+        {
+            logger.warn("Found deprecated property 'compaction_large_partition_warning_threshold_mb' in config - migrate to `guardrails.partition_size_warn_threshold_in_mb`. " +
+                        "The value of 'guardrails.partition_size_warn_threshold_in_mb' is overwritten by 'compaction_large_partition_warning_threshold_mb'.");
+            getGuardrailsConfig().partition_size_warn_threshold_in_mb = conf.compaction_large_partition_warning_threshold_mb;
+        }
+
+        if (conf.tombstone_failure_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'tombstone_failure_threshold' in config - migrate to 'guardrails.tombstone_failure_threshold'. " +
+                        "The value of 'guardrails.tombstone_failure_threshold' is overwritten by 'tombstone_failure_threshold'.");
+            getGuardrailsConfig().tombstone_failure_threshold = conf.tombstone_failure_threshold;
+        }
+
+        if (conf.tombstone_warn_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'tombstone_warn_threshold' in config - migrate to 'guardrails.tombstone_warn_threshold'. " +
+                        "The value of 'guardrails.tombstone_warn_threshold' is overwritten by 'tombstone_warn_threshold'.");
+            getGuardrailsConfig().tombstone_warn_threshold = conf.tombstone_warn_threshold;
+        }
+
+        if (conf.batch_size_fail_threshold_in_kb != 0)
+        {
+            logger.warn("Found deprecated property 'batch_size_fail_threshold_in_kb' in config - migrate to 'guardrails.batch_size_fail_threshold_in_kb'. " +
+                        "The value of 'guardrails.batch_size_fail_threshold_in_kb' is overwritten by 'batch_size_fail_threshold_in_kb'.");
+            getGuardrailsConfig().batch_size_fail_threshold_in_kb = conf.batch_size_fail_threshold_in_kb;
+        }
+
+        if (conf.batch_size_warn_threshold_in_kb != 0)
+        {
+            logger.warn("Found deprecated property 'batch_size_warn_threshold_in_kb' in config - migrate to 'guardrails.batch_size_warn_threshold_in_kb'. " +
+                        "The value of 'guardrails.batch_size_warn_threshold_in_kb' is overwritten by 'batch_size_warn_threshold_in_kb'.");
+            getGuardrailsConfig().batch_size_warn_threshold_in_kb = conf.batch_size_warn_threshold_in_kb;
+        }
+
+        if (conf.unlogged_batch_across_partitions_warn_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'unlogged_batch_across_partitions_warn_threshold' in config - migrate to 'guardrails.unlogged_batch_across_partitions_warn_threshold'. " +
+                        "The value of 'guardrails.unlogged_batch_across_partitions_warn_threshold' is overwritten by 'unlogged_batch_across_partitions_warn_threshold'.");
+            getGuardrailsConfig().unlogged_batch_across_partitions_warn_threshold = conf.unlogged_batch_across_partitions_warn_threshold;
+        }
 
         if (conf.commitlog_segment_size_in_mb <= 0)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "
@@ -1483,42 +1537,6 @@ public class DatabaseDescriptor
         conf.column_index_cache_size_in_kb = val;
     }
 
-    public static int getBatchSizeWarnThreshold()
-    {
-        return (int) ByteUnit.KIBI_BYTES.toBytes(conf.batch_size_warn_threshold_in_kb);
-    }
-
-    public static int getBatchSizeWarnThresholdInKB()
-    {
-        return conf.batch_size_warn_threshold_in_kb;
-    }
-
-    public static long getBatchSizeFailThreshold()
-    {
-        return ByteUnit.KIBI_BYTES.toBytes(conf.batch_size_fail_threshold_in_kb);
-    }
-
-    public static int getBatchSizeFailThresholdInKB()
-    {
-        return conf.batch_size_fail_threshold_in_kb;
-    }
-
-    public static int getUnloggedBatchAcrossPartitionsWarnThreshold()
-    {
-        return conf.unlogged_batch_across_partitions_warn_threshold;
-    }
-
-    public static void setBatchSizeWarnThresholdInKB(int threshold)
-    {
-        checkValidForByteConversion(threshold, "batch_size_warn_threshold_in_kb", ByteUnit.KIBI_BYTES);
-        conf.batch_size_warn_threshold_in_kb = threshold;
-    }
-
-    public static void setBatchSizeFailThresholdInKB(int threshold)
-    {
-        conf.batch_size_fail_threshold_in_kb = threshold;
-    }
-
     public static Collection<String> getInitialTokens()
     {
         return tokensFromString(System.getProperty(Config.PROPERTY_PREFIX + "initial_token", conf.initial_token));
@@ -1799,8 +1817,6 @@ public class DatabaseDescriptor
         conf.compaction_throughput_mb_per_sec = value;
     }
 
-    public static long getCompactionLargePartitionWarningThreshold() { return ByteUnit.MEBI_BYTES.toBytes(conf.compaction_large_partition_warning_threshold_mb); }
-
     public static int getConcurrentValidations()
     {
         return conf.concurrent_validations;
@@ -1957,26 +1973,6 @@ public class DatabaseDescriptor
     public static int getMaxMutationSize()
     {
         return (int) ByteUnit.KIBI_BYTES.toBytes(conf.max_mutation_size_in_kb);
-    }
-
-    public static int getTombstoneWarnThreshold()
-    {
-        return conf.tombstone_warn_threshold;
-    }
-
-    public static void setTombstoneWarnThreshold(int threshold)
-    {
-        conf.tombstone_warn_threshold = threshold;
-    }
-
-    public static int getTombstoneFailureThreshold()
-    {
-        return conf.tombstone_failure_threshold;
-    }
-
-    public static void setTombstoneFailureThreshold(int threshold)
-    {
-        conf.tombstone_failure_threshold = threshold;
     }
 
     public static int getCachedReplicaRowsWarnThreshold()
@@ -2849,6 +2845,11 @@ public class DatabaseDescriptor
         return conf.memtable_cleanup_threshold;
     }
 
+    public static Map<String, String> getMemtableOptions()
+    {
+        return conf.memtable;
+    }
+
     public static int getIndexSummaryResizeIntervalInMinutes()
     {
         return conf.index_summary_resize_interval_in_minutes;
@@ -3374,5 +3375,41 @@ public class DatabaseDescriptor
     public static void setConsecutiveMessageErrorsThreshold(int value)
     {
         conf.consecutive_message_errors_threshold = value;
+    }
+
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
+
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
+    }
+    
+    public static GuardrailsConfig getGuardrailsConfig()
+    {
+        return conf.guardrails;
+    }
+
+    @VisibleForTesting
+    public static boolean setEmulateDbaasDefaults(boolean dbaasDefaults)
+    {
+        return conf.emulate_dbaas_defaults = dbaasDefaults;
+    }
+
+    public static boolean isEmulateDbaasDefaults()
+    {
+        return conf.emulate_dbaas_defaults;
     }
 }

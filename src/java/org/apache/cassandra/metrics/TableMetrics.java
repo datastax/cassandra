@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 import java.nio.ByteBuffer;
@@ -37,7 +38,7 @@ import org.apache.commons.lang3.ArrayUtils;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -376,10 +377,15 @@ public class TableMetrics
      *
      * @param cfs ColumnFamilyStore to measure metrics
      */
-    public TableMetrics(final ColumnFamilyStore cfs)
+    public TableMetrics(final ColumnFamilyStore cfs, ReleasableMetric memtableMetrics)
     {
         factory = new TableMetricNameFactory(cfs, "Table");
         aliasFactory = new TableMetricNameFactory(cfs, "ColumnFamily");
+
+        if (memtableMetrics != null)
+        {
+            all.add(memtableMetrics);
+        }
 
         samplers = new EnumMap<>(SamplerType.class);
         topReadPartitionFrequency = new FrequencySampler<ByteBuffer>()
@@ -429,12 +435,12 @@ public class TableMetrics
 
         // MemtableOnHeapSize naming deprecated in 4.0
         memtableOnHeapDataSize = createTableGaugeWithDeprecation("MemtableOnHeapDataSize", "MemtableOnHeapSize", 
-                                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().owns(), 
+                                                                 () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOnHeap,
                                                                  new GlobalTableGauge("MemtableOnHeapDataSize"));
 
         // MemtableOffHeapSize naming deprecated in 4.0
         memtableOffHeapDataSize = createTableGaugeWithDeprecation("MemtableOffHeapDataSize", "MemtableOffHeapSize", 
-                                                                  () -> cfs.getTracker().getView().getCurrentMemtable().getAllocator().offHeap().owns(), 
+                                                                  () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOffHeap,
                                                                   new GlobalTableGauge("MemtableOnHeapDataSize"));
         
         memtableLiveDataSize = createTableGauge("MemtableLiveDataSize", 
@@ -445,10 +451,7 @@ public class TableMetrics
         {
             public Long getValue()
             {
-                long size = 0;
-                for (ColumnFamilyStore cfs2 : cfs.concatWithIndexes())
-                    size += cfs2.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().owns();
-                return size;
+                return getMemoryUsageWithIndexes(cfs).ownsOnHeap;
             }
         }, new GlobalTableGauge("AllMemtablesOnHeapDataSize"));
 
@@ -457,10 +460,7 @@ public class TableMetrics
         {
             public Long getValue()
             {
-                long size = 0;
-                for (ColumnFamilyStore cfs2 : cfs.concatWithIndexes())
-                    size += cfs2.getTracker().getView().getCurrentMemtable().getAllocator().offHeap().owns();
-                return size;
+                return getMemoryUsageWithIndexes(cfs).ownsOffHeap;
             }
         }, new GlobalTableGauge("AllMemtablesOffHeapDataSize"));
         allMemtablesLiveDataSize = createTableGauge("AllMemtablesLiveDataSize", new Gauge<Long>()
@@ -791,7 +791,7 @@ public class TableMetrics
             public Long getValue()
             {
                 long total = 0;
-                for (SSTableReader sst : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sst : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     total += sst.getIndexSummaryOffHeapSize();
                 return total;
             }
@@ -825,7 +825,7 @@ public class TableMetrics
             protected double getNumerator()
             {
                 long hits = 0L;
-                for (SSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sstable : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     hits += sstable.getKeyCacheHit();
                 return hits;
             }
@@ -833,7 +833,7 @@ public class TableMetrics
             protected double getDenominator()
             {
                 long requests = 0L;
-                for (SSTableReader sstable : cfs.getSSTables(SSTableSet.LIVE))
+                for (SSTableReader sstable : selectOnlyBigTableReaders(cfs.getSSTables(SSTableSet.LIVE)))
                     requests += sstable.getKeyCacheRequest();
                 return Math.max(requests, 1); // to avoid NaN.
             }
@@ -913,6 +913,15 @@ public class TableMetrics
             }
             return cnt;
         });
+    }
+
+    private Memtable.MemoryUsage getMemoryUsageWithIndexes(ColumnFamilyStore cfs)
+    {
+        Memtable.MemoryUsage usage = Memtable.newMemoryUsage();
+        cfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
+        for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
+            indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
+        return usage;
     }
 
     public void updateSSTableIterated(int count)

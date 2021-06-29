@@ -168,6 +168,11 @@ public class FileHandle extends SharedCloseableImpl
         NativeLibrary.trySkipCache(channel.getFileDescriptor(), 0, position, path());
     }
 
+    public Rebufferer instantiateRebufferer()
+    {
+        return instantiateRebufferer(null);
+    }
+
     private Rebufferer instantiateRebufferer(RateLimiter limiter)
     {
         Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer();
@@ -175,6 +180,11 @@ public class FileHandle extends SharedCloseableImpl
         if (limiter != null)
             rebufferer = new LimitingRebufferer(rebufferer, limiter, DiskOptimizationStrategy.MAX_BUFFER_SIZE);
         return rebufferer;
+    }
+
+    public void invalidateIfCached(long position)
+    {
+        rebuffererFactory.invalidateIfCached(position);
     }
 
     /**
@@ -243,6 +253,7 @@ public class FileHandle extends SharedCloseableImpl
 
         private boolean mmapped = false;
         private boolean compressed = false;
+        private long length = -1;
 
         public Builder(String path)
         {
@@ -322,6 +333,11 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        public void withLength(long length)
+        {
+            this.length = length;
+        }
+
         /**
          * Complete building {@link FileHandle} without overriding file length.
          *
@@ -329,7 +345,7 @@ public class FileHandle extends SharedCloseableImpl
          */
         public FileHandle complete()
         {
-            return complete(-1L);
+            return complete(length);
         }
 
         /**
@@ -358,7 +374,11 @@ public class FileHandle extends SharedCloseableImpl
                 long length = overrideLength > 0 ? overrideLength : compressed ? compressionMetadata.compressedFileLength : channelCopy.size();
 
                 RebuffererFactory rebuffererFactory;
-                if (mmapped)
+                if (length == 0)
+                {
+                    rebuffererFactory = new EmptyRebufferer(channelCopy);
+                }
+                else if (mmapped)
                 {
                     if (compressed)
                     {

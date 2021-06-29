@@ -63,7 +63,7 @@ public class ClientResourceLimitsTest extends CQLTester
         QueryOptions.DEFAULT.skipMetadata(),
         QueryOptions.DEFAULT.getPageSize(),
         QueryOptions.DEFAULT.getPagingState(),
-        QueryOptions.DEFAULT.getSerialConsistency(),
+        QueryOptions.DEFAULT.getSerialConsistency(null),
         ProtocolVersion.V5,
         KEYSPACE);
 

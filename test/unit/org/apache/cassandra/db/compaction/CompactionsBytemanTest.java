@@ -128,7 +128,7 @@ public class CompactionsBytemanTest extends CQLTester
 
         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
         assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(cfs));
         assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
@@ -145,7 +145,7 @@ public class CompactionsBytemanTest extends CQLTester
         {
             execute("INSERT INTO %s (id, val) values (2, 'immortal')");
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
     }
 
     private void createLowGCGraceTable(){
@@ -154,10 +154,10 @@ public class CompactionsBytemanTest extends CQLTester
 
     @Test
     @BMRule(name = "Stop all compactions",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
+    targetClass = "CompactionTask$CompactionOperation",
+    targetMethod = "<init>",
     targetLocation = "AT INVOKE getCompactionAwareWriter",
-    action = "$ci.stop()")
+    action = "$this.op.stop()")
     public void testStopUserDefinedCompactionRepaired() throws Throwable
     {
         testStopCompactionRepaired((cfs) -> {
@@ -168,10 +168,10 @@ public class CompactionsBytemanTest extends CQLTester
 
     @Test
     @BMRule(name = "Stop all compactions",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
+    targetClass = "CompactionTask$CompactionOperation",
+    targetMethod = "<init>",
     targetLocation = "AT INVOKE getCompactionAwareWriter",
-    action = "$ci.stop()")
+    action = "$this.op.stop()")
     public void testStopSubRangeCompactionRepaired() throws Throwable
     {
         testStopCompactionRepaired((cfs) -> {
@@ -192,7 +192,7 @@ public class CompactionsBytemanTest extends CQLTester
             {
                 execute("insert into %s (k, c, v) values (?, ?, ?)", i, j, i*j);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
         cfs.getCompactionStrategyManager().mutateRepaired(cfs.getLiveSSTables(), System.currentTimeMillis(), null, false);
         for (int i = 0; i < 5; i++)
@@ -201,11 +201,11 @@ public class CompactionsBytemanTest extends CQLTester
             {
                 execute("insert into %s (k, c, v) values (?, ?, ?)", i, j, i*j);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
 
         assertTrue(cfs.getTracker().getCompacting().isEmpty());
-        assertTrue(CompactionManager.instance.active.getCompactions().stream().noneMatch(h -> h.getCompactionInfo().getTableMetadata().equals(cfs.metadata)));
+        assertTrue(CompactionManager.instance.active.getTableOperations().stream().noneMatch(h -> h.getProgress().metadata().equals(cfs.metadata)));
 
         try
         {
@@ -220,7 +220,7 @@ public class CompactionsBytemanTest extends CQLTester
         }
 
         assertTrue(cfs.getTracker().getCompacting().isEmpty());
-        assertTrue(CompactionManager.instance.active.getCompactions().stream().noneMatch(h -> h.getCompactionInfo().getTableMetadata().equals(cfs.metadata)));
+        assertTrue(CompactionManager.instance.active.getTableOperations().stream().noneMatch(h -> h.getProgress().metadata().equals(cfs.metadata)));
 
     }
 }

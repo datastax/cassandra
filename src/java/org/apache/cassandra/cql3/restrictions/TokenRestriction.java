@@ -22,6 +22,7 @@ import java.util.*;
 
 import com.google.common.base.Joiner;
 
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -31,6 +32,7 @@ import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.service.QueryState;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -122,7 +124,13 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public void addRowFilterTo(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
+    public boolean needsFiltering(Index.Group indexGroup)
+    {
+        return false;
+    }
+
+    @Override
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
     {
         throw new UnsupportedOperationException("Index expression cannot be created for token restriction");
     }
@@ -153,7 +161,7 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     public final PartitionKeyRestrictions mergeWith(Restriction otherRestriction) throws InvalidRequestException
     {
         if (!otherRestriction.isOnToken())
-            return new TokenFilter(toPartitionKeyRestrictions(otherRestriction), this);
+            return TokenFilter.create(toPartitionKeyRestrictions(otherRestriction), this);
 
         return doMergeWith((TokenRestriction) otherRestriction);
     }
@@ -176,7 +184,9 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         if (restriction instanceof PartitionKeyRestrictions)
             return (PartitionKeyRestrictions) restriction;
 
-        return new PartitionKeySingleRestrictionSet(metadata.partitionKeyAsClusteringComparator()).mergeWith(restriction);
+        return PartitionKeySingleRestrictionSet.builder(metadata.partitionKeyAsClusteringComparator())
+                                               .addRestriction(restriction)
+                                               .build();
     }
 
     public static final class EQRestriction extends TokenRestriction
@@ -205,7 +215,10 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         @Override
         public List<ByteBuffer> bounds(Bound b, QueryOptions options) throws InvalidRequestException
         {
-            return values(options);
+            // QueryState is used by inSelectCartesianProduct guardrail to skip non-ordinary users.
+            // Passing null here to avoid polluting too many methods, because in case of EQ token restriction,
+            // it won't generate high cartesian product.
+            return values(options, null);
         }
 
         @Override
@@ -221,7 +234,7 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         }
 
         @Override
-        public List<ByteBuffer> values(QueryOptions options) throws InvalidRequestException
+        public List<ByteBuffer> values(QueryOptions options, QueryState queryState) throws InvalidRequestException
         {
             return Collections.singletonList(value.bindAndGet(options));
         }
@@ -254,7 +267,7 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
         }
 
         @Override
-        public List<ByteBuffer> values(QueryOptions options) throws InvalidRequestException
+        public List<ByteBuffer> values(QueryOptions options, QueryState queryState) throws InvalidRequestException
         {
             throw new UnsupportedOperationException();
         }

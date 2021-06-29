@@ -50,9 +50,11 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
@@ -60,11 +62,13 @@ import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static java.lang.String.format;
 import static java.lang.String.join;
@@ -99,6 +103,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             throw ire("Cannot use ALTER TABLE on a materialized view; use ALTER MATERIALIZED VIEW instead");
 
         return schema.withAddedOrUpdated(apply(keyspace, table));
+    }
+
+    public ResultMessage execute(QueryState state, boolean locally)
+    {
+        return super.execute(state, locally);
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
@@ -160,9 +169,20 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 this.type = type;
                 this.isStatic = isStatic;
             }
+
         }
 
         private final Collection<Column> newColumns;
+        private QueryState queryState;
+
+        @Override
+        public void validate(QueryState state)
+        {
+            super.validate(state);
+
+            // save the query state to use it for guardrails validation in #apply
+            this.queryState = state;
+        }
 
         private AddColumns(String keyspaceName, String tableName, Collection<Column> newColumns)
         {
@@ -177,6 +197,8 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             newColumns.forEach(c -> addColumn(keyspace, table, c, tableBuilder, viewsBuilder));
             TableMetadata tableMetadata = tableBuilder.build();
             tableMetadata.validate();
+
+            Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, queryState);
 
             return keyspace.withSwapped(keyspace.tables.withSwapped(tableMetadata))
                            .withSwapped(viewsBuilder.build());
@@ -388,6 +410,15 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             this.attrs = attrs;
         }
 
+        @Override
+        public void validate(QueryState state)
+        {
+            super.validate(state);
+
+            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+            Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
+        }
+
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
         {
             attrs.validate();
@@ -412,7 +443,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 throw ire("read_repair must be set to 'NONE' for transiently replicated keyspaces");
             }
 
-            return keyspace.withSwapped(keyspace.tables.withSwapped(table.withSwapped(params)));
+            TableMetadata.Builder builder = table.unbuild().params(params);
+            for (DroppedColumn.Raw record : attrs.droppedColumnRecords())
+                builder.recordColumnDrop(record.prepare(keyspaceName, tableName));
+
+            return keyspace.withSwapped(keyspace.tables.withSwapped(builder.build()));
         }
     }
 
@@ -529,7 +564,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
         // DROP
         private final Set<ColumnIdentifier> droppedColumns = new HashSet<>();
-        private Long timestamp = null; // will use execution timestamp if not provided by query
+        private Long dropTimestamp = null; // will use execution timestamp if not provided by query
 
         // RENAME
         private final Map<ColumnIdentifier, ColumnIdentifier> renamedColumns = new HashMap<>();
@@ -551,7 +586,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             {
                 case          ALTER_COLUMN: return new AlterColumn(keyspaceName, tableName);
                 case           ADD_COLUMNS: return new AddColumns(keyspaceName, tableName, addedColumns);
-                case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, timestamp);
+                case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, dropTimestamp);
                 case        RENAME_COLUMNS: return new RenameColumns(keyspaceName, tableName, renamedColumns);
                 case         ALTER_OPTIONS: return new AlterOptions(keyspaceName, tableName, attrs);
                 case  DROP_COMPACT_STORAGE: return new DropCompactStorage(keyspaceName, tableName);
@@ -582,9 +617,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             kind = Kind.DROP_COMPACT_STORAGE;
         }
 
-        public void timestamp(long timestamp)
+        public void dropTimestamp(long timestamp)
         {
-            this.timestamp = timestamp;
+            this.dropTimestamp = timestamp;
         }
 
         public void rename(ColumnIdentifier from, ColumnIdentifier to)

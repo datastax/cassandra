@@ -1,0 +1,18 @@
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -62,15 +62,12 @@
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.io.FSReadError;
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+-<<<<<<<
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+ import org.apache.cassandra.io.sstable.metadata.MetadataType;
+ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+-=======
+ import org.apache.cassandra.io.sstable.format.big.BigTableScanner;
+ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexScanner;
+->>>>>>>
+ import org.apache.cassandra.io.util.FileDataInput;
+ import org.apache.cassandra.io.util.MmappedRegions;
+ import org.apache.cassandra.schema.CachingParams;
