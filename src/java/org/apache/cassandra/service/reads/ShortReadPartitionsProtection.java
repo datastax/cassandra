@@ -84,6 +84,7 @@ public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowI
     public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
     {
         partitionsFetched = true;
+        rangeFetched = true;
 
         lastPartitionKey = partition.partitionKey();
 
