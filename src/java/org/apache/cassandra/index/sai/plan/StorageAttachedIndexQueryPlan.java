@@ -136,6 +136,6 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public boolean supportsMultiRangeReadCommand()
     {
-        return true;
+        return false;
     }
 }
