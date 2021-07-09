@@ -408,16 +408,17 @@ public class QueryProcessor implements QueryHandler
         return UntypedResultSet.create(((ResultMessage.Rows)result).result);
     }
 
+    @VisibleForTesting
     public static UntypedResultSet resultify(String query, RowIterator partition)
     {
         return resultify(query, PartitionIterators.singletonIterator(partition));
     }
 
-    public static UntypedResultSet resultify(String query, PartitionIterator partitions)
+    private static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
         try (PartitionIterator iter = partitions)
         {
-            SelectStatement ss = (SelectStatement) getStatement(query, null);
+            SelectStatement ss = (SelectStatement) getStatement(query, ClientState.forInternalCalls());
             ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds());
             return UntypedResultSet.create(cqlRows);
         }
