@@ -110,6 +110,13 @@ public class ViewManager
                 addView(entry.getValue());
         }
 
+        for (View view : allViews())
+        {
+            // There can be view schema propagation before StorageService is initialized.
+            // We provide the new definition from the base metadata
+            view.updateDefinition(newViewsByName.get(view.name));
+        }
+
         if (!buildAllViews)
             return;
 
@@ -130,8 +137,6 @@ public class ViewManager
         for (View view : allViews())
         {
             view.build();
-            // We provide the new definition from the base metadata
-            view.updateDefinition(newViewsByName.get(view.name));
         }
     }
 
