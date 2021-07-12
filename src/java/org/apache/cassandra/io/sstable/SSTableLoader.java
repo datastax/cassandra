@@ -22,6 +22,7 @@ import java.util.*;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -193,21 +194,24 @@ public class SSTableLoader implements StreamEventHandler
             return plan.execute();
         }
 
-        outputHandler.output(String.format("Streaming relevant part of %s to %s", names(sstables), endpointToRanges.keySet()));
+        outputHandler.output(String.format("Streaming relevant part of %s to %s",
+                                           names(sstables),
+                                           Sets.difference(endpointToRanges.keySet(), toIgnore)));
 
         for (Map.Entry<InetAddressAndPort, Collection<Range<Token>>> entry : endpointToRanges.entrySet())
         {
             InetAddressAndPort remote = entry.getKey();
             if (toIgnore.contains(remote))
-                continue;
+            {
+                // references would normally be released after the stream session, so we explicitly release here
+                // as a future optimization, we could refactor to avoid constructing these sections entirely
+                streamingDetails.get(remote).forEach(OutgoingStream::finish);
 
-            List<OutgoingStream> streams = new LinkedList<>();
+                continue;
+            }
 
             // references are acquired when constructing the SSTableStreamingSections above
-            for (OutgoingStream stream : streamingDetails.get(remote))
-            {
-                streams.add(stream);
-            }
+            List<OutgoingStream> streams = new LinkedList<>(streamingDetails.get(remote));
 
             plan.transferStreams(remote, streams);
         }
