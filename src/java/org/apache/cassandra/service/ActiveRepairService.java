@@ -661,6 +661,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     public synchronized void registerParentRepairSession(UUID parentRepairSession, InetAddressAndPort coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal, PreviewKind previewKind)
     {
         assert isIncremental || repairedAt == ActiveRepairService.UNREPAIRED_SSTABLE;
+
+        Preconditions.checkNotNull(parentRepairSession, "Cannot register repair session with null session-ID (from %s)", coordinator);
+
         if (!registeredForEndpointChanges)
         {
             Gossiper.instance.register(this);
@@ -676,7 +679,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
     public ParentRepairSession getParentRepairSession(UUID parentSessionId)
     {
-        ParentRepairSession session = parentRepairSessions.get(parentSessionId);
+        ParentRepairSession session = parentSessionId != null ? parentRepairSessions.get(parentSessionId) : null;
         // this can happen if a node thinks that the coordinator was down, but that coordinator got back before noticing
         // that it was down itself.
         if (session == null)
