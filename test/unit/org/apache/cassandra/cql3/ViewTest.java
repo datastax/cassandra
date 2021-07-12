@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.junit.Assert;
@@ -40,6 +42,8 @@ import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.view.View;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -65,6 +69,7 @@ public class ViewTest extends CQLTester
     /** Latch used by {@link #testTruncateWhileBuilding()} Byteman injections. */
     @SuppressWarnings("unused")
     private static final CountDownLatch blockViewBuild = new CountDownLatch(1);
+    private static final AtomicInteger viewNameSeqNumber = new AtomicInteger();
 
     private final List<String> views = new ArrayList<>();
 
@@ -1530,5 +1535,120 @@ public class ViewTest extends CQLTester
         return Metrics.getThreadPoolMetrics("ViewBuildExecutor")
                       .map(p -> p.activeTasks.getValue() + p.pendingTasks.getValue())
                       .orElse(0);
+    }
+
+    @Test
+    public void testFunctionInWhereClause() throws Throwable
+    {
+        // Native token function with lowercase, should be unquoted in the schema where clause
+        assertEmpty(testFunctionInWhereClause("CREATE TABLE %s (k bigint PRIMARY KEY, v int)",
+                                              null,
+                                              "CREATE MATERIALIZED VIEW %s AS" +
+                                              "   SELECT * FROM %%s WHERE k = token(1) AND v IS NOT NULL " +
+                                              "   PRIMARY KEY (v, k)",
+                                              "k = token(1) AND v IS NOT NULL",
+                                              "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                              "INSERT INTO %s(k, v) VALUES (2, 3)"));
+
+        // Native token function with uppercase, should be unquoted and lowercased in the schema where clause
+        assertEmpty(testFunctionInWhereClause("CREATE TABLE %s (k bigint PRIMARY KEY, v int)",
+                                              null,
+                                              "CREATE MATERIALIZED VIEW %s AS" +
+                                              "   SELECT * FROM %%s WHERE k = TOKEN(1) AND v IS NOT NULL" +
+                                              "   PRIMARY KEY (v, k)",
+                                              "k = token(1) AND v IS NOT NULL",
+                                              "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                              "INSERT INTO %s(k, v) VALUES (2, 3)"));
+
+        // UDF with lowercase name, shouldn't be quoted in the schema where clause
+        assertRows(testFunctionInWhereClause("CREATE TABLE %s (k int PRIMARY KEY, v int)",
+                                             "CREATE FUNCTION fun()" +
+                                             "   CALLED ON NULL INPUT" +
+                                             "   RETURNS int LANGUAGE java" +
+                                             "   AS 'return 2;'",
+                                             "CREATE MATERIALIZED VIEW %s AS " +
+                                             "   SELECT * FROM %%s WHERE k = fun() AND v IS NOT NULL" +
+                                             "   PRIMARY KEY (v, k)",
+                                             "k = fun() AND v IS NOT NULL",
+                                             "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                             "INSERT INTO %s(k, v) VALUES (2, 3)"), row(3, 2));
+
+        // UDF with uppercase name, should be quoted in the schema where clause
+        assertRows(testFunctionInWhereClause("CREATE TABLE %s (k int PRIMARY KEY, v int)",
+                                             "CREATE FUNCTION \"FUN\"()" +
+                                             "   CALLED ON NULL INPUT" +
+                                             "   RETURNS int" +
+                                             "   LANGUAGE java" +
+                                             "   AS 'return 2;'",
+                                             "CREATE MATERIALIZED VIEW %s AS " +
+                                             "   SELECT * FROM %%s WHERE k = \"FUN\"() AND v IS NOT NULL" +
+                                             "   PRIMARY KEY (v, k)",
+                                             "k = \"FUN\"() AND v IS NOT NULL",
+                                             "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                             "INSERT INTO %s(k, v) VALUES (2, 3)"), row(3, 2));
+
+        // UDF with uppercase name conflicting with TOKEN keyword but not with native token function name,
+        // should be quoted in the schema where clause
+        assertRows(testFunctionInWhereClause("CREATE TABLE %s (k int PRIMARY KEY, v int)",
+                                             "CREATE FUNCTION \"TOKEN\"(x int)" +
+                                             "   CALLED ON NULL INPUT" +
+                                             "   RETURNS int" +
+                                             "   LANGUAGE java" +
+                                             "   AS 'return x;'",
+                                             "CREATE MATERIALIZED VIEW %s AS" +
+                                             "   SELECT * FROM %%s WHERE k = \"TOKEN\"(2) AND v IS NOT NULL" +
+                                             "   PRIMARY KEY (v, k)",
+                                             "k = \"TOKEN\"(2) AND v IS NOT NULL",
+                                             "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                             "INSERT INTO %s(k, v) VALUES (2, 3)"), row(3, 2));
+
+        // UDF with lowercase name conflicting with both TOKEN keyword and native token function name,
+        // requires specifying the keyspace and should be quoted in the schema where clause
+        assertRows(testFunctionInWhereClause("CREATE TABLE %s (k int PRIMARY KEY, v int)",
+                                             "CREATE FUNCTION \"token\"(x int)" +
+                                             "   CALLED ON NULL INPUT" +
+                                             "   RETURNS int" +
+                                             "   LANGUAGE java" +
+                                             "   AS 'return x;'",
+                                             "CREATE MATERIALIZED VIEW %s AS" +
+                                             "   SELECT * FROM %%s " +
+                                             "   WHERE k = " + keyspace() + ".\"token\"(2) AND v IS NOT NULL" +
+                                             "   PRIMARY KEY (v, k)",
+                                             "k = " + keyspace() + ".\"token\"(2) AND v IS NOT NULL",
+                                             "INSERT INTO %s(k, v) VALUES (0, 1)",
+                                             "INSERT INTO %s(k, v) VALUES (2, 3)"), row(3, 2));
+    }
+
+    private UntypedResultSet testFunctionInWhereClause(String createTableQuery,
+                                                       String createFunctionQuery,
+                                                       String createViewQuery,
+                                                       String expectedSchemaWhereClause,
+                                                       String... insertQueries) throws Throwable
+    {
+        createTable(createTableQuery);
+
+        execute("USE " + keyspace());
+        executeNet("USE " + keyspace());
+
+        if (createFunctionQuery != null)
+        {
+            execute(createFunctionQuery);
+        }
+
+        String viewName = "view_" + viewNameSeqNumber.getAndIncrement();
+        createView(viewName, createViewQuery);
+
+        // Test the where clause stored in system_schema.views
+        String schemaQuery = String.format("SELECT where_clause FROM %s.%s WHERE keyspace_name = ? AND view_name = ?",
+                                           SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                           SchemaKeyspace.VIEWS);
+        assertRows(execute(schemaQuery, keyspace(), viewName), row(expectedSchemaWhereClause));
+
+        for (String insert : insertQueries)
+        {
+            execute(insert);
+        }
+
+        return execute("SELECT * FROM " + viewName);
     }
 }
