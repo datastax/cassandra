@@ -184,8 +184,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public void sync()
     {
-        doFlush(0);
-        syncInternal(false);
+        doFlush(true);
     }
 
     private void syncInternal(boolean syncMetadata)
