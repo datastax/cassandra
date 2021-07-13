@@ -20,7 +20,6 @@ package org.apache.cassandra.io.sstable;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import org.junit.BeforeClass;
@@ -38,6 +37,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.db.ClusteringPrefixTest.assertClusteringIsRetainable;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -221,9 +221,9 @@ public class SSTableMetadataTest
         {
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.start().bufferAt(0)), "0col100");
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.end().bufferAt(0)), "7col149");
-            // make sure the clustering values are minimised
-            assertTrue(sstable.getSSTableMetadata().coveredClustering.start().bufferAt(0).capacity() < 50);
-            assertTrue(sstable.getSSTableMetadata().coveredClustering.end().bufferAt(0).capacity() < 50);
+            // make sure stats don't reference native or off-heap data
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.start());
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.end());
         }
         String key = "row2";
 
@@ -244,8 +244,8 @@ public class SSTableMetadataTest
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.start().bufferAt(0)), "0col100");
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.end().bufferAt(0)), "9col298");
             // make sure stats don't reference native or off-heap data
-            assertBuffersAreRetainable(Arrays.asList(sstable.getSSTableMetadata().coveredClustering.start().getBufferArray()));
-            assertBuffersAreRetainable(Arrays.asList(sstable.getSSTableMetadata().coveredClustering.end().getBufferArray()));
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.start());
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.end());
         }
 
         key = "row3";
@@ -262,8 +262,8 @@ public class SSTableMetadataTest
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.start().bufferAt(0)), "0");
             assertEquals(ByteBufferUtil.string(sstable.getSSTableMetadata().coveredClustering.end().bufferAt(0)), "9col298");
             // make sure stats don't reference native or off-heap data
-            assertBuffersAreRetainable(Arrays.asList(sstable.getSSTableMetadata().coveredClustering.start().getBufferArray()));
-            assertBuffersAreRetainable(Arrays.asList(sstable.getSSTableMetadata().coveredClustering.end().getBufferArray()));
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.start());
+            assertClusteringIsRetainable(sstable.getSSTableMetadata().coveredClustering.end());
         }
     }
 
