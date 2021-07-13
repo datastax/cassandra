@@ -152,9 +152,10 @@ public class SlabAllocator extends MemtableBufferAllocator
         }
     }
 
-    public Cloner cloner(OpOrder.Group writeOp)
+    @Override
+    public Cloner cloner(OpOrder.Group opGroup)
     {
-        return allocator(writeOp);
+        return allocator(opGroup);
     }
 
     /**
