@@ -86,7 +86,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
         protected void doPrepare()
         {
-            syncInternal();
+            sync();
         }
 
         protected Throwable doCommit(Throwable accumulate)
@@ -200,7 +200,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      * Otherwise it will leave a non-uniform size compressed block in the middle of the file
      * and the compressed format can't handle that.
      */
-    protected void syncInternal()
+    private void syncInternal()
     {
         doFlush(0);
         syncDataOnlyInternal();
@@ -333,7 +333,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
 
         // synchronize current buffer with disk - we don't want any data loss
-        syncInternal();
+        sync();
 
         // truncate file to given position
         truncate(truncateTarget);
