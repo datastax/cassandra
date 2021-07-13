@@ -456,6 +456,7 @@ public enum CassandraRelevantProperties
 
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
+    SAI_USE_MULTI_RANGE_READ_COMMAND("cassandra.sai.use_multi_range_read_command", "false"),
 
     /**
      * The maximum number of primary keys that a WHERE clause may materialize before the query planner switches
