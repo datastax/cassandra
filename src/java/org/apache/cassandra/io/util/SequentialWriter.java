@@ -177,10 +177,15 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     /**
      * Synchronize file contents with disk.
+     * <p/>
+     * This is only safe to call before truncation or close for CompressedSequentialWriter
+     * Otherwise it will leave a non-uniform size compressed block in the middle of the file
+     * and the compressed format can't handle that.
      */
     public void sync()
     {
-        syncInternal();
+        doFlush(0);
+        syncDataOnlyInternal();
     }
 
     protected void syncDataOnlyInternal()
@@ -193,17 +198,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         {
             throw new FSWriteError(e, getPath());
         }
-    }
-
-    /*
-     * This is only safe to call before truncation or close for CompressedSequentialWriter
-     * Otherwise it will leave a non-uniform size compressed block in the middle of the file
-     * and the compressed format can't handle that.
-     */
-    private void syncInternal()
-    {
-        doFlush(0);
-        syncDataOnlyInternal();
     }
 
     @Override
