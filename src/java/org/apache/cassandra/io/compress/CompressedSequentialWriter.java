@@ -234,7 +234,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
 
         // synchronize current buffer with disk - we don't want any data loss
-        syncInternal();
+        sync();
 
         chunkOffset = realMark.chunkOffset;
 
@@ -350,7 +350,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         @Override
         protected void doPrepare()
         {
-            syncInternal();
+            sync();
             digestFile.ifPresent(crcMetadata::writeFullChecksum);
             sstableMetadataCollector.addCompressionRatio(compressedSize, uncompressedSize);
             metadataWriter.finalizeLength(current(), chunkCount).prepareToCommit();
