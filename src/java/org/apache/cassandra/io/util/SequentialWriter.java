@@ -192,7 +192,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     {
         try
         {
-            SyncUtil.force(fchannel, syncMetadata);
+            SyncUtil.forceAlways(fchannel, syncMetadata);
         }
         catch (IOException e)
         {

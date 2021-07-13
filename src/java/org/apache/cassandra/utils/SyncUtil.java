@@ -25,6 +25,7 @@ import java.lang.reflect.Field;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.cassandra.config.Config;
@@ -171,6 +172,16 @@ public class SyncUtil
         {
             fc.force(metaData);
         }
+    }
+
+    /**
+     * There are cases when we want to sync even during tests and therefore we bypass {@link #SKIP_SYNC},
+     * for example building partial indexes during early open relies on disk sync.
+     */
+    public static void forceAlways(FileChannel fc, boolean metaData) throws IOException
+    {
+        Objects.requireNonNull(fc);
+        fc.force(metaData);
     }
 
     public static void sync(RandomAccessFile ras) throws IOException
