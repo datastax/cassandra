@@ -24,6 +24,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.audit.AuditLogContext;
@@ -157,14 +158,15 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         //
 
         long offset = getOffset(pagingState, schemaVersion);
-        int pageSize = options.getPageSize().rows();
+        PageSize pageSize = options.getPageSize();
+        Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.ROWS, "Page size for describe statement must be provided in rows unit");
 
         Stream<? extends T> stream = describe(state.getClientState(), keyspaces);
 
         if (offset > 0L)
             stream = stream.skip(offset);
-        if (pageSize > 0)
-            stream = stream.limit(pageSize);
+        if (pageSize.isDefined())
+            stream = stream.limit(pageSize.getCount());
 
         List<List<ByteBuffer>> rows = stream.map(e -> toRow(e, includeInternalDetails))
                                             .collect(Collectors.toList());
@@ -172,9 +174,9 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(metadata(state.getClientState()));
         ResultSet result = new ResultSet(resultMetadata, rows);
 
-        if (pageSize > 0 && rows.size() == pageSize)
+        if (pageSize.isDefined() && rows.size() == pageSize.getCount())
         {
-            result.metadata.setHasMorePages(getPagingState(offset + pageSize, schemaVersion));
+            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getCount(), schemaVersion));
         }
 
         return new ResultMessage.Rows(result);
