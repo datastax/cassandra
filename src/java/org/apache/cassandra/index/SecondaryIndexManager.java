@@ -143,7 +143,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
 
     // default page size (in rows) when rebuilding the index for a whole partition
-    public static final PageSize DEFAULT_PAGE_SIZE = PageSize.inRows(10000);
+    public static final int DEFAULT_PAGE_SIZE = 10000;
 
     // store per-endpoint index status: the key of inner map is identifier "keyspace.index"
     public static final Map<InetAddressAndPort, Map<String, Index.Status>> peerIndexStatus = new ConcurrentHashMap<>();
@@ -1034,36 +1034,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public PageSize calculateIndexingPageSize()
     {
         if (Boolean.getBoolean("cassandra.force_default_indexing_page_size"))
-            return DEFAULT_PAGE_SIZE;
+            return PageSize.inRows(DEFAULT_PAGE_SIZE);
 
-        double targetPageSizeInBytes = 32 * 1024 * 1024;
-        double meanPartitionSize = baseCfs.getMeanPartitionSize();
-        if (meanPartitionSize <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanCellsPerPartition = baseCfs.getMeanEstimatedCellPerPartitionCount();
-        if (meanCellsPerPartition <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int columnsPerRow = baseCfs.metadata().regularColumns().size();
-        if (columnsPerRow <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanRowsPerPartition = meanCellsPerPartition / columnsPerRow;
-        double meanRowSize = meanPartitionSize / meanRowsPerPartition;
-
-        int pageSize = (int) Math.max(1, Math.min(DEFAULT_PAGE_SIZE.rows(), targetPageSizeInBytes / meanRowSize));
-
-        logger.trace("Calculated page size {} for indexing {}.{} ({}/{}/{}/{})",
-                     pageSize,
-                     baseCfs.metadata.keyspace,
-                     baseCfs.metadata.name,
-                     meanPartitionSize,
-                     meanCellsPerPartition,
-                     meanRowsPerPartition,
-                     meanRowSize);
-
-        return PageSize.inRows(pageSize);
+        return PageSize.inBytes(32 * 1024 * 1024);
     }
 
     /**
