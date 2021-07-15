@@ -29,6 +29,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
@@ -65,7 +66,7 @@ class Helpers
     {
         // ensure the ones being removed are the exact same ones present
         for (T reader : remove)
-            assert original.get(reader) == reader;
+            assert original.get(reader) == reader : String.format("%s not found in original set: %s", reader, original);
 
         // ensure we don't already contain any we're adding, that we aren't also removing
         assert !any(add, and(not(in(remove)), in(original.keySet()))) : String.format("original:%s remove:%s add:%s", original.keySet(), remove, add);
@@ -83,10 +84,10 @@ class Helpers
      * A convenience method for encapsulating this action over multiple SSTableReader with exception-safety
      * @return accumulate if not null (with any thrown exception attached), or any thrown exception otherwise
      */
-    static void setupOnline(Iterable<SSTableReader> readers)
+    static void setupOnline(ColumnFamilyStore cfs, Iterable<SSTableReader> readers)
     {
         for (SSTableReader reader : readers)
-            reader.setupOnline();
+            reader.setupOnline(cfs);
     }
 
     /**

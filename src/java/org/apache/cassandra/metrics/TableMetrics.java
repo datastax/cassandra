@@ -111,21 +111,43 @@ public class TableMetrics
     public final TableHistogram sstablesPerReadHistogram;
     /** Histogram of the number of sstable data files accessed per partition range read */
     public final TableHistogram sstablesPerRangeReadHistogram;
+    /** An approximate measure of how long it takes to read a partition from an sstable, in nanoseconds. This is
+     * a moving average of a very rough approximation: the total latency for a single partition
+     * read command divided by the number of sstables that were accessed for that command.
+     * Therefore it currently includes other costs, which is not ideal but it does give a rough estimate.
+     * since disk costs would dominate computing costs. */
+    public final MovingAverage sstablePartitionReadLatency;
     /** (Local) read metrics */
     public final LatencyMetrics readLatency;
     /** (Local) range slice metrics */
     public final LatencyMetrics rangeLatency;
     /** (Local) write metrics */
     public final LatencyMetrics writeLatency;
+    /** The number of single partition read requests, including those dropped due to timeouts */
+    public final Counter readRequests;
+    /** The number of range read requests, including those dropped due to timeouts */
+    public final Counter rangeRequests;
     /** Estimated number of tasks pending for this table */
     public final Counter pendingFlushes;
     /** Total number of bytes flushed since server [re]start */
     public final Counter bytesFlushed;
+    /** The average flushed size for sstables, which is derived from {@link this#bytesFlushed}. */
+    public final MovingAverage flushSize;
     /** The average on-disk flushed size for sstables. */
     public final MovingAverage flushSizeOnDisk;
+    /** The average number of sstables created on flush. */
+    public final MovingAverage flushSegmentCount;
+    /** The average duration per 1Kb of data flushed, in nanoseconds. */
+    public final MovingAverage flushTimePerKb;
+    /** Total number of bytes inserted into memtables since server [re]start. */
+    public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
     public final Counter compactionBytesWritten;
-    /** Estimate of number of pending compactios for this table */
+    /** Total number of bytes read by compaction since server [re]start */
+    public final Counter compactionBytesRead;
+    /** The average duration per 1Kb of data compacted, in nanoseconds. */
+    public final MovingAverage compactionTimePerKb;
+    /** Estimate of number of pending compactions for this table */
     public final Gauge<Integer> pendingCompactions;
     /** Number of SSTables on disk for this CF */
     public final Gauge<Integer> liveSSTableCount;
@@ -544,6 +566,7 @@ public class TableMetrics
         
         sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.keyspace.metric.sstablesPerReadHistogram, true);
         sstablesPerRangeReadHistogram = createTableHistogram("SSTablesPerRangeReadHistogram", cfs.keyspace.metric.sstablesPerRangeReadHistogram, true);
+        sstablePartitionReadLatency = ExpMovingAverage.decayBy100();
         compressionRatio = createTableGauge("CompressionRatio", new Gauge<Double>()
         {
             public Double getValue()
@@ -619,13 +642,23 @@ public class TableMetrics
         readLatency = createLatencyMetrics("Read", cfs.keyspace.metric.readLatency, GLOBAL_READ_LATENCY);
         writeLatency = createLatencyMetrics("Write", cfs.keyspace.metric.writeLatency, GLOBAL_WRITE_LATENCY);
         rangeLatency = createLatencyMetrics("Range", cfs.keyspace.metric.rangeLatency, GLOBAL_RANGE_LATENCY);
+
+        readRequests = createTableCounter("ReadRequests");
+        rangeRequests = createTableCounter("RangeRequests");
+
         pendingFlushes = createTableCounter("PendingFlushes");
         bytesFlushed = createTableCounter("BytesFlushed");
+        flushSize = ExpMovingAverage.decayBy100();
         flushSizeOnDisk = ExpMovingAverage.decayBy1000();
+        flushSegmentCount = ExpMovingAverage.decayBy1000();
+        flushTimePerKb = ExpMovingAverage.decayBy100();
+        bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
-        pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategyManager().getEstimatedRemainingTasks());
-        liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getTracker().getView().liveSSTables().size());
+        compactionBytesRead = createTableCounter("CompactionBytesRead");
+        compactionTimePerKb = ExpMovingAverage.decayBy100();
+        pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
+        liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
         {
             public Integer getValue()
@@ -867,9 +900,28 @@ public class TableMetrics
         return usage;
     }
 
-    public void updateSSTableIterated(int count)
+    public void incBytesFlushed(long inputSize, long outputSize, long elapsedNanos)
+    {
+        bytesFlushed.inc(outputSize);
+        flushSize.update(outputSize);
+        // this assumes that at least 1 Kb was flushed, which should always be the case, then rounds down
+        flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
+    }
+
+    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
+    {
+        compactionBytesRead.inc(inputDiskSize);
+        compactionBytesWritten.inc(outputDiskSize);
+        // this assumes that at least 1 Kb was compacted, which should always be the case, then rounds down
+        compactionTimePerKb.update(elapsedNanos / (double) Math.max(1, inputDiskSize / 1024L));
+    }
+
+    public void updateSSTableIterated(int count, long elapsedNanos)
     {
         sstablesPerReadHistogram.update(count);
+
+        if (count > 0)
+            sstablePartitionReadLatency.update(elapsedNanos / (double) count);
     }
 
     public void updateSSTableIteratedInRangeRead(int count)
@@ -978,17 +1030,17 @@ public class TableMetrics
             Metrics.register(GLOBAL_FACTORY.createMetricName(name),
                              GLOBAL_ALIAS_FACTORY.createMetricName(alias),
                              new Gauge<Long>()
-            {
-                public Long getValue()
-                {
-                    long total = 0;
-                    for (Metric cfGauge : ALL_TABLE_METRICS.get(name))
-                    {
-                        total += ((Counter) cfGauge).getCount();
-                    }
-                    return total;
-                }
-            });
+                             {
+                                 public Long getValue()
+                                 {
+                                     long total = 0;
+                                     for (Metric cfGauge : ALL_TABLE_METRICS.get(name))
+                                     {
+                                         total += ((Counter) cfGauge).getCount();
+                                     }
+                                     return total;
+                                 }
+                             });
         }
         return cfCounter;
     }

@@ -67,7 +67,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
         this.format = format;
         this.lifecycleNewTracker = lifecycleNewTracker;
         this.header = header;
-        boundaries = db.positions;
+        boundaries = db.getPositions();
         if (boundaries == null)
         {
             Directories.DataDirectory localDir = cfs.getDirectories().getWriteableLocation(totalSize);
@@ -108,6 +108,22 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
+    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
+    {
+        if (currentWriter != null)
+            finishedWriters.add(currentWriter);
+        currentWriter = null;
+        for (SSTableMultiWriter writer : finishedWriters)
+        {
+            if (writer.getBytesWritten() > 0)
+                finishedReaders.addAll(writer.finish(repairedAt, maxDataAge, openResult));
+            else
+                SSTableMultiWriter.abortOrDie(writer);
+        }
+        return finishedReaders;
+    }
+
+    @Override
     public Collection<SSTableReader> finish(boolean openResult)
     {
         if (currentWriter != null)
@@ -145,13 +161,25 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     @Override
     public long getBytesWritten()
     {
-       return currentWriter != null ? currentWriter.getBytesWritten() : 0L;
+        long bytesWritten = currentWriter != null ? currentWriter.getBytesWritten() : 0L;
+        for (SSTableMultiWriter writer : finishedWriters)
+            bytesWritten += writer.getBytesWritten();
+        return bytesWritten;
     }
 
     @Override
     public long getOnDiskBytesWritten()
     {
-        return currentWriter != null ? currentWriter.getOnDiskBytesWritten() : 0L;
+        long bytesWritten = currentWriter != null ? currentWriter.getOnDiskBytesWritten() : 0L;
+        for (SSTableMultiWriter writer : finishedWriters)
+            bytesWritten += writer.getOnDiskBytesWritten();
+        return bytesWritten;
+    }
+
+    @Override
+    public int getSegmentCount()
+    {
+        return finishedWriters.size() + 1;
     }
 
     @Override

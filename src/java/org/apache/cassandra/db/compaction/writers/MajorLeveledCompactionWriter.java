@@ -22,6 +22,10 @@ import java.util.Set;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -63,10 +67,10 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     }
 
     @Override
-    public boolean realAppend(UnfilteredRowIterator partition)
+    public boolean append(UnfilteredRowIterator partition)
     {
         partitionsWritten++;
-        return super.realAppend(partition);
+        return super.append(partition);
     }
 
     @Override
@@ -88,22 +92,28 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     }
 
     @Override
-    public void switchCompactionWriter(Directories.DataDirectory location, DecoratedKey nextKey)
+    public void switchCompactionWriter(Directories.DataDirectory location)
     {
         averageEstimatedKeysPerSSTable = Math.round(((double) averageEstimatedKeysPerSSTable * sstablesWritten + partitionsWritten) / (sstablesWritten + 1));
         partitionsWritten = 0;
         sstablesWritten = 0;
-        super.switchCompactionWriter(location, nextKey);
+        super.switchCompactionWriter(location);
     }
 
-    protected int sstableLevel()
+    @Override
+    @SuppressWarnings("resource")
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        return currentLevel;
-    }
-
-    protected long sstableKeyCount()
-    {
-        return keysPerSSTable;
+        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
+                                    keysPerSSTable,
+                                    minRepairedAt,
+                                    pendingRepair,
+                                    isTransient,
+                                    cfs.metadata,
+                                    new MetadataCollector(txn.originals(), cfs.metadata().comparator, currentLevel),
+                                    SerializationHeader.make(cfs.metadata(), txn.originals()),
+                                    cfs.indexManager.listIndexGroups(),
+                                    txn);
     }
 
     @Override

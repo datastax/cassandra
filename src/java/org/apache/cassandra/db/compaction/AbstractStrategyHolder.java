@@ -50,23 +50,23 @@ import org.apache.cassandra.utils.TimeUUID;
  */
 public abstract class AbstractStrategyHolder
 {
-    public static class TaskSupplier implements Comparable<TaskSupplier>
+    public static class TasksSupplier implements Comparable<TasksSupplier>
     {
         private final int numRemaining;
-        private final Supplier<AbstractCompactionTask> supplier;
+        private final Supplier<Collection<AbstractCompactionTask>> supplier;
 
-        TaskSupplier(int numRemaining, Supplier<AbstractCompactionTask> supplier)
+        TasksSupplier(int numRemaining, Supplier<Collection<AbstractCompactionTask>> supplier)
         {
             this.numRemaining = numRemaining;
             this.supplier = supplier;
         }
 
-        public AbstractCompactionTask getTask()
+        public Collection<AbstractCompactionTask> getTasks()
         {
             return supplier.get();
         }
 
-        public int compareTo(TaskSupplier o)
+        public int compareTo(TasksSupplier o)
         {
             return o.numRemaining - numRemaining;
         }
@@ -130,12 +130,14 @@ public abstract class AbstractStrategyHolder
     }
 
     protected final ColumnFamilyStore cfs;
+    protected final CompactionStrategyFactory strategyFactory;
     final DestinationRouter router;
     private int numTokenPartitions = -1;
 
-    AbstractStrategyHolder(ColumnFamilyStore cfs, DestinationRouter router)
+    AbstractStrategyHolder(ColumnFamilyStore cfs, CompactionStrategyFactory strategyFactory, DestinationRouter router)
     {
         this.cfs = cfs;
+        this.strategyFactory = strategyFactory;
         this.router = router;
     }
 
@@ -166,11 +168,11 @@ public abstract class AbstractStrategyHolder
         return managesRepairedGroup(sstable.isRepaired(), sstable.isPendingRepair(), sstable.isTransient());
     }
 
-    public abstract AbstractCompactionStrategy getStrategyFor(SSTableReader sstable);
+    public abstract LegacyAbstractCompactionStrategy getStrategyFor(SSTableReader sstable);
 
-    public abstract Iterable<AbstractCompactionStrategy> allStrategies();
+    public abstract Iterable<LegacyAbstractCompactionStrategy> allStrategies();
 
-    public abstract Collection<TaskSupplier> getBackgroundTaskSuppliers(long gcBefore);
+    public abstract Collection<TasksSupplier> getBackgroundTaskSuppliers(long gcBefore);
 
     public abstract Collection<AbstractCompactionTask> getMaximalTasks(long gcBefore, boolean splitOutput);
 
@@ -200,12 +202,6 @@ public abstract class AbstractStrategyHolder
                                                                 SerializationHeader header,
                                                                 Collection<Index.Group> indexGroups,
                                                                 LifecycleNewTracker lifecycleNewTracker);
-
-    /**
-     * Return the directory index the given compaction strategy belongs to, or -1
-     * if it's not held by this holder
-     */
-    public abstract int getStrategyIndex(AbstractCompactionStrategy strategy);
 
     public abstract boolean containsSSTable(SSTableReader sstable);
 

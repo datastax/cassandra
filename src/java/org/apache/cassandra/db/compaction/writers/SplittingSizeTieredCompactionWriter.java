@@ -26,6 +26,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -91,16 +93,22 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         return false;
     }
 
-    protected int sstableLevel()
-    {
-        return 0;
-    }
-
-    protected long sstableKeyCount()
+    @Override
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
         long currentPartitionsToWrite = Math.round(ratios[currentRatioIndex] * estimatedTotalKeys);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);
-        return currentPartitionsToWrite;
+
+        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
+                                    currentPartitionsToWrite,
+                                    minRepairedAt,
+                                    pendingRepair,
+                                    isTransient,
+                                    cfs.metadata,
+                                    new MetadataCollector(allSSTables, cfs.metadata().comparator, 0),
+                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
+                                    cfs.indexManager.listIndexGroups(),
+                                    txn);
     }
 
     @Override

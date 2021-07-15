@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 
@@ -35,13 +36,20 @@ import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 public class PendingRepairManagerTest extends AbstractPendingRepairTest
 {
+    @Override
+    public String createTableCql()
+    {
+        return String.format("CREATE TABLE %s.%s (k INT PRIMARY KEY, v INT)",
+                             ks, tbl);
+    }
+
     /**
      * If a local session is ongoing, it should not be cleaned up
      */
     @Test
     public void needsCleanupInProgress()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -59,7 +67,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFinalized()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -78,7 +86,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFailed()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -95,14 +103,14 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     public void needsCleanupNoSession()
     {
         TimeUUID fakeID = nextTimeUUID();
-        PendingRepairManager prm = new PendingRepairManager(cfs, null, false);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, null, false);
         Assert.assertTrue(prm.canCleanup(fakeID));
     }
 
     @Test
     public void estimateRemainingTasksInProgress()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -118,7 +126,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void estimateRemainingFinishedRepairTasks()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -136,7 +144,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTask()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -152,13 +160,15 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
         Assert.assertEquals(2, prm.getSessions().size());
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
-        AbstractCompactionTask compactionTask = prm.getNextRepairFinishedTask();
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
+        Collection<AbstractCompactionTask> compactionTasks = prm.getNextRepairFinishedTasks();
+        Assert.assertEquals(1, compactionTasks.size());
+        AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         try
         {
             Assert.assertNotNull(compactionTask);
-            Assert.assertSame(PendingRepairManager.RepairFinishedCompactionTask.class, compactionTask.getClass());
-            PendingRepairManager.RepairFinishedCompactionTask cleanupTask = (PendingRepairManager.RepairFinishedCompactionTask) compactionTask;
+            Assert.assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+            RepairFinishedCompactionTask cleanupTask = (RepairFinishedCompactionTask) compactionTask;
             Assert.assertEquals(repairID, cleanupTask.getSessionID());
         }
         finally
@@ -170,17 +180,17 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTaskNoSessions()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
     }
 
     /**
      * If all sessions should be cleaned up, getNextBackgroundTask should return null
      */
     @Test
-    public void getNextBackgroundTaskAllCleanup() throws Exception
+    public void getNextBackgroundTaskAllCleanup()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -191,14 +201,14 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         Assert.assertNotNull(prm.get(repairID));
         LocalSessionAccessor.finalizeUnsafe(repairID);
 
-        Assert.assertNull(prm.getNextBackgroundTask(FBUtilities.nowInSeconds()));
+        Assert.assertTrue(prm.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
 
     }
 
     @Test
     public void maximalTaskNeedsCleanup()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -223,22 +233,20 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void userDefinedTaskTest()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         TimeUUID repairId = registerSession(cfs, true, true);
         SSTableReader sstable = makeSSTable(true);
         mutateRepaired(sstable, repairId, false);
         prm.addSSTable(sstable);
 
-        try (CompactionTasks tasks = csm.getUserDefinedTasks(Collections.singleton(sstable), 100))
-        {
-            Assert.assertEquals(1, tasks.size());
-        }
+        Collection<AbstractCompactionTask> tasks = prm.createUserDefinedTasks(Collections.singleton(sstable), 100);
+        Assert.assertEquals(1, tasks.size());
     }
 
     @Test
     public void mixedPendingSessionsTest()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         TimeUUID repairId = registerSession(cfs, true, true);
         TimeUUID repairId2 = registerSession(cfs, true, true);
         SSTableReader sstable = makeSSTable(true);
@@ -248,10 +256,8 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         mutateRepaired(sstable2, repairId2, false);
         prm.addSSTable(sstable);
         prm.addSSTable(sstable2);
-        try (CompactionTasks tasks = csm.getUserDefinedTasks(Lists.newArrayList(sstable, sstable2), 100))
-        {
-            Assert.assertEquals(2, tasks.size());
-        }
+        Collection<AbstractCompactionTask> tasks = prm.createUserDefinedTasks(Lists.newArrayList(sstable, sstable2), 100);
+        Assert.assertEquals(2, tasks.size());
     }
 
     /**
@@ -261,7 +267,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getScannersInvalidSSTable() throws Exception
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(true);
         prm.getScanners(Collections.singleton(sstable), Collections.singleton(RANGE1));
     }
@@ -273,7 +279,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getOrCreateInvalidSSTable() throws Exception
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(true);
         prm.getOrCreate(sstable);
     }
@@ -281,7 +287,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void sessionHasData()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
 
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -296,14 +302,14 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void noEmptyCompactionTask()
     {
-        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+        PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(false);
         TimeUUID id = nextTimeUUID();
         mutateRepaired(sstable, id, false);
         prm.getOrCreate(sstable);
         cfs.truncateBlocking();
         Assert.assertFalse(cfs.getSSTables(SSTableSet.LIVE).iterator().hasNext());
-        Assert.assertNull(cfs.getCompactionStrategyManager().getNextBackgroundTask(0));
+        Assert.assertTrue(cfs.getCompactionStrategy().getNextBackgroundTasks(0).isEmpty());
 
     }
 }

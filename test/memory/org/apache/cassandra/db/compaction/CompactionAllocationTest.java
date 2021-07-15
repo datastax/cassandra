@@ -429,6 +429,14 @@ public class CompactionAllocationTest
             readSummaries.put(workload.name(), new ReadSummary(readSampler, readCount));
         }
 
+        ColumnFamilyStore cfs = workload.getCfs();
+        ActiveOperations active = new ActiveOperations();
+        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+
+        CompactionTasks tasks = cfs.getCompactionStrategyContainer()
+                                   .getUserDefinedTasks(sstables, FBUtilities.nowInSeconds());
+        Assert.assertFalse(tasks.isEmpty());
+
         String compactionSummary = "SKIPPED";
         ColumnFamilyStore cfs = workload.getCfs();
         if (!PROFILING_READS)

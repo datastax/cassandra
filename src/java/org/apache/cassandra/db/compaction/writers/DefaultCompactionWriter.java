@@ -26,6 +26,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -55,9 +57,20 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
         return false;
     }
 
-    protected int sstableLevel()
+    @SuppressWarnings("resource")
+    @Override
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        return sstableLevel;
+        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
+                                    estimatedTotalKeys,
+                                    minRepairedAt,
+                                    pendingRepair,
+                                    isTransient,
+                                    cfs.metadata,
+                                    new MetadataCollector(txn.originals(), cfs.metadata().comparator, sstableLevel),
+                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
+                                    cfs.indexManager.listIndexGroups(),
+                                    txn);
     }
 
     protected long sstableKeyCount()

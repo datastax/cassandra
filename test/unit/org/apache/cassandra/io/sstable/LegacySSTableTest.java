@@ -236,7 +236,7 @@ public class LegacySSTableTest
                     TimeUUID random = nextTimeUUID();
                     try
                     {
-                        cfs.getCompactionStrategyManager().mutateRepaired(Collections.singleton(sstable), UNREPAIRED_SSTABLE, random, false);
+                        cfs.mutateRepaired(Collections.singleton(sstable), UNREPAIRED_SSTABLE, random, false);
                         if (!sstable.descriptor.version.hasPendingRepair())
                             fail("We should fail setting pending repair on unsupported sstables "+sstable);
                     }
@@ -251,7 +251,7 @@ public class LegacySSTableTest
                 {
                     try
                     {
-                        cfs.getCompactionStrategyManager().mutateRepaired(Collections.singleton(sstable), UNREPAIRED_SSTABLE, nextTimeUUID(), true);
+                        cfs.mutateRepaired(Collections.singleton(sstable), UNREPAIRED_SSTABLE, nextTimeUUID(), true);
                         if (!sstable.descriptor.version.hasIsTransient())
                             fail("We should fail setting pending repair on unsupported sstables "+sstable);
                     }
@@ -396,10 +396,9 @@ public class LegacySSTableTest
             logger.info("Loading legacy version: {}", legacyVersion);
             truncateLegacyTables(legacyVersion);
             loadLegacyTables(legacyVersion);
-            ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion));
-            AbstractCompactionTask act = cfs.getCompactionStrategyManager().getNextBackgroundTask(0);
+            ColumnFamilyStore cfs = Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple", legacyVersion));
             // there should be no compactions to run with auto upgrades disabled:
-            assertEquals(null, act);
+            assertTrue(cfs.getCompactionStrategy().getNextBackgroundTasks(0).isEmpty());
         }
 
         DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(true);

@@ -17,36 +17,32 @@
  */
 package org.apache.cassandra.schema;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
-import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
+
+import org.apache.cassandra.db.compaction.CompactionStrategy;
+import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
 import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
 import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.commons.lang3.StringUtils;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES;
 
 public final class CompactionParams
 {
-    private static final Logger logger = LoggerFactory.getLogger(CompactionParams.class);
-
     public enum Option
     {
         CLASS,
@@ -76,16 +72,13 @@ public final class CompactionParams
         }
     }
 
-    public static final int DEFAULT_MIN_THRESHOLD = 4;
-    public static final int DEFAULT_MAX_THRESHOLD = 32;
-
     public static final boolean DEFAULT_ENABLED = true;
     public static final TombstoneOption DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES_PROPERTY_VALUE =
         DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES.getEnum(TombstoneOption.NONE);
 
     public static final Map<String, String> DEFAULT_THRESHOLDS =
-        ImmutableMap.of(Option.MIN_THRESHOLD.toString(), Integer.toString(DEFAULT_MIN_THRESHOLD),
-                        Option.MAX_THRESHOLD.toString(), Integer.toString(DEFAULT_MAX_THRESHOLD));
+        ImmutableMap.of(Option.MIN_THRESHOLD.toString(), Integer.toString(CompactionStrategyOptions.DEFAULT_MIN_THRESHOLD),
+                        Option.MAX_THRESHOLD.toString(), Integer.toString(CompactionStrategyOptions.DEFAULT_MAX_THRESHOLD));
 
     public static final CompactionParams DEFAULT;
     static
@@ -105,20 +98,18 @@ public final class CompactionParams
         }
     }
 
-    private final Class<? extends AbstractCompactionStrategy> klass;
-    private final ImmutableMap<String, String> options;
+    private final CompactionStrategyOptions strategyOptions;
     private final boolean isEnabled;
     private final TombstoneOption tombstoneOption;
 
-    private CompactionParams(Class<? extends AbstractCompactionStrategy> klass, Map<String, String> options, boolean isEnabled, TombstoneOption tombstoneOption)
+    private CompactionParams(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean isEnabled, TombstoneOption tombstoneOption)
     {
-        this.klass = klass;
-        this.options = ImmutableMap.copyOf(options);
+        this.strategyOptions = new CompactionStrategyOptions(klass, options, true);
         this.isEnabled = isEnabled;
         this.tombstoneOption = tombstoneOption;
     }
 
-    public static CompactionParams create(Class<? extends AbstractCompactionStrategy> klass, Map<String, String> options)
+    public static CompactionParams create(Class<? extends CompactionStrategy> klass, Map<String, String> options)
     {
         boolean isEnabled = options.containsKey(Option.ENABLED.toString())
                           ? Boolean.parseBoolean(options.get(Option.ENABLED.toString()))
@@ -134,14 +125,7 @@ public final class CompactionParams
         }
         TombstoneOption tombstoneOption = tombstoneOptional.get();
 
-        Map<String, String> allOptions = new HashMap<>(options);
-        if (supportsThresholdParams(klass))
-        {
-            allOptions.putIfAbsent(Option.MIN_THRESHOLD.toString(), Integer.toString(DEFAULT_MIN_THRESHOLD));
-            allOptions.putIfAbsent(Option.MAX_THRESHOLD.toString(), Integer.toString(DEFAULT_MAX_THRESHOLD));
-        }
-
-        return new CompactionParams(klass, allOptions, isEnabled, tombstoneOption);
+        return new CompactionParams(klass, new HashMap<>(options), isEnabled, tombstoneOption);
     }
 
     public static CompactionParams stcs(Map<String, String> options)
@@ -164,20 +148,19 @@ public final class CompactionParams
         return create(TimeWindowCompactionStrategy.class, options);
     }
 
+    public static CompactionParams ucs(Map<String, String> options)
+    {
+        return create(UnifiedCompactionStrategy.class, options);
+    }
+
     public int minCompactionThreshold()
     {
-        String threshold = options.get(Option.MIN_THRESHOLD.toString());
-        return threshold == null
-             ? DEFAULT_MIN_THRESHOLD
-             : Integer.parseInt(threshold);
+        return strategyOptions.minCompactionThreshold();
     }
 
     public int maxCompactionThreshold()
     {
-        String threshold = options.get(Option.MAX_THRESHOLD.toString());
-        return threshold == null
-             ? DEFAULT_MAX_THRESHOLD
-             : Integer.parseInt(threshold);
+        return strategyOptions.maxCompactionThreshold();
     }
 
     public TombstoneOption tombstoneOption()
@@ -185,87 +168,14 @@ public final class CompactionParams
         return tombstoneOption;
     }
 
-    public void validate()
-    {
-        try
-        {
-            Map<?, ?> unknownOptions = (Map) klass.getMethod("validateOptions", Map.class).invoke(null, options);
-            if (!unknownOptions.isEmpty())
-            {
-                throw new ConfigurationException(format("Properties specified %s are not understood by %s",
-                                                        unknownOptions.keySet(),
-                                                        klass.getSimpleName()));
-            }
-        }
-        catch (NoSuchMethodException e)
-        {
-            logger.warn("Compaction strategy {} does not have a static validateOptions method. Validation ignored",
-                        klass.getName());
-        }
-        catch (InvocationTargetException e)
-        {
-            if (e.getTargetException() instanceof ConfigurationException)
-                throw (ConfigurationException) e.getTargetException();
-
-            Throwable cause = e.getCause() == null
-                            ? e
-                            : e.getCause();
-
-            throw new ConfigurationException(format("%s.validateOptions() threw an error: %s %s",
-                                                    klass.getName(),
-                                                    cause.getClass().getName(),
-                                                    cause.getMessage()),
-                                             e);
-        }
-        catch (IllegalAccessException e)
-        {
-            throw new ConfigurationException("Cannot access method validateOptions in " + klass.getName(), e);
-        }
-
-        String minThreshold = options.get(Option.MIN_THRESHOLD.toString());
-        if (minThreshold != null && !StringUtils.isNumeric(minThreshold))
-        {
-            throw new ConfigurationException(format("Invalid value %s for '%s' compaction sub-option - must be an integer",
-                                                    minThreshold,
-                                                    Option.MIN_THRESHOLD));
-        }
-
-        String maxThreshold = options.get(Option.MAX_THRESHOLD.toString());
-        if (maxThreshold != null && !StringUtils.isNumeric(maxThreshold))
-        {
-            throw new ConfigurationException(format("Invalid value %s for '%s' compaction sub-option - must be an integer",
-                                                    maxThreshold,
-                                                    Option.MAX_THRESHOLD));
-        }
-
-        if (minCompactionThreshold() <= 0 || maxCompactionThreshold() <= 0)
-        {
-            throw new ConfigurationException("Disabling compaction by setting compaction thresholds to 0 has been removed,"
-                                             + " set the compaction option 'enabled' to false instead.");
-        }
-
-        if (minCompactionThreshold() <= 1)
-        {
-            throw new ConfigurationException(format("Min compaction threshold cannot be less than 2 (got %d)",
-                                                    minCompactionThreshold()));
-        }
-
-        if (minCompactionThreshold() > maxCompactionThreshold())
-        {
-            throw new ConfigurationException(format("Min compaction threshold (got %d) cannot be greater than max compaction threshold (got %d)",
-                                                    minCompactionThreshold(),
-                                                    maxCompactionThreshold()));
-        }
-    }
-
     double defaultBloomFilterFbChance()
     {
-        return klass.equals(LeveledCompactionStrategy.class) ? 0.1 : 0.01;
+        return klass().equals(LeveledCompactionStrategy.class) ? 0.1 : 0.01;
     }
 
-    public Class<? extends AbstractCompactionStrategy> klass()
+    public Class<? extends CompactionStrategy> klass()
     {
-        return klass;
+        return strategyOptions.klass();
     }
 
     /**
@@ -273,7 +183,7 @@ public final class CompactionParams
      */
     public Map<String, String> options()
     {
-        return options;
+        return strategyOptions.getOptions();
     }
 
     public boolean isEnabled()
@@ -296,14 +206,14 @@ public final class CompactionParams
         return create(classFromName(className), options);
     }
 
-    public static Class<? extends AbstractCompactionStrategy> classFromName(String name)
+    public static Class<? extends CompactionStrategy> classFromName(String name)
     {
         String className = name.contains(".")
                          ? name
                          : "org.apache.cassandra.db.compaction." + name;
-        Class<AbstractCompactionStrategy> strategyClass = FBUtilities.classForName(className, "compaction strategy");
+        Class<CompactionStrategy> strategyClass = FBUtilities.classForName(className, "compaction strategy");
 
-        if (!AbstractCompactionStrategy.class.isAssignableFrom(strategyClass))
+        if (!CompactionStrategy.class.isAssignableFrom(strategyClass))
         {
             throw new ConfigurationException(format("Compaction strategy class %s is not derived from AbstractReplicationStrategy",
                                                     className));
@@ -312,40 +222,17 @@ public final class CompactionParams
         return strategyClass;
     }
 
-    /*
-     * LCS doesn't, STCS and DTCS do
-     */
-    @SuppressWarnings("unchecked")
-    public static boolean supportsThresholdParams(Class<? extends AbstractCompactionStrategy> klass)
-    {
-        try
-        {
-            Map<String, String> unrecognizedOptions =
-                (Map<String, String>) klass.getMethod("validateOptions", Map.class)
-                                           .invoke(null, DEFAULT_THRESHOLDS);
-
-            return unrecognizedOptions.isEmpty();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
     public Map<String, String> asMap()
     {
         Map<String, String> map = new HashMap<>(options());
-        map.put(Option.CLASS.toString(), klass.getName());
+        map.put(Option.CLASS.toString(), klass().getName());
         return map;
     }
 
     @Override
     public String toString()
     {
-        return MoreObjects.toStringHelper(this)
-                          .add("class", klass.getName())
-                          .add("options", options)
-                          .toString();
+        return strategyOptions.toString();
     }
 
     @Override
@@ -359,12 +246,12 @@ public final class CompactionParams
 
         CompactionParams cp = (CompactionParams) o;
 
-        return klass.equals(cp.klass) && options.equals(cp.options);
+        return strategyOptions.equals(cp.strategyOptions);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(klass, options);
+        return Objects.hash(strategyOptions);
     }
 }

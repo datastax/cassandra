@@ -82,7 +82,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void getBoundariesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
     }
 
@@ -90,11 +90,11 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void disallowedDirectoriesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
         DisallowedDirectories.maybeMarkUnwritable(new File(tmpDir, "3"));
         dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(2, dbv.positions.size());
+        Assert.assertEquals(2, dbv.getPositions().size());
         Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File(tmpDir, "1")),
                                                new Directories.DataDirectory(new File(tmpDir, "2"))),
                                  dbv.directories);

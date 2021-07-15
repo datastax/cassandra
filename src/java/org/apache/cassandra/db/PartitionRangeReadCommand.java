@@ -331,9 +331,14 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime);
     }
 
-    protected void recordLatency(TableMetrics metric, long latencyNanos)
+    protected void recordReadLatency(TableMetrics metric, long latencyNanos)
     {
         metric.rangeLatency.addNano(latencyNanos);
+    }
+
+    protected void recordReadRequest(TableMetrics metric)
+    {
+        metric.rangeRequests.inc();
     }
 
     @VisibleForTesting
@@ -348,7 +353,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         try
         {
             // avoid iterating over the memtable if we purge all tombstones
-            boolean useMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
+            boolean useMinLocalDeletionTime = cfs.onlyPurgeRepairedTombstones();
 
             SSTableReadsListener readCountUpdater = newReadCountUpdater();
             for (Memtable memtable : view.memtables)

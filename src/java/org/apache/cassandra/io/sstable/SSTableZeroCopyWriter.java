@@ -152,6 +152,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     @Override
     public long getBytesWritten()
     {
+        // TODO: these two may need fixing.
         return 0;
     }
 
@@ -159,6 +160,12 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     public long getOnDiskBytesWritten()
     {
         return 0;
+    }
+
+    @Override
+    public int getSegmentCount()
+    {
+        return 1;
     }
 
     @Override
