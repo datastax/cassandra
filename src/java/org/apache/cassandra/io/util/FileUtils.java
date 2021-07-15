@@ -723,6 +723,16 @@ public final class FileUtils
     {
         return parent.isAncestorOf(child);
     }
+    
+    /**
+     * Handle large file system by returning {@code Long.MAX_VALUE} when the size overflows.
+     * @param size returned by the Java's FileStore methods
+     * @return the size or {@code Long.MAX_VALUE} if the size was bigger than {@code Long.MAX_VALUE}
+     */
+    public static long handleLargeFileSystem(long size)
+    {
+        return size < 0 ? Long.MAX_VALUE : size;
+    }
 
     /** @deprecated See CASSANDRA-16926 */
     @Deprecated(since = "4.1")
