@@ -43,7 +43,7 @@ public abstract class SSTableReaderWithFilter extends SSTableReader
     {
         super(builder, owner);
         this.filter = Objects.requireNonNull(builder.getFilter());
-        this.filterTracker = new BloomFilterTracker();
+        this.filterTracker = owner.getBloomFilterTracker();
     }
 
     @Override

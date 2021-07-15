@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Set;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -27,9 +28,9 @@ public class TimeWindowCompactionTask extends CompactionTask
 {
     private final boolean ignoreOverlaps;
 
-    public TimeWindowCompactionTask(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore, boolean ignoreOverlaps)
+    public TimeWindowCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, boolean ignoreOverlaps, TimeWindowCompactionStrategy strategy)
     {
-        super(strategy, txn, gcBefore, false);
+        super(cfs, txn, gcBefore, false, strategy);
         this.ignoreOverlaps = ignoreOverlaps;
     }
 

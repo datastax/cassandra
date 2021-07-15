@@ -65,7 +65,7 @@ class Helpers
     {
         // ensure the ones being removed are the exact same ones present
         for (T reader : remove)
-            assert original.get(reader) == reader;
+            assert original.get(reader) == reader : String.format("%s not found in original set: %s", reader, original);
 
         // ensure we don't already contain any we're adding, that we aren't also removing
         assert !any(add, and(not(in(remove)), in(original.keySet()))) : String.format("original:%s remove:%s add:%s", original.keySet(), remove, add);
