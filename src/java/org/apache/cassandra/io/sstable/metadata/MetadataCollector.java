@@ -178,6 +178,12 @@ public class MetadataCollector implements PartitionStatisticsCollector
         commitLogIntervals(intervals.build());
     }
 
+    public MetadataCollector(Iterable<SSTableReader> sstables, ClusteringComparator comparator, int level)
+    {
+        this(sstables, comparator);
+        sstableLevel(level);
+    }
+
     public MetadataCollector addKey(ByteBuffer key)
     {
         long hashed = MurmurHash.hash2_64(key, key.position(), key.remaining(), 0);

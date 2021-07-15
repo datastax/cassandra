@@ -29,6 +29,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -47,7 +48,7 @@ public class Upgrader
     private final File directory;
 
     private final CompactionController controller;
-    private final CompactionStrategyManager strategyManager;
+    private final CompactionStrategyContainer strategyContainer;
     private final long estimatedRows;
 
     private final OutputHandler outputHandler;
@@ -63,9 +64,9 @@ public class Upgrader
 
         this.controller = new UpgradeController(cfs);
 
-        this.strategyManager = cfs.getCompactionStrategyManager();
+        this.strategyContainer = cfs.getCompactionStrategyContainer();
         long estimatedTotalKeys = Math.max(cfs.metadata().params.minIndexInterval, SSTableReader.getApproximateKeyCount(Collections.singletonList(this.sstable)));
-        long estimatedSSTables = Math.max(1, SSTableReader.getTotalBytes(Collections.singletonList(this.sstable)) / strategyManager.getMaxSSTableBytes());
+        long estimatedSSTables = Math.max(1, SSTableReader.getTotalBytes(Collections.singletonList(this.sstable)) / strategyContainer.getMaxSSTableBytes());
         this.estimatedRows = (long) Math.ceil((double) estimatedTotalKeys / estimatedSSTables);
     }
 
@@ -93,7 +94,7 @@ public class Upgrader
         outputHandler.output("Upgrading " + sstable);
         long nowInSec = FBUtilities.nowInSeconds();
         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, keepOriginals, CompactionTask.getMaxDataAge(transaction.originals()));
-             AbstractCompactionStrategy.ScannerList scanners = strategyManager.getScanners(transaction.originals());
+             ScannerList scanners = strategyContainer.getScanners(transaction.originals());
              CompactionIterator iter = new CompactionIterator(transaction.opType(), scanners.scanners, controller, nowInSec, nextTimeUUID()))
         {
             writer.switchWriter(createCompactionWriter(sstable.getSSTableMetadata()));

@@ -20,14 +20,19 @@ package org.apache.cassandra.db.compaction.writers;
 import java.util.Arrays;
 import java.util.Set;
 
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
 /**
  * CompactionAwareWriter that splits input in differently sized sstables
@@ -91,16 +96,24 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         return false;
     }
 
-    protected int sstableLevel()
-    {
-        return 0;
-    }
-
-    protected long sstableKeyCount()
+    @Override
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
         long currentPartitionsToWrite = Math.round(ratios[currentRatioIndex] * estimatedTotalKeys);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);
-        return currentPartitionsToWrite;
+
+        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(currentPartitionsToWrite)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(allSSTables, cfs.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
 
     @Override

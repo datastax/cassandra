@@ -239,6 +239,11 @@ public final class JVMStabilityInspector
         return oldKiller;
     }
 
+    public static Killer killer()
+    {
+        return killer;
+    }
+
     @VisibleForTesting
     public static class Killer
     {
