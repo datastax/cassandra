@@ -95,10 +95,10 @@ public class CompactionTaskTest
     @Before
     public void setUp() throws Exception
     {
-        cfs.getCompactionStrategyManager().enable();
+        cfs.getCompactionStrategyContainer().enable();
         cfs.truncateBlocking();
 
-        gcGraceCfs.getCompactionStrategyManager().enable();
+        gcGraceCfs.getCompactionStrategyContainer().enable();
         gcGraceCfs.truncateBlocking();
     }
 
@@ -119,7 +119,7 @@ public class CompactionTaskTest
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             id = txn.opId();
-            CompactionTask task = new CompactionTask(cfs, txn, 0, false);
+            CompactionTask task = new CompactionTask(cfs, txn, 0, false, null);
             task.execute(CompactionManager.instance.active);
         }
 
@@ -139,7 +139,7 @@ public class CompactionTaskTest
     @Test
     public void compactionDisabled() throws Exception
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
         Util.flush(cfs);
@@ -155,7 +155,7 @@ public class CompactionTaskTest
 
         AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
         Assert.assertNotNull(task);
-        cfs.getCompactionStrategyManager().pause();
+        cfs.getCompactionStrategyContainer().pause();
         try
         {
             task.execute(CompactionManager.instance.active);
@@ -178,7 +178,7 @@ public class CompactionTaskTest
     public void testFullyExpiredSSTablesAreNotReleasedPrematurely()
     {
         Assert.assertEquals(0, gcGraceCfs.getLiveSSTables().size());
-        gcGraceCfs.getCompactionStrategyManager().disable();
+        gcGraceCfs.getCompactionStrategyContainer().disable();
 
         // Use large SSTables (10+ MiB) so that switching to new output SSTables happens during
         // compaction. Without large enough SSTables, the output fits in one SSTable and no switch happens
@@ -284,7 +284,7 @@ public class CompactionTaskTest
 
             // Use MaxSSTableSizeWriter with a small max size (2 MiB) to force output sstable switches during compaction.
             long maxSSTableSize = 2L * 1024 * 1024; // 2 MiB
-            CompactionTask task = new CompactionTask(gcGraceCfs, txn, FBUtilities.nowInSeconds() + 2, false)
+            CompactionTask task = new CompactionTask(gcGraceCfs, txn, FBUtilities.nowInSeconds() + 2, false, null)
             {
                 @Override
                 public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs,
@@ -340,7 +340,7 @@ public class CompactionTaskTest
     @Test
     public void compactionInterruption()
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         Set<SSTableReader> sstables = generateData(2, 2);
 
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
@@ -385,7 +385,7 @@ public class CompactionTaskTest
     @Test
     public void mixedSSTableFailure() throws Exception
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         Util.flush(cfs);
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
@@ -434,7 +434,7 @@ public class CompactionTaskTest
     @Test
     public void testOfflineCompaction()
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         Util.flush(cfs);
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
@@ -453,7 +453,7 @@ public class CompactionTaskTest
         try (LifecycleTransaction txn = new LifecycleTransaction(tracker, OperationType.COMPACTION, sstables))
         {
             Assert.assertEquals(4, tracker.getView().liveSSTables().size());
-            CompactionTask task = new CompactionTask(cfs, txn, 1000, false);
+            CompactionTask task = new CompactionTask(cfs, txn, 1000, false, null);
             task.execute(new ActiveOperations());
 
             // Check that new SSTable was not released
@@ -471,15 +471,15 @@ public class CompactionTaskTest
     @Test
     public void testMajorCompactTask()
     {
-        //major compact without range/pk specified
-        CompactionTasks compactionTasks = cfs.getCompactionStrategyManager().getMaximalTasks(Integer.MAX_VALUE, false, OperationType.MAJOR_COMPACTION);
+        //major compact without range/pk specified 
+        CompactionTasks compactionTasks = cfs.getCompactionStrategyContainer().getMaximalTasks(Integer.MAX_VALUE, false);
         Assert.assertTrue(compactionTasks.stream().allMatch(task -> task.compactionType.equals(OperationType.MAJOR_COMPACTION)));
     }
     
     @Test
     public void testCompactionReporting()
     {
-        cfs.getCompactionStrategyManager().disable();
+        cfs.getCompactionStrategyContainer().disable();
         Set<SSTableReader> sstables = generateData(2, 2);
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         assertNotNull(txn);
@@ -487,13 +487,14 @@ public class CompactionTaskTest
         CompactionObserver compObserver = Mockito.mock(CompactionObserver.class);
         final ArgumentCaptor<TableOperation> tableOpCaptor = ArgumentCaptor.forClass(AbstractTableOperation.class);
         final ArgumentCaptor<CompactionProgress> compactionCaptor = ArgumentCaptor.forClass(CompactionProgress.class);
-        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0, compObserver);
+        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        task.addObserver(compObserver);
         assertNotNull(task);
         task.execute(operationObserver);
 
         verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
-        verify(compObserver, times(1)).setInProgress(compactionCaptor.capture());
-        verify(compObserver, times(1)).setCompleted(eq(txn.opId()));
+        verify(compObserver, times(1)).onInProgress(compactionCaptor.capture());
+        verify(compObserver, times(1)).onCompleted(eq(txn.opId()));
     }
 
 

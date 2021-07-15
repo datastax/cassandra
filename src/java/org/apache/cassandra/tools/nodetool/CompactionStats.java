@@ -73,24 +73,36 @@ public class CompactionStats extends NodeToolCmd
     private void pendingTasksAndConcurrentCompactorsStats(NodeProbe probe, TableBuilder tableBuilder)
     {
         Map<String, Map<String, Integer>> pendingTaskNumberByTable =
-        (Map<String, Map<String, Integer>>) probe.getCompactionMetric("PendingTasksByTableName");
+            (Map<String, Map<String, Integer>>) probe.getCompactionMetric("PendingTasksByTableName");
+        Map<String, Map<String, Double>> writeAmplificationByTableName =
+            (Map<String, Map<String, Double>>) probe.getCompactionMetric("WriteAmplificationByTableName");
 
         tableBuilder.add("concurrent compactors", Integer.toString(probe.getConcurrentCompactors()));
-        tableBuilder.add("pending tasks", Integer.toString(numPendingTasks(pendingTaskNumberByTable)));
-
-        for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
-            for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
-                tableBuilder.add(ksEntry.getKey(), tableEntry.getKey(), tableEntry.getValue().toString());
-    }
-
-    private int numPendingTasks(Map<String, Map<String, Integer>> pendingTaskNumberByTable)
-    {
         int numTotalPendingTasks = 0;
+        double totWriteAmplification = 0;
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
+        {
+            Map<String, Double> ksWriteAmplification = writeAmplificationByTableName.get(ksEntry.getKey());
             for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
+            {
                 numTotalPendingTasks += tableEntry.getValue();
+                if (ksWriteAmplification != null)
+                    totWriteAmplification += ksWriteAmplification.get(tableEntry.getKey());
+            }
+        }
+        tableBuilder.add("pending tasks", Integer.toString(numTotalPendingTasks));
+        tableBuilder.add("write amplification", String.format("%.2f", totWriteAmplification));
 
-        return numTotalPendingTasks;
+        for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
+        {
+            Map<String, Double> ksWriteAmplification = writeAmplificationByTableName.get(ksEntry.getKey());
+            for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
+            {
+                double wa = ksWriteAmplification == null ? 0 : ksWriteAmplification.get(tableEntry.getKey());
+                tableBuilder.add(ksEntry.getKey(), tableEntry.getKey(), tableEntry.getValue().toString());
+                tableBuilder.add(ksEntry.getKey(), String.format("%s write amplification", tableEntry.getKey()), String.format("%.2f", wa));
+            }
+        }
     }
 
     private void compactionsStats(NodeProbe probe, TableBuilder tableBuilder)
