@@ -57,6 +57,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
@@ -84,55 +85,23 @@ public class CompactionTask extends AbstractCompactionTask
 
     // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
     @Nullable
-    private final AbstractCompactionStrategy strategy;
+    private final CompactionStrategy strategy;
 
-    /**
-     * This constructs a compaction tasks that operations that do not normally have a compaction strategy, such as tombstone
-     * collection or table splitting, also tests.
-     */
-    protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, boolean keepOriginals)
-    {
-        this(cfs, txn, gcBefore, keepOriginals, CompactionObserver.NO_OP, null);
-    }
-
-    /**
-     * This constructs a compaction task that has been created by a compaction strategy.
-     */
-    protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore, boolean keepOriginals)
-    {
-        this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy.getBackgroundCompactions(), strategy);
-    }
-
-    private CompactionTask(ColumnFamilyStore cfs,
-                           LifecycleTransaction txn,
-                           long gcBefore,
-                           boolean keepOriginals,
-                           CompactionObserver compObserver,
-                           @Nullable AbstractCompactionStrategy strategy)
+    public CompactionTask(ColumnFamilyStore cfs,
+                          LifecycleTransaction txn,
+                          long gcBefore,
+                          boolean keepOriginals,
+                          @Nullable CompactionStrategy strategy)
     {
         super(cfs, txn);
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
-        this.compObserver = compObserver;
         this.strategy = strategy;
 
+        if (strategy != null)
+            addObserver(strategy);
+
         logger.debug("Created compaction task with id {} and strategy {}", txn.opId(), strategy);
-    }
-
-    /**
-     * Create a compaction task for a generic compaction strategy.
-     */
-    public static AbstractCompactionTask forCompaction(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
-    {
-        return new CompactionTask(strategy, txn, gcBefore, false);
-    }
-
-    /**
-     * Create a compaction task for {@link TimeWindowCompactionStrategy}.
-     */
-    static AbstractCompactionTask forTimeWindowCompaction(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
-    {
-        return new TimeWindowCompactionTask(strategy, txn, gcBefore, strategy.ignoreOverlaps());
     }
 
     /**
@@ -140,15 +109,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore)
     {
-        return new CompactionTask(cfs, txn, gcBefore, false);
-    }
-
-    /**
-     * Create a compaction task without a compaction strategy, currently only called by tests.
-     */
-    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, CompactionObserver compObserver)
-    {
-        return new CompactionTask(cfs, txn, gcBefore, false, compObserver, null);
+        return new CompactionTask(cfs, txn, gcBefore, false, null);
     }
 
     /**
@@ -156,7 +117,7 @@ public class CompactionTask extends AbstractCompactionTask
      */
     public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
-        AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false)
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false, null)
         {
             @Override
             protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
@@ -244,11 +205,11 @@ public class CompactionTask extends AbstractCompactionTask
     public final class CompactionOperation implements AutoCloseable
     {
         private final CompactionController controller;
-        private final CompactionStrategyManager strategyManager;
+        private final CompactionStrategy strategy;
         private final Set<SSTableReader> fullyExpiredSSTables;
         private final TimeUUID taskId;
         private final RateLimiter limiter;
-        private final long start;
+        private final long startNanos;
         private final long startTime;
         private final Set<SSTableReader> actuallyCompact;
         private final CompactionProgress progress;
@@ -263,7 +224,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         // resources that need closing
         private Refs<SSTableReader> sstableRefs;
-        private AbstractCompactionStrategy.ScannerList scanners;
+        private ScannerList scanners;
         private CompactionIterator compactionIterator;
         private TableOperation op;
         private Closeable obsCloseable;
@@ -279,9 +240,7 @@ public class CompactionTask extends AbstractCompactionTask
         {
             this.controller = controller;
 
-            // Note that the current compaction strategy, is not necessarily the one this task was created under.
-            // This should be harmless; see comments to CFS.maybeReloadCompactionStrategy.
-            this.strategyManager = cfs.getCompactionStrategyManager();
+            this.strategy = cfs.getCompactionStrategy();
             this.fullyExpiredSSTables = controller.getFullyExpiredSSTables();
             this.taskId = transaction.opId();
 
@@ -298,7 +257,7 @@ public class CompactionTask extends AbstractCompactionTask
             assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(cfs.name));
 
             this.limiter = CompactionManager.instance.getRateLimiter();
-            this.start = Clock.Global.nanoTime();
+            this.startNanos = Clock.Global.nanoTime();
             this.startTime = Clock.Global.currentTimeMillis();
             this.actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
             this.progress = new Progress();
@@ -313,13 +272,13 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.scanners = strategyManager.getScanners(actuallyCompact);
+                this.scanners = strategy.getScanners(actuallyCompact);
                 this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
                 this.op = compactionIterator.getOperation();
                 this.writer = getCompactionAwareWriter(cfs, dirs, transaction, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
 
-                compObserver.setInProgress(progress);
+                compObservers.forEach(obs -> obs.onInProgress(progress));
             }
             catch (Throwable t)
             {
@@ -351,7 +310,7 @@ public class CompactionTask extends AbstractCompactionTask
                 debugLogCompactingMessage(taskId);
             }
 
-            long lastCheckObsoletion = start;
+            long lastCheckObsoletion = startNanos;
             double compressionRatio = scanners.getCompressionRatio();
             if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)
                 compressionRatio = 1.0;
@@ -360,7 +319,7 @@ public class CompactionTask extends AbstractCompactionTask
 
             long lastBytesScanned = 0;
 
-            if (!controller.cfs.getCompactionStrategyManager().isActive())
+            if (!controller.cfs.getCompactionStrategyContainer().isActive())
                 throw new CompactionInterruptedException(op.getProgress());
 
             estimatedKeys = writer.estimatedKeys();
@@ -429,17 +388,22 @@ public class CompactionTask extends AbstractCompactionTask
             if (completed)
             {
                 updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress, ImmutableMap.of(COMPACTION_TYPE_PROPERTY, compactionType.type));
+                CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTables.size());
+                if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
+                    // this CompactionOperation only deleted fully expired SSTables without compacting anything
+                    CompactionManager.instance.incrementDeleteOnlyCompactions();
 
                 if (logger.isDebugEnabled())
-                    debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, progress);
-
+                    debugLogCompactionSummaryInfo(taskId, Clock.Global.nanoTime() - startNanos, totalKeysWritten, newSStables, progress);
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
 
-                cfs.getCompactionLogger().compaction(startTime, transaction.originals(), Clock.Global.currentTimeMillis(), newSStables);
+                strategy.getCompactionLogger().compaction(startTime, transaction.originals(), Clock.Global.currentTimeMillis(), newSStables);
 
                 // update the metrics
-                cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
+                cfs.metric.incBytesCompacted(progress.adjustedInputDiskSize(),
+                                             progress.outputDiskSize(),
+                                             Clock.Global.nanoTime() - startNanos);
             }
 
             Throwables.maybeFail(err);
@@ -524,9 +488,9 @@ public class CompactionTask extends AbstractCompactionTask
 
             @Override
             @Nullable
-            public AbstractCompactionStrategy strategy()
+            public CompactionStrategy strategy()
             {
-                return strategy;
+                return CompactionTask.this.strategy;
             }
 
             @Override
@@ -594,7 +558,7 @@ public class CompactionTask extends AbstractCompactionTask
             @Override
             public long durationInNanos()
             {
-                return Clock.Global.nanoTime() - start;
+                return Clock.Global.nanoTime() - startNanos;
             }
 
             @Override
@@ -726,7 +690,7 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         final Set<SSTableReader> nonExpiredSSTables = Sets.difference(transaction.originals(), fullyExpiredSSTables);
-        CompactionStrategyManager strategy = cfs.getCompactionStrategyManager();
+        CompactionStrategy strategy = cfs.getCompactionStrategy();
         int sstablesRemoved = 0;
 
         while(!nonExpiredSSTables.isEmpty())
@@ -881,13 +845,12 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     private void debugLogCompactionSummaryInfo(TimeUUID taskId,
-                                               long start,
+                                               long durationInNano,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
                                                CompactionProgress progress)
     {
         // log a bunch of statistics about the result and save to system table compaction_history
-        long durationInNano = Clock.Global.nanoTime() - start;
         long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
 
         long totalMergedPartitions = 0;

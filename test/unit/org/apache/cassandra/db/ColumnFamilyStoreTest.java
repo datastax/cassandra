@@ -644,7 +644,7 @@ public class ColumnFamilyStoreTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
         List<String> dataPaths = cfs.getDataPaths();
-        Assert.assertFalse(dataPaths.isEmpty());
+        assertFalse(dataPaths.isEmpty());
 
         Path path = Paths.get(dataPaths.get(0));
 
@@ -696,6 +696,28 @@ public class ColumnFamilyStoreTest
         schemaAndManifestFileSizes += manifestFile.isPresent() ? manifestFile.get().length() : 0;
 
         return schemaAndManifestFileSizes;
+    }
+    
+    @Test
+    public void testMutateRepaired() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+
+        new RowUpdateBuilder(cfs.metadata(), 0, "key1").clustering("Column1").add("val", "val1").build().applyUnsafe();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        assertEquals(1, sstables.size());
+
+        SSTableReader sstable = sstables.iterator().next();
+        assertFalse(sstable.isRepaired());
+
+        int repaired = cfs.mutateRepaired(sstables, 1, null, false);
+        assertEquals(1, repaired);
+
+        sstables = cfs.getLiveSSTables();
+        sstable = sstables.iterator().next();
+        assertTrue(sstable.isRepaired());
     }
 
     private Memtable fakeMemTableWithMinTS(ColumnFamilyStore cfs, long minTS)

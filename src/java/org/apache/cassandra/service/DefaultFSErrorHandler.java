@@ -65,7 +65,6 @@ public class DefaultFSErrorHandler implements FSErrorHandler
 
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
-            case die:
             case stop_paranoid:
             case stop:
                 // exception not logged here on purpose as it is already logged
@@ -93,6 +92,9 @@ public class DefaultFSErrorHandler implements FSErrorHandler
                     if (directory != null)
                         Keyspace.removeUnreadableSSTables(directory);
                 }
+                break;
+            case die:
+                JVMStabilityInspector.killCurrentJVM(e, false);
                 break;
             case ignore:
                 // already logged, so left nothing to do
