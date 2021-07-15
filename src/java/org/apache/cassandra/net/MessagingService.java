@@ -31,10 +31,10 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
-import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -51,7 +51,6 @@ import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
 import static java.util.Collections.synchronizedList;
 import static java.util.concurrent.TimeUnit.MINUTES;
-
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.NON_GRACEFUL_SHUTDOWN;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -218,9 +217,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         VERSION_3014(11),
         VERSION_40(12),
         // c14227 TTL overflow, 'uint' timestamps
-        VERSION_50(13);
+        VERSION_50(13),
+        VERSION_SG_10(100), // DS Converged Cassandra 4.0
+        VERSION_SG_20(110), // DS Converged Cassandra 5.0
+        ;
 
-        public static final Version CURRENT = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_40 : VERSION_50;
+        public static final Version CURRENT = VERSION_SG_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
 
@@ -248,12 +250,13 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_3014 = 11;
     public static final int VERSION_40 = 12;
     public static final int VERSION_50 = 13; // c14227 TTL overflow, 'uint' timestamps
+    public static final int VERSION_SG_10 = 100; // DS Converged Cassandra 4.0
+    public static final int VERSION_SG_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
     public static final int current_version = Version.CURRENT.value;
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
-    static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
+    static AcceptVersions accept_streaming = new AcceptVersions(minimum_version, current_version);
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, v -> v.ordinal()));
-
     /**
      * This is an optimisation to speed up the translation of the serialization
      * version to the {@link Version} enum ordinal.

@@ -336,7 +336,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
             hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
-            correspondingMessagingVersion = MessagingService.VERSION_40;
+            correspondingMessagingVersion = MessagingService.VERSION_50;
         }
 
         @Override

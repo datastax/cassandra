@@ -25,13 +25,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
@@ -50,11 +50,16 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
+import static org.apache.cassandra.db.commitlog.CommitLogDescriptor.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
+import static org.apache.cassandra.net.MessagingService.VERSION_SG_20;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
-import static org.apache.cassandra.utils.vint.VIntCoding.*;
+import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
+import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
+import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt32;
+import static org.apache.cassandra.utils.vint.VIntCoding.skipUnsignedVInt;
 
 /**
  * Immutable main unit of internode communication - what used to be {@code MessageIn} and {@code MessageOut} fused
@@ -1077,6 +1082,8 @@ public class Message<T>
 
     private int serializedSize40;
     private int serializedSize50;
+    private int serializedSizeSG10;
+    private int serializedSizeSG20;
 
     /**
      * Serialized size of the entire message, for the provided messaging version. Caches the calculated value.
@@ -1093,6 +1100,14 @@ public class Message<T>
                 if (serializedSize50 == 0)
                     serializedSize50 = serializer.serializedSize(this, VERSION_50);
                 return serializedSize50;
+            case VERSION_SG_10:
+                if (serializedSizeSG10 == 0)
+                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
+                return serializedSizeSG10;
+            case VERSION_SG_20:
+                if (serializedSizeSG20 == 0)
+                    serializedSizeSG20 = (int) serializer.serializedSize(this, VERSION_SG_20);
+                return serializedSizeSG20;
             default:
                 throw new IllegalStateException("Unkown serialization version " + version);
         }
@@ -1100,6 +1115,8 @@ public class Message<T>
 
     private int payloadSize40   = -1;
     private int payloadSize50   = -1;
+    private int payloadSizeSG10 = -1;
+    private int payloadSizeSG20 = -1;
 
     private int payloadSize(int version)
     {
@@ -1113,7 +1130,14 @@ public class Message<T>
                 if (payloadSize50 < 0)
                     payloadSize50 = serializer.payloadSize(this, VERSION_50);
                 return payloadSize50;
-
+            case VERSION_SG_10:
+                if (payloadSizeSG10 < 0)
+                    payloadSizeSG10 = serializer.payloadSize(this, VERSION_SG_10);
+                return payloadSizeSG10;
+            case VERSION_SG_20:
+                if (payloadSizeSG20 < 0)
+                    payloadSizeSG20 = serializer.payloadSize(this, VERSION_SG_20);
+                return payloadSizeSG20;
             default:
                 throw new IllegalStateException("Unkown serialization version " + version);
         }
