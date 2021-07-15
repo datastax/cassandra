@@ -42,18 +42,18 @@ public class CompactionStrategyManagerBoundaryReloadTest extends CQLTester
     {
         createTable("create table %s (id int primary key)");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        List<List<AbstractCompactionStrategy>> strategies = cfs.getCompactionStrategyManager().getStrategies();
+        List<CompactionStrategy> strategies = cfs.getCompactionStrategyContainer().getStrategies();
         DiskBoundaries db = cfs.getDiskBoundaries();
         StorageService.instance.getTokenMetadata().invalidateCachedRings();
         // make sure the strategy instances are the same (no reload)
-        assertTrue(isSame(strategies, cfs.getCompactionStrategyManager().getStrategies()));
+        assertTrue(isSame(strategies, cfs.getCompactionStrategyContainer().getStrategies()));
         // but disk boundaries are not .equal (ring version changed)
         assertNotEquals(db, cfs.getDiskBoundaries());
         assertTrue(db.isEquivalentTo(cfs.getDiskBoundaries()));
 
         db = cfs.getDiskBoundaries();
         alterTable("alter table %s with comment = 'abcd'");
-        assertTrue(isSame(strategies, cfs.getCompactionStrategyManager().getStrategies()));
+        assertTrue(isSame(strategies, cfs.getCompactionStrategyContainer().getStrategies()));
         // disk boundaries don't change because of alter
         assertEquals(db, cfs.getDiskBoundaries());
     }
@@ -63,36 +63,33 @@ public class CompactionStrategyManagerBoundaryReloadTest extends CQLTester
     {
         createTable("create table %s (id int primary key)");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        List<List<AbstractCompactionStrategy>> strategies = cfs.getCompactionStrategyManager().getStrategies();
+        List<CompactionStrategy> strategies = cfs.getCompactionStrategyContainer().getStrategies();
         DiskBoundaries db = cfs.getDiskBoundaries();
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
         tmd.updateNormalToken(tmd.partitioner.getMinimumToken(), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(tmd.partitioner.getMaximumToken(), InetAddressAndPort.getByName("127.0.0.2"));
         // make sure the strategy instances have been reloaded
         assertFalse(isSame(strategies,
-                           cfs.getCompactionStrategyManager().getStrategies()));
+                           cfs.getCompactionStrategyContainer().getStrategies()));
         assertNotEquals(db, cfs.getDiskBoundaries());
         db = cfs.getDiskBoundaries();
 
-        strategies = cfs.getCompactionStrategyManager().getStrategies();
+        strategies = cfs.getCompactionStrategyContainer().getStrategies();
         alterTable("alter table %s with compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': false}");
         assertFalse(isSame(strategies,
-                           cfs.getCompactionStrategyManager().getStrategies()));
+                           cfs.getCompactionStrategyContainer().getStrategies()));
         assertEquals(db, cfs.getDiskBoundaries());
 
     }
 
-    private boolean isSame(List<List<AbstractCompactionStrategy>> a, List<List<AbstractCompactionStrategy>> b)
+    private boolean isSame(List<CompactionStrategy> a, List<CompactionStrategy> b)
     {
         if (a.size() != b.size())
             return false;
         for (int i = 0; i < a.size(); i++)
         {
-            if (a.get(i).size() != b.get(i).size())
+            if (a.get(i) != b.get(i))
                 return false;
-            for (int j = 0; j < a.get(i).size(); j++)
-                if (a.get(i).get(j) != b.get(i).get(j))
-                    return false;
         }
         return true;
     }

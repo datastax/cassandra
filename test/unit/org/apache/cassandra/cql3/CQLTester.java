@@ -66,6 +66,7 @@ import javax.management.remote.rmi.RMIConnectorServer;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import org.apache.commons.lang3.ArrayUtils;
@@ -655,7 +656,8 @@ public abstract class CQLTester
     private static void startServices()
     {
         VirtualKeyspaceRegistry.instance.register(VirtualSchemaKeyspace.instance);
-        StorageService.instance.initServer();
+        if (!StorageService.instance.isInitialized())
+            StorageService.instance.initServer();
         SchemaLoader.startGossiper();
     }
 
@@ -918,6 +920,14 @@ public abstract class CQLTester
         if (keyspaces.isEmpty())
             return null;
         return keyspaces.get(keyspaces.size() - 1);
+    }
+
+    protected Collection<String> currentTables()
+    {
+        if (tables == null || tables.isEmpty())
+            return ImmutableList.of();
+
+        return new ArrayList<>(tables);
     }
 
     protected ByteBuffer unset()
