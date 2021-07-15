@@ -234,7 +234,7 @@ public class TableStatsHolder implements StatsHolder
                 statsTable.maxSSTableSize = sstableSize == null ? 0 : sstableSize;
 
                 int[] leveledSStables = table.getSSTableCountPerLevel();
-                if (leveledSStables != null)
+                if (leveledSStables.length > 0)
                 {
                     statsTable.isLeveledSstable = true;
 
