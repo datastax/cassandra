@@ -65,13 +65,16 @@ public class CommitLogDescriptor
     public static final int VERSION_50 = 8;
     // For compatibility with CNDB
     public static final int VERSION_DSE_68 = 680;
+    // Stargazer 1.0 messaging
+    public static final int VERSION_SG_10 = 100;
+    public static final int VERSION_SG_20 = 110;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
     @VisibleForTesting
-    public static final int current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_40 : VERSION_50;
+    public static final int current_version = VERSION_SG_20; // TODO revisit storage compatiblity mode
 
     final int version;
     public final long id;
@@ -222,12 +225,16 @@ public class CommitLogDescriptor
         switch (version)
         {
             case VERSION_30:
-                return MessagingService.VERSION_30;
+                return MessagingService.Version.VERSION_30.value;
             case VERSION_40:
             case VERSION_DSE_68:
-                return MessagingService.VERSION_40;
+                return MessagingService.Version.VERSION_40.value;
             case VERSION_50:
-                return MessagingService.VERSION_50;
+                return MessagingService.Version.VERSION_50.value;
+            case VERSION_SG_10:
+                return MessagingService.Version.VERSION_SG_10.value;
+            case VERSION_SG_20:
+                return MessagingService.Version.VERSION_SG_20.value;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + version);
         }
