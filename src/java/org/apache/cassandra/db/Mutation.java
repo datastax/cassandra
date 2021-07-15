@@ -18,7 +18,13 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -50,6 +56,8 @@ import org.apache.cassandra.utils.concurrent.Future;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
+import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_SG_20;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class Mutation implements IMutation, Supplier<Mutation>
@@ -317,6 +325,8 @@ public class Mutation implements IMutation, Supplier<Mutation>
 
     private int serializedSize40;
     private int serializedSize50;
+    private int serializedSizeSG10;
+    private int serializedSizeSG20;
 
     public int serializedSize(int version)
     {
@@ -330,7 +340,14 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 if (serializedSize50 == 0)
                     serializedSize50 = (int) serializer.serializedSize(this, VERSION_50);
                 return serializedSize50;
-
+            case VERSION_SG_10:
+                if (serializedSizeSG10 == 0)
+                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
+                return serializedSizeSG10;
+            case VERSION_SG_20:
+                if (serializedSizeSG20 == 0)
+                    serializedSizeSG20 = (int) serializer.serializedSize(this, VERSION_SG_20);
+                return serializedSizeSG20;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }
