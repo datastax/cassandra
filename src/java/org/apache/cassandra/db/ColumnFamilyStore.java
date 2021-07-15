@@ -19,15 +19,12 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -48,6 +45,9 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.management.openmbean.CompositeData;
@@ -69,6 +69,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,11 +85,13 @@ import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
-import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionStrategy;
+import org.apache.cassandra.db.compaction.CompactionStrategyContainer;
+import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
+import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -111,7 +114,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
@@ -120,6 +122,7 @@ import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IScrubber;
@@ -140,7 +143,6 @@ import org.apache.cassandra.metrics.Sampler.SamplerType;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TopPartitionTracker;
 import org.apache.cassandra.repair.TableRepairManager;
-import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
@@ -298,7 +300,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      *
      * We synchronize on the Tracker to ensure isolation when we want to make sure
      * that the memtable we're acting on doesn't change out from under us.  I.e., flush
-     * syncronizes on it to make sure it can submit on both executors atomically,
+     * synchronizes on it to make sure it can submit on both executors atomically,
      * so anyone else who wants to make sure flush doesn't interfere should as well.
      */
     private final Tracker data;
@@ -317,7 +319,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private volatile DefaultValue<Integer> maxCompactionThreshold;
     private volatile DefaultValue<Double> crcCheckChance;
 
-    private final CompactionStrategyManager compactionStrategyManager;
+    private final CompactionStrategyFactory strategyFactory;
+    private volatile CompactionStrategyContainer strategyContainer;
 
     private final Directories directories;
 
@@ -337,6 +340,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     // Tombtone partitions that ignore the gc_grace_seconds during compaction
     private final Set<DecoratedKey> partitionKeySetIgnoreGcGrace = ConcurrentHashMap.newKeySet();
+
+    /** The local ranges are used by the {@link DiskBoundaryManager} to create the disk boundaries but can also be
+     * used independently. They are created lazily and invalidated whenever {@link this#invalidateLocalRangesAndDiskBoundaries()}
+     * is called.
+     */
+    private volatile SortedLocalRanges localRanges;
 
     @VisibleForTesting
     final DiskBoundaryManager diskBoundaryManager = new DiskBoundaryManager();
@@ -367,6 +376,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final PaxosRepairHistoryLoader paxosRepairHistory = new PaxosRepairHistoryLoader();
 
+    // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
+    private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
+
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
         postFlushExecutor.shutdown();
@@ -388,7 +400,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // only update these runtime-modifiable settings if they have not been modified.
         if (!minCompactionThreshold.isModified())
             for (ColumnFamilyStore cfs : concatWithIndexes())
-                cfs.minCompactionThreshold = new DefaultValue(metadata().params.compaction.minCompactionThreshold());
+                cfs.minCompactionThreshold = new DefaultValue<>(metadata().params.compaction.minCompactionThreshold());
         if (!maxCompactionThreshold.isModified())
             for (ColumnFamilyStore cfs : concatWithIndexes())
                 cfs.maxCompactionThreshold = new DefaultValue(metadata().params.compaction.maxCompactionThreshold());
@@ -396,7 +408,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             for (ColumnFamilyStore cfs : concatWithIndexes())
                 cfs.crcCheckChance = new DefaultValue(metadata().params.crcCheckChance);
 
-        compactionStrategyManager.maybeReloadParamsFromSchema(metadata().params.compaction);
+        reloadCompactionStrategy(metadata().params.compaction, CompactionStrategyContainer.ReloadReason.METADATA_CHANGE);
 
         indexManager.reload();
 
@@ -404,6 +416,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         if (DatabaseDescriptor.isDaemonInitialized())
             switchMemtableOrNotify(FlushReason.SCHEMA_CHANGE, Memtable::metadataUpdated);
+    }
+
+    /**
+     * Reload the compaction strategy using the given compaction parameters and reason.
+     */
+    private void reloadCompactionStrategy(CompactionParams compactionParams, CompactionStrategyContainer.ReloadReason reason)
+    {
+        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason);
     }
 
     public static Runnable getBackgroundCompactionTaskSubmitter()
@@ -415,9 +435,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         };
     }
 
+    @VisibleForTesting
+    public CompactionStrategyFactory getCompactionFactory()
+    {
+        return strategyFactory;
+    }
+
+    public CompactionParams getCompactionParams()
+    {
+        return strategyContainer.getCompactionParams();
+    }
+
     public Map<String, String> getCompactionParameters()
     {
-        return compactionStrategyManager.getCompactionParams().asMap();
+        return getCompactionParams().asMap();
     }
 
     public String getCompactionParametersJson()
@@ -429,9 +460,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            CompactionParams compactionParams = CompactionParams.fromMap(options);
-            compactionParams.validate();
-            compactionStrategyManager.setNewLocalCompactionStrategy(compactionParams);
+            reloadCompactionStrategy(CompactionParams.fromMap(options), CompactionStrategyContainer.ReloadReason.JMX_REQUEST);
         }
         catch (Throwable t)
         {
@@ -527,14 +556,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
 
         // compaction strategy should be created after the CFS has been prepared
-        compactionStrategyManager = new CompactionStrategyManager(this);
-        compactionStrategyManager.reloadParamsFromSchema(metadata().params.compaction);
-
-        if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
-        {
-            logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
-            this.compactionStrategyManager.disable();
-        }
+        this.strategyFactory = new CompactionStrategyFactory(this);
+        this.strategyContainer = strategyFactory.reload(null,
+                                                        metadata.get().params.compaction,
+                                                        CompactionStrategyContainer.ReloadReason.FULL);
 
         // create the private ColumnFamilyStores for the secondary column indexes
         indexManager = new SecondaryIndexManager(this);
@@ -672,12 +697,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, TimeUUID pendingRepair, boolean isTransient, IntervalSet<CommitLogPosition> commitLogPositions, int sstableLevel, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
     {
-        return getCompactionStrategyManager().createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, commitLogPositions, sstableLevel, header, indexManager.listIndexGroups(), lifecycleNewTracker);
+        MetadataCollector metadataCollector = new MetadataCollector(metadata.get().comparator)
+                .commitLogIntervals(commitLogPositions != null ? commitLogPositions : IntervalSet.empty())
+                .sstableLevel(sstableLevel);
+        return getCompactionStrategy().createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadataCollector, header, indexManager.listIndexGroups(), lifecycleNewTracker);
     }
 
     public boolean supportsEarlyOpen()
     {
-        return compactionStrategyManager.supportsEarlyOpen();
+        return strategyContainer.supportsEarlyOpen();
     }
 
     /** call when dropping or renaming a CF. Performs mbean housekeeping and invalidates CFS to other operations */
@@ -710,7 +738,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
         }
 
-        compactionStrategyManager.shutdown();
+        strategyContainer.shutdown();
 
         // Do not remove truncation records for index CFs, given they have the same ID as their backing/base tables.
         if (!metadata.get().isIndex())
@@ -942,20 +970,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         logger.info("User Requested secondary index re-build for {}/{} indexes: {}", ksName, cfName, Joiner.on(',').join(idxNames));
         cfs.indexManager.rebuildIndexesBlocking(Sets.newHashSet(Arrays.asList(idxNames)));
-    }
-
-    public AbstractCompactionStrategy createCompactionStrategyInstance(CompactionParams compactionParams)
-    {
-        try
-        {
-            Constructor<? extends AbstractCompactionStrategy> constructor =
-                compactionParams.klass().getConstructor(ColumnFamilyStore.class, Map.class);
-            return constructor.newInstance(this, compactionParams.options());
-        }
-        catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | InstantiationException e)
-        {
-            throw new RuntimeException(e);
-        }
     }
 
     /** @deprecated See CASSANDRA-9448 */
@@ -1394,7 +1408,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
             cfs.replaceFlushed(memtable, sstables);
             reclaim(memtable);
-            cfs.compactionStrategyManager.compactionLogger.flush(sstables);
+            cfs.strategyFactory.getCompactionLogger().flush(sstables);
             logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
                          sstables,
                          sstables.size(),
@@ -1496,6 +1510,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             metric.topWritePartitionFrequency.addSample(key.getKey(), 1);
             if (metric.topWritePartitionSize.isEnabled()) // dont compute datasize if not needed
                 metric.topWritePartitionSize.addSample(key.getKey(), update.dataSize());
+            metric.bytesInserted.inc(update.dataSize());
             StorageHook.instance.reportWrite(metadata.id, update);
             metric.writeLatency.addNano(nanoTime() - start);
             // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
@@ -1521,52 +1536,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                : UpdateTransaction.NO_OP;
     }
 
-    public static class VersionedLocalRanges extends ArrayList<Splitter.WeightedRange>
-    {
-        public final long ringVersion;
-
-        public VersionedLocalRanges(long ringVersion, int initialSize)
-        {
-            super(initialSize);
-            this.ringVersion = ringVersion;
-        }
-    }
-
-    public VersionedLocalRanges localRangesWeighted()
-    {
-        if (!SchemaConstants.isLocalSystemKeyspace(getKeyspaceName())
-            && getPartitioner() == StorageService.instance.getTokenMetadata().partitioner)
-        {
-            DiskBoundaryManager.VersionedRangesAtEndpoint versionedLocalRanges = DiskBoundaryManager.getVersionedLocalRanges(this);
-            Set<Range<Token>> localRanges = versionedLocalRanges.rangesAtEndpoint.ranges();
-            long ringVersion = versionedLocalRanges.ringVersion;
-
-            if (!localRanges.isEmpty())
-            {
-                VersionedLocalRanges weightedRanges = new VersionedLocalRanges(ringVersion, localRanges.size());
-                for (Range<Token> r : localRanges)
-                {
-                    // WeightedRange supports only unwrapped ranges as it relies
-                    // on right - left == num tokens equality
-                    for (Range<Token> u: r.unwrap())
-                        weightedRanges.add(new Splitter.WeightedRange(1.0, u));
-                }
-                weightedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
-                return weightedRanges;
-            }
-            else
-            {
-                return fullWeightedRange(ringVersion, getPartitioner());
-            }
-        }
-        else
-        {
-            // Local tables need to cover the full token range and don't care about ring changes.
-            // We also end up here if the table's partitioner is not the database's, which can happen in tests.
-            return fullWeightedRange(RING_VERSION_IRRELEVANT, getPartitioner());
-        }
-    }
-
     @Override
     public ShardBoundaries localRangeSplits(int shardCount)
     {
@@ -1580,23 +1549,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             (shardBoundaries.ringVersion != RING_VERSION_IRRELEVANT &&
              shardBoundaries.ringVersion != StorageService.instance.getTokenMetadata().getRingVersion()))
         {
-            VersionedLocalRanges weightedRanges = localRangesWeighted();
-
-            List<Token> boundaries = getPartitioner().splitter().get().splitOwnedRanges(shardCount, weightedRanges, false);
-            shardBoundaries = new ShardBoundaries(boundaries.subList(0, boundaries.size() - 1),
-                                                  weightedRanges.ringVersion);
+            SortedLocalRanges localRanges = getLocalRanges();
+            List<PartitionPosition> positions = localRanges.split(shardCount);
+            shardBoundaries = new ShardBoundaries(positions.subList(0, positions.size() - 1),
+                                                  localRanges.getRingVersion());
             cachedShardBoundaries = shardBoundaries;
-            logger.debug("Memtable shard boundaries for {}.{}: {}", getKeyspaceName(), getTableName(), boundaries);
+            logger.info("Memtable shard boundaries for {}.{}: {}", keyspace.getName(), getTableName(), positions);
         }
         return shardBoundaries;
-    }
-
-    @VisibleForTesting
-    public static VersionedLocalRanges fullWeightedRange(long ringVersion, IPartitioner partitioner)
-    {
-        VersionedLocalRanges ranges = new VersionedLocalRanges(ringVersion, 1);
-        ranges.add(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken())));
-        return ranges;
     }
 
     /**
@@ -1867,7 +1827,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public Set<SSTableReader> getLiveSSTables()
     {
-        return data.getView().liveSSTables();
+        return data.getLiveSSTables();
     }
 
     public Iterable<SSTableReader> getSSTables(SSTableSet sstableSet)
@@ -1911,29 +1871,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             stats.put(entry.getKey(), entry.getValue().build());
         }
         return stats;
-    }
-
-    /**
-     * promotes (or demotes) data attached to an incremental repair session that has either completed successfully,
-     * or failed
-     *
-     * @return session ids whose data could not be released
-     */
-    public CleanupSummary releaseRepairData(Collection<TimeUUID> sessions, boolean force)
-    {
-        if (force)
-        {
-            Predicate<SSTableReader> predicate = sst -> {
-                TimeUUID session = sst.getPendingRepair();
-                return session != null && sessions.contains(session);
-            };
-            return runWithCompactionsDisabled(() -> compactionStrategyManager.releaseRepairData(sessions),
-                                              predicate, OperationType.STREAM, false, true, true);
-        }
-        else
-        {
-            return compactionStrategyManager.releaseRepairData(sessions);
-        }
     }
 
     public boolean isFilterFullyCoveredBy(ClusteringIndexFilter filter,
@@ -2755,7 +2692,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             cfs.runWithCompactionsDisabled((Callable<Void>) () -> {
                 cfs.data.reset(memtableFactory.create(new AtomicReference<>(CommitLogPosition.NONE), cfs.metadata, cfs));
-                cfs.compactionStrategyManager.forceReload();
+                cfs.reloadCompactionStrategy(metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
                 return null;
             }, OperationType.P0, true, false);
         }
@@ -2973,7 +2910,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             for (ColumnFamilyStore cfs : toPause)
             {
                 successfullyPaused.ensureCapacity(successfullyPaused.size() + 1); // to avoid OOM:ing after pausing the strategies
-                cfs.getCompactionStrategyManager().pause();
+                cfs.getCompactionStrategy().pause();
                 successfullyPaused.add(cfs);
             }
             return () -> maybeFail(resumeAll(null, toPause));
@@ -2991,7 +2928,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             try
             {
-                cfs.getCompactionStrategyManager().resume();
+                cfs.getCompactionStrategy().resume();
             }
             catch (Throwable t)
             {
@@ -3005,8 +2942,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         Callable<LifecycleTransaction> callable = () -> {
             assert data.getCompacting().isEmpty() : data.getCompacting();
-            Iterable<SSTableReader> sstables = getLiveSSTables();
-            sstables = AbstractCompactionStrategy.filterSuspectSSTables(sstables);
+            Iterable<SSTableReader> sstables = Iterables.filter(getLiveSSTables(), sstable -> !sstable.isMarkedSuspect());
             LifecycleTransaction modifier = data.tryModify(sstables, operationType);
             assert modifier != null: "something marked things compacting while compactions are disabled";
             return modifier;
@@ -3031,7 +2967,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // we don't use CompactionStrategy.pause since we don't want users flipping that on and off
         // during runWithCompactionsDisabled
-        compactionStrategyManager.disable();
+        strategyContainer.disable();
+    }
+
+    public boolean compactionShouldBeEnabled()
+    {
+        return strategyContainer.getCompactionParams().isEnabled();
     }
 
     public void enableAutoCompaction()
@@ -3041,39 +2982,80 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     /**
      * used for tests - to be able to check things after a minor compaction
-     * @param waitForFutures if we should block until autocompaction is done
+     * @param waitForFuture if we should block until autocompaction is done
      */
     @VisibleForTesting
-    public void enableAutoCompaction(boolean waitForFutures)
+    public void enableAutoCompaction(boolean waitForFuture)
     {
-        compactionStrategyManager.enable();
-        List<Future<?>> futures = CompactionManager.instance.submitBackground(this);
-        if (waitForFutures)
-            FBUtilities.waitOnFutures(futures);
+        strategyContainer.enable();
+        Future<?> future = CompactionManager.instance.submitBackground(this);
+        if (waitForFuture)
+            FBUtilities.waitOnFuture(future);
     }
 
     public boolean isAutoCompactionDisabled()
     {
-        return !this.compactionStrategyManager.isEnabled();
+        return !this.strategyContainer.isEnabled();
     }
 
-    /*
-     JMX getters and setters for the Default<T>s.
-       - get/set minCompactionThreshold
-       - get/set maxCompactionThreshold
-       - get     memsize
-       - get     memops
-       - get/set memtime
+    public SortedLocalRanges getLocalRanges()
+    {
+        synchronized (this)
+        {
+            if (localRanges != null && !localRanges.isOutOfDate())
+                return localRanges;
+
+            localRanges = SortedLocalRanges.create(this);
+            return localRanges;
+        }
+    }
+
+    /**
+     * Return the compaction strategy for this CFS. Even though internally the strategy container
+     * implements the strategy, we would like to just expose {@link CompactionStrategy} externally.
+     * This is not currently possible for the reasons explained in {@link this#getCompactionStrategyContainer()},
+     * so we expose the container as well, but using a separate method, marked as deprecated.
+     *
+     * @return the compaction strategy for this CFS
      */
-
-    public CompactionStrategyManager getCompactionStrategyManager()
+    public CompactionStrategy getCompactionStrategy()
     {
-        return compactionStrategyManager;
+        return strategyContainer;
     }
 
-    public CompactionLogger getCompactionLogger()
+    /**
+     * The reasons for exposing the compaction strategy container are the following:
+     *
+     * - Unit tests
+     * - Repair
+     *
+     * Eventually we would like to only expose the {@link CompactionStrategy}, so for new code call
+     * {@link this#getCompactionStrategy()} instead.
+     *
+     * @return the compaction strategy container
+     */
+    /** @deprecated See STAR-13 */
+    @Deprecated(since = "unknown")
+    @VisibleForTesting
+    public CompactionStrategyContainer getCompactionStrategyContainer()
     {
-        return compactionStrategyManager == null ? null : compactionStrategyManager.compactionLogger;
+        return strategyContainer;
+    }
+
+    /**
+     * This option determines if tombstones should only be removed when the sstable has been repaired.
+     * Because this option was introduced in patch releases (I'm guessing), the compaction parameters were
+     * abused. Eventually this option should be moved out of the compaction parameters. TODO: move it
+     * to the new compaction strategy interface.
+     *
+     * @return true if tombstones can only be removed if the sstable has been repaired
+     */
+    public boolean onlyPurgeRepairedTombstones()
+    {
+        // Here we need to ask the CSM for the parameters in case they were changed over JMX without changing the schema,
+        // for now the CSM has the up-to-date copy of the params
+        CompactionParams params = strategyContainer.getCompactionParams();
+        return Boolean.parseBoolean(params.options().get(CompactionStrategyOptions.ONLY_PURGE_REPAIRED_TOMBSTONES));
     }
 
     public void setCrcCheckChance(double crcCheckChance)
@@ -3172,6 +3154,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return count > 0 ? sum * 1.0 / count : 0;
     }
 
+    public double sstablePartitionReadLatency()
+    {
+        return metric == null ? 0 : metric.sstablePartitionReadLatency.get();
+    }
+
+    public double getCompactionTimePerKb()
+    {
+        return metric == null ? 0 : metric.compactionTimePerKb.get();
+    }
+
+    public double getFlushTimePerKb()
+    {
+        return metric == null ? 0 : metric.flushTimePerKb.get();
+    }
+
     public int getMeanRowCount()
     {
         long totalRows = 0;
@@ -3203,6 +3200,77 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return getPartitioner().decorateKey(key);
     }
 
+    public BloomFilterTracker getBloomFilterTracker()
+    {
+        return bloomFilterTracker;
+    }
+
+    public long getBloomFilterFalsePositiveCount()
+    {
+        return bloomFilterTracker.getFalsePositiveCount();
+    }
+
+    public long getBloomFilterTruePositiveCount()
+    {
+        return bloomFilterTracker.getTruePositiveCount();
+    }
+
+    public long getBloomFilterTrueNegativeCount()
+    {
+        return bloomFilterTracker.getTrueNegativeCount();
+    }
+
+    public double getRecentBloomFilterFalsePositiveRate()
+    {
+        return bloomFilterTracker.getRecentFalsePositiveRate();
+    }
+
+    public double getRecentBloomFilterTruePositiveRate()
+    {
+        return bloomFilterTracker.getRecentTruePositiveRate();
+    }
+
+    public double getRecentBloomFilterTrueNegativeRate()
+    {
+        return bloomFilterTracker.getRecentTrueNegativeRate();
+    }
+
+    public double bloomFilterFpRatio()
+    {
+        return metric == null ? 0 : metric.bloomFilterFalseRatio.getValue();
+    }
+
+    public long getReadRequests()
+    {
+        return metric == null ? 0 : metric.readRequests.getCount();
+    }
+
+    public long getBytesInserted()
+    {
+        return metric == null ? 0 : metric.bytesInserted.getCount();
+    }
+
+    /**
+     * @return the write amplification (bytes flushed + bytes compacted / bytes flushed).
+     */
+    public double getWA()
+    {
+        if (metric == null)
+            return 0;
+
+        double bytesCompacted = metric.compactionBytesWritten.getCount();
+        double bytesFlushed = metric.bytesFlushed.getCount();
+        return bytesFlushed <= 0 ? 0 : (bytesFlushed + bytesCompacted) / bytesFlushed;
+    }
+
+    public double getFlushSizeOnDisk()
+    {
+        if (metric == null)
+            return 0;
+
+        return metric.flushSizeOnDisk.get();
+    }
+
     /** true if this CFS contains secondary index data */
     public boolean isIndex()
     {
@@ -3224,37 +3292,40 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public int getUnleveledSSTables()
     {
-        return compactionStrategyManager.getUnleveledSSTables();
+        if (strategyContainer instanceof CompactionStrategyManager)
+            return ((CompactionStrategyManager) strategyContainer).getUnleveledSSTables();
+        else
+            return 0;
     }
 
     @Override
     public int[] getSSTableCountPerLevel()
     {
-        return compactionStrategyManager.getSSTableCountPerLevel();
+        return strategyContainer.getSSTableCountPerLevel();
     }
 
     @Override
     public long[] getPerLevelSizeBytes()
     {
-        return compactionStrategyManager.getPerLevelSizeBytes();
+        return strategyContainer.getPerLevelSizeBytes();
     }
 
     @Override
     public boolean isLeveledCompaction()
     {
-        return compactionStrategyManager.isLeveledCompaction();
+        return strategyContainer.isLeveledCompaction();
     }
 
     @Override
     public int[] getSSTableCountPerTWCSBucket()
     {
-        return compactionStrategyManager.getSSTableCountPerTWCSBucket();
+        return strategyContainer.getSSTableCountPerTWCSBucket();
     }
 
     @Override
     public int getLevelFanoutSize()
     {
-        return compactionStrategyManager.getLevelFanoutSize();
+        return strategyContainer.getLevelFanoutSize();
     }
 
     public static class ViewFragment
@@ -3460,8 +3531,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return diskBoundaryManager.getDiskBoundaries(this);
     }
 
-    public void invalidateLocalRanges()
+    public void invalidateLocalRangesAndDiskBoundaries()
     {
+        synchronized (this)
+        {
+            if (localRanges != null)
+                localRanges.invalidate();
+        }
+
         diskBoundaryManager.invalidate();
 
         switchMemtableOrNotify(FlushReason.OWNED_RANGES_CHANGE, Memtable::localRangesUpdated);
@@ -3495,7 +3572,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
 
-        compactionStrategyManager.shutdown();
+        strategyContainer.shutdown();
 
         // wait for any outstanding reads/writes that might affect the CFS
         Keyspace.writeOrder.awaitNewBarrier();
@@ -3655,5 +3732,85 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public TableMetrics getMetrics()
     {
         return metric;
+    }
+    
+    private static void verifyMetadata(SSTableReader sstable, long repairedAt, TimeUUID pendingRepair, boolean isTransient)
+    {
+        if (!Objects.equals(pendingRepair, sstable.getPendingRepair()))
+            throw new IllegalStateException(String.format("Failed setting pending repair to %s on %s (pending repair is %s)", pendingRepair, sstable, sstable.getPendingRepair()));
+        if (repairedAt != sstable.getRepairedAt())
+            throw new IllegalStateException(String.format("Failed setting repairedAt to %d on %s (repairedAt is %d)", repairedAt, sstable, sstable.getRepairedAt()));
+        if (isTransient != sstable.isTransient())
+            throw new IllegalStateException(String.format("Failed setting isTransient to %b on %s (isTransient is %b)", isTransient, sstable, sstable.isTransient()));
+    }
+
+    /**
+     * This method is exposed for testing only
+     * NotThreadSafe
+     */
+    @VisibleForTesting
+    public int mutateRepaired(Collection<SSTableReader> sstables, long repairedAt, TimeUUID pendingRepair, boolean isTransient) throws IOException
+    {
+        Set<SSTableReader> changed = new HashSet<>();
+        try
+        {
+            for (SSTableReader sstable: sstables)
+            {
+                sstable.mutateRepairedAndReload(repairedAt, pendingRepair, isTransient);
+                verifyMetadata(sstable, repairedAt, pendingRepair, isTransient);
+                changed.add(sstable);
+            }
+        }
+        finally
+        {
+            // if there was an exception mutating repairedAt, we should still notify for the
+            // sstables that we were able to modify successfully before releasing the lock
+            getTracker().notifySSTableRepairedStatusChanged(changed);
+        }
+        return changed.size();
+    }
+
+    /**
+     * Mutates sstable repairedAt times and notifies listeners of the change with the writeLock held. Prevents races
+     * with other processes between when the metadata is changed and when sstables are moved between strategies.
+     */
+    public int mutateRepaired(@Nullable final ReentrantReadWriteLock.WriteLock writeLock,
+                              Collection<SSTableReader> sstables,
+                              long repairedAt,
+                              TimeUUID pendingRepair,
+                              boolean isTransient) throws IOException
+    {
+        if (writeLock == null)
+            return mutateRepaired(sstables, repairedAt, pendingRepair, isTransient);
+
+        writeLock.lock();
+        try
+        {
+            return mutateRepaired(sstables, repairedAt, pendingRepair, isTransient);
+        }
+        finally
+        {
+            writeLock.unlock();
+        }
+    }
+
+    public boolean hasPendingRepairSSTables(TimeUUID sessionID)
+    {
+        return Iterables.any(data.getLiveSSTables(), pendingRepairPredicate(sessionID));
+    }
+
+    public Set<SSTableReader> getPendingRepairSSTables(TimeUUID sessionID)
+    {
+        return Sets.filter(data.getLiveSSTables(), pendingRepairPredicate(sessionID));
+    }
+
+    public static Predicate<SSTableReader> pendingRepairPredicate(@Nonnull TimeUUID sessionID)
+    {
+        return sstable -> sstable.getPendingRepair() != null && sessionID.equals(sstable.getPendingRepair());
+    }
+
+    public static Predicate<SSTableReader> nonSuspectAndNotInPredicate(Set<SSTableReader> compacting)
+    {
+        return sstable -> !sstable.isMarkedSuspect() && !compacting.contains(sstable);
     }
 }

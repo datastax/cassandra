@@ -37,7 +37,6 @@ import com.google.common.collect.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -46,12 +45,15 @@ import org.apache.cassandra.schema.CompactionParams;
 
 import static com.google.common.collect.Iterables.filter;
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.db.compaction.CompactionStrategyOptions.TOMBSTONE_COMPACTION_INTERVAL_OPTION;
+import static org.apache.cassandra.db.compaction.CompactionStrategyOptions.TOMBSTONE_THRESHOLD_OPTION;
+import static org.apache.cassandra.db.compaction.CompactionStrategyOptions.UNCHECKED_TOMBSTONE_COMPACTION_OPTION;
 
-public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.WithAggregates
+public class TimeWindowCompactionStrategy extends LegacyAbstractCompactionStrategy.WithAggregates
 {
     private static final Logger logger = LoggerFactory.getLogger(TimeWindowCompactionStrategy.class);
 
-    private final TimeWindowCompactionStrategyOptions options;
+    private final TimeWindowCompactionStrategyOptions twcsOptions;
     private final Set<SSTableReader> sstables = new HashSet<>();
     private long lastExpiredCheck;
     private long highestWindowSeen;
@@ -59,26 +61,29 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     // This is accessed in both the threading context of compaction / repair and also JMX
     private volatile Map<Long, Integer> sstableCountByBuckets = Collections.emptyMap();
 
-    public TimeWindowCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
+    public TimeWindowCompactionStrategy(CompactionStrategyFactory factory, Map<String, String> options)
     {
-        super(cfs, options);
-        this.options = new TimeWindowCompactionStrategyOptions(options);
+        super(factory, options);
+        this.twcsOptions = new TimeWindowCompactionStrategyOptions(options);
         String[] tsOpts = { UNCHECKED_TOMBSTONE_COMPACTION_OPTION, TOMBSTONE_COMPACTION_INTERVAL_OPTION, TOMBSTONE_THRESHOLD_OPTION };
-        if (Arrays.stream(tsOpts).map(o -> options.get(o)).filter(Objects::nonNull).anyMatch(v -> !v.equals("false")))
+        if (Arrays.stream(tsOpts).map(options::get).filter(Objects::nonNull).anyMatch(v -> !v.equals("false")))
         {
             logger.debug("Enabling tombstone compactions for TWCS");
         }
         else
         {
             logger.debug("Disabling tombstone compactions for TWCS");
-            disableTombstoneCompactions = true;
+            super.options.setDisableTombstoneCompactions(true);
         }
     }
 
     @Override
-    public AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
+    public AbstractCompactionTask createCompactionTask(final long gcBefore,
+                                                       LifecycleTransaction txn,
+                                                       boolean isMaximal,
+                                                       boolean splitOutput)
     {
-        return CompactionTask.forTimeWindowCompaction(this, txn, gcBefore);
+        return new TimeWindowCompactionTask(cfs, txn, gcBefore, ignoreOverlaps(), this);
     }
 
     /**
@@ -89,10 +94,10 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     @Override
     protected synchronized CompactionAggregate getNextBackgroundAggregate(final long gcBefore)
     {
-        if (Iterables.isEmpty(cfs.getSSTables(SSTableSet.LIVE)))
+        if (Iterables.isEmpty(dataTracker.getView().select(SSTableSet.LIVE)))
             return null;
 
-        Set<SSTableReader> compacting = cfs.getCompactingSSTables();
+        Set<SSTableReader> compacting = dataTracker.getCompacting();
         Set<SSTableReader> uncompacting;
         synchronized (sstables)
         {
@@ -102,11 +107,11 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
         // Find fully expired SSTables. Those will be included no matter what.
         Set<SSTableReader> expired = Collections.emptySet();
 
-        if (currentTimeMillis() - lastExpiredCheck > options.expiredSSTableCheckFrequency)
+        if (currentTimeMillis() - lastExpiredCheck > twcsOptions.expiredSSTableCheckFrequency)
         {
             logger.debug("TWCS expired check sufficiently far in the past, checking for fully expired SSTables");
-            expired = CompactionController.getFullyExpiredSSTables(cfs, uncompacting, options.ignoreOverlaps ? Collections.emptySet() : cfs.getOverlappingLiveSSTables(uncompacting),
-                                                                   gcBefore, options.ignoreOverlaps);
+            expired = CompactionController.getFullyExpiredSSTables(cfs, uncompacting, twcsOptions.ignoreOverlaps ? Collections.emptySet() : cfs.getOverlappingLiveSSTables(uncompacting),
+                                                                   gcBefore, twcsOptions.ignoreOverlaps);
             lastExpiredCheck = currentTimeMillis();
         }
         else
@@ -114,7 +119,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
             logger.debug("TWCS skipping check for fully expired SSTables");
         }
 
-        Set<SSTableReader> candidates = Sets.newHashSet(filterSuspectSSTables(uncompacting));
+        Set<SSTableReader> candidates = Sets.newHashSet(Iterables.filter(uncompacting, sstable -> !sstable.isMarkedSuspect()));
 
         CompactionAggregate compactionCandidate = getNextNonExpiredSSTables(Sets.difference(candidates, expired), gcBefore);
         if (expired.isEmpty())
@@ -123,7 +128,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
         logger.debug("Including expired sstables: {}", expired);
         if (compactionCandidate == null)
         {
-            long timestamp = getWindowBoundsInMillis(options.sstableWindowUnit, options.sstableWindowSize,
+            long timestamp = getWindowBoundsInMillis(twcsOptions.sstableWindowUnit, twcsOptions.sstableWindowSize,
                                                      Collections.max(expired, Comparator.comparing(SSTableReader::getMaxTimestamp)).getMaxTimestamp());
             return CompactionAggregate.createTimeTiered(expired, timestamp);
         }
@@ -134,7 +139,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     private CompactionAggregate getNextNonExpiredSSTables(Iterable<SSTableReader> nonExpiringSSTables, final long gcBefore)
     {
         List<CompactionAggregate> candidates = getCompactionCandidates(nonExpiringSSTables);
-        backgroundCompactions.setPending(candidates);
+        backgroundCompactions.setPending(this, candidates);
 
         CompactionAggregate ret = candidates.isEmpty() ? null : candidates.get(0);
 
@@ -148,7 +153,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     private List<CompactionAggregate> getCompactionCandidates(Iterable<SSTableReader> candidateSSTables)
     {
-        NavigableMap<Long, List<SSTableReader>> buckets = getBuckets(candidateSSTables, options.sstableWindowUnit, options.sstableWindowSize, options.timestampResolution);
+        NavigableMap<Long, List<SSTableReader>> buckets = getBuckets(candidateSSTables, twcsOptions.sstableWindowUnit, twcsOptions.sstableWindowSize, twcsOptions.timestampResolution);
         // Update the highest window seen, if necessary
         if (!buckets.isEmpty())
         {
@@ -160,7 +165,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
         return getBucketAggregates(buckets,
                                    cfs.getMinimumCompactionThreshold(),
                                    cfs.getMaximumCompactionThreshold(),
-                                   options.stcsOptions,
+                                   twcsOptions.stcsOptions,
                                    this.highestWindowSeen);
     }
 
@@ -201,7 +206,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    protected Set<SSTableReader> getSSTables()
+    public Set<SSTableReader> getSSTables()
     {
         synchronized (sstables)
         {
@@ -393,7 +398,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     boolean ignoreOverlaps()
     {
-        return options.ignoreOverlaps;
+        return twcsOptions.ignoreOverlaps;
     }
 
     public long getMaxSSTableBytes()
@@ -408,7 +413,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
-        Map<String, String> uncheckedOptions = AbstractCompactionStrategy.validateOptions(options);
+        Map<String, String> uncheckedOptions = CompactionStrategyOptions.validateOptions(options);
         uncheckedOptions = TimeWindowCompactionStrategyOptions.validateOptions(options, uncheckedOptions);
 
         uncheckedOptions.remove(CompactionParams.Option.MIN_THRESHOLD.toString());
