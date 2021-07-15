@@ -443,6 +443,11 @@ public class Tracker
         return view.get().getNoncompacting(candidates);
     }
 
+    public Set<SSTableReader> getLiveSSTables()
+    {
+        return view.get().liveSSTables();
+    }
+
     public void maybeIncrementallyBackup(final Iterable<SSTableReader> sstables)
     {
         if (!cfstore.isTableIncrementalBackupsEnabled())
@@ -559,6 +564,8 @@ public class Tracker
     public void subscribe(INotificationConsumer consumer)
     {
         subscribers.add(consumer);
+        if (logger.isTraceEnabled())
+            logger.trace("{} subscribed to the data tracker.", consumer);
     }
 
     public void unsubscribe(INotificationConsumer consumer)
@@ -579,6 +586,12 @@ public class Tracker
     @VisibleForTesting
     public void removeUnsafe(Set<SSTableReader> toRemove)
     {
-        Pair<View, View> result = apply(view -> updateLiveSet(toRemove, emptySet()).apply(view));
+        apply(view -> updateLiveSet(toRemove, emptySet()).apply(view));
+    }
+
+    @VisibleForTesting
+    public void removeCompactingUnsafe(Set<SSTableReader> toRemove)
+    {
+        apply(view -> updateCompacting(toRemove, emptySet()).apply(view));
     }
 }

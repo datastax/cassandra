@@ -88,7 +88,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);
         DiskBoundaries db = cfs.getDiskBoundaries();
-        diskBoundaries = db.positions;
+        diskBoundaries = db.getPositions();
         locations = db.directories;
         locationIndex = -1;
     }
@@ -135,10 +135,10 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
      * @param partition the partition to append
      * @return true if the partition was written, false otherwise
      */
-    public final boolean append(UnfilteredRowIterator partition)
+    public boolean append(UnfilteredRowIterator partition)
     {
         maybeSwitchWriter(partition.partitionKey());
-        return realAppend(partition);
+        return sstableWriter.append(partition) != null;
     }
 
     public final File getSStableDirectory() throws IOException
@@ -153,14 +153,10 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         return super.doPostCleanup(accumulate);
     }
 
-    protected boolean realAppend(UnfilteredRowIterator partition)
-    {
-        return sstableWriter.append(partition) != null;
-    }
-
     /**
      * Switches the writer if necessary, i.e. if the new key should be placed in a different data directory, or if the
      * specific strategy has decided a new sstable is needed.
+     *
      * Guaranteed to be called before the first call to realAppend.
      */
     protected void maybeSwitchWriter(DecoratedKey key)
@@ -169,7 +165,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
             return;
 
         if (shouldSwitchWriterInCurrentLocation(key))
-            switchCompactionWriter(currentDirectory, key);
+            switchCompactionWriter(currentDirectory);
     }
 
     /**
@@ -183,7 +179,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
             if (locationIndex < 0)
             {
                 Directories.DataDirectory defaultLocation = getWriteDirectory(nonExpiredSSTables, getExpectedWriteSize());
-                switchCompactionWriter(defaultLocation, key);
+                switchCompactionWriter(defaultLocation);
                 locationIndex = 0;
                 return true;
             }
@@ -199,7 +195,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         Directories.DataDirectory newLocation = locations.get(locationIndex);
         if (prevIdx >= 0)
             logger.debug("Switching write location from {} to {}", locations.get(prevIdx), newLocation);
-        switchCompactionWriter(newLocation, key);
+        switchCompactionWriter(newLocation);
         return true;
     }
 
@@ -211,44 +207,35 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
     /**
      * Implementations of this method should finish the current sstable writer and start writing to this directory.
-     * <p>
-     * Called once before starting to append and then whenever we see a need to start writing to another directory.
      *
+     * Called once before starting to append and then whenever we see a need to start writing to another directory.
      * @param directory
-     * @param nextKey
      */
-    protected void switchCompactionWriter(Directories.DataDirectory directory, DecoratedKey nextKey)
+    protected void switchCompactionWriter(Directories.DataDirectory directory)
     {
         currentDirectory = directory;
-        sstableWriter.switchWriter(sstableWriter(directory, nextKey));
+        PartitionPosition diskBoundary = diskBoundaries != null && locationIndex > -1
+                                         ? diskBoundaries.get(locationIndex)
+                                         : null;
+        sstableWriter.switchWriter(sstableWriter(directory, diskBoundary));
     }
 
     @SuppressWarnings("resource")
-    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, DecoratedKey nextKey)
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
         Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
-        MetadataCollector collector = new MetadataCollector(txn.originals(), cfs.metadata().comparator)
-                                      .sstableLevel(sstableLevel());
-        SerializationHeader header = SerializationHeader.make(cfs.metadata(), nonExpiredSSTables);
-
-        return newWriterBuilder(descriptor).setMetadataCollector(collector)
-                                           .setSerializationHeader(header)
-                                           .setKeyCount(sstableKeyCount())
-                                           .build(txn, cfs);
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(estimatedTotalKeys)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
-
-    /**
-     * Returns the level that should be used when creating sstables.
-     */
-    protected int sstableLevel()
-    {
-        return 0;
-    }
-
-    /**
-     * Returns the key count with which created sstables should be set up.
-     */
-    abstract protected long sstableKeyCount();
 
     /**
      * The directories we can write to

@@ -82,7 +82,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void getBoundariesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
     }
 
@@ -90,11 +90,11 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void disallowedDirectoriesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
         DisallowedDirectories.maybeMarkUnwritable(new File(tmpDir, "3"));
         dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(2, dbv.positions.size());
+        Assert.assertEquals(2, dbv.getPositions().size());
         Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File(tmpDir, "1")),
                                                new Directories.DataDirectory(new File(tmpDir, "2"))),
                                  dbv.directories);
@@ -132,7 +132,7 @@ public class DiskBoundaryManagerTest extends CQLTester
         pps.add(pp(200));
         pps.add(pp(Long.MAX_VALUE)); // last position is always the max token
 
-        DiskBoundaries diskBoundaries = new DiskBoundaries(mock, dirs.getWriteableLocations(), pps, 0, 0);
+        DiskBoundaries diskBoundaries = new DiskBoundaries(mock, dirs.getWriteableLocations(), pps, null, 0);
 
         Assert.assertEquals(Lists.newArrayList(datadirs.get(0)),                  diskBoundaries.getDisksInBounds(dk(10),  dk(50)));
         Assert.assertEquals(Lists.newArrayList(datadirs.get(2)),                  diskBoundaries.getDisksInBounds(dk(250), dk(500)));
@@ -152,7 +152,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void testGetDataDirectoriesForFiles()
     {
         int gen = 1;
-        List<Murmur3Partitioner.LongToken> tokens = mock.getDiskBoundaries().positions.stream().map(t -> (Murmur3Partitioner.LongToken)t.getToken()).collect(Collectors.toList());
+        List<Murmur3Partitioner.LongToken> tokens = mock.getDiskBoundaries().getPositions().stream().map(t -> (Murmur3Partitioner.LongToken)t.getToken()).collect(Collectors.toList());
         IPartitioner partitioner = Murmur3Partitioner.instance;
 
         Murmur3Partitioner.LongToken sstableFirstDisk1 = (Murmur3Partitioner.LongToken) partitioner.midpoint(partitioner.getMinimumToken(), tokens.get(0));

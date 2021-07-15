@@ -33,34 +33,23 @@ public interface CompactionObserver
     CompactionObserver NO_OP = new CompactionObserver()
     {
         @Override
-        public void setSubmitted(TimeUUID id, CompactionAggregate compaction) { }
+        public void onInProgress(CompactionProgress progress) { }
 
         @Override
-        public void setInProgress(CompactionProgress progress) { }
-
-        @Override
-        public void setCompleted(TimeUUID id) { }
+        public void onCompleted(TimeUUID id) { }
     };
-
-    /**
-     * Indicates that a compaction with the given id has been submitted for the given aggregate.
-     * <p/>
-     * @param id the id of the compaction
-     * @param compaction the compaction aggregate the compaction is part of
-     */
-    void setSubmitted(TimeUUID id, CompactionAggregate compaction);
 
     /**
      * Indicates that a compaction has started.
      * <p/>
      * @param progress the compaction progress, it contains the unique id and real-time progress information
      */
-    void setInProgress(CompactionProgress progress);
+    void onInProgress(CompactionProgress progress);
 
     /**
      * Indicates that a compaction with the given id has completed.
      * <p/>
      * @param id  the id of the compaction
      */
-    void setCompleted(TimeUUID id);
+    void onCompleted(TimeUUID id);
 }

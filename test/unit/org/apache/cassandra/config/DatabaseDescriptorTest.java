@@ -18,25 +18,31 @@
 */
 package org.apache.cassandra.config;
 
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.nio.file.FileStore;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.function.Consumer;
 
-
 import com.google.common.base.Throwables;
+import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Multiset;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.assertj.core.api.Assertions;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CONFIG_LOADER;
@@ -47,9 +53,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.when;
 
 public class DatabaseDescriptorTest
 {
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
     @BeforeClass
     public static void setupDatabaseDescriptor()
     {
@@ -804,5 +814,45 @@ public class DatabaseDescriptorTest
     public void testInvalidSub1DefaultRFs() throws IllegalArgumentException
     {
         DatabaseDescriptor.setDefaultKeyspaceRF(0);
+    }
+    
+    @Test
+    public void testDataFileDirectoriesMinTotalSpaceInGB() throws IOException
+    {
+        DatabaseDescriptor.getRawConfig().data_file_directories = new String[]{};
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
+
+        DatabaseDescriptor.getRawConfig().data_file_directories = new String[] { temporaryFolder.newFolder("data").toString() };
+        assertTrue(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() > 0);
+
+        Multiset<FileStore> fileStoreMultiset = HashMultiset.create();
+
+        // single disk (i.e. mockFileStore1)
+        FileStore mockFileStore1 = Mockito.mock(FileStore.class);
+        when(mockFileStore1.getTotalSpace()).thenReturn(1L << 43); // 8 TB
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(8192L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks (i.e. mockFileStore1, mockFileStore2)
+        FileStore mockFileStore2 = Mockito.mock(FileStore.class);
+        when(mockFileStore2.getTotalSpace()).thenReturn(1L << 41); // 2 TB
+        fileStoreMultiset.add(mockFileStore2);
+        assertEquals(4096L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks with three directories. Two directories are on disk 1 (i.e. mockFileStore1)
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(6144L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        fileStoreMultiset.clear();
+
+        FileStore mockLargeFileStore = Mockito.mock(FileStore.class);
+        when(mockLargeFileStore.getTotalSpace()).thenReturn(-1L);
+        fileStoreMultiset.add(mockLargeFileStore);
+        assertEquals(Long.MAX_VALUE >> 30, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        FileStore mockSmallFileStore = Mockito.mock(FileStore.class);
+        when(mockSmallFileStore.getTotalSpace()).thenReturn(1L << 29); // 512 MB
+        fileStoreMultiset.add(mockSmallFileStore);
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
     }
 }

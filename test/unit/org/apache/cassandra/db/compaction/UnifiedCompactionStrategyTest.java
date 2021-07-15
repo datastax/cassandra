@@ -20,139 +20,104 @@ package org.apache.cassandra.db.compaction;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import org.apache.commons.math3.random.JDKRandomGenerator;
+import org.apache.cassandra.utils.TimeUUID;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
-import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.lifecycle.Tracker;
-import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
-import org.mockito.Answers;
-import org.mockito.Mock;
 import org.mockito.Mockito;
-import org.mockito.MockitoAnnotations;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.RETURNS_SMART_NULLS;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.withSettings;
 
 /**
  * The unified compaction strategy is described in this design document:
  *
- * See CEP-26: https://cwiki.apache.org/confluence/display/CASSANDRA/CEP-26%3A+Unified+Compaction+Strategy
+ * TODO: link to design doc or SEP
+ *
+ * It has properties of  both tiered and leveled compactions and it adapts to the workload
+ * by switching between strategies or increasing / decreasing the fanout factor.
+ *
+ * The essential formulae are the calculations of buckets:
+ *
+ * S = ⌊log_oF(size / m)⌋ = ⌊(ln size - ln m) / (ln F + ln o)⌋
+ *
+ * where log_oF is the log with oF as the base
+ * o is the survival factor, currently fixed to 1
+ * F is the fanout factor calculated below
+ * m is the minimal size, fixed in the strategy options
+ * size is the sorted run size (sum of all the sizes of the sstables in the sorted run)
+ *
+ * Also, T is the number of sstables that trigger compaction.
+ *
+ * Give a parameter W, which is fixed in these tests, then T and F are calculated as follows:
+ *
+ * - W < 0 then T = 2 and F = 2 - W (leveled merge policy)
+ * - W > 0 then T = F and F = 2 + W (tiered merge policy)
+ * - W = 0 then T = F = 2 (middle ground)
  */
-public class UnifiedCompactionStrategyTest
+@RunWith(Parameterized.class)
+public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 {
     private final static long ONE_MB = 1 << 20;
 
     // Multiple disks can be used both with and without disk boundaries. We want to test both cases.
 
-    final String keyspace = "ks";
-    final String table = "tbl";
+    @Parameterized.Parameters(name = "useDiskBoundaries {0}")
+    public static Iterable<Object[]> params()
+    {
+        return Arrays.asList(new Object[][] { {false}, {true} });
+    }
 
-    @Mock(answer = Answers.RETURNS_SMART_NULLS)
-    ColumnFamilyStore cfs;
-
-    @Mock(answer = Answers.RETURNS_SMART_NULLS)
-    CompactionStrategyManager csm;
-
-    ColumnFamilyStore.VersionedLocalRanges localRanges;
-
-    Tracker dataTracker;
-
-    long repairedAt;
-
-    IPartitioner partitioner;
-
-    Splitter splitter;
+    @Parameterized.Parameter
+    public boolean useDiskBoundaries = true;
 
     @BeforeClass
     public static void setUpClass()
     {
-        long seed = System.currentTimeMillis();
-        random.setSeed(seed);
-        System.out.println("Random seed: " + seed);
-
-        DatabaseDescriptor.daemonInitialization(); // because of all the static initialization in CFS
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        BaseCompactionStrategyTest.setUpClass();
     }
-
-
-    static final JDKRandomGenerator random = new JDKRandomGenerator();
 
     @Before
     public void setUp()
     {
-        setUp(1);
-    }
-
-    protected void setUp(int numShards)
-    {
-        MockitoAnnotations.initMocks(this);
-
-        TableMetadata metadata = TableMetadata.builder(keyspace, table)
-                                              .addPartitionKeyColumn("pk", AsciiType.instance)
-                                              .build();
-
-        dataTracker = Tracker.newDummyTracker();
-        repairedAt = System.currentTimeMillis();
-        partitioner = DatabaseDescriptor.getPartitioner();
-        splitter = partitioner.splitter().orElse(null);
-        if (numShards > 1)
-            assertNotNull("Splitter is required with multiple compaction shards", splitter);
-
-        when(cfs.getPartitioner()).thenReturn(partitioner);
-        localRanges = cfs.fullWeightedRange(0, partitioner);
-
-        when(cfs.metadata()).thenReturn(metadata);
-        when(cfs.getTableName()).thenReturn(table);
-        when(cfs.localRangesWeighted()).thenReturn(localRanges);
-        when(cfs.getTracker()).thenReturn(dataTracker);
-        when(cfs.getLiveSSTables()).thenAnswer(request -> dataTracker.getView().select(SSTableSet.LIVE));
-        when(cfs.getSSTables(any())).thenAnswer(request -> dataTracker.getView().select(request.getArgument(0)));
-        when(cfs.getCompactionStrategyManager()).thenReturn(csm);
-
-        DiskBoundaries db = new DiskBoundaries(cfs, new Directories.DataDirectory[0], 0);
-        when(cfs.getDiskBoundaries()).thenReturn(db);
-
-        when(csm.onlyPurgeRepairedTombstones()).thenReturn(false);
+        super.setUp();
     }
 
     @Test
@@ -160,20 +125,19 @@ public class UnifiedCompactionStrategyTest
     {
         Controller controller = Mockito.mock(Controller.class);
         long minimalSizeBytes = 2 << 20;
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(4);
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.random()).thenCallRealMethod();
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        assertNull(strategy.getNextBackgroundTask(FBUtilities.nowInSeconds()));
+        assertTrue(strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).isEmpty());
         assertEquals(0, strategy.getEstimatedRemainingTasks());
     }
 
@@ -240,7 +204,8 @@ public class UnifiedCompactionStrategyTest
         long minimalSizeBytes = m << 20;
 
         Controller controller = Mockito.mock(Controller.class);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getNumShards()).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
@@ -252,12 +217,11 @@ public class UnifiedCompactionStrategyTest
         });
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
 
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
         when(controller.random()).thenCallRealMethod();
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         IPartitioner partitioner = cfs.getPartitioner();
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
@@ -277,21 +241,124 @@ public class UnifiedCompactionStrategyTest
                 sstables.add(mockSSTable(sizeOnDiskBytes, System.currentTimeMillis(), first, last));
             }
         }
-        strategy.addSSTables(sstables);
         dataTracker.addInitialSSTables(sstables);
 
-        List<UnifiedCompactionStrategy.Level> levels = strategy.getLevels();
-        assertEquals(expectedTs.length, levels.size());
+        Map<UnifiedCompactionStrategy.Shard, List<UnifiedCompactionStrategy.Bucket>> arenas = strategy.getShardsWithBuckets();
+        assertNotNull(arenas);
+        assertEquals(1, arenas.size());
 
-        for (int i = 0; i < expectedTs.length; i++)
+        for (Map.Entry<UnifiedCompactionStrategy.Shard, List<UnifiedCompactionStrategy.Bucket>> entry : arenas.entrySet())
         {
-            UnifiedCompactionStrategy.Level level = levels.get(i);
-            assertEquals(i, level.getIndex());
-            UnifiedCompactionStrategy.SelectionContext context = new UnifiedCompactionStrategy.SelectionContext(strategy.getController());
-            UnifiedCompactionStrategy.CompactionPick pick = level.getCompactionPick(context);
+            List<UnifiedCompactionStrategy.Bucket> buckets = entry.getValue();
+            assertEquals(expectedTs.length, buckets.size());
 
-            assertEquals(level.getSSTables().size() >= expectedTs[i], pick != null);
+            for (int i = 0; i < expectedTs.length; i++)
+            {
+                UnifiedCompactionStrategy.Bucket bucket = buckets.get(i);
+                if (bucket.sstables.size() >= expectedTs[i])
+                    assertFalse(bucket.getCompactionAggregate(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes).isEmpty());
+                else
+                    assertTrue(bucket.getCompactionAggregate(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes).isEmpty());
+            }
         }
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead1pct()
+    {
+        testLimitOversizedCompactions(true, 0.01);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead10pct()
+    {
+        testLimitOversizedCompactions(true, 0.1);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead20pct()
+    {
+        testLimitOversizedCompactions(true, 0.2);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead50pct()
+    {
+        testLimitOversizedCompactions(true, 0.5);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingTriggered_maxSpaceOverhead90pct()
+    {
+        testLimitOversizedCompactions(true, 0.9);
+    }
+
+    void testLimitOversizedCompactions(boolean triggerOversizedLimiting, double maxSpaceOverhead)
+    {
+        testLimitCompactions(1000, true, triggerOversizedLimiting, maxSpaceOverhead);
+    }
+
+    @Test
+    public void testLimitCompactions_noLimiting()
+    {
+        testLimitCompactionsCount(true, 1000);
+    }
+
+    @Test
+    public void testLimitCompactionsCount_1()
+    {
+        testLimitCompactionsCount(false, 1);
+    }
+
+    @Test
+    public void testLimitCompactionsCount_3()
+    {
+        testLimitCompactionsCount(false, 3);
+    }
+
+    @Test
+    public void testLimitCompactionsCount_PerLevel_1()
+    {
+        testLimitCompactionsCount(true, 1);
+    }
+
+    @Test
+    public void testLimitCompactionsCount_PerLevel_5()
+    {
+        testLimitCompactionsCount(true, 5);
+    }
+
+    @Test
+    public void testLimitCompactionsCount_PerLevel_11()
+    {
+        testLimitCompactionsCount(true, 11);
+    }
+
+    void testLimitCompactionsCount(boolean topLevelOnly, int count)
+    {
+        testLimitCompactions(count, topLevelOnly, false, 1.0);
+    }
+
+    public void testLimitCompactions(int maxCount, boolean topLevelOnly, boolean triggerOversizedLimiting, double maxSpaceOverhead)
+    {
+        final int numBuckets = 4;
+        UnifiedCompactionStrategy strategy = prepareStrategyWithLimits(maxCount,
+                                                                       topLevelOnly,
+                                                                       triggerOversizedLimiting,
+                                                                       maxSpaceOverhead,
+                                                                       Double.MAX_VALUE,
+                                                                       numBuckets);
+
+        int numShards = strategy.getController().getNumShards();
+        // Without limiting oversized compactions kicking in, we expect one compaction per shard, otherwise we expect
+        // a fraction of the number of all shards, proportional to the max allowed space amplification fraction.
+        int expectedCompactionTasks = triggerOversizedLimiting
+                                      ? (int) (Math.floor(numShards * maxSpaceOverhead))
+                                      : topLevelOnly
+                                        ? Math.min((maxCount + numBuckets - 1) / numBuckets, numShards)
+                                        : Math.min(maxCount, numShards);
+        // TODO: Check that a warning was issued if space overhead limit was too low.
+        assertEquals(expectedCompactionTasks, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
     }
 
     @Test
@@ -365,12 +432,13 @@ public class UnifiedCompactionStrategyTest
         final int levels = (int) Math.floor(Math.log(numSSTables) / Math.log(F)) + 1;
 
         Controller controller = Mockito.mock(Controller.class);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(numShards);
+        when(controller.getMaxSpaceOverhead()).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
 
         if (maxSSTablesToCompact >= numSSTables)
@@ -378,30 +446,43 @@ public class UnifiedCompactionStrategyTest
         else
             when(controller.maxConcurrentCompactions()).thenReturn(1000); // make sure the work is assigned to different levels
 
+        when(controller.maxCompactionSpaceBytes()).thenCallRealMethod();
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
+        when(controller.getDataSetSizeBytes()).thenReturn(minSstableSizeBytes * numSSTables * numShards);
         when(controller.maxSSTablesToCompact()).thenReturn(maxSSTablesToCompact);
         Random random = Mockito.mock(Random.class);
         when(random.nextInt(anyInt())).thenReturn(0);
         when(controller.random()).thenReturn(random);
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         List<SSTableReader> allSstables = new ArrayList<>();
 
         List<SSTableReader> sstables = mockSSTables(numSSTables,
+                                                    minSstableSizeBytes,
                                                     0,
                                                     System.currentTimeMillis(),
-                                                    0);
+                                                    0,
+                                                    true,
+                                                    null);
         allSstables.addAll(sstables);
-        strategy.addSSTables(allSstables);
         dataTracker.addInitialSSTables(allSstables);
 
         int num = numSSTables;
-        UnifiedCompactionStrategy.CompactionPick task;
+        Collection<AbstractCompactionTask> tasks;
+        boolean headerPrinted = false;
         while (true)
         {
-            task = strategy.getNextCompactionPick(0); // do not check expiration
-            if (task == null)
+            tasks = strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+            if (tasks.isEmpty())
                 break;
+
+            for (CompactionAggregate aggregate : strategy.getAggregates())
+            {
+                if (!headerPrinted)
+                    System.out.println(aggregate.getStatistics().header());
+                headerPrinted = true;
+                System.out.println(aggregate.getStatistics().data());
+            }
 
             boolean layout = Math.min(num, maxSSTablesToCompact) > F * F;
             int limit;
@@ -414,25 +495,258 @@ public class UnifiedCompactionStrategyTest
             else
                 limit = maxSSTablesToCompact;
 
-            int expected = num;
-            if (layout)
+            for (AbstractCompactionTask task : tasks)
             {
-                int forTopLevel = (int) (Math.pow(F, Math.floor(Math.log(num) / Math.log(F))));
-                expected = W > 0
-                           ? forTopLevel
-                           : num / forTopLevel * forTopLevel;
+                int expected = num;
+                if (layout)
+                {
+                    int forTopLevel = (int) (Math.pow(F, Math.floor(Math.log(num) / Math.log(F))));
+                    expected = W > 0
+                               ? forTopLevel
+                               : num / forTopLevel * forTopLevel;
 
+                }
+                expected = Math.min(expected, limit);
+
+                int count = task.transaction.originals().size();
+                assertEquals(expected, count);
+                num -= count;
             }
-            expected = Math.min(expected, limit);
-
-            int count = task.size();
-            assertEquals(expected, count);
-            for (SSTableReader rdr : task)
-                strategy.removeSSTable(rdr);
-            num -= count;
         }
         // Check that we issue all the compactions
         assertTrue(num < T);
+    }
+
+    @Test
+    public void testLimitCompactionsThroughput_1()
+    {
+        testLimitCompactionsThroughput(1000, 1);
+    }
+
+    @Test
+    public void testLimitCompactionsThroughput_3()
+    {
+        testLimitCompactionsThroughput(1000, 3);
+    }
+
+    @Test
+    public void testOversizedCompactions_limitingNotTriggered()
+    {
+        testLimitOversizedCompactions(false, 1.0);
+    }
+
+    void testLimitCompactionsThroughput(int maxCount, int maxThroughput)
+    {
+        UnifiedCompactionStrategy strategy = prepareStrategyWithLimits(maxCount, false, false, 1.0, maxThroughput, 4);
+
+        // first call should return a pilot task
+        assertEquals(1, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+
+        // if task hasn't progressed, no new tasks should be produced
+        assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+
+        for (CompactionPick pick : strategy.backgroundCompactions.getCompactionsInProgress())
+            strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id));
+
+        // now that we have a rate, make sure we produce tasks to fill up the limit
+        assertEquals(Math.min(maxThroughput, maxCount) - 1, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+
+        // and don't create any new ones when the limit is filled, before they make progress
+        assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+
+        for (CompactionPick pick : strategy.backgroundCompactions.getCompactionsInProgress())
+            if (pick.progress == null)
+                strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id));
+
+        // and also when they do
+        assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+
+        for (int remaining = strategy.getController().getNumShards() - Math.min(maxThroughput, maxCount);
+             remaining > 0;
+             --remaining)
+        {
+            // mark a task as completed
+            strategy.backgroundCompactions.onCompleted(strategy, Iterables.get(strategy.backgroundCompactions.getCompactionsInProgress(), 0).id);
+
+            // and check that we get a new one
+            assertEquals(1, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
+        }
+    }
+
+    private UnifiedCompactionStrategy prepareStrategyWithLimits(int maxCount,
+                                                                boolean topBucketOnly,
+                                                                boolean triggerOversizedLimiting,
+                                                                double maxSpaceOverhead,
+                                                                double maxThroughput,
+                                                                int numBuckets)
+    {
+        int W = 2; // W = 2 => T = F = 4
+        int T = 4;
+        int F = 4;
+        final long minSstableSizeBytes = 2L << 20; // 2 MB
+        final int numShards = 5;
+
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
+        when(controller.getScalingParameter(anyInt())).thenReturn(W);
+        when(controller.getFanout(anyInt())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt())).thenCallRealMethod();
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(numShards);
+        when(controller.getMaxSpaceOverhead()).thenReturn(maxSpaceOverhead);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
+        when(controller.maxConcurrentCompactions()).thenReturn(maxCount);
+        when(controller.maxCompactionSpaceBytes()).thenCallRealMethod();
+        when(controller.maxThroughput()).thenReturn(maxThroughput);
+        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
+        // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
+        // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
+        // size for that bucket.
+        long topBucketMaxSstableSize = (long) (minSstableSizeBytes * Math.pow(F, numBuckets));
+        long topBucketMaxCompactionSize = T * topBucketMaxSstableSize;
+        when(controller.getDataSetSizeBytes()).thenReturn(topBucketMaxCompactionSize * numShards);
+        when(controller.random()).thenCallRealMethod();
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+        List<SSTableReader> allSstables = new ArrayList<>();
+
+        for (int i = numBuckets; i > 0; i--)
+        {
+            // Set compactions only in the top bucket of each shard
+            int numSstables = (!topBucketOnly || i == numBuckets) ? T : T - 1;
+            long size = (long) (minSstableSizeBytes * Math.pow(F, i));
+            // Simulate shards by using different disk indexes
+            for (int j = numShards; j > 0; j--)
+            {
+                List<SSTableReader> sstables = mockSSTables(numSstables,
+                                                            size,
+                                                            0,
+                                                            System.currentTimeMillis(),
+                                                            j - 1,
+                                                            true,
+                                                            null);
+                allSstables.addAll(sstables);
+            }
+        }
+        dataTracker.addInitialSSTables(allSstables);
+        return strategy;
+    }
+
+    private CompactionProgress mockProgress(UnifiedCompactionStrategy strategy, TimeUUID id)
+    {
+        CompactionProgress progress = Mockito.mock(CompactionProgress.class);
+        when(progress.durationInNanos()).thenReturn(1000L*1000*1000);
+        when(progress.outputDiskSize()).thenReturn(1L);
+        when(progress.operationId()).thenReturn(id);
+        return progress;
+    }
+
+    private static final class ArenaSpecs
+    {
+        private List<SSTableReader> sstables;
+        private int[] expectedBuckets;
+
+        ArenaSpecs(int[] expectedBuckets)
+        {
+            this.sstables = new ArrayList<>();
+            this.expectedBuckets = expectedBuckets;
+        }
+    }
+
+    private ArenaSpecs mockArena(Token min,
+                                 Token max,
+                                 Map<Long, Integer> sstables,
+                                 boolean repaired,
+                                 TimeUUID pendingRepair,
+                                 int diskIndex,
+                                 int[] expectedBuckets)
+    {
+        ArenaSpecs arena = new ArenaSpecs(expectedBuckets);
+        ByteBuffer bb = ByteBuffer.allocate(0);
+
+        sstables.forEach((size, num) -> {
+            // Generate a key inside the shard, but make sure it's not too close to the boundaries to compensate for
+            // rounding differences between splitting directly and splitting first by disk and then by shard.
+            Token first = min.getPartitioner().split(min, max, 0.01 + random.nextDouble() * 0.98);
+            Token last = min.getPartitioner().split(min, max, 0.99);
+
+            for (int i = 0; i < num; i++)
+            {
+                arena.sstables.add(mockSSTable(0,
+                                               size,
+                                               System.currentTimeMillis(),
+                                               0.0,
+                                               new BufferDecoratedKey(first, bb),
+                                               new BufferDecoratedKey(last, bb),
+                                               diskIndex,
+                                               repaired,
+                                               pendingRepair,
+                                               0));
+                first = first.nextValidToken();
+            }
+        });
+
+        return arena;
+    }
+
+    private List<PartitionPosition> makeBoundaries(int numShards, int numDisks)
+    {
+        IPartitioner partitioner = cfs.getPartitioner();
+        assert numShards >= 1;
+        assert numDisks >= 1;
+
+        if (numShards * numDisks == 1)
+            return ImmutableList.of(partitioner.getMaximumToken().maxKeyBound());
+
+        Splitter splitter = partitioner.splitter().orElse(null);
+        assertNotNull("The partitioner must support a splitter", splitter);
+
+        int numBoundaries = useDiskBoundaries ? numDisks * numShards : numShards;
+        Splitter.WeightedRange range = new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()));
+        final List<PartitionPosition> shards = splitter.splitOwnedRanges(numBoundaries, ImmutableList.of(range), Splitter.SplitType.ALWAYS_SPLIT)
+                                               .boundaries
+                                               .stream()
+                                               .map(Token::maxKeyBound)
+                                               .collect(Collectors.toList());
+        if (useDiskBoundaries)
+        {
+            diskBoundaryPositions = new ArrayList<>(numDisks);
+            for (int i = 0; i < numDisks; ++i)
+                diskBoundaryPositions.add(shards.get((i + 1) * numShards - 1));
+        }
+        return shards;
+    }
+
+    private List<ArenaSpecs> mockArenas(int diskIndex,
+                                        int diskCount,
+                                        boolean repaired,
+                                        TimeUUID pendingRepair,
+                                        List<PartitionPosition> boundaries,
+                                        Map<Long, Integer> sstables,
+                                        int[] buckets)
+    {
+        List<ArenaSpecs> arenasList = new ArrayList<>();
+
+        int numShards = boundaries.size() / diskCount;
+        List<PartitionPosition> shardPositions = useDiskBoundaries
+                                                 ? boundaries.subList(diskIndex * numShards, (diskIndex + 1) * numShards)
+                                                 : boundaries;
+        Token min = useDiskBoundaries && diskIndex > 0
+                    ? boundaries.get(diskIndex * numShards - 1).getToken()
+                    : partitioner.getMinimumToken();
+
+        for (PartitionPosition boundary : shardPositions)
+        {
+            Token max = boundary.getToken();
+
+            // what matters is the first key, which must be less than max
+            arenasList.add(mockArena(min, max, sstables, repaired, pendingRepair, diskIndex, buckets));
+
+            min = max;
+        }
+
+        return arenasList;
     }
 
     private static Map<Long, Integer> mapFromPair(Pair<Long, Integer> ... pairs)
@@ -447,74 +761,446 @@ public class UnifiedCompactionStrategyTest
     }
 
     @Test
-    public void testGetNextBackgroundTasks()
+    public void testAllArenasOneBucket_NoShards()
     {
+        testAllArenasOneBucket(1);
+    }
+
+    @Test
+    public void testAllArenasOneBucket_MultipleShards()
+    {
+        testAllArenasOneBucket(5);
+    }
+
+    private void testAllArenasOneBucket(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
+        List<ArenaSpecs> arenasList = new ArrayList<>();
+
+        Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
+        int[] buckets = new int[]{4};
+
+        TimeUUID pendingRepair = TimeUUID.Generator.nextTimeUUID();
+        arenasList.addAll(mockArenas(0, 2, false, pendingRepair, boundaries, sstables, buckets)); // pending repair
+
+        arenasList.addAll(mockArenas(0, 2, false, null, boundaries, sstables, buckets)); // unrepaired
+        arenasList.addAll(mockArenas(1, 2, false, null, boundaries, sstables, buckets)); // unrepaired, next disk
+
+        arenasList.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets)); // repaired
+        arenasList.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets)); // repaired, next disk
+
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+    }
+
+    @Test
+    public void testRepairedOneDiskOneBucket_NoShards()
+    {
+        testRepairedOneDiskOneBucket(1);
+    }
+
+    @Test
+    public void testRepairedOneDiskOneBucket_MultipleShards()
+    {
+        testRepairedOneDiskOneBucket(5);
+    }
+
+    private void testRepairedOneDiskOneBucket(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
+        int[] buckets = new int[]{4};
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 1);
+        List<ArenaSpecs> arenas = mockArenas(0, 1, true, null, boundaries, sstables, buckets);
+        testGetBucketsMultipleArenas(arenas, W, m, boundaries);
+    }
+
+    @Test
+    public void testRepairedTwoDisksOneBucket_NoShards()
+    {
+        testRepairedTwoDisksOneBucket(1);
+    }
+
+    @Test
+    public void testRepairedTwoDisksOneBucket_MultipleShards()
+    {
+        testRepairedTwoDisksOneBucket(5);
+    }
+
+    private void testRepairedTwoDisksOneBucket(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        Map<Long, Integer> sstables = mapFromPair(Pair.create(4 * ONE_MB, 4));
+        int[] buckets = new int[]{4};
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
+        List<ArenaSpecs> arenas = new ArrayList<>();
+
+        arenas.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets));
+        arenas.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets));
+
+        testGetBucketsMultipleArenas(arenas, W, m, boundaries);
+    }
+
+    @Test
+    public void testRepairedMultipleDisksMultipleBuckets_NoShards()
+    {
+        testRepairedMultipleDisksMultipleBuckets(1);
+    }
+
+    @Test
+    public void testRepairedMultipleDisksMultipleBuckets_MultipleShards()
+    {
+        testRepairedMultipleDisksMultipleBuckets(15);
+    }
+
+    private void testRepairedMultipleDisksMultipleBuckets(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 6);
+        List<ArenaSpecs> arenasList = new ArrayList<>();
+
+        Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
+        int[] buckets1 = new int[]{4,4,4};
+
+        Map<Long, Integer> sstables2 = mapFromPair(Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 8));
+        int[] buckets2 = new int[]{0,4,8};
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (i % 2 == 0)
+                arenasList.addAll(mockArenas(i, 6, true, null, boundaries, sstables1, buckets1));
+            else
+                arenasList.addAll(mockArenas(i, 6, true, null, boundaries, sstables2, buckets2));
+
+        }
+
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+    }
+
+    @Test
+    public void testRepairedUnrepairedOneDiskMultipleBuckets_NoShards()
+    {
+        testRepairedUnrepairedOneDiskMultipleBuckets(1);
+    }
+
+    @Test
+    public void testRepairedUnrepairedOneDiskMultipleBuckets_MultipleShards()
+    {
+        testRepairedUnrepairedOneDiskMultipleBuckets(10);
+    }
+
+    private void testRepairedUnrepairedOneDiskMultipleBuckets(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 1);
+        List<ArenaSpecs> arenasList = new ArrayList<>();
+
+        Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
+        int[] buckets1 = new int[]{4,4,4};
+
+        Map<Long, Integer> sstables2 = mapFromPair(Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 8));
+        int[] buckets2 = new int[]{0,4,8};
+
+        arenasList.addAll(mockArenas(0, 1, true, null, boundaries, sstables2, buckets2)); // repaired
+        arenasList.addAll(mockArenas(0, 1, false, null, boundaries, sstables1, buckets1)); // unrepaired
+
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+    }
+
+    @Test
+    public void testRepairedUnrepairedTwoDisksMultipleBuckets_NoShards()
+    {
+        testRepairedUnrepairedTwoDisksMultipleBuckets(1);
+    }
+
+    @Test
+    public void testRepairedUnrepairedTwoDisksMultipleBuckets_MultipleShards()
+    {
+        testRepairedUnrepairedTwoDisksMultipleBuckets(5);
+    }
+
+    private void testRepairedUnrepairedTwoDisksMultipleBuckets(int numShards)
+    {
+        final int m = 2; // minimal sorted run size in MB
+        final int W = 2; // => o = 1 => F = 4, T = 4: 0-8m, 8-32m, 32-128m
+
+        List<PartitionPosition> boundaries = makeBoundaries(numShards, 2);
+        List<ArenaSpecs> arenasList = new ArrayList<>();
+
+        Map<Long, Integer> sstables1 = mapFromPair(Pair.create(2 * ONE_MB, 4), Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 4));
+        int[] buckets1 = new int[]{4,4,4};
+
+        Map<Long, Integer> sstables2 = mapFromPair(Pair.create(8 * ONE_MB, 4), Pair.create(32 * ONE_MB, 8));
+        int[] buckets2 = new int[]{0,4,8};
+
+        arenasList.addAll(mockArenas(0, 2, true, null, boundaries, sstables2, buckets2));  // repaired, first disk
+        arenasList.addAll(mockArenas(1, 2, true, null, boundaries, sstables1, buckets1));  // repaired, second disk
+
+        arenasList.addAll(mockArenas(0, 2, false, null, boundaries, sstables1, buckets1));  // unrepaired, first disk
+        arenasList.addAll(mockArenas(1, 2, false, null, boundaries, sstables2, buckets2));  // unrepaired, second disk
+
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+    }
+
+    private void testGetBucketsMultipleArenas(List<ArenaSpecs> arenaSpecs, int W, int m, List<PartitionPosition> shards)
+    {
+        long minimalSizeBytes = m << 20;
+
         Controller controller = Mockito.mock(Controller.class);
-        long minimalSizeBytes = 2 << 20;
-        when(controller.getScalingParameter(anyInt())).thenReturn(0);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.getNumShards()).thenReturn(shards.size());
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.random()).thenCallRealMethod();
 
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        List<SSTableReader> sstables = arenaSpecs.stream().flatMap(a -> a.sstables.stream()).collect(Collectors.toList());
+        dataTracker.addInitialSSTables(sstables);
+
+        Map<UnifiedCompactionStrategy.Shard, List<UnifiedCompactionStrategy.Bucket>> arenas = strategy.getShardsWithBuckets();
+        assertNotNull(arenas);
+        assertEquals(arenaSpecs.size(), arenas.size());
+
+        int idx = 0;
+        for (Map.Entry<UnifiedCompactionStrategy.Shard, List<UnifiedCompactionStrategy.Bucket>> entry : arenas.entrySet())
+        {
+            List<UnifiedCompactionStrategy.Bucket> buckets = entry.getValue();
+            ArenaSpecs currentArenaSpecs = arenaSpecs.get(idx++);
+
+            assertEquals(currentArenaSpecs.expectedBuckets.length, buckets.size());
+            for (int i = 0; i < currentArenaSpecs.expectedBuckets.length; i++)
+                assertEquals(currentArenaSpecs.expectedBuckets[i], buckets.get(i).sstables.size());
+        }
+    }
+
+    @Test
+    public void testShardBoundaries()
+    {
+        // no shards
+        testShardBoundaries(ints(100), 1, 1, ints(10, 50));
+        // split on disks at minimum
+        testShardBoundaries(ints(30, 100), 1, 2, ints(10, 50));
+        testShardBoundaries(ints(20, 30, 40, 50, 100), 1, 5, ints(10, 51, 61, 70));
+
+        // no disks
+        testShardBoundaries(ints(30, 100), 2, 1, ints(10, 50));
+        testShardBoundaries(ints(20, 30, 40, 50, 100), 5, 1, ints(10, 51, 61, 70));
+
+        // split
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 80, 100), 9, 3, ints(0, 90));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(0, 51, 61, 100));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(0, 49, 59, 100));
+        testShardBoundaries(ints(12, 23, 33, 45, 56, 70, 80, 90, 100), 9, 3, ints(0, 9, 11, 20, 21, 39, 41, 50, 51, 60, 64, 68, 68, 100));
+
+        // uneven
+        testShardBoundaries(ints(11, 22, 33, 42, 50, 58, 67, 78, 89, 100), 10, 3, ints(0, 100));
+        testShardBoundaries(ints(8, 17, 25, 38, 50, 58, 67, 75, 88, 100), 10, 4, ints(0, 100));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 80, 90, 100), 10, 5, ints(0, 100));
+        testShardBoundaries(ints(8, 17, 33, 42, 50, 58, 67, 83, 92, 100), 10, 6, ints(0, 100));
+        testShardBoundaries(ints(14, 21, 29, 43, 50, 57, 71, 79, 86, 100), 10, 7, ints(0, 100));
+        testShardBoundaries(ints(13, 19, 25, 38, 50, 63, 69, 75, 88, 100), 10, 8, ints(0, 100));
+        testShardBoundaries(ints(11, 22, 33, 44, 50, 56, 67, 78, 89, 100), 10, 9, ints(0, 100));
+
+        // uneven again, where x0 are the disk boundaries and the others are inserted shard boundaries
+        testShardBoundaries(ints(3, 7, 10, 13, 15, 18, 20, 23, 27, 100), 10, 3, ints(0, 30));
+        testShardBoundaries(ints(3, 7, 10, 15, 20, 23, 27, 30, 35, 100), 10, 4, ints(0, 40));
+        testShardBoundaries(ints(5, 10, 15, 20, 25, 30, 35, 40, 45, 100), 10, 5, ints(0, 50));
+        testShardBoundaries(ints(5, 10, 20, 25, 30, 35, 40, 50, 55, 100), 10, 6, ints(0, 60));
+        testShardBoundaries(ints(10, 15, 20, 30, 35, 40, 50, 55, 60, 100), 10, 7, ints(0, 70));
+        testShardBoundaries(ints(10, 15, 20, 30, 40, 50, 55, 60, 70, 100), 10, 8, ints(0, 80));
+        testShardBoundaries(ints(10, 20, 30, 40, 45, 50, 60, 70, 80, 100), 10, 9, ints(0, 90));
+    }
+
+    @Test
+    public void testShardBoundariesWraparound()
+    {
+        // no shards
+        testShardBoundaries(ints(100), 1, 1, ints(50, 10));
+        // split on disks at minimum
+        testShardBoundaries(ints(70, 100), 1, 2, ints(50, 10));
+        testShardBoundaries(ints(10, 20, 30, 70, 100), 1, 5, ints(91, 31, 61, 71));
+        // no disks
+        testShardBoundaries(ints(70, 100), 2, 1, ints(50, 10));
+        testShardBoundaries(ints(10, 20, 30, 70, 100), 5, 1, ints(91, 31, 61, 71));
+        // split
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 90, 100), 9, 3, ints(81, 71));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(51, 41));
+        testShardBoundaries(ints(10, 30, 40, 50, 60, 70, 80, 90, 100), 9, 3, ints(21, 11));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 60, 70, 90, 100), 9, 3, ints(89, 79));
+        testShardBoundaries(ints(10, 20, 30, 40, 60, 70, 80, 90, 100), 9, 3, ints(59, 49));
+        testShardBoundaries(ints(10, 30, 40, 50, 60, 70, 80, 90, 100), 9, 3, ints(29, 19));
+
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(91, 51, 61, 91));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(21, 51, 61, 21));
+        testShardBoundaries(ints(10, 20, 30, 40, 50, 70, 80, 90, 100), 9, 3, ints(71, 51, 61, 71));
+    }
+
+    private int[] ints(int... values)
+    {
+        return values;
+    }
+
+    private void testShardBoundaries(int[] expected, int numShards, int numDisks, int[] rangeBounds)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        List<Splitter.WeightedRange> ranges = new ArrayList<>();
+        for (int i = 0; i < rangeBounds.length; i += 2)
+            ranges.add(new Splitter.WeightedRange(1.0, new Range<>(getToken(rangeBounds[i + 0]), getToken(rangeBounds[i + 1]))));
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(cfs, ranges);
+
+        List<PartitionPosition> diskBoundaries = sortedRanges.split(numDisks);
+
+        int[] result = UnifiedCompactionStrategy.computeShardBoundaries(sortedRanges, diskBoundaries, numShards, partitioner)
+                                                .stream()
+                                                .map(PartitionPosition::getToken)
+                                                .mapToInt(this::fromToken)
+                                                .toArray();
+
+        Assert.assertArrayEquals("Disks " + numDisks + " shards " + numShards + " expected " + Arrays.toString(expected) + " was " + Arrays.toString(result), expected, result);
+    }
+
+    private Token getToken(int x)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), x * 0.01);
+    }
+
+    private int fromToken(Token t)
+    {
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+        return (int) Math.round(partitioner.getMinimumToken().size(t) * 100.0);
+    }
+
+    @Test
+    public void testGetNextBackgroundTasks()
+    {
+        assertCompactionTask(1, 3, CompactionTask.class);
+        assertCompactionTask(3, 3, UnifiedCompactionTask.class);
+    }
+
+    private void assertCompactionTask(final int numShards, final int expectedNumOfTasks, Class expectedClass)
+    {
+        Controller controller = Mockito.mock(Controller.class);
+        long minimalSizeBytes = 2 << 20;
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getScalingParameter(anyInt())).thenReturn(0);
+        when(controller.getFanout(anyInt())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt())).thenCallRealMethod();
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(numShards);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
+        when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
+        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        when(controller.random()).thenCallRealMethod();
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         IPartitioner partitioner = cfs.getPartitioner();
 
         List<SSTableReader> sstables = createSStables(partitioner);
 
-        strategy.addSSTables(sstables);
         dataTracker.addInitialSSTables(sstables);
 
-        AbstractCompactionTask task = strategy.getNextBackgroundTask(0);
-        assertSame(UnifiedCompactionTask.class, task.getClass());
-        task.transaction.abort();
+        Collection<AbstractCompactionTask> tasks = strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+        assertEquals("Expecting number of next background tasks:", expectedNumOfTasks, tasks.size());
+        for (AbstractCompactionTask task : tasks)
+        {
+            assertSame(expectedClass, task.getClass());
+        }
     }
 
     private List<SSTableReader> createSStables(IPartitioner partitioner)
     {
-        return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), 10000);
+        return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), 10000, TimeUUID.Generator.nextTimeUUID());
     }
 
-    private List<SSTableReader> createSStables(IPartitioner partitioner, int ttl)
+    private List<SSTableReader> createSStables(IPartitioner partitioner, int ttl, TimeUUID pendingRepair)
     {
-        return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), ttl);
+        return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), ttl, pendingRepair);
     }
 
     private List<SSTableReader> createSStables(IPartitioner partitioner, Map<Long, Integer> sstablesMap)
     {
-        return createSStables(partitioner, sstablesMap, 10000);
+        return createSStables(partitioner, sstablesMap, 10000, TimeUUID.Generator.nextTimeUUID());
     }
-
-    // Used to make sure timestamps are not exactly the same, which disables expiration
-    int millisAdjustment = 0;
 
     private List<SSTableReader> createSStables(IPartitioner partitioner,
                                                Map<Long, Integer> sstablesMap,
-                                               int ttl)
+                                               int ttl,
+                                               TimeUUID pendingRepair)
     {
         List<SSTableReader> mockSSTables = new ArrayList<>();
         Token min = partitioner.getMinimumToken();
         Token max = partitioner.getMaximumToken();
         ByteBuffer bb = ByteBuffer.allocate(0);
         sstablesMap.forEach((size, num) -> {
-            Token first = min.getPartitioner().split(min, max, 0.01);
+            Token first = min.getPartitioner().split(min, max, 0.01 + random.nextDouble() * 0.98);
 
             for (int i = 0; i < num; i++)
             {
                 // pending repair
                 mockSSTables.add(mockSSTable(0,
                                              size,
-                                             System.currentTimeMillis() + millisAdjustment++,
+                                             System.currentTimeMillis(),
                                              0.0,
                                              new BufferDecoratedKey(first, bb),
                                              new BufferDecoratedKey(max, bb),
+                                             0,
+                                             false,
+                                             pendingRepair,
+                                             ttl));
+                first = first.nextValidToken();
+            }
+
+            for (int i = 0; i < num; i++)
+            {
+                // unrepaired
+                mockSSTables.add(mockSSTable(0,
+                                             size,
+                                             System.currentTimeMillis(),
+                                             0.0,
+                                             new BufferDecoratedKey(first, bb),
+                                             new BufferDecoratedKey(max, bb),
+                                             0,
+                                             false,
+                                             null,
+                                             ttl));
+                first = first.nextValidToken();
+            }
+
+            for (int i = 0; i < num; i++)
+            {
+                // repaired
+                mockSSTables.add(mockSSTable(0,
+                                             size,
+                                             System.currentTimeMillis(),
+                                             0.0,
+                                             new BufferDecoratedKey(first, bb),
+                                             new BufferDecoratedKey(max, bb),
+                                             0,
+                                             true,
+                                             null,
                                              ttl));
                 first = first.nextValidToken();
             }
@@ -523,52 +1209,65 @@ public class UnifiedCompactionStrategyTest
     }
 
     @Test
-    public void testDropExpiredSSTables()
+    public void testDropExpiredSSTables1Shard()
     {
         testDropExpiredFromBucket(1);
         testDropExpiredAndCompactNonExpired();
+    }
+
+    @Test
+    public void testDropExpiredSSTables3Shards()
+    {
+        testDropExpiredFromBucket(3);
     }
 
     private void testDropExpiredFromBucket(int numShards)
     {
         Controller controller = Mockito.mock(Controller.class);
         long minimalSizeBytes = 2 << 20;
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(3); // T=5
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(numShards);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
-        when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
         when(controller.random()).thenCallRealMethod();
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
         List<SSTableReader> sstables = createSStables(cfs.getPartitioner());
         // Tracker#addSSTables also tries to backup SSTables, so we use addInitialSSTables and notify explicitly
-        strategy.addSSTables(sstables);
         dataTracker.addInitialSSTables(sstables);
 
         try
         {
             // nothing to compact yet
-            assertNull(strategy.getNextCompactionPick(0));
+            assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
 
             long timestamp = sstables.get(sstables.size() - 1).getMaxLocalDeletionTime();
             long expirationPoint = timestamp + 1;
 
-            UnifiedCompactionStrategy.CompactionPick pick = strategy.getNextCompactionPick(expirationPoint);
-            assertNotNull(pick);
-            assertEquals(sstables.size(), pick.size());
-            assertEquals(-1, pick.level);
+            assertEquals(3, strategy.getNextBackgroundTasks(expirationPoint).size()); // repaired, unrepaired, pending
+            Collection<CompactionPick> picks = strategy.backgroundCompactions.getCompactionsInProgress();
+            for (CompactionPick pick : picks)
+            {
+                // expired SSTables don't contribute to total size
+                assertTrue(pick.hasExpiredOnly());
+                assertEquals(sstables.size() / 3, pick.expired.size());
+                assertEquals(0L, pick.totSizeInBytes);
+                assertEquals(0L, pick.avgSizeInBytes);
+                assertEquals(0, pick.parent);
+            }
         }
         finally
         {
             strategy.shutdown();
+            dataTracker.dropSSTables();
         }
     }
 
@@ -576,47 +1275,56 @@ public class UnifiedCompactionStrategyTest
     {
         Controller controller = Mockito.mock(Controller.class);
         long minimalSizeBytes = 2 << 20;
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(2);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
-        when(controller.maxSSTablesToCompact()).thenReturn(1000);
-
         when(controller.random()).thenCallRealMethod();
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> expiredSSTables = createSStables(cfs.getPartitioner(), 1000);
-        List<SSTableReader> nonExpiredSSTables = createSStables(cfs.getPartitioner(), 0);
-        strategy.addSSTables(expiredSSTables);
-        strategy.addSSTables(nonExpiredSSTables.subList(0, 3));
-        dataTracker.addInitialSSTables(Iterables.concat(expiredSSTables, nonExpiredSSTables));
+        TimeUUID pendingRepair = TimeUUID.Generator.nextTimeUUID();
+        List<SSTableReader> expiredSSTables = createSStables(cfs.getPartitioner(), 1000, pendingRepair);
+        List<SSTableReader> nonExpiredSSTables = createSStables(cfs.getPartitioner(), 0, pendingRepair);
+        List<SSTableReader> allSSTables = Stream.concat(expiredSSTables.stream(), nonExpiredSSTables.stream())
+                                                .collect(Collectors.toList());
+        dataTracker.addInitialSSTables(allSSTables);
 
         long timestamp = expiredSSTables.get(expiredSSTables.size() - 1).getMaxLocalDeletionTime();
         long expirationPoint = timestamp + 1;
 
         try
         {
-            UnifiedCompactionStrategy.CompactionPick pick = strategy.getNextCompactionPick(expirationPoint);
+            strategy.getNextBackgroundTasks(expirationPoint);
+            Collection<CompactionPick> picks = strategy.backgroundCompactions.getCompactionsInProgress();
 
-            assertEquals(expiredSSTables.size(), pick.size());
-            assertEquals(-1, pick.level);
-
-            strategy.addSSTables(nonExpiredSSTables);   // duplicates should be skipped
-            pick = strategy.getNextCompactionPick(expirationPoint);
-
-            assertEquals(expiredSSTables.size() + nonExpiredSSTables.size(), pick.size());
-            assertEquals(0, pick.level);
+            for (CompactionPick pick : picks)
+            {
+                assertFalse(pick.hasExpiredOnly());
+                assertEquals(pick.sstables.size() / 2, pick.expired.size());
+                Set<SSTableReader> nonExpired = pick.sstables.stream()
+                                                             .filter(sstable -> !pick.expired.contains(sstable))
+                                                             .collect(Collectors.toSet());
+                assertEquals(pick.sstables.size() / 2, nonExpired.size());
+                long expectedTotSize = nonExpired.stream()
+                                                 .mapToLong(SSTableReader::onDiskLength)
+                                                 .sum();
+                assertEquals(expectedTotSize, pick.totSizeInBytes);
+                assertEquals(expectedTotSize / nonExpired.size(), pick.avgSizeInBytes);
+                assertEquals(0, pick.parent);
+            }
         }
         finally
         {
             strategy.shutdown();
+            dataTracker.dropSSTables();
         }
     }
 
@@ -624,291 +1332,32 @@ public class UnifiedCompactionStrategyTest
     public void testPending()
     {
         Controller controller = Mockito.mock(Controller.class);
-        when(controller.getScalingParameter(anyInt())).thenReturn(8); // F=10, T=10
+        when(controller.getScalingParameter(anyInt())).thenReturn(-8); // F=10, T=2
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.maxSSTablesToCompact()).thenReturn(10); // same as fanout
 
         long minimalSizeBytes = 2 << 20;
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
         when(controller.random()).thenCallRealMethod();
-
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        int count = 91;
         List<SSTableReader> sstables = createSStables(cfs.getPartitioner(),
-                                                      mapFromPair(Pair.create(4 * ONE_MB, count)));
-        strategy.addSSTables(sstables);
+                                                      mapFromPair(Pair.create(4 * ONE_MB, 91)));
         dataTracker.addInitialSSTables(sstables);
 
-        UnifiedCompactionStrategy.CompactionPick pick = strategy.getNextCompactionPick(0);
-        assertNotNull(pick);
-        assertEquals(9, strategy.getEstimatedRemainingTasks());
-    }
-
-    @Test
-    public void testMaximalSelection()
-    {
-        Set<SSTableReader> allSSTables = new HashSet<>();
-        allSSTables.addAll(mockNonOverlappingSSTables(10, 0, 100 << 20));
-        allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
-        allSSTables.addAll(mockNonOverlappingSSTables(25, 2, 400 << 20));
-
-        Controller controller = Mockito.mock(Controller.class);
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
-        strategy.addSSTables(allSSTables);
-        dataTracker.addInitialSSTables(allSSTables);
-
-        Collection<AbstractCompactionTask> tasks = strategy.getMaximalTask(0, false);
-        assertEquals(5, tasks.size());  // 5 (gcd of 10,15,25) common boundaries
-        for (AbstractCompactionTask task : tasks)
-        {
-            Set<SSTableReader> compacting = task.transaction.originals();
-            assertEquals(2 + 3 + 5, compacting.size()); // count / gcd sstables of each level
-            assertEquals((2 * 100L + 3 * 200 + 5 * 400) << 20, compacting.stream().mapToLong(SSTableReader::onDiskLength).sum());
-
-            // None of the selected sstables may intersect any in any other set.
-            for (AbstractCompactionTask task2 : tasks)
-            {
-                if (task == task2)
-                    continue;
-
-                Set<SSTableReader> compacting2 = task2.transaction.originals();
-                for (SSTableReader r1 : compacting)
-                    for (SSTableReader r2 : compacting2)
-                        assertTrue(r1 + " intersects " + r2, r1.getFirst().compareTo(r2.getLast()) > 0 || r1.getLast().compareTo(r2.getFirst()) < 0);
-            }
-        }
-    }
-
-    @Test
-    public void testBucketSelectionSimple()
-    {
-        testBucketSelection(repeats(4, 10), repeats(10, 4), Overlaps.InclusionMethod.TRANSITIVE);
-    }
-
-    @Test
-    public void testBucketSelectionHalved()
-    {
-        testBucketSelection(repeats(4, arr(10, 5)), repeats(5, 6), Overlaps.InclusionMethod.TRANSITIVE);
-        testBucketSelection(repeats(4, arr(10, 5)), repeats(5, 6), Overlaps.InclusionMethod.SINGLE);
-        // When we take large sstables for one compaction, remaining overlaps don't have enough to trigger next
-        testBucketSelection(repeats(4, arr(10, 5)), repeats(5, 4), Overlaps.InclusionMethod.NONE, 10);
-    }
-
-    @Test
-    public void testBucketSelectionFives()
-    {
-        testBucketSelection(arr(25, 15, 10), repeats(5, arr(10)), Overlaps.InclusionMethod.TRANSITIVE);
-        testBucketSelection(arr(25, 15, 10), repeats(10, arr(6, 4)), Overlaps.InclusionMethod.SINGLE);
-        // When we take large sstables for one compaction, remaining overlaps don't have enough to trigger next
-        testBucketSelection(arr(25, 15, 10), repeats(10, arr(3)), Overlaps.InclusionMethod.NONE, 20);
-    }
-
-    @Test
-    public void testBucketSelectionMissing()
-    {
-        testBucketSelection(repeats(4,5), repeats(4, 4), Overlaps.InclusionMethod.TRANSITIVE, 3, 1);
-    }
-
-    @Test
-    public void testBucketSelectionHalvesMissing()
-    {
-        // Drop one half: still compact because of overlap
-        // Note: picks are returned right-to-left because the random mock always returns 0, picking the last bucket.
-        testBucketSelection(repeats(4, arr(6, 3)), arr(6, 6, 5), Overlaps.InclusionMethod.TRANSITIVE, 0, 1);
-        // Drop one full: don't compact
-        testBucketSelection(repeats(4, arr(3, 6)), arr(6, 6), Overlaps.InclusionMethod.TRANSITIVE, 5, 1);
-        // Drop two adjacent halves: don't compact
-        testBucketSelection(repeats(4, arr(6, 3)), arr(6, 6), Overlaps.InclusionMethod.TRANSITIVE, 4, 2, 3);
-    }
-
-
-    private int[] arr(int... values)
-    {
-        return values;
-    }
-
-    private int[] repeats(int count, int... values)
-    {
-        int[] rep = new int[count];
-        for (int i = 0; i < count; ++i)
-            rep[i] = values[i % values.length];
-        return rep;
-    }
-
-    public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod)
-    {
-        testBucketSelection(counts, expecteds, overlapInclusionMethod, 0);
-    }
-
-    public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod, int expectedRemaining, int... dropFromFirst)
-    {
-        Set<SSTableReader> allSSTables = new HashSet<>();
-        int fanout = counts.length;
-        for (int i = 0; i < fanout; ++i)
-        {
-            final int count = counts[i];
-            final List<SSTableReader> list = mockNonOverlappingSSTables(count, 0, (100 << 20) / count);
-            if (i == 0)
-            {
-                for (int k = dropFromFirst.length - 1; k >= 0; --k)
-                    list.remove(dropFromFirst[k]);
-            }
-            allSSTables.addAll(list);
-        }
-        Controller controller = Mockito.mock(Controller.class);
-        when(controller.getScalingParameter(anyInt())).thenReturn(fanout - 2); // F=T=fanout
-        when(controller.getFanout(anyInt())).thenCallRealMethod();
-        when(controller.getThreshold(anyInt())).thenCallRealMethod();
-        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
-        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 << 20));
-        when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
-        when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
-        when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
-        when(controller.overlapInclusionMethod()).thenReturn(overlapInclusionMethod);
-        Random randomMock = Mockito.mock(Random.class);
-        when(randomMock.nextInt(anyInt())).thenReturn(0);
-        when(controller.random()).thenReturn(randomMock);
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(cfs, new HashMap<>(), controller);
-        strategy.addSSTables(allSSTables);
-        dataTracker.addInitialSSTables(allSSTables);
-
-        List<UnifiedCompactionStrategy.CompactionPick> picks = new ArrayList<>();
-        while (true)
-        {
-            UnifiedCompactionStrategy.CompactionPick pick = strategy.getNextCompactionPick(0);
-            if (pick == null)
-                break;
-            strategy.removeSSTables(pick);
-            picks.add(pick);
-        }
-        assertEquals(expectedRemaining, strategy.getSSTables().size());
-
-        assertEquals(expecteds.length, picks.size());
-        int buckIdx = 0;
-        for (UnifiedCompactionStrategy.CompactionPick pick : picks)
-        {
-            int expectedCount = expecteds[buckIdx++];
-            assertEquals(expectedCount, pick.size()); // count / gcd sstables of each level
-
-            if (overlapInclusionMethod == Overlaps.InclusionMethod.TRANSITIVE)
-            {
-                // None of the selected sstables may intersect any in any other set.
-                for (UnifiedCompactionStrategy.CompactionPick pick2 : picks)
-                {
-                    if (pick == pick2)
-                        continue;
-
-                    for (SSTableReader r1 : pick)
-                        for (SSTableReader r2 : pick2)
-                            assertTrue(r1 + " intersects " + r2, r1.getFirst().compareTo(r2.getLast()) > 0 || r1.getLast().compareTo(r2.getFirst()) < 0);
-                }
-            }
-        }
-    }
-
-    SSTableReader mockSSTable(int level, long bytesOnDisk, long timestamp, double hotness, DecoratedKey first, DecoratedKey last)
-    {
-        return mockSSTable(level, bytesOnDisk, timestamp, hotness, first, last, 0);
-    }
-
-    SSTableReader mockSSTable(long bytesOnDisk, long timestamp, DecoratedKey first, DecoratedKey last)
-    {
-        return mockSSTable(0, bytesOnDisk, timestamp, 0, first, last, 0);
-    }
-
-    SSTableReader mockSSTable(int level,
-                              long bytesOnDisk,
-                              long timestamp,
-                              double hotness,
-                              DecoratedKey first,
-                              DecoratedKey last,
-                              int ttl)
-    {
-        // We create a ton of mock SSTables that mockito is going to keep until the end of the test suite without stubOnly.
-        // Mockito keeps them alive to preserve the history of invocations which is not available for stubs. If we ever
-        // need history of invocations and remove stubOnly, we should also manually reset mocked SSTables in tearDown.
-        SSTableReader ret = Mockito.mock(SSTableReader.class, withSettings().stubOnly()
-                                                                            .defaultAnswer(RETURNS_SMART_NULLS));
-
-        when(ret.getSSTableLevel()).thenReturn(level);
-        when(ret.onDiskLength()).thenReturn(bytesOnDisk);
-        when(ret.uncompressedLength()).thenReturn(bytesOnDisk); // let's assume no compression
-        when(ret.getMaxTimestamp()).thenReturn(timestamp);
-        when(ret.getMinTimestamp()).thenReturn(timestamp);
-        when(ret.getFirst()).thenReturn(first);
-        when(ret.getLast()).thenReturn(last);
-        when(ret.isMarkedSuspect()).thenReturn(false);
-        when(ret.isRepaired()).thenReturn(false);
-        when(ret.getRepairedAt()).thenReturn(repairedAt);
-        when(ret.getPendingRepair()).thenReturn(null);
-        when(ret.isPendingRepair()).thenReturn(false);
-        when(ret.getColumnFamilyName()).thenReturn(table);
-        when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s",
-                                                      FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last));
-        long deletionTime;
-        if (ttl > 0)
-            deletionTime = TimeUnit.MILLISECONDS.toSeconds(timestamp) + ttl;
-        else
-            deletionTime = Long.MAX_VALUE;
-
-        when(ret.getMinLocalDeletionTime()).thenReturn(deletionTime);
-        when(ret.getMaxLocalDeletionTime()).thenReturn(deletionTime);
-        when(ret.getMinTTL()).thenReturn(ttl);
-        when(ret.getMaxTTL()).thenReturn(ttl);
-
-        return ret;
-    }
-
-    List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp)
-    {
-        DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
-        DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
-
-        List<SSTableReader> sstables = new ArrayList<>();
-        for (int i = 0; i < numSSTables; i++)
-        {
-            long b = (long)(bytesOnDisk * 0.95 + bytesOnDisk * 0.05 * random.nextDouble()); // leave 5% variability
-            double h = hotness * 0.95 + hotness * 0.05 * random.nextDouble(); // leave 5% variability
-            sstables.add(mockSSTable(0, b, timestamp, h, first, last, 0));
-        }
-
-        return sstables;
-    }
-
-    List<SSTableReader> mockNonOverlappingSSTables(int numSSTables, int level, long bytesOnDisk)
-    {
-        if (!partitioner.splitter().isPresent())
-            throw new IllegalStateException(String.format("Cannot split ranges with current partitioner %s", partitioner));
-
-        ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
-
-        long timestamp = System.currentTimeMillis();
-        List<SSTableReader> sstables = new ArrayList<>(numSSTables);
-        for (int i = 0; i < numSSTables; i++)
-        {
-            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i).nextValidToken(), emptyBuffer);
-            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i+1), emptyBuffer);
-            sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
-
-            timestamp+=10;
-        }
-
-        return sstables;
-    }
-
-    private Token boundary(int numSSTables, int i)
-    {
-        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i * 1.0 / numSSTables);
+        assertEquals(3, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size()); // repaired, unrepaired, pending
+        Collection<CompactionAggregate> aggregates = strategy.backgroundCompactions.getAggregates();
+        assertEquals(3, aggregates.size());
+        for (CompactionAggregate aggregate : aggregates)
+            assertEquals(8, aggregate.getPending().size());
     }
 }
