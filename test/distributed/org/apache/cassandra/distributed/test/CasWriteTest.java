@@ -339,7 +339,7 @@ public class CasWriteTest extends TestBaseImpl
                 {
                     StatsMetadata oldMetadata = s.getSSTableMetadata();
                     s.mutateLevelAndReload(3);
-                    cfs.getCompactionStrategyManager().handleNotification(new SSTableMetadataChanged(s, oldMetadata), null);
+                    cfs.getCompactionStrategyContainer().handleNotification(new SSTableMetadataChanged(s, oldMetadata), null);
                 }
                 catch (Throwable t)
                 {
@@ -380,7 +380,7 @@ public class CasWriteTest extends TestBaseImpl
         {
             ((IInvokableInstance)cluster.get(k)).runOnInstance(() -> {
                 ColumnFamilyStore cfs = Keyspace.open("system").getColumnFamilyStore("paxos");
-                while (cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() > 0)
+                while (cfs.getCompactionStrategy().getEstimatedRemainingTasks() > 0)
                 {
                     try { Thread.sleep(1000); }
                     catch (InterruptedException e) { throw new RuntimeException(e); }
