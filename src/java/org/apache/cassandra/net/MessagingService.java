@@ -219,7 +219,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         VERSION_3014(11),
         VERSION_40(12),
         // c14227 TTL overflow, 'uint' timestamps
-        VERSION_50(13);
+        VERSION_50(13),
+        VERSION_SG_10(100), // DS Converged Cassandra 4.0
+        VERSION_SG_20(110), // DS Converged Cassandra 5.0
+        ;
+
+        public static final Version CURRENT = VERSION_SG_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
 
@@ -249,6 +254,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_3014 = 11;
     public static final int VERSION_40 = 12;
     public static final int VERSION_50 = 13; // c14227 TTL overflow, 'uint' timestamps
+    public static final int VERSION_SG_10 = 100; // DS Converged Cassandra 4.0
+    public static final int VERSION_SG_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
     public static final int maximum_version = VERSION_50;
     // we want to use a modified behavior for the tools and clients - that is, since they are not running a server, they
@@ -267,11 +274,10 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         else
         {
             accept_messaging = new AcceptVersions(minimum_version, current_version);
-            accept_streaming = new AcceptVersions(current_version, current_version);
+            accept_streaming = new AcceptVersions(minimum_version, current_version);
         }
     }
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, v -> v.ordinal()));
-
     /**
      * This is an optimisation to speed up the translation of the serialization
      * version to the {@link Version} enum ordinal.
