@@ -190,7 +190,8 @@ public final class DistributedRepairUtils
                     if (session != null && !session.isCompleted())
                         continue;
                     // The session is complete, yet the sstable is not updated... is this still pending in compaction?
-                    if (cfs.getCompactionStrategyManager().hasPendingRepairSSTable(pendingRepair, sstable))
+//                    if (cfs.getCompactionStrategyManager().hasPendingRepairSSTable(pendingRepair, sstable))
+                    if (cfs.hasPendingRepairSSTables(pendingRepair))
                         continue;
                     // compaction does not know about the pending repair... race condition since this check started?
                     if (sstable.getSSTableMetadata().pendingRepair == null)

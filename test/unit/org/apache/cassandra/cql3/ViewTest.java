@@ -462,14 +462,14 @@ public class ViewTest extends ViewAbstractTest
                                      "WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
 
         cfs.enableAutoCompaction();
-        List<? extends Future<?>> futures = CompactionManager.instance.submitBackground(cfs);
+        Future<?> future = CompactionManager.instance.submitBackground(cfs);
 
         //Force a second MV on the same base table, which will restart the first MV builder...
         createView("CREATE MATERIALIZED VIEW %s AS SELECT val, k, c FROM %s " +
                    "WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (val,k,c)");
 
         //Compact the base table
-        FBUtilities.waitOnFutures(futures);
+        FBUtilities.waitOnFuture(future);
 
         waitForViewBuild(mv1);
 
