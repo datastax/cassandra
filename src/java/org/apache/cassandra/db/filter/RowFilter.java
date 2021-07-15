@@ -69,6 +69,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -505,6 +506,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             public void serialize(FilterElement operation, DataOutputPlus out, int version) throws IOException
             {
+                assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.Version.VERSION_SG_10.value :
+                "Attempting to serialize a disjunct row filter to a node that doesn't support disjunction";
+
                 out.writeBoolean(operation.isDisjunction);
                 out.writeUnsignedVInt32(operation.expressions.size());
                 for (Expression expr : operation.expressions)

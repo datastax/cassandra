@@ -33,9 +33,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
-
-import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileInputStreamPlus;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.CountingOutputStream;
 import org.slf4j.Logger;
@@ -47,6 +44,8 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.security.EncryptionContext;
@@ -68,7 +67,9 @@ final class HintsDescriptor
 
     static final int VERSION_40 = 2;
     static final int VERSION_50 = 3;
-    static final int CURRENT_VERSION = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_40 : VERSION_50;
+    static final int VERSION_SG_10 = 100;
+    static final int VERSION_SG_20 = 110;
+    static final int CURRENT_VERSION = VERSION_SG_20; // TODO reconsider storage compatibility mode
 
     static final String COMPRESSION = "compression";
     static final String ENCRYPTION = "encryption";
@@ -231,9 +232,13 @@ final class HintsDescriptor
         switch (hintsVersion)
         {
             case VERSION_40:
-                return MessagingService.VERSION_40;
+                return MessagingService.Version.VERSION_40.value;
             case VERSION_50:
-                return MessagingService.VERSION_50;
+                return MessagingService.Version.VERSION_50.value;
+            case VERSION_SG_10:
+                return MessagingService.Version.VERSION_SG_10.value;
+            case VERSION_SG_20:
+                return MessagingService.Version.VERSION_SG_20.value;
             default:
                 throw new AssertionError();
         }
