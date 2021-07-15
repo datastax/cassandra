@@ -261,6 +261,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.io.util.PathUtils$IOToLongFunction",
     "org.apache.cassandra.io.util.RebufferingInputStream",
     "org.apache.cassandra.io.util.SpinningDiskOptimizationStrategy",
+    "org.apache.cassandra.io.util.FileUtils$DiskAccessType",
     "org.apache.cassandra.locator.IEndpointSnitch",
     "org.apache.cassandra.locator.InetAddressAndPort",
     "org.apache.cassandra.locator.Replica",

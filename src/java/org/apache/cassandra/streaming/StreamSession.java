@@ -47,6 +47,7 @@ import com.google.common.collect.Sets;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.Future; //checkstyle: permit this import
 
+import org.apache.cassandra.db.compaction.CompactionStrategyContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +57,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.File;
@@ -945,7 +945,7 @@ public class StreamSession
                                                                                 .collect(Collectors.toMap(ks::getColumnFamilyStore, Function.identity()));
             for (ColumnFamilyStore cfs : ks.getColumnFamilyStores())
             {
-                CompactionStrategyManager csm = cfs.getCompactionStrategyManager();
+                CompactionStrategyContainer csm = cfs.getCompactionStrategyContainer();
                 int tasksOther = csm.getEstimatedRemainingTasks();
                 int tasksStreamed = tasksOther;
                 if (cfStreamed.containsKey(cfs))

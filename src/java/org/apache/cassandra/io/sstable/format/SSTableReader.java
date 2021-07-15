@@ -44,6 +44,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,26 +97,10 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.CheckedFunction;
-import org.apache.cassandra.io.util.DataIntegrityMetadata;
-import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.EstimatedHistogram;
-import org.apache.cassandra.utils.ExecutorUtils;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.NativeLibrary;
-import org.apache.cassandra.utils.OutputHandler;
-import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -348,6 +335,31 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return count;
     }
 
+    /**
+     * The key cardinality estimator for the sstable, if it can be loaded.
+     *
+     * @return the sstable key cardinality estimator created during flush/compaction, or {@code null} if that estimator
+     * cannot be loaded for any reason.
+     */
+    @VisibleForTesting
+    public ICardinality keyCardinalityEstimator()
+    {
+        if (openReason == OpenReason.EARLY)
+            return null;
+
+        try
+        {
+            CompactionMetadata metadata = (CompactionMetadata) descriptor.getMetadataSerializer()
+                                                                         .deserialize(descriptor, MetadataType.COMPACTION);
+            return metadata == null ? null : metadata.cardinalityEstimator;
+        }
+        catch (IOException e)
+        {
+            logger.warn("Reading cardinality from Statistics.db failed for {}.", this, e);
+            return null;
+        }
+    }
+
     public static SSTableReader open(SSTable.Owner owner, Descriptor descriptor)
     {
         return open(owner, descriptor, null);
@@ -457,6 +469,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstables;
     }
 
+
     protected SSTableReader(Builder<?, ?> builder, Owner owner)
     {
         super(builder, owner);
@@ -543,9 +556,8 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return dfile.path();
     }
 
-    public void setupOnline()
-    {
-         owner().ifPresent(o -> setCrcCheckChance(o.getCrcCheckChance()));
+    public void setupOnline() {
+        owner().ifPresent(o -> setCrcCheckChance(o.getCrcCheckChance()));
     }
 
     /**

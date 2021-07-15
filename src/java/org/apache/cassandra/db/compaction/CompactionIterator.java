@@ -396,7 +396,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         private Purger(AbstractCompactionController controller, long nowInSec)
         {
             super(nowInSec, controller.gcBefore, controller.compactingRepaired() ? Long.MAX_VALUE : Integer.MIN_VALUE,
-                  controller.cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones(),
+                  controller.cfs.onlyPurgeRepairedTombstones(),
                   controller.cfs.metadata.get().enforceStrictLiveness());
             this.controller = controller;
         }

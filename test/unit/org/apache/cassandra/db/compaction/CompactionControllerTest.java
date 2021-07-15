@@ -21,6 +21,7 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -264,15 +265,18 @@ public class CompactionControllerTest extends SchemaLoader
         options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, "MILLISECONDS");
         options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
         options.put(TimeWindowCompactionStrategyOptions.UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_KEY, Boolean.toString(ignoreOverlaps));
-        TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(cfs, options);
+        TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(new CompactionStrategyFactory(cfs), options);
         for (SSTableReader sstable : cfs.getLiveSSTables())
             twcs.addSSTable(sstable);
 
         twcs.startup();
 
-        CompactionTask task = (CompactionTask)twcs.getUserDefinedTask(sstables, 0);
+        CompactionTasks tasks = twcs.getUserDefinedTasks(sstables, 0);
 
-        assertNotNull(task);
+        assertNotNull(tasks);
+        Optional<AbstractCompactionTask> maybeTask = tasks.stream().findFirst();
+        assertTrue(maybeTask.isPresent());
+        AbstractCompactionTask task = maybeTask.get();
         assertEquals(1, Iterables.size(task.transaction.originals()));
 
         //start a compaction for the first sstable (compaction1)

@@ -80,6 +80,11 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         return writer.getEstimatedOnDiskBytesWritten();
     }
 
+    public int getSegmentCount()
+    {
+        return 1;
+    }
+
     public TableId getTableId()
     {
         return writer.metadata().id;
@@ -123,6 +128,22 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         MetadataCollector metadataCollector = new MetadataCollector(metadata.get().comparator)
                                               .commitLogIntervals(commitLogPositions != null ? commitLogPositions : IntervalSet.empty())
                                               .sstableLevel(sstableLevel);
+        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, indexGroups, lifecycleNewTracker, owner);
+    }
+
+    @SuppressWarnings({"resource", "RedundantSuppression"}) // SimpleSSTableMultiWriter closes writer
+    public static SSTableMultiWriter create(Descriptor descriptor,
+                                            long keyCount,
+                                            long repairedAt,
+                                            TimeUUID pendingRepair,
+                                            boolean isTransient,
+                                            TableMetadataRef metadata,
+                                            MetadataCollector metadataCollector,
+                                            SerializationHeader header,
+                                            Collection<Index.Group> indexGroups,
+                                            LifecycleNewTracker lifecycleNewTracker,
+                                            SSTable.Owner owner)
+    {
         SSTableWriter writer = descriptor.getFormat().getWriterFactory().builder(descriptor)
                                             .setKeyCount(keyCount)
                                             .setRepairedAt(repairedAt)

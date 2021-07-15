@@ -326,7 +326,7 @@ public class Util
     public static void compact(ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
     {
         long gcBefore = cfs.gcBefore(FBUtilities.nowInSeconds());
-        try (CompactionTasks tasks = cfs.getCompactionStrategyManager().getUserDefinedTasks(sstables, gcBefore))
+        try (CompactionTasks tasks = cfs.getCompactionStrategy().getUserDefinedTasks(sstables, gcBefore))
         {
             for (AbstractCompactionTask task : tasks)
                 task.execute();
@@ -811,6 +811,15 @@ public class Util
             // Expected -- marked all directories as unwritable
         }
         return () -> DisallowedDirectories.clearUnwritableUnsafe();
+    }
+
+    public static boolean getDirectoriesWriteable(ColumnFamilyStore cfs)
+    {
+        boolean ret = true;
+        for (File dir : cfs.getDirectories().getCFDirectories())
+            ret &= !DisallowedDirectories.isUnwritable(dir);
+
+        return ret;
     }
 
     public static PagingState makeSomePagingState(ProtocolVersion protocolVersion)

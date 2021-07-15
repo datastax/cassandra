@@ -368,7 +368,7 @@ public class Keyspace
         if (!ksm.params.replication.equals(replicationParams))
         {
             logger.debug("New replication settings for keyspace {} - invalidating disk boundary caches", ksm.name);
-            columnFamilyStores.values().forEach(ColumnFamilyStore::invalidateLocalRanges);
+            columnFamilyStores.values().forEach(ColumnFamilyStore::invalidateLocalRangesAndDiskBoundaries);
         }
         replicationParams = ksm.params.replication;
     }
