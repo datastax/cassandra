@@ -500,12 +500,15 @@ public class SSTableReaderTest
         assertEquals(1, keyCache.getRequests());
         assertEquals(0, keyCache.getHits());
         // existing, cached key
+        assertEquals(1, store.getBloomFilterTracker().getTruePositiveCount());
         sstable.getPosition(dk(2), SSTableReader.Operator.EQ);
         assertEquals(2, keyCache.getRequests());
         assertEquals(1, keyCache.getHits());
         // non-existing key (it is specifically chosen to not be rejected by Bloom Filter check)
         sstable.getPosition(dk(14), SSTableReader.Operator.EQ);
         assertEquals(3, keyCache.getRequests());
+        assertEquals(2, store.getBloomFilterTracker().getTruePositiveCount());
+        sstable.getPosition(dk(15), SSTableReader.Operator.EQ);
         assertEquals(1, keyCache.getHits());
     }
 
