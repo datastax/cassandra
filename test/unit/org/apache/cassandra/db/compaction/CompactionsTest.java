@@ -158,7 +158,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -208,7 +208,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -230,7 +230,7 @@ public class CompactionsTest
         SchemaTestUtil.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build());
 
         //submit background task again and wait for it to complete
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -602,7 +602,7 @@ public class CompactionsTest
         assertTrue(store.getLiveSSTables().size() >= 2);
 
         // Enable compaction but do not submit any background compactions
-        store.getCompactionStrategyManager().enable();
+        store.getCompactionStrategyContainer().enable();
 
         CountDownLatch compactionRegistered = new CountDownLatch(1);
         CountDownLatch resumeCompaction = new CountDownLatch(1);
