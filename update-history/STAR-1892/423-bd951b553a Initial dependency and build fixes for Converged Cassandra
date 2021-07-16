@@ -1,0 +1,489 @@
+--- a/build.xml
++++ b/build.xml
+@@ -345,11 +345,7 @@
+         windowtitle="${ant.project.name} API" classpathref="cassandra.classpath"
+         bottom="Copyright &amp;copy; 2009- The Apache Software Foundation"
+         useexternalfile="yes" encoding="UTF-8" failonerror="false"
+-<<<<<<<
+-        maxmemory="1024M" additionalparam="${jdk11-javadoc-exports}">
+-=======
+-        maxmemory="256m" additionalparam="${jdk11plus-javac-exports}">
+->>>>>>>
++        maxmemory="1024M" additionalparam="${jdk11plus-javac-exports}">
+         <filesets/>
+       </javadoc>
+       <fail message="javadoc failed">
+@@ -470,408 +466,6 @@
+         <jflex file="${build.src.java}/org/apache/cassandra/index/sasi/analyzer/StandardTokenizerImpl.jflex" destdir="${build.src.gen-java}/" />
+     </target>
+ 
+-<<<<<<<
+-=======
+-    <!--
+-       Fetch Maven Ant Tasks and Cassandra's dependencies
+-       These targets are intentionally free of dependencies so that they
+-       can be run stand-alone from a binary release artifact.
+-    -->
+-    <target name="maven-ant-tasks-localrepo" unless="maven-ant-tasks.jar.exists" if="maven-ant-tasks.jar.local"
+-            depends="init" description="Fetch Maven ANT Tasks from Maven Local Repository">
+-      <copy file="${maven-ant-tasks.local}/${maven-ant-tasks.version}/maven-ant-tasks-${maven-ant-tasks.version}.jar"
+-           tofile="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar"/>
+-      <property name="maven-ant-tasks.jar.exists" value="true"/>
+-    </target>
+-
+-    <target name="maven-ant-tasks-download" depends="init,maven-ant-tasks-localrepo" unless="maven-ant-tasks.jar.exists"
+-            description="Fetch Maven ANT Tasks from Maven Central Repositroy">
+-      <echo>Downloading Maven ANT Tasks...</echo>
+-      <get src="${maven-ant-tasks.url}/${maven-ant-tasks.version}/maven-ant-tasks-${maven-ant-tasks.version}.jar"
+-           dest="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" usetimestamp="true" />
+-      <copy file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar"
+-            tofile="${maven-ant-tasks.local}/${maven-ant-tasks.version}/maven-ant-tasks-${maven-ant-tasks.version}.jar"/>
+-    </target>
+-
+-    <target name="maven-ant-tasks-init" depends="maven-ant-tasks-download,resolver-init" unless="maven-ant-tasks.initialized"
+-            description="Initialize Maven ANT Tasks">
+-      <typedef uri="antlib:org.apache.maven.artifact.ant" classpathref="maven-ant-tasks.classpath" />
+-      <property name="maven-ant-tasks.initialized" value="true"/>
+-    </target>
+-
+-    <!-- this task defines the dependencies that will be fetched by Maven ANT Tasks
+-         the dependencies are re-used for publishing artifacts to Maven Central
+-         in order to keep everything consistent -->
+-    <target name="maven-declare-dependencies" depends="maven-ant-tasks-init"
+-            description="Define dependencies and dependency versions">
+-      <!-- The parent pom defines the versions of all dependencies -->
+-      <artifact:pom id="parent-pom"
+-                    groupId="org.apache.cassandra"
+-                    artifactId="cassandra-parent"
+-                    packaging="pom"
+-                    version="${version}"
+-                    url="https://cassandra.apache.org"
+-                    name="Apache Cassandra"
+-                    inceptionYear="2009"
+-                    description="The Apache Cassandra Project develops a highly scalable second-generation distributed database, bringing together Dynamo's fully distributed design and Bigtable's ColumnFamily-based data model.">
+-
+-        <!-- Inherit from the ASF template pom file, ref http://maven.apache.org/pom/asf/ -->
+-        <parent groupId="org.apache" artifactId="apache" version="22"/>
+-        <license name="The Apache Software License, Version 2.0" url="https://www.apache.org/licenses/LICENSE-2.0.txt"/>
+-        <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
+-        <dependencyManagement>
+-          <dependency groupId="org.xerial.snappy" artifactId="snappy-java" version="1.1.10.1"/>
+-          <dependency groupId="org.lz4" artifactId="lz4-java" version="1.8.0"/>
+-          <dependency groupId="com.ning" artifactId="compress-lzf" version="0.8.4" scope="provided"/>
+-          <dependency groupId="com.github.luben" artifactId="zstd-jni" version="1.5.5-1"/>
+-          <dependency groupId="com.google.guava" artifactId="guava" version="27.0-jre">
+-            <exclusion groupId="com.google.code.findbugs" artifactId="jsr305" />
+-            <exclusion groupId="org.codehaus.mojo" artifactId="animal-sniffer-annotations" />
+-            <exclusion groupId="com.google.guava" artifactId="listenablefuture" />
+-            <exclusion groupId="com.google.guava" artifactId="failureaccess" />
+-            <exclusion groupId="org.checkerframework" artifactId="checker-qual" />
+-            <exclusion groupId="com.google.errorprone" artifactId="error_prone_annotations" />
+-          </dependency>
+-          <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram" version="2.1.9"/>
+-          <dependency groupId="commons-cli" artifactId="commons-cli" version="1.1"/>
+-          <dependency groupId="commons-codec" artifactId="commons-codec" version="1.15"/>
+-          <dependency groupId="commons-io" artifactId="commons-io" version="2.6" scope="test"/>
+-          <dependency groupId="org.apache.commons" artifactId="commons-lang3" version="3.11"/>
+-          <dependency groupId="org.apache.commons" artifactId="commons-math3" version="3.2"/>
+-          <dependency groupId="org.antlr" artifactId="antlr" version="3.5.2" scope="provided">
+-            <exclusion groupId="org.antlr" artifactId="stringtemplate"/>
+-          </dependency>
+-          <dependency groupId="org.antlr" artifactId="ST4" version="4.0.8"/>
+-          <dependency groupId="org.antlr" artifactId="antlr-runtime" version="3.5.2">
+-            <exclusion groupId="org.antlr" artifactId="stringtemplate"/>
+-          </dependency>
+-          <dependency groupId="org.slf4j" artifactId="slf4j-api" version="1.7.25"/>
+-          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="1.7.25"/>
+-          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="1.7.25" />
+-          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.2.9"/>
+-          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.2.9"/>
+-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.13.2"/>
+-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.13.2.2"/>
+-          <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.13.2"/>
+-          <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
+-          <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
+-          <dependency groupId="com.github.jbellis" artifactId="jamm" version="${jamm.version}"/>
+-          <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.26"/>
+-          <dependency groupId="junit" artifactId="junit" version="4.12" scope="test">
+-            <exclusion groupId="org.hamcrest" artifactId="hamcrest-core"/>
+-          </dependency>
+-          <dependency groupId="org.mockito" artifactId="mockito-core" version="3.2.4" scope="test"/>
+-          <dependency groupId="org.quicktheories" artifactId="quicktheories" version="0.26" scope="test"/>
+-          <dependency groupId="com.google.code.java-allocation-instrumenter" artifactId="java-allocation-instrumenter" version="${allocation-instrumenter.version}" scope="test">
+-            <exclusion groupId="com.google.guava" artifactId="guava"/>
+-          </dependency>
+-          <dependency groupId="org.apache.cassandra" artifactId="dtest-api" version="0.0.15" scope="test"/>
+-          <dependency groupId="org.reflections" artifactId="reflections" version="0.10.2" scope="test"/>
+-          <dependency groupId="org.apache.hadoop" artifactId="hadoop-core" version="1.0.3" scope="provided">
+-            <exclusion groupId="org.mortbay.jetty" artifactId="servlet-api"/>
+-            <exclusion groupId="commons-logging" artifactId="commons-logging"/>
+-            <exclusion groupId="org.eclipse.jdt" artifactId="core"/>
+-            <exclusion groupId="ant" artifactId="ant"/>
+-            <exclusion groupId="junit" artifactId="junit"/>
+-            <exclusion groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl"/>
+-            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
+-          </dependency>
+-          <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" version="1.0.3" scope="provided">
+-            <exclusion groupId="asm" artifactId="asm"/> <!-- this is the outdated version 3.1 -->
+-            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
+-            <exclusion groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl"/>
+-          </dependency>
+-          <dependency groupId="net.java.dev.jna" artifactId="jna" version="5.9.0"/>
+-
+-          <dependency groupId="org.jacoco" artifactId="org.jacoco.agent" version="${jacoco.version}" scope="test"/>
+-          <dependency groupId="org.jacoco" artifactId="org.jacoco.ant" version="${jacoco.version}" scope="test"/>
+-
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-install" version="${byteman.version}" scope="provided"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman" version="${byteman.version}" scope="provided"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-submit" version="${byteman.version}" scope="provided"/>
+-          <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit" version="${byteman.version}" scope="provided"/>
+-
+-          <dependency groupId="net.bytebuddy" artifactId="byte-buddy" version="${bytebuddy.version}" />
+-          <dependency groupId="net.bytebuddy" artifactId="byte-buddy-agent" version="${bytebuddy.version}" />
+-
+-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-core" version="1.21" scope="test"/>
+-          <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess" version="1.21" scope="test"/>
+-
+-          <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.10.12" scope="test"/>
+-
+-          <dependency groupId="org.apache.cassandra" artifactId="cassandra-all" version="${version}" />
+-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core" version="3.1.5" />
+-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm" version="3.1.5" />
+-          <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback" version="3.1.5" />
+-          <dependency groupId="com.addthis.metrics" artifactId="reporter-config3" version="3.0.3">
+-            <exclusion groupId="org.hibernate" artifactId="hibernate-validator" />
+-           </dependency>
+-          <dependency groupId="org.mindrot" artifactId="jbcrypt" version="0.4" />
+-          <dependency groupId="io.airlift" artifactId="airline" version="0.8">
+-            <exclusion groupId="com.google.code.findbugs" artifactId="jsr305" />
+-           </dependency>
+-          <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.58.Final" type="pom" scope="provided"/>
+-          <dependency groupId="io.netty" artifactId="netty-all" version="4.1.58.Final" />
+-          <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.36.Final"/>
+-          <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
+-            <exclusion groupId="com.sun" artifactId="tools" />
+-          </dependency>
+-          <dependency groupId="net.openhft" artifactId="chronicle-core" version="${chronicle-core.version}">
+-            <exclusion groupId="net.openhft" artifactId="chronicle-analytics" />
+-            <exclusion groupId="org.jetbrains" artifactId="annotations" />
+-          </dependency>
+-          <dependency groupId="net.openhft" artifactId="chronicle-bytes" version="${chronicle-bytes.version}">
+-            <exclusion groupId="org.jetbrains" artifactId="annotations" />
+-          </dependency>
+-          <dependency groupId="net.openhft" artifactId="chronicle-wire" version="${chronicle-wire.version}">
+-            <exclusion groupId="net.openhft" artifactId="compiler" />
+-          </dependency>
+-          <dependency groupId="net.openhft" artifactId="chronicle-threads" version="${chronicle-threads.version}">
+-            <exclusion groupId="net.openhft" artifactId="affinity" />
+-            <!-- Exclude JNA here, as we want to avoid breaking consumers of the cassandra-all jar -->
+-            <exclusion groupId="net.java.dev.jna" artifactId="jna" />
+-            <exclusion groupId="net.java.dev.jna" artifactId="jna-platform" />
+-          </dependency>
+-          <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" scope="provided"/>
+-          <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2">
+-            <exclusion groupId="it.unimi.dsi" artifactId="fastutil" />
+-          </dependency>
+-          <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="3.11.0" classifier="shaded">
+-            <exclusion groupId="io.netty" artifactId="netty-buffer"/>
+-            <exclusion groupId="io.netty" artifactId="netty-codec"/>
+-            <exclusion groupId="io.netty" artifactId="netty-handler"/>
+-            <exclusion groupId="io.netty" artifactId="netty-transport"/>
+-            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
+-            <exclusion groupId="com.github.jnr" artifactId="jnr-ffi"/>
+-            <exclusion groupId="com.github.jnr" artifactId="jnr-posix"/>
+-          </dependency>
+-          <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="${ecj.version}" />
+-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="${ohc.version}">
+-            <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
+-          </dependency>
+-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8" version="${ohc.version}" />
+-          <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" scope="provided"/>
+-          <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4">
+-            <exclusion groupId="log4j" artifactId="log4j"/>
+-          </dependency>
+-          <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.8.1" />
+-          <dependency groupId="de.jflex" artifactId="jflex" version="${jflex.version}">
+-            <exclusion groupId="org.apache.ant" artifactId="ant"/>
+-          </dependency>
+-          <dependency groupId="com.github.rholder" artifactId="snowball-stemmer" version="1.3.0.581.1" />
+-          <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
+-          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.5.6" />
+-          <dependency groupId="org.jctools" artifactId="jctools-core" version="3.1.0"/>
+-          <dependency groupId="org.ow2.asm" artifactId="asm" version="${asm.version}"/>
+-          <dependency groupId="org.ow2.asm" artifactId="asm-tree" version="${asm.version}" scope="test"/>
+-          <dependency groupId="org.ow2.asm" artifactId="asm-commons" version="${asm.version}" scope="test"/>
+-          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli" version="0.14"/>
+-          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core" version="0.14">
+-            <exclusion groupId="org.gridkit.jvmtool" artifactId="sjk-hflame"/>
+-            <exclusion groupId="org.perfkit.sjk.parsers" artifactId="sjk-hflame"/>
+-            <exclusion groupId="org.perfkit.sjk.parsers" artifactId="sjk-jfr-standalone"/>
+-            <exclusion groupId="org.perfkit.sjk.parsers" artifactId="sjk-nps"/>
+-            <exclusion groupId="org.perfkit.sjk.parsers" artifactId="sjk-jfr5"/>
+-            <exclusion groupId="org.perfkit.sjk.parsers" artifactId="sjk-jfr6"/>
+-          </dependency>
+-          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace" version="0.14"/>
+-          <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" version="0.14"/>
+-          <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" version="1.5"/>
+-          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json" version="0.14"/>
+-          <dependency groupId="com.beust" artifactId="jcommander" version="1.30"/>
+-          <dependency groupId="org.psjava" artifactId="psjava" version="0.1.19"/>
+-          <dependency groupId="javax.inject" artifactId="javax.inject" version="1"/>
+-          <dependency groupId="com.google.j2objc" artifactId="j2objc-annotations" version="1.3"/>
+-          <!-- adding this dependency is necessary for assertj. When updating assertj, need to also update the version of
+-             this that the new assertj's `assertj-parent-pom` depends on. -->
+-          <dependency groupId="org.junit" artifactId="junit-bom" version="5.6.0" type="pom" scope="test"/>
+-          <!-- when updating assertj, make sure to also update the corresponding junit-bom dependency -->
+-          <dependency groupId="org.assertj" artifactId="assertj-core" version="3.15.0" scope="provided"/>
+-          <dependency groupId="org.awaitility" artifactId="awaitility" version="4.0.3"  scope="test">
+-            <exclusion groupId="org.hamcrest" artifactId="hamcrest"/>
+-          </dependency>
+-          <dependency groupId="org.hamcrest" artifactId="hamcrest" version="2.2" scope="test"/>
+-        </dependencyManagement>
+-        <developer id="adelapena" name="Andres de la Peña"/>
+-        <developer id="alakshman" name="Avinash Lakshman"/>
+-        <developer id="aleksey" name="Aleksey Yeschenko"/>
+-        <developer id="amorton" name="Aaron Morton"/>
+-        <developer id="aweisberg" name="Ariel Weisberg"/>
+-        <developer id="bdeggleston" name="Blake Eggleston"/>
+-        <developer id="benedict" name="Benedict Elliott Smith"/>
+-        <developer id="benjamin" name="Benjamin Lerer"/>
+-        <developer id="blambov" name="Branimir Lambov"/>
+-        <developer id="brandonwilliams" name="Brandon Williams"/>
+-        <developer id="carl" name="Carl Yeksigian"/>
+-        <developer id="dbrosius" name="David Brosiusd"/>
+-        <developer id="dikang" name="Dikang Gu"/>
+-        <developer id="eevans" name="Eric Evans"/>
+-        <developer id="edimitrova" name="Ekaterina Dimitrova"/>
+-        <developer id="gdusbabek" name="Gary Dusbabek"/>
+-        <developer id="goffinet" name="Chris Goffinet"/>
+-        <developer id="ifesdjeen" name="Alex Petrov"/>
+-        <developer id="jaakko" name="Laine Jaakko Olavi"/>
+-        <developer id="jake" name="T Jake Luciani"/>
+-        <developer id="jasonbrown" name="Jason Brown"/>
+-        <developer id="jbellis" name="Jonathan Ellis"/>
+-        <developer id="jfarrell" name="Jake Farrell"/>
+-        <developer id="jjirsa" name="Jeff Jirsa"/>
+-        <developer id="jkni" name="Joel Knighton"/>
+-        <developer id="jmckenzie" name="Josh McKenzie"/>
+-        <developer id="johan" name="Johan Oskarsson"/>
+-        <developer id="junrao" name="Jun Rao"/>
+-        <developer id="jzhuang" name="Jay Zhuang"/>
+-        <developer id="kohlisankalp" name="Sankalp Kohli"/>
+-        <developer id="marcuse" name="Marcus Eriksson"/>
+-        <developer id="mck" name="Michael Semb Wever"/>
+-        <developer id="mishail" name="Mikhail Stepura"/>
+-        <developer id="mshuler" name="Michael Shuler"/>
+-        <developer id="paulo" name="Paulo Motta"/>
+-        <developer id="pmalik" name="Prashant Malik"/>
+-        <developer id="rstupp" name="Robert Stupp"/>
+-        <developer id="scode" name="Peter Schuller"/>
+-        <developer id="beobal" name="Sam Tunnicliffe"/>
+-        <developer id="slebresne" name="Sylvain Lebresne"/>
+-        <developer id="stefania" name="Stefania Alborghetti"/>
+-        <developer id="tylerhobbs" name="Tyler Hobbs"/>
+-        <developer id="vijay" name="Vijay Parthasarathy"/>
+-        <developer id="xedin" name="Pavel Yaskevich"/>
+-        <developer id="yukim" name="Yuki Morishita"/>
+-        <developer id="zznate" name="Nate McCall"/>
+-      </artifact:pom>
+-
+-      <!-- each dependency set then defines the subset of the dependencies for that dependency set -->
+-      <artifact:pom id="build-deps-pom"
+-                    artifactId="cassandra-build-deps">
+-        <parent groupId="org.apache.cassandra"
+-                artifactId="cassandra-parent"
+-                version="${version}"
+-                relativePath="${final.name}-parent.pom"/>
+-        <dependency groupId="junit" artifactId="junit"/>
+-        <dependency groupId="commons-io" artifactId="commons-io"/>
+-        <dependency groupId="org.mockito" artifactId="mockito-core"/>
+-        <dependency groupId="org.quicktheories" artifactId="quicktheories"/>
+-        <dependency groupId="org.reflections" artifactId="reflections"/>
+-        <dependency groupId="com.google.code.java-allocation-instrumenter" artifactId="java-allocation-instrumenter" version="${allocation-instrumenter.version}"/>
+-        <dependency groupId="org.apache.cassandra" artifactId="dtest-api"/>
+-        <dependency groupId="org.openjdk.jmh" artifactId="jmh-core"/>
+-        <dependency groupId="org.openjdk.jmh" artifactId="jmh-generator-annprocess"/>
+-        <dependency groupId="org.apache.ant" artifactId="ant-junit"/>
+-        <!-- adding this dependency is necessary for assertj. When updating assertj, need to also update the version of
+-             this that the new assertj's `assertj-parent-pom` depends on. -->
+-        <dependency groupId="org.junit" artifactId="junit-bom" type="pom"/>
+-        <dependency groupId="org.awaitility" artifactId="awaitility"/>
+-        <dependency groupId="org.hamcrest" artifactId="hamcrest"/>
+-        <!-- coverage debs -->
+-        <dependency groupId="org.jacoco" artifactId="org.jacoco.agent"/>
+-        <dependency groupId="org.jacoco" artifactId="org.jacoco.ant"/>
+-      </artifact:pom>
+-
+-      <!-- now the pom's for artifacts being deployed to Maven Central -->
+-      <artifact:pom id="all-pom"
+-                    artifactId="cassandra-all"
+-                    url="https://cassandra.apache.org"
+-                    name="Apache Cassandra">
+-        <parent groupId="org.apache.cassandra"
+-                artifactId="cassandra-parent"
+-                version="${version}"
+-                relativePath="${final.name}-parent.pom"/>
+-        <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
+-        <dependency groupId="org.xerial.snappy" artifactId="snappy-java"/>
+-        <dependency groupId="org.lz4" artifactId="lz4-java"/>
+-        <dependency groupId="com.ning" artifactId="compress-lzf"/>
+-        <dependency groupId="com.google.guava" artifactId="guava"/>
+-        <dependency groupId="commons-cli" artifactId="commons-cli"/>
+-        <dependency groupId="commons-codec" artifactId="commons-codec"/>
+-        <dependency groupId="org.apache.commons" artifactId="commons-lang3"/>
+-        <dependency groupId="org.apache.commons" artifactId="commons-math3"/>
+-        <dependency groupId="org.antlr" artifactId="antlr" scope="provided"/>
+-        <dependency groupId="org.antlr" artifactId="ST4"/>
+-        <dependency groupId="org.antlr" artifactId="antlr-runtime"/>
+-        <dependency groupId="org.slf4j" artifactId="slf4j-api"/>
+-        <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j"/>
+-        <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j"/>
+-        <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core"/>
+-        <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind"/>
+-        <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations"/>
+-        <dependency groupId="com.googlecode.json-simple" artifactId="json-simple"/>
+-        <dependency groupId="com.boundary" artifactId="high-scale-lib"/>
+-        <dependency groupId="org.yaml" artifactId="snakeyaml"/>
+-        <dependency groupId="org.mindrot" artifactId="jbcrypt"/>
+-        <dependency groupId="io.airlift" artifactId="airline"/>
+-        <dependency groupId="io.dropwizard.metrics" artifactId="metrics-core"/>
+-        <dependency groupId="io.dropwizard.metrics" artifactId="metrics-jvm"/>
+-        <dependency groupId="io.dropwizard.metrics" artifactId="metrics-logback"/>
+-        <dependency groupId="com.addthis.metrics" artifactId="reporter-config3"/>
+-        <dependency groupId="com.clearspring.analytics" artifactId="stream"/>
+-
+-        <dependency groupId="ch.qos.logback" artifactId="logback-core"/>
+-        <dependency groupId="ch.qos.logback" artifactId="logback-classic"/>
+-
+-        <!-- don't need hadoop classes to run, but if you use the hadoop stuff -->
+-        <dependency groupId="org.apache.hadoop" artifactId="hadoop-core" optional="true"/>
+-        <dependency groupId="org.apache.hadoop" artifactId="hadoop-minicluster" optional="true"/>
+-
+-        <!-- don't need the Java Driver to run, but if you use the hadoop stuff or UDFs -->
+-        <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" classifier="shaded" optional="true"/>
+-          <!-- don't need jna to run, but nice to have -->
+-        <dependency groupId="net.java.dev.jna" artifactId="jna"/>
+-
+-        <!-- don't need jamm unless running a server in which case it needs to be a -javagent to be used anyway -->
+-        <dependency groupId="com.github.jbellis" artifactId="jamm"/>
+-
+-        <dependency groupId="io.netty" artifactId="netty-bom"  type="pom"  />
+-        <dependency groupId="io.netty" artifactId="netty-all"/>
+-        <dependency groupId="net.openhft" artifactId="chronicle-queue"/>
+-        <dependency groupId="net.openhft" artifactId="chronicle-core"/>
+-        <dependency groupId="net.openhft" artifactId="chronicle-bytes"/>
+-        <dependency groupId="net.openhft" artifactId="chronicle-wire"/>
+-        <dependency groupId="net.openhft" artifactId="chronicle-threads"/>
+-        <dependency groupId="org.fusesource" artifactId="sigar"/>
+-        <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
+-        <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
+-        <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8"/>
+-        <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
+-        <dependency groupId="org.jctools" artifactId="jctools-core"/>
+-        <dependency groupId="org.ow2.asm" artifactId="asm" />
+-        <dependency groupId="com.carrotsearch" artifactId="hppc" />
+-        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli" />
+-        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core" />
+-        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace" />
+-        <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" />
+-        <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" />
+-        <dependency groupId="com.beust" artifactId="jcommander" />
+-        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json"/>
+-        <dependency groupId="com.github.luben" artifactId="zstd-jni"/>
+-        <dependency groupId="org.psjava" artifactId="psjava"/>
+-        <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
+-        <dependency groupId="javax.inject" artifactId="javax.inject"/>
+-        <dependency groupId="com.google.j2objc" artifactId="j2objc-annotations"/>
+-        <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
+-
+-        <!-- sasi deps -->
+-        <dependency groupId="com.github.rholder" artifactId="snowball-stemmer" />
+-        <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" />
+-
+-        <!-- compile tools -->
+-        <dependency groupId="com.google.code.findbugs" artifactId="jsr305"/>
+-        <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations"/>
+-        <dependency groupId="org.assertj" artifactId="assertj-core"/>
+-        <dependency groupId="org.jboss.byteman" artifactId="byteman-install"/>
+-        <dependency groupId="org.jboss.byteman" artifactId="byteman"/>
+-        <dependency groupId="org.jboss.byteman" artifactId="byteman-submit"/>
+-        <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit"/>
+-      </artifact:pom>
+-    </target>
+-
+-    <!-- deprecated: legacy compatibility for build scripts in other repositories -->
+-    <target name="maven-ant-tasks-retrieve-build" depends="resolver-retrieve-build"/>
+-
+-    <target name="echo-base-version">
+-        <echo message="${base.version}" />
+-    </target>
+-
+->>>>>>>
+     <!-- create properties file with C version -->
+     <target name="_createVersionPropFile" depends="_get-git-sha,set-cqlsh-version">
+       <taskdef name="propertyfile" classname="org.apache.tools.ant.taskdefs.optional.PropertyFile"/>
+@@ -1378,32 +972,6 @@
+       </checksum>
+     </target>
+ 
+-<<<<<<<
+-=======
+-  <target name="build-jmh" depends="build-test, jar" description="Create JMH uber jar">
+-      <jar jarfile="${build.test.dir}/deps.jar">
+-          <zipgroupfileset dir="${test.lib}/jars">
+-              <include name="*jmh*.jar"/>
+-              <include name="junit*.jar"/>
+-              <include name="jopt*.jar"/>
+-              <include name="commons*.jar"/>
+-              <include name="junit*.jar"/>
+-              <include name="hamcrest*.jar"/>
+-          </zipgroupfileset>
+-          <zipgroupfileset dir="${build.lib}" includes="*.jar"/>
+-      </jar>
+-      <jar jarfile="${build.test.dir}/benchmarks.jar">
+-          <manifest>
+-              <attribute name="Main-Class" value="org.openjdk.jmh.Main"/>
+-          </manifest>
+-          <zipfileset src="${build.test.dir}/deps.jar" excludes="META-INF/*.SF" />
+-          <fileset dir="${build.classes.main}"/>
+-          <fileset dir="${test.classes}"/>
+-          <fileset dir="${test.conf}" />
+-      </jar>
+-  </target>
+-
+->>>>>>>
+   <!-- Wrapper of build-test without dependencies, so both that target and its dependencies are skipped if the property
+     no-build-test is true. This is meant to be used to run tests without actually building them, provided that they have
+     been built before. All test targets depend on this, so one can run them using the no-build-test property.
+--- a/ide/nbproject/project.xml
++++ b/ide/nbproject/project.xml
+@@ -7,11 +7,7 @@
+             <properties>
+                 <property name="project.dir">..</property>
+                 <!-- the compile classpaths should be distinct per compilation unit… but it is kept simple and the build will catch errors -->
+-<<<<<<<
+                 <property name="cassandra.classpath.jars">${project.dir}/build/lib/jars/AmazonCorrettoCryptoProvider-2.2.0-linux-x86_64.jar:${project.dir}/build/lib/jars/HdrHistogram-2.1.9.jar:${project.dir}/build/lib/jars/ST4-4.0.8.jar:${project.dir}/build/lib/jars/affinity-3.23.3.jar:${project.dir}/build/lib/jars/agrona-1.17.1.jar:${project.dir}/build/lib/jars/airline-0.8.jar:${project.dir}/build/lib/jars/antlr-3.5.2.jar:${project.dir}/build/lib/jars/antlr-runtime-3.5.2.jar:${project.dir}/build/lib/jars/asm-9.4.jar:${project.dir}/build/lib/jars/big-math-2.3.0.jar:${project.dir}/build/lib/jars/byteman-4.0.20.jar:${project.dir}/build/lib/jars/byteman-bmunit-4.0.20.jar:${project.dir}/build/lib/jars/byteman-install-4.0.20.jar:${project.dir}/build/lib/jars/byteman-submit-4.0.20.jar:${project.dir}/build/lib/jars/caffeine-2.9.2.jar:${project.dir}/build/lib/jars/cassandra-driver-core-3.11.0-shaded.jar:${project.dir}/build/lib/jars/checker-qual-3.10.0.jar:${project.dir}/build/lib/jars/chronicle-bytes-2.23.33.jar:${project.dir}/build/lib/jars/chronicle-core-2.23.36.jar:${project.dir}/build/lib/jars/chronicle-queue-5.23.37.jar:${project.dir}/build/lib/jars/chronicle-threads-2.23.25.jar:${project.dir}/build/lib/jars/chronicle-wire-2.23.39.jar:${project.dir}/build/lib/jars/commons-cli-1.5.0.jar:${project.dir}/build/lib/jars/commons-codec-1.9.jar:${project.dir}/build/lib/jars/commons-lang3-3.11.jar:${project.dir}/build/lib/jars/commons-math3-3.2.jar:${project.dir}/build/lib/jars/compile-command-annotations-1.2.0.jar:${project.dir}/build/lib/jars/compress-lzf-0.8.4.jar:${project.dir}/build/lib/jars/concurrent-trees-2.4.0.jar:${project.dir}/build/lib/jars/ecj-3.33.0.jar:${project.dir}/build/lib/jars/error_prone_annotations-2.5.1.jar:${project.dir}/build/lib/jars/failureaccess-1.0.1.jar:${project.dir}/build/lib/jars/guava-32.0.1-jre.jar:${project.dir}/build/lib/jars/high-scale-lib-1.0.6.jar:${project.dir}/build/lib/jars/hppc-0.8.1.jar:${project.dir}/build/lib/jars/ipaddress-5.3.3.jar:${project.dir}/build/lib/jars/j2objc-annotations-1.3.jar:${project.dir}/build/lib/jars/jackson-annotations-2.13.2.jar:${project.dir}/build/lib/jars/jackson-core-2.13.2.jar:${project.dir}/build/lib/jars/jackson-databind-2.13.2.2.jar:${project.dir}/build/lib/jars/jackson-datatype-jsr310-2.13.2.jar:${project.dir}/build/lib/jars/jacocoagent.jar:${project.dir}/build/lib/jars/jamm-0.4.0.jar:${project.dir}/build/lib/jars/javax.inject-1.jar:${project.dir}/build/lib/jars/jbcrypt-0.4.jar:${project.dir}/build/lib/jars/jcl-over-slf4j-1.7.25.jar:${project.dir}/build/lib/jars/jcommander-1.30.jar:${project.dir}/build/lib/jars/jctools-core-3.1.0.jar:${project.dir}/build/lib/jars/jffi-1.3.11-native.jar:${project.dir}/build/lib/jars/jffi-1.3.11.jar:${project.dir}/build/lib/jars/jna-5.13.0.jar:${project.dir}/build/lib/jars/jna-platform-5.13.0.jar:${project.dir}/build/lib/jars/jnr-a64asm-1.0.0.jar:${project.dir}/build/lib/jars/jnr-constants-0.10.4.jar:${project.dir}/build/lib/jars/jnr-ffi-2.2.13.jar:${project.dir}/build/lib/jars/jnr-x86asm-1.0.2.jar:${project.dir}/build/lib/jars/jsr305-2.0.2.jar:${project.dir}/build/lib/jars/jvm-attach-api-1.5.jar:${project.dir}/build/lib/jars/log4j-over-slf4j-1.7.25.jar:${project.dir}/build/lib/jars/logback-classic-1.2.9.jar:${project.dir}/build/lib/jars/logback-core-1.2.9.jar:${project.dir}/build/lib/jars/lucene-analysis-common-9.7.0.jar:${project.dir}/build/lib/jars/lucene-core-9.7.0.jar:${project.dir}/build/lib/jars/lz4-java-1.8.0.jar:${project.dir}/build/lib/jars/metrics-core-3.1.5.jar:${project.dir}/build/lib/jars/metrics-jvm-3.1.5.jar:${project.dir}/build/lib/jars/metrics-logback-3.1.5.jar:${project.dir}/build/lib/jars/mxdump-0.14.jar:${project.dir}/build/lib/jars/netty-all-4.1.58.Final.jar:${project.dir}/build/lib/jars/netty-tcnative-boringssl-static-2.0.36.Final.jar:${project.dir}/build/lib/jars/ohc-core-0.5.1.jar:${project.dir}/build/lib/jars/ohc-core-j8-0.5.1.jar:${project.dir}/build/lib/jars/posix-2.24ea4.jar:${project.dir}/build/lib/jars/psjava-0.1.19.jar:${project.dir}/build/lib/jars/reporter-config-base-3.0.3.jar:${project.dir}/build/lib/jars/reporter-config3-3.0.3.jar:${project.dir}/build/lib/jars/sigar-1.6.4.jar:${project.dir}/build/lib/jars/sjk-cli-0.14.jar:${project.dir}/build/lib/jars/sjk-core-0.14.jar:${project.dir}/build/lib/jars/sjk-json-0.14.jar:${project.dir}/build/lib/jars/sjk-stacktrace-0.14.jar:${project.dir}/build/lib/jars/slf4j-api-1.7.25.jar:${project.dir}/build/lib/jars/snakeyaml-1.26.jar:${project.dir}/build/lib/jars/snappy-java-1.1.10.1.jar:${project.dir}/build/lib/jars/stream-2.5.2.jar:${project.dir}/build/lib/jars/zstd-jni-1.5.5-1.jar:${project.dir}/build/test/lib/jars/AmazonCorrettoCryptoProvider-2.2.0-linux-x86_64.jar:${project.dir}/build/test/lib/jars/Saxon-HE-12.2.jar:${project.dir}/build/test/lib/jars/accessors-smart-2.4.7.jar:${project.dir}/build/test/lib/jars/ant-1.10.12.jar:${project.dir}/build/test/lib/jars/ant-junit-1.10.12.jar:${project.dir}/build/test/lib/jars/ant-launcher-1.10.12.jar:${project.dir}/build/test/lib/jars/antlr4-runtime-4.11.1.jar:${project.dir}/build/test/lib/jars/asm-9.4.jar:${project.dir}/build/test/lib/jars/asm-analysis-9.4.jar:${project.dir}/build/test/lib/jars/asm-commons-9.4.jar:${project.dir}/build/test/lib/jars/asm-tree-9.4.jar:${project.dir}/build/test/lib/jars/asm-util-9.4.jar:${project.dir}/build/test/lib/jars/asm-xml-6.0.jar:${project.dir}/build/test/lib/jars/assertj-core-3.15.0.jar:${project.dir}/build/test/lib/jars/awaitility-4.0.3.jar:${project.dir}/build/test/lib/jars/byte-buddy-1.12.13.jar:${project.dir}/build/test/lib/jars/byte-buddy-agent-1.12.13.jar:${project.dir}/build/test/lib/jars/checker-qual-3.27.0.jar:${project.dir}/build/test/lib/jars/checkstyle-10.12.1.jar:${project.dir}/build/test/lib/jars/commons-beanutils-1.9.4.jar:${project.dir}/build/test/lib/jars/commons-codec-1.15.jar:${project.dir}/build/test/lib/jars/commons-collections-3.2.2.jar:${project.dir}/build/test/lib/jars/commons-fileupload-1.4.jar:${project.dir}/build/test/lib/jars/commons-io-2.11.0.jar:${project.dir}/build/test/lib/jars/commons-lang3-3.12.0.jar:${project.dir}/build/test/lib/jars/commons-logging-1.2.jar:${project.dir}/build/test/lib/jars/commons-math3-3.2.jar:${project.dir}/build/test/lib/jars/dtest-api-0.0.15.jar:${project.dir}/build/test/lib/jars/guava-18.0.jar:${project.dir}/build/test/lib/jars/hamcrest-2.2.jar:${project.dir}/build/test/lib/jars/hamcrest-core-2.2.jar:${project.dir}/build/test/lib/jars/handlebars-4.3.1.jar:${project.dir}/build/test/lib/jars/handlebars-helpers-4.3.1.jar:${project.dir}/build/test/lib/jars/harry-core-0.0.1.jar:${project.dir}/build/test/lib/jars/http2-common-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/http2-hpack-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/http2-server-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/httpclient5-5.1.3.jar:${project.dir}/build/test/lib/jars/httpcore5-5.1.3.jar:${project.dir}/build/test/lib/jars/httpcore5-h2-5.1.3.jar:${project.dir}/build/test/lib/jars/jackson-annotations-2.11.3.jar:${project.dir}/build/test/lib/jars/jackson-core-2.13.2.jar:${project.dir}/build/test/lib/jars/jackson-databind-2.11.3.jar:${project.dir}/build/test/lib/jars/jackson-dataformat-yaml-2.13.2.jar:${project.dir}/build/test/lib/jars/jakarta.activation-api-1.2.2.jar:${project.dir}/build/test/lib/jars/jakarta.xml.bind-api-2.3.3.jar:${project.dir}/build/test/lib/jars/java-allocation-instrumenter-3.1.0.jar:${project.dir}/build/test/lib/jars/java-cup-runtime-11b-20160615.jar:${project.dir}/build/test/lib/jars/javassist-3.28.0-GA.jar:${project.dir}/build/test/lib/jars/javax.servlet-api-3.1.0.jar:${project.dir}/build/test/lib/jars/jetty-alpn-client-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-alpn-java-client-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-alpn-java-server-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-alpn-openjdk8-client-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-alpn-openjdk8-server-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-alpn-server-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-client-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-continuation-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-http-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-io-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-proxy-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-security-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-server-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-servlet-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-servlets-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-util-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-util-ajax-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-webapp-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jetty-xml-9.4.49.v20220914.jar:${project.dir}/build/test/lib/jars/jflex-1.8.2.jar:${project.dir}/build/test/lib/jars/jimfs-1.1.jar:${project.dir}/build/test/lib/jars/jmh-core-1.21.jar:${project.dir}/build/test/lib/jars/jmh-generator-annprocess-1.21.jar:${project.dir}/build/test/lib/jars/jopt-simple-4.6.jar:${project.dir}/build/test/lib/jars/json-path-2.7.0.jar:${project.dir}/build/test/lib/jars/json-smart-2.4.7.jar:${project.dir}/build/test/lib/jars/json-unit-core-2.36.0.jar:${project.dir}/build/test/lib/jars/jsr305-3.0.2.jar:${project.dir}/build/test/lib/jars/junit-4.12.jar:${project.dir}/build/test/lib/jars/mockito-core-4.7.0.jar:${project.dir}/build/test/lib/jars/mockito-inline-4.7.0.jar:${project.dir}/build/test/lib/jars/objenesis-3.2.jar:${project.dir}/build/test/lib/jars/org.jacoco.agent-0.8.8.jar:${project.dir}/build/test/lib/jars/org.jacoco.ant-0.8.8.jar:${project.dir}/build/test/lib/jars/org.jacoco.core-0.8.8.jar:${project.dir}/build/test/lib/jars/org.jacoco.report-0.8.8.jar:${project.dir}/build/test/lib/jars/picocli-4.7.4.jar:${project.dir}/build/test/lib/jars/quicktheories-0.26.jar:${project.dir}/build/test/lib/jars/randomizedtesting-runner-2.1.2.jar:${project.dir}/build/test/lib/jars/reflections-0.10.2.jar:${project.dir}/build/test/lib/jars/semver4j-3.1.0.jar:${project.dir}/build/test/lib/jars/simulator-asm.jar:${project.dir}/build/test/lib/jars/simulator-bootstrap.jar:${project.dir}/build/test/lib/jars/slf4j-api-1.7.32.jar:${project.dir}/build/test/lib/jars/wiremock-jre8-2.35.0.jar:${project.dir}/build/test/lib/jars/xmlresolver-5.1.2-data.jar:${project.dir}/build/test/lib/jars/xmlresolver-5.1.2.jar:${project.dir}/build/test/lib/jars/xmlunit-core-2.9.0.jar:${project.dir}/build/test/lib/jars/xmlunit-legacy-2.9.0.jar:${project.dir}/build/test/lib/jars/xmlunit-placeholders-2.9.0.jar:</property>
+-=======
+-                <property name="cassandra.classpath.jars">${project.dir}/build/lib/jars/airline-0.8.jar:${project.dir}/build/lib/jars/antlr-3.5.2.jar:${project.dir}/build/lib/jars/antlr-runtime-3.5.2.jar:${project.dir}/build/lib/jars/asm-7.1.jar:${project.dir}/build/lib/jars/assertj-core-3.15.0.jar:${project.dir}/build/lib/jars/byteman-4.0.6.jar:${project.dir}/build/lib/jars/byteman-bmunit-4.0.6.jar:${project.dir}/build/lib/jars/byteman-install-4.0.6.jar:${project.dir}/build/lib/jars/byteman-submit-4.0.6.jar:${project.dir}/build/lib/jars/caffeine-2.5.6.jar:${project.dir}/build/lib/jars/cassandra-driver-core-3.11.0-shaded.jar:${project.dir}/build/lib/jars/chronicle-bytes-2.20.111.jar:${project.dir}/build/lib/jars/chronicle-core-2.20.126.jar:${project.dir}/build/lib/jars/chronicle-queue-5.20.123.jar:${project.dir}/build/lib/jars/chronicle-threads-2.20.111.jar:${project.dir}/build/lib/jars/chronicle-wire-2.20.117.jar:${project.dir}/build/lib/jars/commons-beanutils-1.7.0.jar:${project.dir}/build/lib/jars/commons-beanutils-core-1.8.0.jar:${project.dir}/build/lib/jars/commons-cli-1.1.jar:${project.dir}/build/lib/jars/commons-codec-1.9.jar:${project.dir}/build/lib/jars/commons-collections-3.2.1.jar:${project.dir}/build/lib/jars/commons-configuration-1.6.jar:${project.dir}/build/lib/jars/commons-digester-1.8.jar:${project.dir}/build/lib/jars/commons-el-1.0.jar:${project.dir}/build/lib/jars/commons-httpclient-3.0.1.jar:${project.dir}/build/lib/jars/commons-lang-2.4.jar:${project.dir}/build/lib/jars/commons-lang3-3.11.jar:${project.dir}/build/lib/jars/commons-math-2.1.jar:${project.dir}/build/lib/jars/commons-math3-3.2.jar:${project.dir}/build/lib/jars/commons-net-1.4.1.jar:${project.dir}/build/lib/jars/compile-command-annotations-1.2.0.jar:${project.dir}/build/lib/jars/compress-lzf-0.8.4.jar:${project.dir}/build/lib/jars/concurrent-trees-2.4.0.jar:${project.dir}/build/lib/jars/ecj-4.6.1.jar:${project.dir}/build/lib/jars/ftplet-api-1.0.0.jar:${project.dir}/build/lib/jars/ftpserver-core-1.0.0.jar:${project.dir}/build/lib/jars/ftpserver-deprecated-1.0.0-M2.jar:${project.dir}/build/lib/jars/guava-27.0-jre.jar:${project.dir}/build/lib/jars/hadoop-core-1.0.3.jar:${project.dir}/build/lib/jars/hadoop-minicluster-1.0.3.jar:${project.dir}/build/lib/jars/hadoop-test-1.0.3.jar:${project.dir}/build/lib/jars/HdrHistogram-2.1.9.jar:${project.dir}/build/lib/jars/high-scale-lib-1.0.6.jar:${project.dir}/build/lib/jars/hppc-0.8.1.jar:${project.dir}/build/lib/jars/hsqldb-1.8.0.10.jar:${project.dir}/build/lib/jars/j2objc-annotations-1.3.jar:${project.dir}/build/lib/jars/jackson-annotations-2.13.2.jar:${project.dir}/build/lib/jars/jackson-core-2.13.2.jar:${project.dir}/build/lib/jars/jackson-databind-2.13.2.2.jar:${project.dir}/build/lib/jars/jacocoagent.jar:${project.dir}/build/lib/jars/jamm-0.3.2.jar:${project.dir}/build/lib/jars/jasper-compiler-5.5.12.jar:${project.dir}/build/lib/jars/jasper-runtime-5.5.12.jar:${project.dir}/build/lib/jars/java-cup-runtime-11b-20160615.jar:${project.dir}/build/lib/jars/javax.inject-1.jar:${project.dir}/build/lib/jars/jbcrypt-0.4.jar:${project.dir}/build/lib/jars/jcl-over-slf4j-1.7.25.jar:${project.dir}/build/lib/jars/jcommander-1.30.jar:${project.dir}/build/lib/jars/jctools-core-3.1.0.jar:${project.dir}/build/lib/jars/jersey-core-1.0.jar:${project.dir}/build/lib/jars/jersey-server-1.0.jar:${project.dir}/build/lib/jars/jets3t-0.7.1.jar:${project.dir}/build/lib/jars/jetty-6.1.26.jar:${project.dir}/build/lib/jars/jetty-util-6.1.26.jar:${project.dir}/build/lib/jars/jflex-1.8.2.jar:${project.dir}/build/lib/jars/jna-5.6.0.jar:${project.dir}/build/lib/jars/json-simple-1.1.jar:${project.dir}/build/lib/jars/jsp-2.1-6.1.14.jar:${project.dir}/build/lib/jars/jsp-api-2.1-6.1.14.jar:${project.dir}/build/lib/jars/jsr305-2.0.2.jar:${project.dir}/build/lib/jars/jsr311-api-1.0.jar:${project.dir}/build/lib/jars/jvm-attach-api-1.5.jar:${project.dir}/build/lib/jars/kfs-0.3.jar:${project.dir}/build/lib/jars/log4j-over-slf4j-1.7.25.jar:${project.dir}/build/lib/jars/logback-classic-1.2.9.jar:${project.dir}/build/lib/jars/logback-core-1.2.9.jar:${project.dir}/build/lib/jars/lz4-java-1.8.0.jar:${project.dir}/build/lib/jars/metrics-core-3.1.5.jar:${project.dir}/build/lib/jars/metrics-jvm-3.1.5.jar:${project.dir}/build/lib/jars/metrics-logback-3.1.5.jar:${project.dir}/build/lib/jars/mina-core-2.0.0-M5.jar:${project.dir}/build/lib/jars/mxdump-0.14.jar:${project.dir}/build/lib/jars/netty-all-4.1.58.Final.jar:${project.dir}/build/lib/jars/netty-tcnative-boringssl-static-2.0.36.Final.jar:${project.dir}/build/lib/jars/ohc-core-0.5.1.jar:${project.dir}/build/lib/jars/ohc-core-j8-0.5.1.jar:${project.dir}/build/lib/jars/oro-2.0.8.jar:${project.dir}/build/lib/jars/psjava-0.1.19.jar:${project.dir}/build/lib/jars/reporter-config3-3.0.3.jar:${project.dir}/build/lib/jars/reporter-config-base-3.0.3.jar:${project.dir}/build/lib/jars/servlet-api-2.5-6.1.14.jar:${project.dir}/build/lib/jars/sigar-1.6.4.jar:${project.dir}/build/lib/jars/sjk-cli-0.14.jar:${project.dir}/build/lib/jars/sjk-core-0.14.jar:${project.dir}/build/lib/jars/sjk-json-0.14.jar:${project.dir}/build/lib/jars/sjk-stacktrace-0.14.jar:${project.dir}/build/lib/jars/slf4j-api-1.7.25.jar:${project.dir}/build/lib/jars/snakeyaml-1.26.jar:${project.dir}/build/lib/jars/snappy-java-1.1.2.6.jar:${project.dir}/build/lib/jars/snowball-stemmer-1.3.0.581.1.jar:${project.dir}/build/lib/jars/ST4-4.0.8.jar:${project.dir}/build/lib/jars/stream-2.5.2.jar:${project.dir}/build/lib/jars/xmlenc-0.52.jar:${project.dir}/build/lib/jars/zstd-jni-1.5.0-4.jar:${project.dir}/build/test/lib/jars/ant-1.10.12.jar:${project.dir}/build/test/lib/jars/ant-junit-1.10.12.jar:${project.dir}/build/test/lib/jars/ant-launcher-1.10.12.jar:${project.dir}/build/test/lib/jars/asm-6.0.jar:${project.dir}/build/test/lib/jars/asm-analysis-6.0.jar:${project.dir}/build/test/lib/jars/asm-commons-6.0.jar:${project.dir}/build/test/lib/jars/asm-tree-6.0.jar:${project.dir}/build/test/lib/jars/asm-util-6.0.jar:${project.dir}/build/test/lib/jars/asm-xml-6.0.jar:${project.dir}/build/test/lib/jars/awaitility-4.0.3.jar:${project.dir}/build/test/lib/jars/byte-buddy-1.10.5.jar:${project.dir}/build/test/lib/jars/byte-buddy-agent-1.10.5.jar:${project.dir}/build/test/lib/jars/commons-io-2.6.jar:${project.dir}/build/test/lib/jars/commons-math3-3.2.jar:${project.dir}/build/test/lib/jars/dtest-api-0.0.13.jar:${project.dir}/build/test/lib/jars/hamcrest-2.2.jar:${project.dir}/build/test/lib/jars/java-allocation-instrumenter-3.1.0.jar:${project.dir}/build/test/lib/jars/javassist-3.28.0-GA.jar:${project.dir}/build/test/lib/jars/jmh-core-1.21.jar:${project.dir}/build/test/lib/jars/jmh-generator-annprocess-1.21.jar:${project.dir}/build/test/lib/jars/jopt-simple-4.6.jar:${project.dir}/build/test/lib/jars/jsr305-3.0.2.jar:${project.dir}/build/test/lib/jars/junit-4.12.jar:${project.dir}/build/test/lib/jars/mockito-core-3.2.4.jar:${project.dir}/build/test/lib/jars/objenesis-2.6.jar:${project.dir}/build/test/lib/jars/org.jacoco.agent-0.8.6.jar:${project.dir}/build/test/lib/jars/org.jacoco.ant-0.8.6.jar:${project.dir}/build/test/lib/jars/org.jacoco.core-0.8.6.jar:${project.dir}/build/test/lib/jars/org.jacoco.report-0.8.6.jar:${project.dir}/build/test/lib/jars/quicktheories-0.26.jar:${project.dir}/build/test/lib/jars/reflections-0.10.2.jar:${project.dir}/build/test/lib/jars/semver4j-3.1.0.jar:${project.dir}/build/test/lib/jars/slf4j-api-1.7.32.jar:</property>
+->>>>>>>
+             </properties>
+             <folders>
+                 <source-folder>
+diff --cc build.xml
+index b61e5a240f,e4451babdd..0000000000
+--- a/build.xml
++++ b/build.xml
+@@@ -345,7 -310,7 +345,7 @@@
+          windowtitle="${ant.project.name} API" classpathref="cassandra.classpath"
+          bottom="Copyright &amp;copy; 2009- The Apache Software Foundation"
+          useexternalfile="yes" encoding="UTF-8" failonerror="false"
+-         maxmemory="256m" additionalparam="${jdk11plus-javac-exports}">
+ -        maxmemory="1024M" additionalparam="${jdk11-javadoc-exports}">
+++        maxmemory="1024M" additionalparam="${jdk11plus-javac-exports}">
+          <filesets/>
+        </javadoc>
+        <fail message="javadoc failed">
+diff --cc ide/nbproject/project.xml
+index 3250cb78db,298f205434..0000000000
+--- a/ide/nbproject/project.xml
++++ b/ide/nbproject/project.xml
