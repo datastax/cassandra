@@ -710,6 +710,7 @@ public class SelectStatement implements CQLStatement
 
             return DataLimits.groupByLimits(cqlRowLimit,
                                             cqlPerPartitionLimit,
+                                            pageSize.bytes(),
                                             pageSize.rows(),
                                             aggregationSpec);
         }
