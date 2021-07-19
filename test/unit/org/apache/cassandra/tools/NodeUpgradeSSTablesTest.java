@@ -28,6 +28,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -51,6 +52,14 @@ public class NodeUpgradeSSTablesTest extends CQLTester
         probe.close();
     }
 
+    @Test
+    public void testConcurrentCompactorsExceeded() throws Throwable
+    {
+        int concurrentCompactors = probe.getConcurrentCompactors() + 2;
+        ToolResult toolResult = ToolRunner.invokeNodetool("upgradesstables", "-j", String.valueOf(concurrentCompactors));
+        Assertions.assertThat(toolResult.getStdout()).containsPattern("jobs \\(\\d*\\) is bigger than configured concurrent_compactors \\(\\d*\\), using at most \\d* threads");
+    }
+    
     @Test
     public void testSetConcurrentCompactors() throws Throwable
     {
