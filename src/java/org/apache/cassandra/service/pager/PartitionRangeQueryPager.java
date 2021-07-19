@@ -83,7 +83,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
         if (lastReturnedKey == null)
         {
             pageRange = fullRange;
-            limits = query.limits().forPaging(pageSize.rows());
+            limits = query.limits().forPaging(pageSize);
         }
         // if the last key was the one of the end of the range we know that we are done
         else if (lastReturnedKey.equals(fullRange.keyRange().right) && remainingInPartition() == 0 && lastReturnedRow == null)
@@ -98,12 +98,12 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, query.metadata().comparator, lastReturnedRow.clustering(query.metadata()), false);
-                limits = query.limits().forPaging(pageSize.rows(), lastReturnedKey.getKey(), remainingInPartition());
+                limits = query.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
             {
                 pageRange = fullRange.forSubRange(bounds);
-                limits = query.limits().forPaging(pageSize.rows());
+                limits = query.limits().forPaging(pageSize);
             }
         }
 

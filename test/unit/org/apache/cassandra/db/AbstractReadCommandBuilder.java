@@ -23,6 +23,7 @@ import java.util.*;
 
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -39,7 +40,7 @@ public abstract class AbstractReadCommandBuilder
     protected int nowInSeconds;
 
     private int cqlLimit = -1;
-    private int pagingLimit = -1;
+    private PageSize pagingLimit = PageSize.NULL;
     private int perPartitionLimit = -1;
     protected boolean reversed = false;
 
@@ -115,7 +116,7 @@ public abstract class AbstractReadCommandBuilder
         return this;
     }
 
-    public AbstractReadCommandBuilder withPagingLimit(int newLimit)
+    public AbstractReadCommandBuilder withPagingLimit(PageSize newLimit)
     {
         this.pagingLimit = newLimit;
         return this;
@@ -219,8 +220,9 @@ public abstract class AbstractReadCommandBuilder
 
     protected DataLimits makeLimits()
     {
-        DataLimits limits = cqlLimit < 0 ? DataLimits.NONE : DataLimits.cqlLimits(cqlLimit, perPartitionLimit);
-        if (pagingLimit >= 0)
+        DataLimits limits = DataLimits.cqlLimits(cqlLimit < 0 ? DataLimits.NO_LIMIT : cqlLimit,
+                                                 perPartitionLimit < 0 ? DataLimits.NO_LIMIT : perPartitionLimit);
+        if (pagingLimit.isDefined())
             limits = limits.forPaging(pagingLimit);
         return limits;
     }

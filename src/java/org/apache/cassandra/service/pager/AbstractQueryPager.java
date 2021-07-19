@@ -66,7 +66,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return EmptyIterators.partition();
 
         pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        Pager<Row> pager = new RowPager(limits.forPaging(pageSize.rows()), query.nowInSec());
+        Pager<Row> pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
         ReadQuery readQuery = nextPageReadQuery(pageSize);
         if (readQuery == null)
         {
@@ -83,7 +83,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return EmptyIterators.partition();
 
         pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        RowPager pager = new RowPager(limits.forPaging(pageSize.rows()), query.nowInSec());
+        RowPager pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
         ReadQuery readQuery = nextPageReadQuery(pageSize);
         if (readQuery == null)
         {
@@ -99,7 +99,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return EmptyIterators.unfilteredPartition(metadata);
 
         pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        UnfilteredPager pager = new UnfilteredPager(limits.forPaging(pageSize.rows()), query.nowInSec());
+        UnfilteredPager pager = new UnfilteredPager(limits.forPaging(pageSize), query.nowInSec());
         ReadQuery readQuery = nextPageReadQuery(pageSize);
         if (readQuery == null)
         {
@@ -198,7 +198,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             {
                 remainingInPartition -= counter.countedInCurrentPartition();
             }
-            exhausted = pageLimits.isExhausted(counter);
+            exhausted = pageLimits.isCounterBelowLimits(counter);
         }
 
         public Row applyToStatic(Row row)

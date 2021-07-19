@@ -161,7 +161,7 @@ public class QueryPagerTest
         AbstractReadCommandBuilder builder = Util.cmd(cfs(), key);
         for (String name : names)
             builder.includeRow(name);
-        return builder.withPagingLimit(100).build();
+        return builder.withPagingLimit(PageSize.inRows(100)).build();
     }
 
     private static SinglePartitionReadCommand sliceQuery(String key, String start, String end, int count)
@@ -185,7 +185,7 @@ public class QueryPagerTest
         AbstractReadCommandBuilder builder = Util.cmd(cfs())
                                                  .fromKeyExcl(keyStart)
                                                  .toKeyIncl(keyEnd)
-                                                 .withPagingLimit(count);
+                                                 .withPagingLimit(PageSize.inRows(count));
         for (String name : names)
             builder.includeRow(name);
 
@@ -199,7 +199,7 @@ public class QueryPagerTest
                    .toKeyIncl(keyEnd)
                    .fromIncl(start)
                    .toIncl(end)
-                   .withPagingLimit(count)
+                   .withPagingLimit(PageSize.inRows(count))
                    .build();
     }
 
