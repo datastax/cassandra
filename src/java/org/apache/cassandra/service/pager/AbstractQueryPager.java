@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service.pager;
 
+import java.util.StringJoiner;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -247,6 +249,18 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             lastRow = row;
             return row;
         }
+
+        @Override
+        public String toString()
+        {
+            return new StringJoiner(", ", Pager.class.getSimpleName() + "[", "]")
+                   .add("pageLimits=" + pageLimits)
+                   .add("counter=" + counter)
+                   .add("currentKey=" + currentKey)
+                   .add("lastRow=" + lastRow)
+                   .add("isFirstPartition=" + isFirstPartition)
+                   .toString();
+        }
     }
 
     protected void restoreState(DecoratedKey lastKey, int remaining, int remainingInPartition)
@@ -284,4 +298,17 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
     protected abstract T nextPageReadQuery(PageSize pageSize, int remaining);
     protected abstract void recordLast(DecoratedKey key, Row row);
     protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", AbstractQueryPager.class.getSimpleName() + "[", "]")
+               .add("limits=" + limits)
+               .add("remaining=" + remaining)
+               .add("lastCounter=" + lastCounter)
+               .add("lastKey=" + lastKey)
+               .add("remainingInPartition=" + remainingInPartition)
+               .add("exhausted=" + exhausted)
+               .toString();
+    }
 }
