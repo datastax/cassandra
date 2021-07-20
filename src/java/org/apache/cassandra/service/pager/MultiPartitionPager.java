@@ -23,6 +23,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 
 import java.util.Arrays;
+import java.util.StringJoiner;
 
 import javax.annotation.Nonnull;
 
@@ -263,5 +264,17 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
     public int maxRemaining()
     {
         return remaining;
+    }
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", MultiPartitionPager.class.getSimpleName() + "[", "]")
+               .add("pagers=" + pagers.length)
+               .add("limit=" + limit)
+               .add("nowInSec=" + nowInSec)
+               .add("remaining=" + remaining)
+               .add("current=" + current)
+               .toString();
     }
 }

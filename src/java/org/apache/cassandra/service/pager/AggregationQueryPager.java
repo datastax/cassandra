@@ -19,6 +19,7 @@ package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
+import java.util.StringJoiner;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -417,6 +418,22 @@ public final class AggregationQueryPager implements QueryPager
                 lastClustering = row.clustering();
                 return row;
             }
+        }
+
+        @Override
+        public String toString()
+        {
+            return new StringJoiner(", ", GroupByPartitionIterator.class.getSimpleName() + "[", "]")
+                   .add("groupsPageSize=" + groupsPageSize)
+                   .add("subPageSize=" + subPageSize)
+                   .add("endOfData=" + endOfData)
+                   .add("closed=" + closed)
+                   .add("limits=" + limits)
+                   .add("lastPartitionKey=" + lastPartitionKey)
+                   .add("lastClustering=" + ((lastClustering != null && subPager.executionController() != null) ? lastClustering.toString(subPager.executionController().metadata()): String.valueOf(lastClustering)))
+                   .add("initialMaxRemaining=" + initialMaxRemaining)
+                   .add("sub-pager=" + subPager.toString())
+                   .toString();
         }
     }
 

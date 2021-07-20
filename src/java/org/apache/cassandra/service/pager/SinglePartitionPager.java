@@ -18,6 +18,7 @@
 package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
+import java.util.StringJoiner;
 
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
@@ -27,7 +28,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * Common interface to single partition queries (by slice and by name).
- *
+ * <p>
  * For use by MultiPartitionPager.
  */
 public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionReadQuery>
@@ -79,8 +80,8 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
     public PagingState state()
     {
         return lastReturned == null
-             ? null
-             : new PagingState(null, lastReturned, maxRemaining(), remainingInPartition());
+               ? null
+               : new PagingState(null, lastReturned, maxRemaining(), remainingInPartition());
     }
 
     @Override
@@ -104,5 +105,21 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
     protected boolean isPreviouslyReturnedPartition(DecoratedKey key)
     {
         return lastReturned != null;
+    }
+
+    @Override
+    public String toString()
+    {
+            String s = String.valueOf(lastReturned);
+        try
+        {
+            s = lastReturned.clustering(query.metadata()).toString(query.metadata());
+        } catch (NullPointerException ex) {
+        }
+
+            return new StringJoiner(", ", SinglePartitionPager.class.getSimpleName() + "[", "]")
+                   .add("super=" + super.toString())
+                   .add("lastReturned=" + s)
+                   .toString();
     }
 }

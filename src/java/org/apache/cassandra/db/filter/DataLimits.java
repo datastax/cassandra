@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.StringJoiner;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -640,8 +641,8 @@ public abstract class DataLimits
             @Override
             public String toString()
             {
-                return String.format("[counted(bytes,rows,perPartition): (%d,%d,%d), count(bytes,rows,perPartition): (%d,%d,%d)",
-                                     bytesCounted(), rowsCounted(), rowsCountedInCurrentPartition(), bytes(), count(), perPartitionCount());
+                return String.format("%s(bytes=%s/%s, rows=%s/%s, partition-rows=%s/%s)", this.getClass().getName(),
+                                     bytesCounted(), bytesLimit, rowsCounted(), rowLimit, rowsCountedInCurrentPartition(), perPartitionLimit);
             }
         }
 
@@ -737,6 +738,16 @@ public abstract class DataLimits
                     super.applyToPartition(partitionKey, staticRow);
                 }
             }
+        }
+
+        @Override
+        public String toString()
+        {
+            return new StringJoiner(", ", CQLPagingLimits.class.getSimpleName() + "[", "]")
+                   .add("super=" + super.toString())
+                   .add("lastReturnedKey=" + lastReturnedKey)
+                   .add("lastReturnedKeyRemaining=" + lastReturnedKeyRemaining)
+                   .toString();
         }
     }
 
@@ -1203,8 +1214,8 @@ public abstract class DataLimits
             @Override
             public String toString()
             {
-                return String.format("[counted(bytes,groups,perPartition): (%d,%d,%d), count(bytes,groups,perPartition): (%d,%d,%d)",
-                                     bytesCounted(), groupCounted, groupInCurrentPartition, bytes(), count(), perPartitionCount());
+                return String.format("%s(bytes=%s/%s, rows=%s/%s, partition-rows=%s/%s, groups=%s/%s, partition-groups=%s/%s)", this.getClass().getName(),
+                                     bytesCounted(), bytesLimit, rowsCounted(), rowLimit, rowsCountedInCurrentPartition(), perPartitionLimit, groupCounted, groupLimit, groupInCurrentPartition, groupPerPartitionLimit);
             }
         }
     }
@@ -1306,6 +1317,16 @@ public abstract class DataLimits
                     super.applyToPartition(partitionKey, staticRow);
                 }
             }
+        }
+
+        @Override
+        public String toString()
+        {
+            return new StringJoiner(", ", CQLGroupByPagingLimits.class.getSimpleName() + "[", "]")
+                   .add("super=" + super.toString())
+                   .add("lastReturnedKey=" + lastReturnedKey)
+                   .add("lastReturnedKeyRemaining=" + lastReturnedKeyRemaining)
+                   .toString();
         }
     }
 
