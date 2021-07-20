@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.Row;
@@ -74,7 +75,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
     }
 
     @Override
-    protected PartitionRangeReadQuery nextPageReadQuery(int pageSize)
+    protected PartitionRangeReadQuery nextPageReadQuery(PageSize pageSize)
     {
         DataLimits limits;
         DataRange fullRange = query.dataRange();
@@ -82,7 +83,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
         if (lastReturnedKey == null)
         {
             pageRange = fullRange;
-            limits = query.limits().forPaging(pageSize);
+            limits = query.limits().forPaging(pageSize.rows());
         }
         // if the last key was the one of the end of the range we know that we are done
         else if (lastReturnedKey.equals(fullRange.keyRange().right) && remainingInPartition() == 0 && lastReturnedRow == null)
@@ -97,12 +98,12 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, query.metadata().comparator, lastReturnedRow.clustering(query.metadata()), false);
-                limits = query.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
+                limits = query.limits().forPaging(pageSize.rows(), lastReturnedKey.getKey(), remainingInPartition());
             }
             else
             {
                 pageRange = fullRange.forSubRange(bounds);
-                limits = query.limits().forPaging(pageSize);
+                limits = query.limits().forPaging(pageSize.rows());
             }
         }
 

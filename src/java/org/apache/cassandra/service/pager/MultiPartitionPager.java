@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -148,22 +149,22 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public PartitionIterator fetchPage(PageSize pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        int toQuery = Math.min(remaining, pageSize);
+        PageSize toQuery = PageSize.inRows(Math.min(remaining, pageSize.rows()));
         return new PagersIterator(toQuery, consistency, queryState, null, queryStartNanoTime);
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException
+    public PartitionIterator fetchPageInternal(PageSize pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException
     {
-        int toQuery = Math.min(remaining, pageSize);
+        PageSize toQuery = PageSize.inRows(Math.min(remaining, pageSize.rows()));
         return new PagersIterator(toQuery, null, null, executionController, System.nanoTime());
     }
 
     private class PagersIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
-        private final int pageSize;
+        private final PageSize pageSize;
         private PartitionIterator result;
         private boolean closed;
         private final long queryStartNanoTime;
@@ -178,7 +179,7 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
         private int pagerMaxRemaining;
         private int counted;
 
-        public PagersIterator(int pageSize, ConsistencyLevel consistency, QueryState queryState, ReadExecutionController executionController, long queryStartNanoTime)
+        public PagersIterator(PageSize pageSize, ConsistencyLevel consistency, QueryState queryState, ReadExecutionController executionController, long queryStartNanoTime)
         {
             this.pageSize = pageSize;
             this.consistency = consistency;
@@ -199,8 +200,8 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
 
                 // We are done if we have reached the page size or in the case of GROUP BY if the current pager
                 // is not exhausted.
-                boolean isDone = counted >= pageSize
-                        || (result != null && limit.isGroupByLimit() && !pagers[current].isExhausted());
+                boolean isDone = pageSize.isCompleted(counted, PageSize.PageUnit.ROWS)
+                                 || (result != null && limit.isGroupByLimit() && !pagers[current].isExhausted());
 
                 // isExhausted() will sets us on the first non-exhausted pager
                 if (isDone || isExhausted())
@@ -210,7 +211,7 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
                 }
 
                 pagerMaxRemaining = pagers[current].maxRemaining();
-                int toQuery = pageSize - counted;
+                PageSize toQuery = pageSize.withDecreasedRows(counted);
                 result = consistency == null
                        ? pagers[current].fetchPageInternal(toQuery, executionController)
                        : pagers[current].fetchPage(toQuery, consistency, queryState, queryStartNanoTime);

@@ -31,6 +31,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -88,8 +89,7 @@ public class GuardrailConsistencyTest extends GuardrailTester
         return QueryOptions.create(cl,
                                    Collections.emptyList(),
                                    false,
-                                   1,
-                                   false,
+                                   PageSize.inRows(1),
                                    null,
                                    serialCl,
                                    ProtocolVersion.CURRENT,
