@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3;
 
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -27,11 +29,14 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.ReadExecutionController;
@@ -52,11 +57,21 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class PagingQueryTest extends CQLTester
 {
     final int ROW_SIZE = 49; // size of internal representation
 
-    // legacy test
+    @Parameterized.Parameters(name = "aggregation_sub_page_size={0}")
+    public static Collection<Object[]> generateParameters()
+    {
+        return Arrays.asList(new Object[]{ PageSize.inBytes(1024) }, new Object[]{ PageSize.NULL });
+    }
+
+    public PagingQueryTest(PageSize subPageSize)
+    {
+        DatabaseDescriptor.setAggregationSubPageSize(subPageSize);
+    }
 
     @Test
     public void pagingOnRegularColumn() throws Throwable
@@ -484,7 +499,7 @@ public class PagingQueryTest extends CQLTester
     @Test
     public void testLimitsOnFullScanQueryWithAggregateEverything() throws Throwable
     {
-        testPagingCasesWithAggregateEverything("SELECT COUNT(*) FROM %s", 10, 10, 10, 1000);
+        testPagingCasesWithAggregateEverything("SELECT COUNT(*) FROM %s", 3, 3, 3, 27);
     }
 
     @Test
