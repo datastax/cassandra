@@ -271,11 +271,12 @@ public class SelectStatement implements CQLStatement
     {
         Selectors selectors = selection.newSelectors(options);
         return getQuery(state,
-        options,
-        selectors.getColumnFilter(),
-        nowInSec,
-        getLimit(options),
-        getPerPartitionLimit(options), options.getPageSize());
+                        options,
+                        selectors.getColumnFilter(),
+                        nowInSec,
+                        getLimit(options),
+                        getPerPartitionLimit(options),
+                        options.getPageSize());
     }
 
     public ReadQuery getQuery(QueryState queryState,
@@ -474,14 +475,15 @@ public class SelectStatement implements CQLStatement
         }
     }
 
-    private QueryPager getPager(ReadQuery query, QueryOptions options)
+    @VisibleForTesting
+    public QueryPager getPager(ReadQuery query, QueryOptions options)
     {
         QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
 
         if (aggregationSpec == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, query.limits());
+        return new AggregationQueryPager(pager, PageSize.NULL, query.limits());
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
@@ -710,8 +712,8 @@ public class SelectStatement implements CQLStatement
 
             return DataLimits.groupByLimits(cqlRowLimit,
                                             cqlPerPartitionLimit,
-                                            pageSize.bytes(),
-                                            pageSize.rows(),
+                                            NO_LIMIT,
+                                            NO_LIMIT,
                                             aggregationSpec);
         }
 

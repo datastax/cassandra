@@ -84,12 +84,13 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
     }
 
     @Override
-    protected SinglePartitionReadQuery nextPageReadQuery(PageSize pageSize)
+    protected SinglePartitionReadQuery nextPageReadQuery(PageSize pageSize, int remaining)
     {
         Clustering<?> clustering = lastReturned == null ? null : lastReturned.clustering(query.metadata());
-        DataLimits limits = lastReturned == null
-                          ? limits().forPaging(pageSize)
-                          : limits().forPaging(pageSize, key(), remainingInPartition());
+        DataLimits limits = limits().withCountedLimit(Math.min(limits().count(), remaining));
+        limits = lastReturned == null
+                 ? limits.forPaging(pageSize)
+                 : limits.forPaging(pageSize, key(), remainingInPartition());
 
         return query.forPaging(clustering, limits);
     }

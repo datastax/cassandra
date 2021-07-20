@@ -65,6 +65,11 @@ public class PagingState
         this.rowMark = rowMark;
         this.remaining = remaining;
         this.remainingInPartition = remainingInPartition;
+
+        if (remaining < 0 || remainingInPartition < 0)
+        {
+            logger.error("Just created an invalid paging state: " + toString(), new Throwable());
+        }
     }
 
     public ByteBuffer serialize(ProtocolVersion protocolVersion)
