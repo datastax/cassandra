@@ -20,6 +20,7 @@ package org.apache.cassandra.service.pager;
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -34,7 +35,7 @@ import org.apache.cassandra.service.QueryState;
  * <p>
  * For aggregation/group by queries, the user page size is in number of groups. But each group could be composed of very
  * many rows so to avoid running into OOMs, this pager will page internal queries into sub-pages. So each call to
- * {@link fetchPage} may (transparently) yield multiple internal queries (sub-pages).
+ * {@link #fetchPage} may (transparently) yield multiple internal queries (sub-pages).
  */
 public final class AggregationQueryPager implements QueryPager
 {
@@ -50,7 +51,7 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public PartitionIterator fetchPage(int pageSize,
+    public PartitionIterator fetchPage(PageSize pageSize,
                                        ConsistencyLevel consistency,
                                        QueryState queryState,
                                        long queryStartNanoTime)
@@ -68,7 +69,7 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public PartitionIterator fetchPageInternal(PageSize pageSize, ReadExecutionController executionController)
     {
         if (limits.isGroupByLimit())
             return new GroupByPartitionIterator(pageSize, executionController, System.nanoTime());
@@ -109,7 +110,7 @@ public final class AggregationQueryPager implements QueryPager
         /**
          * The top-level page size in number of groups.
          */
-        private final int pageSize;
+        private final PageSize pageSize;
 
         // For "normal" queries
         private final ConsistencyLevel consistency;
@@ -155,7 +156,7 @@ public final class AggregationQueryPager implements QueryPager
 
         private long queryStartNanoTime;
 
-        public GroupByPartitionIterator(int pageSize,
+        public GroupByPartitionIterator(PageSize pageSize,
                                         ConsistencyLevel consistency,
                                         QueryState queryState,
                                         long queryStartNanoTime)
@@ -163,31 +164,24 @@ public final class AggregationQueryPager implements QueryPager
             this(pageSize, consistency, queryState, null, queryStartNanoTime);
         }
 
-        public GroupByPartitionIterator(int pageSize,
+        public GroupByPartitionIterator(PageSize pageSize,
                                         ReadExecutionController executionController,
                                         long queryStartNanoTime)
        {
            this(pageSize, null, null, executionController, queryStartNanoTime);
        }
 
-        private GroupByPartitionIterator(int pageSize,
+        private GroupByPartitionIterator(PageSize pageSize,
                                          ConsistencyLevel consistency,
                                          QueryState queryState,
                                          ReadExecutionController executionController,
                                          long queryStartNanoTime)
         {
-            this.pageSize = handlePagingOff(pageSize);
+            this.pageSize = pageSize;
             this.consistency = consistency;
             this.queryState = queryState;
             this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
-        }
-
-        private int handlePagingOff(int pageSize)
-        {
-            // If the paging is off, the pageSize will be <= 0. So we need to replace
-            // it by DataLimits.NO_LIMIT
-            return pageSize <= 0 ? DataLimits.NO_LIMIT : pageSize;
         }
 
         public final void close()
@@ -243,9 +237,9 @@ public final class AggregationQueryPager implements QueryPager
             next = partitionIterator.next();
         }
 
-        protected boolean isDone(int pageSize, int counted)
+        protected boolean isDone(PageSize pageSize, int counted)
         {
-            return counted == pageSize;
+            return counted == pageSize.rows();
         }
 
         /**
@@ -274,9 +268,9 @@ public final class AggregationQueryPager implements QueryPager
          * @param counted the number of result returned so far by the previous sub-pages
          * @return the size of the next sub-page to retrieve
          */
-        protected int computeSubPageSize(int pageSize, int counted)
+        protected PageSize computeSubPageSize(PageSize pageSize, int counted)
         {
-            return pageSize - counted;
+            return pageSize.withDecreasedRows(counted);
         }
 
         /**
@@ -285,7 +279,7 @@ public final class AggregationQueryPager implements QueryPager
          * @param subPageSize the sub-page size in number of groups
          * @return the next sub-page
          */
-        private final PartitionIterator fetchSubPage(int subPageSize)
+        private final PartitionIterator fetchSubPage(PageSize subPageSize)
         {
             return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, queryStartNanoTime)
                                        : subPager.fetchPageInternal(subPageSize, executionController);
@@ -398,7 +392,7 @@ public final class AggregationQueryPager implements QueryPager
      */
     public final class AggregationPartitionIterator extends GroupByPartitionIterator
     {
-        public AggregationPartitionIterator(int pageSize,
+        public AggregationPartitionIterator(PageSize pageSize,
                                             ConsistencyLevel consistency,
                                             QueryState queryState,
                                             long queryStartNanoTime)
@@ -406,7 +400,7 @@ public final class AggregationQueryPager implements QueryPager
             super(pageSize, consistency, queryState, queryStartNanoTime);
         }
 
-        public AggregationPartitionIterator(int pageSize,
+        public AggregationPartitionIterator(PageSize pageSize,
                                             ReadExecutionController executionController,
                                             long queryStartNanoTime)
         {
@@ -423,13 +417,13 @@ public final class AggregationQueryPager implements QueryPager
         }
 
         @Override
-        protected boolean isDone(int pageSize, int counted)
+        protected boolean isDone(PageSize pageSize, int counted)
         {
             return false;
         }
 
         @Override
-        protected int computeSubPageSize(int pageSize, int counted)
+        protected PageSize computeSubPageSize(PageSize pageSize, int counted)
         {
             return pageSize;
         }

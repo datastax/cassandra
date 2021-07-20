@@ -29,6 +29,7 @@ import com.google.common.base.Splitter;
 import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -131,21 +132,21 @@ public class Client extends SimpleClient
             line = line.substring(6);
             // Ugly hack to allow setting a page size, but that's playground code anyway
             String query = line;
-            int pageSize = -1;
+            PageSize pageSize = PageSize.NULL;
             if (line.matches(".+ !\\d+$"))
             {
                 int idx = line.lastIndexOf('!');
                 query = line.substring(0, idx-1);
                 try
                 {
-                    pageSize = Integer.parseInt(line.substring(idx+1, line.length()));
+                    pageSize = PageSize.inRows(Integer.parseInt(line.substring(idx + 1, line.length())));
                 }
                 catch (NumberFormatException e)
                 {
                     return null;
                 }
             }
-            return new QueryMessage(query, QueryOptions.create(ConsistencyLevel.ONE, Collections.<ByteBuffer>emptyList(), false, pageSize, false, null, null, version, null));
+            return new QueryMessage(query, QueryOptions.create(ConsistencyLevel.ONE, Collections.<ByteBuffer>emptyList(), false, pageSize, null, null, version, null));
         }
         else if (msgType.equals("PREPARE"))
         {
