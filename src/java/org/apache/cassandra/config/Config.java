@@ -545,6 +545,8 @@ public class Config
 
     public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
 
+    public volatile int aggretaion_sub_page_size_in_kb = 2048;
+
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
      */

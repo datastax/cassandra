@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -483,7 +484,7 @@ public class SelectStatement implements CQLStatement
         if (aggregationSpec == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, PageSize.NULL, query.limits());
+        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits());
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
