@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.service.pager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -29,14 +32,22 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 {
+    private final static Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
+
     protected final T query;
+
+    // the limits provided as a part of the query
     protected final DataLimits limits;
     protected final ProtocolVersion protocolVersion;
     private final boolean enforceStrictLiveness;
 
     private int remaining;
 
-    // This is the last key we've been reading from (or can still be reading within). This the key for
+    // This is the counter which was used for the last page we fetched. It can be used to obtain the number of
+    // fetched rows or bytes.
+    private DataLimits.Counter lastCounter;
+
+    // This is the last key we've been reading from (or can still be reading within). This is the key for
     // which remainingInPartition makes sense: if we're starting another key, we should reset remainingInPartition
     // (and this is done in PagerIterator). This can be null (when we start).
     private DecoratedKey lastKey;
@@ -65,9 +76,9 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         if (isExhausted())
             return EmptyIterators.partition();
 
-        pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        Pager<Row> pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize);
+        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
+        Pager<Row> pager = new RowPager(updatedQueryLimits, query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
         if (readQuery == null)
         {
             exhausted = true;
@@ -82,9 +93,9 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         if (isExhausted())
             return EmptyIterators.partition();
 
-        pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        RowPager pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize);
+        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
+        RowPager pager = new RowPager(updatedQueryLimits, query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
         if (readQuery == null)
         {
             exhausted = true;
@@ -98,15 +109,24 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         if (isExhausted())
             return EmptyIterators.unfilteredPartition(metadata);
 
-        pageSize = PageSize.inRows(Math.min(pageSize.rows(), remaining));
-        UnfilteredPager pager = new UnfilteredPager(limits.forPaging(pageSize), query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize);
+        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
+        UnfilteredPager pager = new UnfilteredPager(updatedQueryLimits, query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
         if (readQuery == null)
         {
             exhausted = true;
             return EmptyIterators.unfilteredPartition(metadata);
         }
         return Transformation.apply(readQuery.executeLocally(executionController), pager);
+    }
+
+    /**
+     * For subsequent pages we want to limit the number of rows to the minimum of the currently set limit in the query
+     * and the number of remaining rows in page. Note that paging itself will be applied separately.
+     */
+    private DataLimits nextPageLimits()
+    {
+        return limits.withCountedLimit(Math.min(limits.count(), remaining));
     }
 
     private class UnfilteredPager extends Pager<Unfiltered>
@@ -148,6 +168,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         private Pager(DataLimits pageLimits, int nowInSec)
         {
             this.counter = pageLimits.newCounter(nowInSec, true, query.selectsFullPartition(), enforceStrictLiveness);
+            lastCounter = this.counter;
             this.pageLimits = pageLimits;
         }
 
@@ -179,6 +200,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         @Override
         public void onClose()
         {
+            assert lastCounter == counter;
             // In some case like GROUP BY a counter need to know when the processing is completed.
             counter.onClose();
 
@@ -198,6 +220,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             {
                 remainingInPartition -= counter.countedInCurrentPartition();
             }
+            // if the counter did not count up to the page limits, then the iteration must have reached the end
             exhausted = pageLimits.isCounterBelowLimits(counter);
         }
 
@@ -248,7 +271,17 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         return remainingInPartition;
     }
 
-    protected abstract T nextPageReadQuery(PageSize pageSize);
+    /**
+     * Returns the {@link DataLimits.Counter} for the page which was last fetched (the last page in the meaning
+     * the last returned and traversed row iterator, the iterator must be closed in order for this method to return
+     * proper counter)
+     */
+    public DataLimits.Counter getLastCounter()
+    {
+        return lastCounter;
+    }
+
+    protected abstract T nextPageReadQuery(PageSize pageSize, int remaining);
     protected abstract void recordLast(DecoratedKey key, Row row);
     protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
 }

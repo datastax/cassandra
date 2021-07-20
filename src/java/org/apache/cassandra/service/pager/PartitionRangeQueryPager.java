@@ -75,7 +75,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
     }
 
     @Override
-    protected PartitionRangeReadQuery nextPageReadQuery(PageSize pageSize)
+    protected PartitionRangeReadQuery nextPageReadQuery(PageSize pageSize, int remaining)
     {
         DataLimits limits;
         DataRange fullRange = query.dataRange();
@@ -95,15 +95,17 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
             // We want to include the last returned key only if we haven't achieved our per-partition limit, otherwise, don't bother.
             boolean includeLastKey = remainingInPartition() > 0 && lastReturnedRow != null;
             AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey);
+            limits = query.limits();
+            limits = limits.withCountedLimit(Math.min(limits.count(), remaining));
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, query.metadata().comparator, lastReturnedRow.clustering(query.metadata()), false);
-                limits = query.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
+                limits = limits.forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
             {
                 pageRange = fullRange.forSubRange(bounds);
-                limits = query.limits().forPaging(pageSize);
+                limits = limits.forPaging(pageSize);
             }
         }
 
