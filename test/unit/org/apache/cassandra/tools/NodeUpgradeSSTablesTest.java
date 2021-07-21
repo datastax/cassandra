@@ -75,7 +75,6 @@ public class NodeUpgradeSSTablesTest extends CQLTester
     private void assertToolResult(ToolResult toolResult)
     {
         assertTrue(toolResult.getStdout().isEmpty());
-        assertTrue(toolResult.getCleanedStderr().isEmpty());
-        assertEquals(0, toolResult.getExitCode());
+        toolResult.assertOnCleanExit();
     }
 }
