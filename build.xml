@@ -95,7 +95,7 @@
     <!-- Use build/tmp for temp files if not otherwise specified. Because Ant properties are immutable, this has no effect if
          the user specifies the tmp.dir property -->
     <property name="tmp.dir" value="${build.dir}/tmp"/>
-
+    <property name="test.logback.configurationFile" value="${test.conf}/logback-test.xml"/>
     <property name="doc.dir" value="${basedir}/doc"/>
 
     <condition property="version" value="${base.version}">
@@ -1222,6 +1222,7 @@
         <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
@@ -1245,6 +1246,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${compressed_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
@@ -1265,6 +1267,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${cdc_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
@@ -1287,6 +1290,7 @@
                 <jvmarg value="-Dcassandra.config=file:///${trie_yaml}"/>
                 <jvmarg value="-Dcassandra.junit_storage_compatibility_mode=NONE"/>
                 <jvmarg value="-Dcassandra.skip_sync=true" />
+                <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
             </testmacrohelper>
         </sequential>
     </macrodef>
@@ -1299,7 +1303,7 @@
           <fileset file="${test.conf}/cassandra.yaml"/>
           <fileset file="${test.conf}/storage_compatibility_mode_none.yaml"/>
         </concat>
-      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" 
+      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}"
                        exclude="**/*.java" timeout="${test.timeout}" testtag="oa">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1308,33 +1312,12 @@
         <jvmarg value="-Dcassandra.config=file:///${scm_none_yaml}"/>
         <jvmarg value="-Dcassandra.junit_storage_compatibility_mode=NONE"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
 
-    <macrodef name="testlist-bigtable">
-      <attribute name="test.file.list"/>
-      <sequential>
-        <property name="bigtable_yaml" value="${build.test.dir}/cassandra.bigtable.yaml"/>
-        <concat destfile="${bigtable_yaml}">
-          <fileset file="${test.conf}/cassandra.yaml"/>
-          <fileset file="${test.conf}/bigtable.yaml"/>
-        </concat>
-
-        <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
-                         exclude="**/*.java" timeout="${test.timeout}" testtag="bigtable">
-          <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
-          <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
-          <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
-          <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
-          <jvmarg value="-Dcassandra.skip_sync=true" />
-          <jvmarg value="-Dcassandra.sstable.format.default=big" />
-          <jvmarg value="-Dcassandra.config=file:///${bigtable_yaml}"/>
-        </testmacrohelper>
-      </sequential>
-    </macrodef>
-
-    <macrodef name="testlist-system-keyspace-directory">
+  <macrodef name="testlist-system-keyspace-directory">
     <attribute name="test.file.list" />
     <sequential>
       <property name="system_keyspaces_directory_yaml" value="${build.test.dir}/cassandra.system.yaml"/>
@@ -1350,6 +1333,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${system_keyspaces_directory_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
   </macrodef>
