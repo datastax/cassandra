@@ -326,7 +326,7 @@ public final class WhereClause
          */
         public final boolean containsCustomExpressions()
         {
-            return exists(e -> e instanceof CustomIndexExpressionElement);
+            return exists(CustomIndexExpressionElement.class::isInstance);
         }
 
         public ExpressionElement rename(ColumnIdentifier from, ColumnIdentifier to)
