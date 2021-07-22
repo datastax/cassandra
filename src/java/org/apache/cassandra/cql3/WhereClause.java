@@ -33,7 +33,7 @@ import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
  */
 public final class WhereClause
 {
-    private static final WhereClause EMPTY = new WhereClause(ExpressionElement.EMPTY);
+    private static final WhereClause EMPTY = new WhereClause(new AndElement(Collections.emptyList()));
 
     private final ExpressionElement rootElement;
 
@@ -288,8 +288,6 @@ public final class WhereClause
 
     public static abstract class ExpressionElement
     {
-        private static final ExpressionElement EMPTY = new EmptyElement();
-
         public List<ContainerElement> operations()
         {
             return Collections.emptyList();
@@ -370,6 +368,7 @@ public final class WhereClause
          * Examples:
          * <pre>
          * a = 1                                 -> AND(a = 1)
+         * AND()                                 -> AND()
          * AND(a = 1, b = 2)                     -> AND(a = 1, b = 2)
          * AND(a = 1, AND(b = 2, c = 3))         -> AND(a = 1, b = 2, c = 3)
          * OR(a = 1, b = 2)                      -> AND(OR(a = 1, b = 2))
@@ -394,15 +393,6 @@ public final class WhereClause
         public boolean exists(Predicate<ExpressionElement> f)
         {
             return f.test(this);
-        }
-    }
-
-    public static class EmptyElement extends VariableElement
-    {
-        @Override
-        public String toString()
-        {
-            return "";
         }
     }
 
@@ -472,6 +462,8 @@ public final class WhereClause
         protected abstract ContainerElement withChildren(Collection<ExpressionElement> children);
 
         protected abstract Operator operator();
+
+        protected abstract String emptyValue();
 
         @Override
         public List<ContainerElement> operations()
@@ -543,12 +535,13 @@ public final class WhereClause
         @Override
         public String toString()
         {
-            return children.isEmpty()
-                    ? "()"
-                    : children
-                        .stream()
-                        .map(c -> children.size() > 1 && c.isCompound() ? '(' + c.toString() + ')':c.toString())
-                        .collect(Collectors.joining(operator().joinValue()));
+            if (children.isEmpty())
+                return emptyValue();
+
+            return children
+                .stream()
+                .map(c -> children.size() > 1 && c.isCompound() ? '(' + c.toString() + ')' : c.toString())
+                .collect(Collectors.joining(operator().joinValue()));
         }
     }
 
@@ -570,6 +563,12 @@ public final class WhereClause
         {
             return Operator.AND;
         }
+
+        @Override
+        protected String emptyValue()
+        {
+            return "TRUE";
+        }
     }
 
     public static class OrElement extends ContainerElement
@@ -589,6 +588,12 @@ public final class WhereClause
         protected Operator operator()
         {
             return Operator.OR;
+        }
+
+        @Override
+        protected String emptyValue()
+        {
+            return "FALSE";
         }
 
         @Override
