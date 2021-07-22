@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service.pager;
 
+import java.util.StringJoiner;
+
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -141,5 +143,15 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
         return includeLastKey
              ? new IncludingExcludingBounds<>(lastReturnedKey, bounds.right)
              : new ExcludingBounds<>(lastReturnedKey, bounds.right);
+    }
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", PartitionRangeQueryPager.class.getSimpleName() + "[", "]")
+               .add("super=" + super.toString())
+               .add("lastReturnedKey=" + lastReturnedKey)
+               .add("lastReturnedRow=" + (lastReturnedRow != null ? lastReturnedRow.clustering(query.metadata()).toString(query.metadata()) : null))
+               .toString();
     }
 }

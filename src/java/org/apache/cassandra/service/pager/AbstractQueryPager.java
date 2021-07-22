@@ -34,7 +34,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 {
-    private final static Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
+    private static final Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
 
     protected final T query;
 
@@ -172,6 +172,9 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             this.counter = pageLimits.newCounter(nowInSec, true, query.selectsFullPartition(), enforceStrictLiveness);
             lastCounter = this.counter;
             this.pageLimits = pageLimits;
+
+            if (logger.isTraceEnabled())
+                logger.trace("Fetching new page - created {}", this);
         }
 
         @Override

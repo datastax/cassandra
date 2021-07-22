@@ -27,6 +27,9 @@ import java.util.StringJoiner;
 
 import javax.annotation.Nonnull;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -50,7 +53,9 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
  */
 public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements QueryPager
 {
-    private final static SinglePartitionPager[] NO_PAGERS = new SinglePartitionPager[0];
+    private static final Logger logger = LoggerFactory.getLogger(MultiPartitionPager.class);
+
+    private static final SinglePartitionPager[] NO_PAGERS = new SinglePartitionPager[0];
 
     // a pager per queried partition
     @Nonnull
@@ -205,6 +210,9 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
             this.queryState = queryState;
             this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
+
+            if (logger.isTraceEnabled())
+                logger.trace("Fetching a new page - created {}", this);
         }
 
         protected RowIterator computeNext()
@@ -259,6 +267,18 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
             if (partitionIterator != null && !closed)
                 partitionIterator.close();
         }
+
+        @Override
+        public String toString()
+        {
+            return new StringJoiner(", ", PagersIterator.class.getSimpleName() + "[", "]")
+                   .add("pageSize=" + pageSize)
+                   .add("closed=" + closed)
+                   .add("countedRows=" + countedRows)
+                   .add("countedBytes=" + countedBytes)
+                   .add("counted=" + counted)
+                   .toString();
+        }
     }
 
     public int maxRemaining()
@@ -270,11 +290,10 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
     public String toString()
     {
         return new StringJoiner(", ", MultiPartitionPager.class.getSimpleName() + "[", "]")
-               .add("pagers=" + pagers.length)
-               .add("limit=" + limit)
-               .add("nowInSec=" + nowInSec)
-               .add("remaining=" + remaining)
                .add("current=" + current)
+               .add("pagers.length=" + pagers.length)
+               .add("limit=" + limit)
+               .add("remaining=" + remaining)
                .toString();
     }
 }

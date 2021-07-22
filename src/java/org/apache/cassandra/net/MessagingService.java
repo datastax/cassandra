@@ -213,11 +213,11 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     public enum Version
     {
-        VERSION_30(10),
-        VERSION_3014(11),
-        VERSION_40(12),
-        VERSION_41(13),
-        STARGAZER_10(100);
+        VERSION_30(MessagingService.VERSION_30),
+        VERSION_3014(MessagingService.VERSION_3014),
+        VERSION_40(MessagingService.VERSION_40),
+        VERSION_41(MessagingService.VERSION_41),
+        STARGAZER_10(MessagingService.VERSION_SG_10);
 
         public final int value;
 

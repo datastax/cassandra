@@ -23,9 +23,9 @@ import com.google.common.base.Preconditions;
 
 public class PageSize
 {
-    public final static int NO_LIMIT = Integer.MAX_VALUE;
+    public static final int NO_LIMIT = Integer.MAX_VALUE;
 
-    public static PageSize NULL = new PageSize(NO_LIMIT, PageUnit.ROWS);
+    public static final PageSize NULL = new PageSize(NO_LIMIT, PageUnit.ROWS);
 
     public enum PageUnit
     {
@@ -115,14 +115,6 @@ public class PageSize
     public PageSize withDecreasedBytes(int bytesCount) {
         return unit == PageUnit.BYTES && count != NO_LIMIT
                ? inBytes(Math.max(0, count - bytesCount))
-               : this;
-    }
-
-    public PageSize withAddedBytes(int addedBytesCount)
-    {
-        Preconditions.checkArgument(unit == PageUnit.BYTES);
-        return isDefined() && addedBytesCount != 0
-               ? new PageSize(count + addedBytesCount, PageUnit.BYTES)
                : this;
     }
 

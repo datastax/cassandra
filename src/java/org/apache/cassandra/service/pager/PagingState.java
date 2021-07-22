@@ -52,7 +52,7 @@ import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
 @SuppressWarnings("WeakerAccess")
 public class PagingState
 {
-    private final static Logger logger = LoggerFactory.getLogger(PagingState.class);
+    private static final Logger logger = LoggerFactory.getLogger(PagingState.class);
 
     public final ByteBuffer partitionKey;  // Can be null for single partition queries.
     public final RowMark rowMark;          // Can be null if not needed.
@@ -65,11 +65,6 @@ public class PagingState
         this.rowMark = rowMark;
         this.remaining = remaining;
         this.remainingInPartition = remainingInPartition;
-
-        if (remaining < 0 || remainingInPartition < 0)
-        {
-            logger.error("Just created an invalid paging state: " + toString(), new Throwable());
-        }
     }
 
     public ByteBuffer serialize(ProtocolVersion protocolVersion)
