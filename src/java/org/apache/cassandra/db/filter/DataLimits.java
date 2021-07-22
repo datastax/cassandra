@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.StringJoiner;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -214,6 +215,14 @@ public abstract class DataLimits
      * @return the maximum number of bytes this limits enforces.
      */
     public abstract int bytes();
+
+    /**
+     * The max number of rows this limits enforces. Note that this means traversed rows, regardless we use grouping or not.
+     * <p>
+     * @return the maximum number of rows this limits enforces.
+     */
+    @VisibleForTesting
+    public abstract int rows();
 
     /**
      * The max number of results this limits enforces.
@@ -420,7 +429,7 @@ public abstract class DataLimits
             if (Guardrails.pageSize.enabled(null))
             {
                 if (bytesLimit != NO_LIMIT)
-                    Guardrails.pageSize.guard(bytesLimit, "page size in bytes", false, null);
+                    Guardrails.pageSize.guard(bytesLimit, "in bytes", false, null);
                 else
                     bytesLimit = DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb * 1024;
             }
@@ -511,6 +520,11 @@ public abstract class DataLimits
         public int bytes()
         {
             return bytesLimit;
+        }
+
+        public int rows()
+        {
+            return rowLimit;
         }
 
         public int count()
@@ -652,9 +666,9 @@ public abstract class DataLimits
             List<String> limits = new ArrayList<>(3);
 
             if (bytesLimit != NO_LIMIT)
-                limits.add("BYTES " + bytesLimit);
+                limits.add("BYTES LIMIT " + bytesLimit);
             if (rowLimit != NO_LIMIT)
-                limits.add("LIMIT " + rowLimit);
+                limits.add("ROWS LIMIT " + rowLimit);
             if (perPartitionLimit != NO_LIMIT)
                 limits.add("PER PARTITION LIMIT " + perPartitionLimit);
 
@@ -745,7 +759,7 @@ public abstract class DataLimits
         {
             return new StringJoiner(", ", CQLPagingLimits.class.getSimpleName() + "[", "]")
                    .add("super=" + super.toString())
-                   .add("lastReturnedKey=" + lastReturnedKey)
+                   .add("lastReturnedKey=" + (lastReturnedKey != null ? ByteBufferUtil.bytesToHex(lastReturnedKey) : null))
                    .add("lastReturnedKeyRemaining=" + lastReturnedKeyRemaining)
                    .toString();
         }
@@ -927,7 +941,7 @@ public abstract class DataLimits
             if (bytesLimit != NO_LIMIT)
                 limits.add("BYTES LIMIT " + bytesLimit);
             if (rowLimit != NO_LIMIT)
-                limits.add("LIMIT " + rowLimit);
+                limits.add("ROWS LIMIT " + rowLimit);
 
             return String.join(" ", limits);
         }
@@ -1105,7 +1119,7 @@ public abstract class DataLimits
                 if (isLive(row))
                 {
                     hasUnfinishedGroup = true;
-                    incrementRowCount(bytes() != NO_LIMIT ? row.dataSize() : 0);
+                    incrementRowCount(bytesLimit != NO_LIMIT ? row.dataSize() : 0);
                     hasReturnedRowsFromCurrentPartition = true;
                 }
 
@@ -1324,7 +1338,7 @@ public abstract class DataLimits
         {
             return new StringJoiner(", ", CQLGroupByPagingLimits.class.getSimpleName() + "[", "]")
                    .add("super=" + super.toString())
-                   .add("lastReturnedKey=" + lastReturnedKey)
+                   .add("lastReturnedKey=" + (lastReturnedKey != null ? ByteBufferUtil.bytesToHex(lastReturnedKey) : null))
                    .add("lastReturnedKeyRemaining=" + lastReturnedKeyRemaining)
                    .toString();
         }

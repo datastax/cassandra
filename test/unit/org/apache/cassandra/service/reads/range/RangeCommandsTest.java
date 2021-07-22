@@ -252,6 +252,12 @@ public class RangeCommandsTest extends CQLTester
         }
 
         @Override
+        public int rows()
+        {
+            return wrapped.rows();
+        }
+
+        @Override
         public int count()
         {
             return wrapped.count();

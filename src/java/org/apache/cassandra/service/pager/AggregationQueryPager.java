@@ -45,7 +45,7 @@ import org.apache.cassandra.service.QueryState;
  */
 public final class AggregationQueryPager implements QueryPager
 {
-    private final static Logger logger = LoggerFactory.getLogger(AggregationQueryPager.class);
+    private static final Logger logger = LoggerFactory.getLogger(AggregationQueryPager.class);
 
     private final DataLimits limits;
 
@@ -222,6 +222,9 @@ public final class AggregationQueryPager implements QueryPager
             this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
             subPager = subPager.withUpdatedLimit(limits.withCountedLimit(groupsPageSize.minRowsCount(maxRemaining())));
+
+            if (logger.isTraceEnabled())
+                logger.trace("Fetching a new page - created {}", this);
         }
 
         public final void close()
@@ -435,6 +438,16 @@ public final class AggregationQueryPager implements QueryPager
                    .add("sub-pager=" + subPager.toString())
                    .toString();
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", AggregationQueryPager.class.getSimpleName() + "[", "]")
+               .add("limits=" + limits)
+               .add("subPageSize=" + subPageSize)
+               .add("subPager=" + subPager)
+               .toString();
     }
 
     /**

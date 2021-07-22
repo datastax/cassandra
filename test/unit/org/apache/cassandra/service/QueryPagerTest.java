@@ -47,34 +47,49 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.AbstractReadCommandBuilder;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.PartitionRangeReadQuery;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadQuery;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SinglePartitionReadCommand.Group;
+import org.apache.cassandra.db.SinglePartitionReadQuery;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.AbstractClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.pager.AggregationQueryPager;
+import org.apache.cassandra.service.pager.MultiPartitionPager;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.assertj.core.api.Assertions;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
@@ -82,6 +97,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class QueryPagerTest
@@ -485,7 +502,7 @@ public class QueryPagerTest
 
     public void multiQueryTest(boolean testPagingState, ProtocolVersion protocolVersion)
     {
-        ReadQuery command = new SinglePartitionReadCommand.Group(new ArrayList<SinglePartitionReadCommand>()
+        ReadQuery command = new Group(new ArrayList<SinglePartitionReadCommand>()
         {{
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k1", "c2", "c6"));
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k4", "c3", "c5"));
@@ -519,7 +536,7 @@ public class QueryPagerTest
     public void multiPartitionSingleRowQueryTest() throws Exception
     {
         int totQueryRows = 4;
-        ReadQuery command = new SinglePartitionReadCommand.Group(new ArrayList<SinglePartitionReadCommand>()
+        ReadQuery command = new Group(new ArrayList<SinglePartitionReadCommand>()
         {{
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k1", "c1", "c1"));
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k2", "c1", "c1"));
@@ -537,7 +554,7 @@ public class QueryPagerTest
     public void multiPartitionFourRowsQueryTest() throws Exception
     {
         int totQueryRows = 8;
-        ReadQuery command = new SinglePartitionReadCommand.Group(new ArrayList<SinglePartitionReadCommand>()
+        ReadQuery command = new Group(new ArrayList<SinglePartitionReadCommand>()
         {{
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k1", "c1", "c4"));
             add(sliceQuery(cfs(KEYSPACE1, CF_STANDARD), "k2", "c1", "c4"));
@@ -554,7 +571,7 @@ public class QueryPagerTest
         int count = 8;
         int partitionCount = DataLimits.NO_LIMIT;
         int totQueryRows = 8;
-        ReadQuery command = new SinglePartitionReadCommand.Group(new ArrayList<SinglePartitionReadCommand>()
+        ReadQuery command = new Group(new ArrayList<SinglePartitionReadCommand>()
         {{
             add(sliceQuery(count, partitionCount, PageSize.NULL, cfs(KEYSPACE1, CF_STANDARD), "k1", "c1", "c4", false));
             add(sliceQuery(count, partitionCount, PageSize.NULL, cfs(KEYSPACE1, CF_STANDARD), "k2", "c1", "c4", false));
@@ -571,7 +588,7 @@ public class QueryPagerTest
         int count = DataLimits.NO_LIMIT;
         int partitionCount = 2;
         int totQueryRows = 8;
-        ReadQuery command = new SinglePartitionReadCommand.Group(new ArrayList<SinglePartitionReadCommand>()
+        ReadQuery command = new Group(new ArrayList<SinglePartitionReadCommand>()
         {{
             add(sliceQuery(count, partitionCount, PageSize.NULL, cfs(KEYSPACE1, CF_STANDARD), "k1", "c1", "c4", false));
             add(sliceQuery(count, partitionCount, PageSize.NULL, cfs(KEYSPACE1, CF_STANDARD), "k2", "c1", "c4", false));
@@ -1008,7 +1025,7 @@ public class QueryPagerTest
             SinglePartitionReadCommand q2 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k1", "c0", "c3", false);
             SinglePartitionReadCommand q3 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k2", "c0", "c5", false);
             SinglePartitionReadCommand q4 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k3", "c0", "c9", false);
-            SinglePartitionReadCommand.Group q = new SinglePartitionReadCommand.Group(
+            Group q = new Group(
             Arrays.asList(q1, q2, q3, q4),
             count > 0 ? DataLimits.cqlLimits(count) : DataLimits.NONE);
             checkRows(q, PageSize.PageUnit.BYTES, count > 0 ? count : maxExpected, 1, 128, 256, 1024);
@@ -1022,7 +1039,7 @@ public class QueryPagerTest
             SinglePartitionReadCommand q2 = sliceQuery(-1, partitionCount, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k1", "c0", "c9", false);
             SinglePartitionReadCommand q3 = sliceQuery(-1, partitionCount, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k2", "c0", "c9", false);
             SinglePartitionReadCommand q4 = sliceQuery(-1, partitionCount, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL), "k3", "c0", "c9", false);
-            SinglePartitionReadCommand.Group q = new SinglePartitionReadCommand.Group(
+            Group q = new Group(
             Arrays.asList(q1, q2, q3, q4),
             DataLimits.cqlLimits(Integer.MAX_VALUE, partitionCount));
             checkRows(q, PageSize.PageUnit.BYTES, partitionCount * 4, 1, 128, 256, 1024);
@@ -1046,10 +1063,77 @@ public class QueryPagerTest
             SinglePartitionReadCommand q2 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL_WITH_STATIC), "k1", "c", "c", false);
             SinglePartitionReadCommand q3 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL_WITH_STATIC), "k2", "c", "c", false);
             SinglePartitionReadCommand q4 = sliceQuery(count, -1, PageSize.NULL, cfs(KEYSPACE_CQL, CF_CQL_WITH_STATIC), "k3", "c", "c", false);
-            SinglePartitionReadCommand.Group q = new SinglePartitionReadCommand.Group(
+            Group q = new Group(
             Arrays.asList(q1, q2, q3, q4),
             count > 0 ? DataLimits.cqlLimits(count) : DataLimits.NONE);
             checkRows(q, PageSize.PageUnit.BYTES, count > 0 ? count : maxExpected, 1, 128, 256, 1024);
         }
+    }
+
+    @Test
+    public void toStringTest()
+    {
+        TableMetadata metadata = TableMetadata.builder("ks", "tab")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addClusteringColumn("c", Int32Type.instance)
+                                              .addColumn(ColumnMetadata.regularColumn("ks", "tab", "v", Int32Type.instance))
+                                              .build();
+
+        DataLimits limits = DataLimits.cqlLimits(31, 29);
+
+        Clustering clustering = Clustering.make(bytes(11));
+        Row row = mock(Row.class);
+        when(row.clustering()).thenReturn(clustering);
+        when(row.isRow()).thenReturn(true);
+
+        PagingState state = new PagingState(ByteBufferUtil.bytes(1), PagingState.RowMark.create(metadata, row, ProtocolVersion.CURRENT), 19, 17);
+
+        SinglePartitionReadQuery singlePartitionReadQuery = mock(SinglePartitionReadQuery.class);
+        when(singlePartitionReadQuery.metadata()).thenReturn(metadata);
+        when(singlePartitionReadQuery.limits()).thenReturn(limits);
+        when(singlePartitionReadQuery.partitionKey()).thenReturn(metadata.partitioner.decorateKey(ByteBufferUtil.bytes(1)));
+        QueryPager singlePartitionPager = new SinglePartitionPager(singlePartitionReadQuery, state, ProtocolVersion.CURRENT);
+        Assertions.assertThat(singlePartitionPager.toString())
+                  .contains(limits.toString())
+                  .contains("remaining=19")
+                  .contains("remainingInPartition=17")
+                  .contains("lastReturned=c=11")
+                  .contains("lastCounter=null")
+                  .contains("lastKey=DecoratedKey(00000001, 00000001)")
+                  .contains("exhausted=false");
+
+        PartitionRangeReadQuery partitionRangeReadQuery = mock(PartitionRangeReadQuery.class);
+        when(partitionRangeReadQuery.metadata()).thenReturn(metadata);
+        when(partitionRangeReadQuery.limits()).thenReturn(limits);
+        QueryPager partitionRangeQueryPager = new PartitionRangeQueryPager(partitionRangeReadQuery, state, ProtocolVersion.CURRENT);
+        Assertions.assertThat(partitionRangeQueryPager.toString())
+                  .contains(limits.toString())
+                  .contains("remaining=19")
+                  .contains("remainingInPartition=17")
+                  .contains("lastReturnedRow=c=11")
+                  .contains("lastCounter=null")
+                  .contains("lastKey=DecoratedKey(00000001, 00000001)")
+                  .contains("lastReturnedKey=DecoratedKey(00000001, 00000001)")
+                  .contains("exhausted=false");
+
+        Group singlePartitionReadQueryGroup = Group.create(metadata,
+                                                           FBUtilities.nowInSeconds(),
+                                                           ColumnFilter.all(metadata),
+                                                           RowFilter.NONE, limits,
+                                                           Arrays.asList(metadata.partitioner.decorateKey(bytes(1)), metadata.partitioner.decorateKey(bytes(2))),
+                                                           new ClusteringIndexSliceFilter(Slices.ALL, false));
+        QueryPager multiPartitionPager = new MultiPartitionPager<>(singlePartitionReadQueryGroup, state, ProtocolVersion.CURRENT);
+        Assertions.assertThat(multiPartitionPager.toString())
+                  .contains("pagers.length=2")
+                  .contains("limit=" + limits)
+                  .contains("remaining=19")
+                  .contains("current=0");
+
+        AggregationQueryPager aggregationQueryPager = new AggregationQueryPager(singlePartitionPager, PageSize.inBytes(512), limits);
+        Assertions.assertThat(aggregationQueryPager.toString())
+                  .contains("limits=" + limits)
+                  .contains("subPageSize=512 bytes")
+                  .contains("subPager=" + singlePartitionPager)
+                  .contains("lastReturned=c=11");
     }
 }

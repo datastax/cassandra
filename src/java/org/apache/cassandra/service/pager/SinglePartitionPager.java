@@ -110,16 +110,9 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
     @Override
     public String toString()
     {
-            String s = String.valueOf(lastReturned);
-        try
-        {
-            s = lastReturned.clustering(query.metadata()).toString(query.metadata());
-        } catch (NullPointerException ex) {
-        }
-
-            return new StringJoiner(", ", SinglePartitionPager.class.getSimpleName() + "[", "]")
-                   .add("super=" + super.toString())
-                   .add("lastReturned=" + s)
-                   .toString();
+        return new StringJoiner(", ", SinglePartitionPager.class.getSimpleName() + "[", "]")
+               .add("super=" + super.toString())
+               .add("lastReturned=" + (lastReturned != null ? lastReturned.clustering(query.metadata()).toString(query.metadata()) : null))
+               .toString();
     }
 }
