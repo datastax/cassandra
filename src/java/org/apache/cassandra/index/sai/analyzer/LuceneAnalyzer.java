@@ -29,10 +29,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.MoreObjects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
@@ -82,6 +84,10 @@ public class LuceneAnalyzer extends AbstractAnalyzer
                 final BytesRef br = termAttr.getBytesRef();
 
                 next = ByteBuffer.wrap(br.bytes, br.offset, br.length);
+
+                String str = ByteBufferUtil.string(next, Charsets.UTF_8);
+
+                System.out.println("next=" + str);
             }
             return hasNext;
         }
@@ -101,7 +107,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
         try
         {
             tokenStream.end();
-            tokenStream.close();
+            tokenStream.close(); // TODO: is this correct?
         }
         catch (IOException ex)
         {

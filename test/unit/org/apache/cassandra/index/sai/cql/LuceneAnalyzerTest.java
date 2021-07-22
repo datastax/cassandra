@@ -60,9 +60,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'{\n" +
-                                            "  \"analyzerlalalala\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"\n" +
-                                            "}'}")).isInstanceOf(InvalidConfigurationInQueryException.class);
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                                            "\t{\"analyzerlllala\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"}\n" +
+                                            "]'}")).isInstanceOf(InvalidConfigurationInQueryException.class);
     }
 
     @Test
@@ -70,9 +70,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'{\n" +
-                    "  \"analyzer\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"\n" +
-                    "}'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"analyzer\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"}\n" +
+                    "]'}");
 
         waitForIndexQueryable();
 
@@ -98,10 +98,10 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'{\n" +
-                    "  \"tokenizer\":\"keyword\",\n" +
-                    "  \"charfilter\":\"htmlstrip\"\n" +
-                    "}'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"keyword\"},\n" +
+                    "\t{\"charfilter\":\"htmlstrip\"}\n" +
+                    "]'}");
 
         waitForIndexQueryable();
 
@@ -117,10 +117,10 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'{\n" +
-                    "  \"tokenizer\":\"whitespace\",\n" +
-                    "  \"filter\":\"porterstem\"\n" +
-                    "}'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"whitespace\"},\n" +
+                    "\t{\"filter\":\"porterstem\"}\n" +
+                    "]'}");
 
         waitForIndexQueryable();
 
@@ -129,5 +129,29 @@ public class LuceneAnalyzerTest extends SAITester
         flush();
 
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'query'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'queries'").size());
+    }
+
+    @Test
+    public void testCustomStopWords() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"whitespace\"},\n" +
+                    "\t{\"filter\":\"lowercase\"},\n" +
+                    "\t{\"filter\":\"stop\", \"stop_words\":[\"the\",\"and\",\"in\"]}\t\n" +
+                    "]'}");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the man in the man hat')");
+
+        //flush();
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'man'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'the'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'in'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'hat'").size());
     }
 }

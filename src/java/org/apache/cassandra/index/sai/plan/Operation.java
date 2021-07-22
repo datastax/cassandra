@@ -89,79 +89,78 @@ public class Operation
             List<Expression> perColumn = analyzed.get(e.column());
 
             AbstractAnalyzer analyzer = columnContext.getQueryAnalyzer();
-
-            analyzer.reset(e.getIndexValue().duplicate());
-
-            // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
-            // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
-            // CONTAINS/CONTAINS_KEY are always treated as multiple expressions since they currently only targetting
-            // collections, NOT_EQ is made an independent expression only in case of pre-existing multiple EQ expressions, or
-            // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
-            // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
-            // since NOT_EQ has the lowest priority.
-            boolean isMultiExpression = false;
-            switch (e.operator())
+            try
             {
-                case EQ:
-                    // EQ operator will always be a multiple expression because it is being used by
-                    // map entries
-                    isMultiExpression = columnContext.isNonFrozenCollection();
-                    break;
+                analyzer.reset(e.getIndexValue().duplicate());
 
-                case CONTAINS:
-                case CONTAINS_KEY:
-                case LIKE_PREFIX:
-                case LIKE_MATCHES:
-                    isMultiExpression = true;
-                    break;
-
-                case NEQ:
-                    isMultiExpression = (perColumn.size() == 0 || perColumn.size() > 1
-                                     || (perColumn.size() == 1 && perColumn.get(0).getOp() == Expression.Op.NOT_EQ));
-                    break;
-            }
-            if (isMultiExpression)
-            {
-                while (analyzer.hasNext())
+                // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
+                // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
+                // CONTAINS/CONTAINS_KEY are always treated as multiple expressions since they currently only targetting
+                // collections, NOT_EQ is made an independent expression only in case of pre-existing multiple EQ expressions, or
+                // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
+                // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
+                // since NOT_EQ has the lowest priority.
+                boolean isMultiExpression = false;
+                switch (e.operator())
                 {
-                    final ByteBuffer token = analyzer.next();
-                    perColumn.add(new Expression(columnContext).add(e.operator(), token));
+                    case EQ:
+                        // EQ operator will always be a multiple expression because it is being used by
+                        // map entries
+                        isMultiExpression = columnContext.isNonFrozenCollection();
+                        break;
+
+                    case CONTAINS:
+                    case CONTAINS_KEY:
+                    case LIKE_PREFIX:
+                    case LIKE_MATCHES:
+                        isMultiExpression = true;
+                        break;
+
+                    case NEQ:
+                        isMultiExpression = (perColumn.size() == 0 || perColumn.size() > 1
+                                             || (perColumn.size() == 1 && perColumn.get(0).getOp() == Expression.Op.NOT_EQ));
+                        break;
                 }
-            }
-            else
-            // "range" or not-equals operator, combines both bounds together into the single expression,
-            // iff operation of the group is AND, otherwise we are forced to create separate expressions,
-            // not-equals is combined with the range iff operator is AND.
-            {
-                Expression range;
-                if (perColumn.size() == 0 || op != OperationType.AND)
+                if (isMultiExpression)
                 {
-                    perColumn.add((range = new Expression(columnContext)));
+                    while (analyzer.hasNext())
+                    {
+                        final ByteBuffer token = analyzer.next();
+                        perColumn.add(new Expression(columnContext).add(e.operator(), token.duplicate()));
+                    }
                 }
                 else
+                // "range" or not-equals operator, combines both bounds together into the single expression,
+                // iff operation of the group is AND, otherwise we are forced to create separate expressions,
+                // not-equals is combined with the range iff operator is AND.
                 {
-                    range = Iterables.getLast(perColumn);
-                }
+                    Expression range;
+                    if (perColumn.size() == 0 || op != OperationType.AND)
+                    {
+                        perColumn.add((range = new Expression(columnContext)));
+                    }
+                    else
+                    {
+                        range = Iterables.getLast(perColumn);
+                    }
 
-                if (!TypeUtil.isLiteral(columnContext.getValidator()))
-                {
-                    range.add(e.operator(), e.getIndexValue().duplicate());
-                }
-                else
-                {
-                    try
+                    if (!TypeUtil.isLiteral(columnContext.getValidator()))
+                    {
+                        range.add(e.operator(), e.getIndexValue().duplicate());
+                    }
+                    else
                     {
                         while (analyzer.hasNext())
                         {
                             ByteBuffer term = analyzer.next();
-                            range.add(e.operator(), term);
+                            range.add(e.operator(), term.duplicate());
                         }
                     }
-                    finally
-                    {
-                        analyzer.end();
-                    }
                 }
+            }
+            finally
+            {
+                analyzer.end();
             }
         }
 

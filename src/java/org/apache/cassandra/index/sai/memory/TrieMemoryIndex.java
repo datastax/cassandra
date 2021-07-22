@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -111,6 +112,16 @@ public class TrieMemoryIndex extends MemoryIndex
                 while (analyzer.hasNext())
                 {
                     final ByteBuffer term = analyzer.next();
+
+                    try
+                    {
+                        System.out.println("TrieMemoryIndex term=" + ByteBufferUtil.string(term));
+                    }
+                    catch (Exception ex)
+                    {
+                        ex.printStackTrace();
+                    }
+
                     setMinMaxTerm(term);
 
                     final ByteComparable encodedTerm = encode(term);

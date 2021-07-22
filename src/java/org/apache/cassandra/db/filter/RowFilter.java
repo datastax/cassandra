@@ -565,6 +565,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         protected Expression(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
             this.column = column;
+            assert operator != null;
             this.operator = operator;
             this.value = value;
         }

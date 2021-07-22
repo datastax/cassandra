@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -156,6 +157,8 @@ public class SSTableIndexWriter implements ColumnIndexWriter
 
         if (term.remaining() == 0) return;
 
+        System.out.println("term=" + ByteBufferUtil.string(term));
+
         if (!TypeUtil.isLiteral(type))
         {
             limiter.increment(currentBuilder.add(term, key, sstableRowId));
@@ -168,6 +171,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
                 while (analyzer.hasNext())
                 {
                     ByteBuffer token = analyzer.next();
+                    System.out.println("token=" + ByteBufferUtil.string(token));
                     limiter.increment(currentBuilder.add(token, key, sstableRowId));
                 }
             }

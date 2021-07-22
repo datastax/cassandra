@@ -60,6 +60,7 @@ public class AnalyzerView extends AbstractVirtualTable
     @Override
     public DataSet data(DecoratedKey partitionKey)
     {
+        LuceneAnalyzer luceneAnalyzer = null;
         try
         {
             ByteBuffer[] array = ((CompositeType) metadata().partitionKeyType).split(partitionKey.getKey());
@@ -67,7 +68,7 @@ public class AnalyzerView extends AbstractVirtualTable
             String optionsString = UTF8Type.instance.compose(array[1]);
 
             Analyzer analyzer = JSONAnalyzerParser.parse(optionsString);
-            LuceneAnalyzer luceneAnalyzer = new LuceneAnalyzer(UTF8Type.instance, analyzer, new HashMap<>());
+            luceneAnalyzer = new LuceneAnalyzer(UTF8Type.instance, analyzer, new HashMap<>());
 
             ByteBuffer toAnalyze = ByteBuffer.wrap(text.getBytes(Charsets.UTF_8));
             luceneAnalyzer.reset(toAnalyze);
@@ -82,9 +83,6 @@ public class AnalyzerView extends AbstractVirtualTable
                 list.add(ByteBufferUtil.string(analyzed, Charsets.UTF_8));
             }
 
-            luceneAnalyzer.end();
-            luceneAnalyzer.close();
-
             SimpleDataSet result = new SimpleDataSet(metadata());
             result.row(text, optionsString).column("tokens", list.toString());
             return result;
@@ -92,6 +90,21 @@ public class AnalyzerView extends AbstractVirtualTable
         catch (Exception ex)
         {
             throw new RuntimeException(ex);
+        }
+        finally
+        {
+            if (luceneAnalyzer != null)
+            {
+                luceneAnalyzer.end();
+                try
+                {
+                    luceneAnalyzer.close();
+                }
+                catch (Exception ex)
+                {
+                    throw new RuntimeException(ex);
+                }
+            }
         }
     }
 }

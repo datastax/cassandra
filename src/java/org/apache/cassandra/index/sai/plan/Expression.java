@@ -82,7 +82,8 @@ public class Expression
                     return IN;
 
                 default:
-                    return null;
+                    throw new IllegalStateException("Unknown operator="+operator);
+                    //return null;
             }
         }
 
@@ -189,6 +190,8 @@ public class Expression
                     lower = new Bound(value, validator, lowerInclusive);
                 break;
         }
+
+        assert operation != null;
 
         return this;
     }

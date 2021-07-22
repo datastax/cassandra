@@ -43,26 +43,21 @@ import static org.junit.Assert.assertArrayEquals;
 public class LuceneAnalyzerTest
 {
     @Test
-    public void testNgramJson() throws Exception
+    public void testNgram() throws Exception
     {
-        String json = "{\n" +
-                      "  \"tokenizer\":{\n" +
-                      "     \"ngram\":{\n" +
-                      "       \"minGramSize\":\"2\",\n" +
-                      "       \"maxGramSize\":\"3\"\n" +
-                      "     }\n" +
-                      "  }\n" +
-                      "}";
-        System.out.println("json="+json);
-        String testString = "dog";
+        String json = "[\n" +
+                      "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
+                      "\t{\"filter\":\"lowercase\"}\n" +
+                      "]";
+        String testString = "DoG";
         String[] expected = new String[]{ "do", "dog", "og" };
         List<String> list = tokenize(testString, json);
-        System.out.println("list="+list);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
     @Test
-    public void testPatternJson() throws Exception
+    // TODO: doesn't work
+    public void testPattern() throws Exception
     {
         String json = "{\n" +
                       "  \"tokenizer\":{\n" +
@@ -71,28 +66,67 @@ public class LuceneAnalyzerTest
                       "    }\n" +
                       "  }\n" +
                       "}";
-        System.out.println("json="+json);
         String testString = "Günther Günther is here";
         String[] expected = new String[]{ "Günther", "Günther", "is", "here" };
         List<String> list = tokenize(testString, json);
-        System.out.println("list="+list);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
     @Test
-    public void testEnglishJson() throws Exception
+    public void testStopWords() throws Exception
     {
-        String json = "{\n" +
-                      "  \"analyzer\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"\n" +
-                      "}";
-        String testString = "dogs withering in the windy";
-        String[] expected = new String[]{ "dog", "wither", "windi" };
+        String json = "[\n" +
+                      "\t{\"tokenizer\":\"standard\"},\n" +
+                      "\t{\"filter\":\"lowercase\"},\n" +
+                      "\t{\"filter\":\"stop\", \"stop_words\":[\"the\",\"and\",\"in\"]}\t\n" +
+                      "]";
+        String testString = "Dogs withEring in the winDy";
+        String[] expected = new String[]{ "dogs", "withering", "windy" };
         List<String> list = tokenize(testString, json);
-        System.out.println("list="+list);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
-    private List<String> tokenize(String testString, String json) throws Exception
+    @Test
+    public void testDefaultStopWords() throws Exception
+    {
+        String json = "[\n" +
+                      "\t{\"tokenizer\":\"standard\"},\n" +
+                      "\t{\"filter\":\"lowercase\"},\n" +
+                      "\t{\"filter\":\"stop\", \"default_stop_words\":\"spanish\"}\n" +
+                      "]";
+        String testString = "Dogs withEring es de winDy";
+        String[] expected = new String[]{ "dogs", "withering", "windy" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testDefaultStopWordsClass() throws Exception
+    {
+        String json = "[\n" +
+                      "\t{\"tokenizer\":\"standard\"},\n" +
+                      "\t{\"filter\":\"lowercase\"},\n" +
+                      "\t{\"filter\":\"stop\",\"default_stop_words\":\"org.apache.lucene.analysis.es.SpanishAnalyzer\"}\n" +
+                      "]\n";
+        String testString = "Dogs withEring es de winDy";
+        String[] expected = new String[]{ "dogs", "withering", "windy" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testEnglishAnalyzer() throws Exception
+    {
+        String json = "[\n" +
+                      "\t{\"analyzer\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"}\n" +
+                      "]";
+        String testString = "dogs withering in the windy";
+        String[] expected = new String[]{ "dog", "wither", "windi" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    public static List<String> tokenize(String testString, String json) throws Exception
     {
         Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json);
         LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>());
@@ -106,7 +140,6 @@ public class LuceneAnalyzerTest
         while (analyzer.hasNext())
         {
             analyzed = analyzer.next();
-
             list.add(ByteBufferUtil.string(analyzed, Charsets.UTF_8));
         }
 
