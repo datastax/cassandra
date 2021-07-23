@@ -36,8 +36,6 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_USE_MULTI_RANGE_READ_COMMAND;
-
 public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 {
     public static final String UNSUPPORTED_NON_STRICT_OPERATOR =
@@ -155,6 +153,6 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public boolean supportsMultiRangeReadCommand()
     {
-        return SAI_USE_MULTI_RANGE_READ_COMMAND.getBoolean();
+        return true;
     }
 }
