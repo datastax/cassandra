@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.service.pager;
 
+import java.util.StringJoiner;
+
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.Row;
@@ -74,7 +77,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
     }
 
     @Override
-    protected PartitionRangeReadQuery nextPageReadQuery(int pageSize)
+    protected PartitionRangeReadQuery nextPageReadQuery(PageSize pageSize, int remaining)
     {
         DataLimits limits;
         DataRange fullRange = query.dataRange();
@@ -94,15 +97,17 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
             // We want to include the last returned key only if we haven't achieved our per-partition limit, otherwise, don't bother.
             boolean includeLastKey = remainingInPartition() > 0 && lastReturnedRow != null;
             AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey);
+            limits = query.limits();
+            limits = limits.withCountedLimit(Math.min(limits.count(), remaining));
             if (includeLastKey)
             {
                 pageRange = fullRange.forPaging(bounds, query.metadata().comparator, lastReturnedRow.clustering(query.metadata()), false);
-                limits = query.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
+                limits = limits.forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
             {
                 pageRange = fullRange.forSubRange(bounds);
-                limits = query.limits().forPaging(pageSize);
+                limits = limits.forPaging(pageSize);
             }
         }
 
@@ -138,5 +143,15 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
         return includeLastKey
              ? new IncludingExcludingBounds<>(lastReturnedKey, bounds.right)
              : new ExcludingBounds<>(lastReturnedKey, bounds.right);
+    }
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", PartitionRangeQueryPager.class.getSimpleName() + "[", "]")
+               .add("super=" + super.toString())
+               .add("lastReturnedKey=" + lastReturnedKey)
+               .add("lastReturnedRow=" + (lastReturnedRow != null ? lastReturnedRow.clustering(query.metadata()).toString(query.metadata()) : null))
+               .toString();
     }
 }

@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -76,6 +77,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
 /**
@@ -247,12 +249,12 @@ public class SelectStatement implements CQLStatement
         int nowInSec = options.getNowInSeconds(queryState);
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
-        int pageSize = options.getPageSize();
+        PageSize pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
+        if (aggregationSpec == null && !pageSize.isCompleted(query.limits().count(), PageSize.PageUnit.ROWS))
             return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
@@ -270,11 +272,12 @@ public class SelectStatement implements CQLStatement
     {
         Selectors selectors = selection.newSelectors(options);
         return getQuery(state,
-        options,
-        selectors.getColumnFilter(),
-        nowInSec,
-        getLimit(options),
-        getPerPartitionLimit(options), options.getPageSize());
+                        options,
+                        selectors.getColumnFilter(),
+                        nowInSec,
+                        getLimit(options),
+                        getPerPartitionLimit(options),
+                        options.getPageSize());
     }
 
     public ReadQuery getQuery(QueryState queryState,
@@ -283,7 +286,7 @@ public class SelectStatement implements CQLStatement
                               int nowInSec,
                               int userLimit,
                               int perPartitionLimit,
-                              int pageSize)
+                              PageSize pageSize)
     {
         boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
@@ -344,7 +347,7 @@ public class SelectStatement implements CQLStatement
             return pager.state();
         }
 
-        public abstract PartitionIterator fetchPage(int pageSize, long queryStartNanoTime);
+        public abstract PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime);
 
         public static class NormalPager extends Pager
         {
@@ -358,7 +361,7 @@ public class SelectStatement implements CQLStatement
                 this.queryState = queryState;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPage(pageSize, consistency, queryState, queryStartNanoTime);
             }
@@ -374,7 +377,7 @@ public class SelectStatement implements CQLStatement
                 this.executionController = executionController;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPageInternal(pageSize, executionController);
             }
@@ -384,7 +387,7 @@ public class SelectStatement implements CQLStatement
     private ResultMessage.Rows execute(Pager pager,
                                        QueryOptions options,
                                        Selectors selectors,
-                                       int pageSize,
+                                       PageSize pageSize,
                                        int nowInSec,
                                        int userLimit,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
@@ -403,7 +406,7 @@ public class SelectStatement implements CQLStatement
 
         // We can't properly do post-query ordering if we page (see #6722)
         // For GROUP BY or aggregation queries we always page internally even if the user has turned paging off
-        checkFalse(pageSize > 0 && needsPostQueryOrdering(),
+        checkFalse(pageSize.isDefined() && needsPostQueryOrdering(),
                   "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                   + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
@@ -446,14 +449,14 @@ public class SelectStatement implements CQLStatement
     {
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
-        int pageSize = options.getPageSize();
+        PageSize pageSize = options.getPageSize();
 
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
         try (ReadExecutionController executionController = query.executionController())
         {
-            if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
+            if (aggregationSpec == null && !pageSize.isCompleted(query.limits().count(), PageSize.PageUnit.ROWS))
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
@@ -473,14 +476,15 @@ public class SelectStatement implements CQLStatement
         }
     }
 
-    private QueryPager getPager(ReadQuery query, QueryOptions options)
+    @VisibleForTesting
+    public QueryPager getPager(ReadQuery query, QueryOptions options)
     {
         QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
 
         if (aggregationSpec == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, query.limits());
+        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits());
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
@@ -682,10 +686,10 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(int userLimit, int perPartitionLimit, int pageSize)
+    private DataLimits getDataLimits(int userLimit, int perPartitionLimit, PageSize pageSize)
     {
-        int cqlRowLimit = DataLimits.NO_LIMIT;
-        int cqlPerPartitionLimit = DataLimits.NO_LIMIT;
+        int cqlRowLimit = NO_LIMIT;
+        int cqlPerPartitionLimit = NO_LIMIT;
 
         // If we do post ordering we need to get all the results sorted before we can trim them.
         if (aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
@@ -697,8 +701,8 @@ public class SelectStatement implements CQLStatement
 
         // Group by and aggregation queries will always be paged internally to avoid OOM.
         // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
-        if (pageSize <= 0)
-            pageSize = DEFAULT_PAGE_SIZE;
+        if (!pageSize.isDefined())
+            pageSize = PageSize.inRows(DEFAULT_PAGE_SIZE);
 
         // Aggregation queries work fine on top of the group by paging but to maintain
         // backward compatibility we need to use the old way.
@@ -709,12 +713,13 @@ public class SelectStatement implements CQLStatement
 
             return DataLimits.groupByLimits(cqlRowLimit,
                                             cqlPerPartitionLimit,
-                                            pageSize,
+                                            NO_LIMIT,
+                                            NO_LIMIT,
                                             aggregationSpec);
         }
 
         if (parameters.isDistinct)
-            return cqlRowLimit == DataLimits.NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+            return cqlRowLimit == NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
 
         return DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
     }
@@ -745,7 +750,7 @@ public class SelectStatement implements CQLStatement
 
     private int getLimit(Term limit, QueryOptions options)
     {
-        int userLimit = DataLimits.NO_LIMIT;
+        int userLimit = NO_LIMIT;
 
         if (limit != null)
         {
