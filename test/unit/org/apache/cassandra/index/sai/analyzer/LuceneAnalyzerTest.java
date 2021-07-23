@@ -43,6 +43,20 @@ import static org.junit.Assert.assertArrayEquals;
 public class LuceneAnalyzerTest
 {
     @Test
+    public void testCzechStem() throws Exception
+    {
+        String json = "[\n" +
+                      "{\"tokenizer\":\"standard\"},\n" +
+                      "{\"filter\":\"lowercase\"},\n" +
+                      "{\"filter\":\"czechstem\"}\n" +
+                      "]\n";
+        String testString = "pánové";
+        String[] expected = new String[]{ "pán" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
     public void testPattern() throws Exception
     {
         String json = "[\n" +
@@ -68,7 +82,7 @@ public class LuceneAnalyzerTest
     }
 
     @Test
-    public void testEnglishAnalyzer() throws Exception
+    public void testPorterStem1() throws Exception
     {
         String json = "[\n" +
                       "\t{\"tokenizer\":\"whitespace\"},\n" +
@@ -76,6 +90,19 @@ public class LuceneAnalyzerTest
                       "]";
         String testString = "dogs withering in the windy";
         String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testPorterStem2() throws Exception
+    {
+        String json = "[\n" +
+                      "\t{\"tokenizer\":\"whitespace\"},\n" +
+                      "\t{\"filter\":\"porterstem\"}\n" +
+                      "]";
+        String testString = "apples orcharding";
+        String[] expected = new String[]{ "appl", "orchard"};
         List<String> list = tokenize(testString, json);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
