@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -63,6 +64,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     private final ColumnContext columnContext;
     private final Descriptor descriptor;
     private final IndexComponents indexComponents;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final int maxTermSize;
@@ -81,11 +83,11 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         this.columnContext = columnContext;
         this.descriptor = descriptor;
         this.indexComponents = IndexComponents.create(columnContext.getIndexName(), descriptor, compressionParams);
-        this.analyzer = columnContext.getAnalyzer();
+        this.analyzerFactory = columnContext.getAnalyzerFactory();
+        this.analyzer = analyzerFactory.get();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.maxTermSize = columnContext.isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
-
     }
 
     @Override
@@ -158,15 +160,22 @@ public class SSTableIndexWriter implements ColumnIndexWriter
 
         if (!TypeUtil.isLiteral(type))
         {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
+            limiter.increment(currentBuilder.add(term.duplicate(), key, sstableRowId));
         }
         else
         {
             analyzer.reset(term);
-            while (analyzer.hasNext())
+            try
             {
-                ByteBuffer token = analyzer.next();
-                limiter.increment(currentBuilder.add(token, key, sstableRowId));
+                while (analyzer.hasNext())
+                {
+                    ByteBuffer token = analyzer.next();
+                    limiter.increment(currentBuilder.add(token.duplicate(), key, sstableRowId));
+                }
+            }
+            finally
+            {
+                analyzer.end();
             }
         }
     }

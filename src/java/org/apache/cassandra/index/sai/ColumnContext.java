@@ -24,6 +24,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
@@ -107,6 +108,8 @@ public class ColumnContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
+    private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
 
     public ColumnContext(TableMetadata tableMeta, IndexMetadata metadata)
     {
@@ -124,6 +127,17 @@ public class ColumnContext
         this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(getIndexName(), tableMeta)
                                               : new ColumnQueryMetrics.BKDIndexMetrics(getIndexName(), tableMeta);
+
+        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
+        if (AbstractAnalyzer.hasQueryAnalyzer(options))
+        {
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+        }
+        else
+        {
+            this.queryAnalyzerFactory = this.analyzerFactory;
+        }
 
         logger.info(logMessage("Initialized column context with index writer config: {}"),
                 this.indexWriterConfig.toString());
@@ -149,6 +163,16 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = indexWriterConfig;
+        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
+        if (AbstractAnalyzer.hasQueryAnalyzer(options))
+        {
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+        }
+        else
+        {
+            this.queryAnalyzerFactory = this.analyzerFactory;
+        }
     }
 
     public ColumnContext(TableMetadata table, ColumnMetadata column)
@@ -164,6 +188,16 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
+        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
+        if (AbstractAnalyzer.hasQueryAnalyzer(options))
+        {
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+        }
+        else
+        {
+            this.queryAnalyzerFactory = this.analyzerFactory;
+        }
     }
 
     public AbstractType<?> keyValidator()
@@ -319,10 +353,14 @@ public class ColumnContext
         return this.config == null ? null : config.name;
     }
 
-    public AbstractAnalyzer getAnalyzer()
+    public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
-        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
-        return AbstractAnalyzer.fromOptions(getValidator(), options);
+        return analyzerFactory;
+    }
+
+    public AbstractAnalyzer.AnalyzerFactory getQueryAnalyzerFactory()
+    {
+        return queryAnalyzerFactory;
     }
 
     public IndexWriterConfig getIndexWriterConfig()
@@ -357,12 +395,18 @@ public class ColumnContext
      * Called when index is dropped. Mark all {@link SSTableIndex} as obsolete and per-column index files
      * will be removed when in-flight queries completed.
      */
-    public void invalidate()
+    public void invalidate() throws IOException
     {
         liveMemtables.clear();
         viewManager.invalidate();
         indexMetrics.release();
         columnQueryMetrics.release();
+
+        analyzerFactory.close();
+        if (queryAnalyzerFactory != analyzerFactory)
+        {
+            queryAnalyzerFactory.close();
+        }
     }
 
     @VisibleForTesting

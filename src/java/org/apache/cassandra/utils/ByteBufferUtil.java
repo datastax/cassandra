@@ -127,6 +127,18 @@ public class ByteBufferUtil
         return string(buffer, StandardCharsets.UTF_8);
     }
 
+    public static String stringNoEx(ByteBuffer buffer)
+    {
+        try
+        {
+            return string(buffer, StandardCharsets.UTF_8);
+        }
+        catch (CharacterCodingException ex)
+        {
+            throw Throwables.cleaned(ex);
+        }
+    }
+
     /**
      * Decode a String representation.
      * This method assumes that the encoding charset is UTF_8.

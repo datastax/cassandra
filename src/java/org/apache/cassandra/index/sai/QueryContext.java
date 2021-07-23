@@ -93,10 +93,10 @@ public class QueryContext
 
     public void checkpoint()
     {
-        if (totalQueryTimeNs() >= executionQuotaNano)
-        {
-            queryTimeouts++;
-            throw new AbortedOperationException();
-        }
+//        if (totalQueryTimeNs() >= executionQuotaNano)
+//        {
+//            queryTimeouts++;
+//            throw new AbortedOperationException();
+//        }
     }
 }
