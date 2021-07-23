@@ -115,6 +115,28 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testWhitespaceLowercase() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"whitespace\"},\n" +
+                    "\t{\"filter\":\"lowercase\"}\n" +
+                    "]'}");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'hELlo woRlD tWice tHe aNd')");
+
+        flush();
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'hello'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'twice'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size()); // test stop word
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'and'").size()); // test stop word
+    }
+
+    @Test
     public void testTokenizer() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
@@ -130,7 +152,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size()); // stop word test
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'query'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'queries'").size());
     }
