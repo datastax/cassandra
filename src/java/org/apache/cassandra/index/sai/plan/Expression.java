@@ -83,7 +83,6 @@ public class Expression
 
                 default:
                     throw new IllegalStateException("Unknown operator="+operator);
-                    //return null;
             }
         }
 
@@ -98,7 +97,7 @@ public class Expression
         }
     }
 
-    public final AbstractAnalyzer analyzer;
+    public final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
 
     public final ColumnContext context;
     public final AbstractType<?> validator;
@@ -114,7 +113,7 @@ public class Expression
     public Expression(ColumnContext columnContext)
     {
         this.context = columnContext;
-        this.analyzer = columnContext.getQueryAnalyzer();
+        this.analyzerFactory = columnContext.getQueryAnalyzerFactory();
         this.validator = columnContext.getValidator();
     }
 
@@ -259,6 +258,7 @@ public class Expression
 
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
     {
+        AbstractAnalyzer analyzer = analyzerFactory.get();
         analyzer.reset(columnValue.duplicate());
         try
         {

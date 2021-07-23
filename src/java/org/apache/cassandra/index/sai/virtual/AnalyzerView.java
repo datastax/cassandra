@@ -96,14 +96,6 @@ public class AnalyzerView extends AbstractVirtualTable
             if (luceneAnalyzer != null)
             {
                 luceneAnalyzer.end();
-                try
-                {
-                    luceneAnalyzer.close();
-                }
-                catch (Exception ex)
-                {
-                    throw new RuntimeException(ex);
-                }
             }
         }
     }

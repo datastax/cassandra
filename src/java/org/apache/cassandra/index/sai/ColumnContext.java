@@ -108,8 +108,8 @@ public class ColumnContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
-    private final AbstractAnalyzer analyzer;
-    private final AbstractAnalyzer queryAnalyzer;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
+    private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
 
     public ColumnContext(TableMetadata tableMeta, IndexMetadata metadata)
     {
@@ -129,14 +129,14 @@ public class ColumnContext
                                               : new ColumnQueryMetrics.BKDIndexMetrics(getIndexName(), tableMeta);
 
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
-        this.analyzer = AbstractAnalyzer.fromOptions(getValidator(), options);
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
         if (AbstractAnalyzer.hasQueryAnalyzer(options))
         {
-            queryAnalyzer = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
         }
         else
         {
-            this.queryAnalyzer = this.analyzer;
+            this.queryAnalyzerFactory = this.analyzerFactory;
         }
 
         logger.info(logMessage("Initialized column context with index writer config: {}"),
@@ -164,14 +164,14 @@ public class ColumnContext
         this.columnQueryMetrics = null;
         this.indexWriterConfig = indexWriterConfig;
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
-        this.analyzer = AbstractAnalyzer.fromOptions(getValidator(), options);
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
         if (AbstractAnalyzer.hasQueryAnalyzer(options))
         {
-            queryAnalyzer = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
         }
         else
         {
-            this.queryAnalyzer = this.analyzer;
+            this.queryAnalyzerFactory = this.analyzerFactory;
         }
     }
 
@@ -189,14 +189,14 @@ public class ColumnContext
         this.columnQueryMetrics = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
-        this.analyzer = AbstractAnalyzer.fromOptions(getValidator(), options);
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
         if (AbstractAnalyzer.hasQueryAnalyzer(options))
         {
-            queryAnalyzer = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
+            queryAnalyzerFactory = AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options);
         }
         else
         {
-            this.queryAnalyzer = this.analyzer;
+            this.queryAnalyzerFactory = this.analyzerFactory;
         }
     }
 
@@ -353,14 +353,14 @@ public class ColumnContext
         return this.config == null ? null : config.name;
     }
 
-    public AbstractAnalyzer getAnalyzer()
+    public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
-        return analyzer;
+        return analyzerFactory;
     }
 
-    public AbstractAnalyzer getQueryAnalyzer()
+    public AbstractAnalyzer.AnalyzerFactory getQueryAnalyzerFactory()
     {
-        return queryAnalyzer;
+        return queryAnalyzerFactory;
     }
 
     public IndexWriterConfig getIndexWriterConfig()
@@ -402,10 +402,10 @@ public class ColumnContext
         indexMetrics.release();
         columnQueryMetrics.release();
 
-        analyzer.close();
-        if (queryAnalyzer != analyzer)
+        analyzerFactory.close();
+        if (queryAnalyzerFactory != analyzerFactory)
         {
-            queryAnalyzer.close();
+            queryAnalyzerFactory.close();
         }
     }
 

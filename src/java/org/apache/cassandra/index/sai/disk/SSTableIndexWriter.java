@@ -64,6 +64,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
     private final ColumnContext columnContext;
     private final Descriptor descriptor;
     private final IndexComponents indexComponents;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final int maxTermSize;
@@ -82,11 +83,11 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         this.columnContext = columnContext;
         this.descriptor = descriptor;
         this.indexComponents = IndexComponents.create(columnContext.getIndexName(), descriptor, compressionParams);
-        this.analyzer = columnContext.getAnalyzer();
+        this.analyzerFactory = columnContext.getAnalyzerFactory();
+        this.analyzer = analyzerFactory.get();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.maxTermSize = columnContext.isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
-
     }
 
     @Override
@@ -157,11 +158,9 @@ public class SSTableIndexWriter implements ColumnIndexWriter
 
         if (term.remaining() == 0) return;
 
-        System.out.println("term=" + ByteBufferUtil.string(term));
-
         if (!TypeUtil.isLiteral(type))
         {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
+            limiter.increment(currentBuilder.add(term.duplicate(), key, sstableRowId));
         }
         else
         {
@@ -171,8 +170,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
                 while (analyzer.hasNext())
                 {
                     ByteBuffer token = analyzer.next();
-                    System.out.println("token=" + ByteBufferUtil.string(token));
-                    limiter.increment(currentBuilder.add(token, key, sstableRowId));
+                    limiter.increment(currentBuilder.add(token.duplicate(), key, sstableRowId));
                 }
             }
             finally

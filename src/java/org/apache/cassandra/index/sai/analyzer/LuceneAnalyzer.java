@@ -58,7 +58,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     private final BytesRefBuilder bytesBuilder = new BytesRefBuilder();
     private final Map<String, String> options;
 
-    public LuceneAnalyzer(AbstractType<?> type, Analyzer analyzer, Map<String, String> options) throws Exception
+    public LuceneAnalyzer(AbstractType<?> type, Analyzer analyzer, Map<String, String> options)
     {
         this.type = type;
         this.analyzer = analyzer;
@@ -66,15 +66,12 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     }
 
     @Override
-    public void close() throws IOException
-    {
-        if (analyzer != null) analyzer.close();
-    }
-
-    @Override
     public boolean hasNext()
     {
-        if (tokenStream == null) throw new IllegalStateException("resetInternal(ByteBuffer term) must be called prior to hasNext()");
+        if (tokenStream == null)
+        {
+            throw new IllegalStateException("resetInternal(ByteBuffer term) must be called prior to hasNext()");
+        }
         try
         {
             hasNext = tokenStream.incrementToken();
@@ -84,10 +81,6 @@ public class LuceneAnalyzer extends AbstractAnalyzer
                 final BytesRef br = termAttr.getBytesRef();
 
                 next = ByteBuffer.wrap(br.bytes, br.offset, br.length);
-
-                String str = ByteBufferUtil.string(next, Charsets.UTF_8);
-
-                System.out.println("next=" + str);
             }
             return hasNext;
         }

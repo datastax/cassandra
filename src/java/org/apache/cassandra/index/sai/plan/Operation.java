@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class Operation
 {
@@ -88,7 +89,8 @@ public class Operation
             ColumnContext columnContext = controller.getContext(e);
             List<Expression> perColumn = analyzed.get(e.column());
 
-            AbstractAnalyzer analyzer = columnContext.getQueryAnalyzer();
+            AbstractAnalyzer.AnalyzerFactory analyzerFactory = columnContext.getQueryAnalyzerFactory();
+            AbstractAnalyzer analyzer = analyzerFactory.get();
             try
             {
                 analyzer.reset(e.getIndexValue().duplicate());
@@ -131,7 +133,7 @@ public class Operation
                 }
                 else
                 // "range" or not-equals operator, combines both bounds together into the single expression,
-                // iff operation of the group is AND, otherwise we are forced to create separate expressions,
+                // if operation of the group is AND, otherwise we are forced to create separate expressions,
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
@@ -338,8 +340,11 @@ public class Operation
         {
             RangeIterator.Builder builder = controller.getIndexes(OperationType.AND, expressionMap.values());
             for (Node child : children)
-                if (child.canFilter())
+            {
+                boolean canFilter = child.canFilter();
+                if (canFilter)
                     builder.add(child.rangeIterator(controller));
+            }
             return builder.build();
         }
     }

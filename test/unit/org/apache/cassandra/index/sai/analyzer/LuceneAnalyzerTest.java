@@ -118,10 +118,11 @@ public class LuceneAnalyzerTest
     public void testEnglishAnalyzer() throws Exception
     {
         String json = "[\n" +
-                      "\t{\"analyzer\":\"org.apache.lucene.analysis.en.EnglishAnalyzer\"}\n" +
+                      "\t{\"tokenizer\":\"whitespace\"},\n" +
+                      "\t{\"filter\":\"porterstem\"}\n" +
                       "]";
         String testString = "dogs withering in the windy";
-        String[] expected = new String[]{ "dog", "wither", "windi" };
+        String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
         List<String> list = tokenize(testString, json);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
@@ -144,7 +145,6 @@ public class LuceneAnalyzerTest
         }
 
         analyzer.end();
-        analyzer.close();
 
         return list;
     }

@@ -67,7 +67,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final MemtableTrie<PrimaryKeys> data;
     private final ClusteringComparator clusteringComparator;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private final AbstractAnalyzer analyzer;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractType<?> validator;
     private final boolean isLiteral;
     private final Object writeLock = new Object();
@@ -89,7 +89,7 @@ public class TrieMemoryIndex extends MemoryIndex
         this.clusteringComparator = columnContext.clusteringComparator();
         this.primaryKeysReducer = new PrimaryKeysReducer();
         // MemoryIndex is per-core, so analyzer should be thread-safe..
-        this.analyzer = columnContext.getAnalyzer();
+        this.analyzerFactory = columnContext.getAnalyzerFactory();
         this.validator = columnContext.getValidator();
         this.isLiteral = TypeUtil.isLiteral(validator);
     }
@@ -99,7 +99,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         synchronized (writeLock)
         {
-            AbstractAnalyzer analyzer = columnContext.getAnalyzer();
+            AbstractAnalyzer analyzer = analyzerFactory.get();
             try
             {
                 value = TypeUtil.encode(value, validator);
@@ -113,18 +113,10 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     final ByteBuffer term = analyzer.next();
 
-                    try
-                    {
-                        System.out.println("TrieMemoryIndex term=" + ByteBufferUtil.string(term));
-                    }
-                    catch (Exception ex)
-                    {
-                        ex.printStackTrace();
-                    }
+                    // TODO: alloc, however ... ?
+                    setMinMaxTerm(ByteBuffer.wrap(ByteBufferUtil.getArray(term.duplicate())));
 
-                    setMinMaxTerm(term);
-
-                    final ByteComparable encodedTerm = encode(term);
+                    final ByteComparable encodedTerm = encode(term.duplicate());
                     try
                     {
                         if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)

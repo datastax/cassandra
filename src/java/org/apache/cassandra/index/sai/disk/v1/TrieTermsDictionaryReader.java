@@ -35,6 +35,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SizedInts;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.ArrayUtil;
 
 /**
@@ -88,6 +89,7 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
     long exactMatch(ByteComparable key)
     {
         int b = follow(key);
+
         if (b != ByteSource.END_OF_STREAM)
         {
             return NOT_FOUND;
