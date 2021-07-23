@@ -100,7 +100,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
         try
         {
             tokenStream.end();
-            tokenStream.close(); // TODO: is this correct?
+            tokenStream.close();
         }
         catch (IOException ex)
         {

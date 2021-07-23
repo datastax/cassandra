@@ -85,8 +85,8 @@ public class LuceneAnalyzerTest
     public void testPorterStem1() throws Exception
     {
         String json = "[\n" +
-                      "\t{\"tokenizer\":\"whitespace\"},\n" +
-                      "\t{\"filter\":\"porterstem\"}\n" +
+                      "{\"tokenizer\":\"whitespace\"},\n" +
+                      "{\"filter\":\"porterstem\"}\n" +
                       "]";
         String testString = "dogs withering in the windy";
         String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
@@ -98,8 +98,8 @@ public class LuceneAnalyzerTest
     public void testPorterStem2() throws Exception
     {
         String json = "[\n" +
-                      "\t{\"tokenizer\":\"whitespace\"},\n" +
-                      "\t{\"filter\":\"porterstem\"}\n" +
+                      "{\"tokenizer\":\"whitespace\"},\n" +
+                      "{\"filter\":\"porterstem\"}\n" +
                       "]";
         String testString = "apples orcharding";
         String[] expected = new String[]{ "appl", "orchard"};

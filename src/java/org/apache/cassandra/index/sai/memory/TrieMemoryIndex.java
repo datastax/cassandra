@@ -113,8 +113,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 {
                     final ByteBuffer term = analyzer.next();
 
-                    // TODO: alloc, however ... ?
-                    setMinMaxTerm(ByteBuffer.wrap(ByteBufferUtil.getArray(term.duplicate())));
+                    setMinMaxTerm(term.duplicate());
 
                     final ByteComparable encodedTerm = encode(term.duplicate());
                     try

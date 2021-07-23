@@ -43,8 +43,8 @@ public abstract class MemoryIndex
 {
     protected final ColumnContext columnContext;
 
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
+    private ByteBuffer minTerm = ByteBuffer.allocate(10);
+    private ByteBuffer maxTerm = ByteBuffer.allocate(10);
 
     protected MemoryIndex(ColumnContext columnContext)
     {
@@ -59,8 +59,21 @@ public abstract class MemoryIndex
     {
         assert term != null;
 
-        minTerm = TypeUtil.min(term, minTerm, columnContext.getValidator());
-        maxTerm = TypeUtil.max(term, maxTerm, columnContext.getValidator());
+        ByteBuffer minTerm = TypeUtil.min(term, this.minTerm, columnContext.getValidator());
+        if (minTerm != this.minTerm)
+        {
+            this.minTerm.clear();
+            this.minTerm.put(minTerm.duplicate());
+            this.minTerm.rewind();
+        }
+
+        ByteBuffer maxTerm = TypeUtil.max(term, this.maxTerm, columnContext.getValidator());
+        if (maxTerm != this.maxTerm)
+        {
+            this.maxTerm.clear();
+            this.maxTerm.put(maxTerm.duplicate());
+            this.maxTerm.rewind();
+        }
     }
 
     public ByteBuffer getMinTerm()

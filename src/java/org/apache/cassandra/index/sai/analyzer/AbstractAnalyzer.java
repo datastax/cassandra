@@ -117,30 +117,34 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         }
     }
 
-    // TODO: merge this with fromOptions
     public static AnalyzerFactory fromOptionsQueryAnalyzer(final AbstractType<?> type, final Map<String, String> options)
     {
         try
         {
             final String json = options.get(LuceneAnalyzer.JSON_QUERY_ANALYZER);
-            final Analyzer analyzer = JSONAnalyzerParser.parse(json);
-            return new AnalyzerFactory() {
-                @Override
-                public void close()
-                {
-                    analyzer.close();
-                }
-
-                public AbstractAnalyzer get()
-                {
-                    return new LuceneAnalyzer(type, analyzer, options);
-                }
-            };
+            return toAnalyzerFactory(json, type, options);
         }
         catch (Exception ex)
         {
             throw new RuntimeException(ex);
         }
+    }
+
+    public static AnalyzerFactory toAnalyzerFactory(String json, final AbstractType<?> type, final Map<String, String> options) throws Exception
+    {
+        final Analyzer analyzer = JSONAnalyzerParser.parse(json);
+        return new AnalyzerFactory() {
+            @Override
+            public void close()
+            {
+                analyzer.close();
+            }
+
+            public AbstractAnalyzer get()
+            {
+                return new LuceneAnalyzer(type, analyzer, options);
+            }
+        };
     }
 
     public static AnalyzerFactory fromOptions(AbstractType<?> type, Map<String, String> options)
@@ -150,19 +154,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
             try
             {
                 String json = options.get(LuceneAnalyzer.JSON_ANALYZER);
-                Analyzer analyzer = JSONAnalyzerParser.parse(json);
-                return new AnalyzerFactory() {
-                    @Override
-                    public void close()
-                    {
-                        analyzer.close();
-                    }
-
-                    public AbstractAnalyzer get()
-                    {
-                        return new LuceneAnalyzer(type, analyzer, options);
-                    }
-                };
+                return toAnalyzerFactory(json, type, options);
             }
             catch (Exception ex)
             {
