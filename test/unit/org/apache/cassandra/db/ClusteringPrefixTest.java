@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -33,10 +34,7 @@ import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
-import org.apache.cassandra.utils.memory.HeapPool;
-import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.apache.cassandra.utils.memory.NativePool;
@@ -77,6 +75,34 @@ public class ClusteringPrefixTest
     public void testRetainableOnHeap()
     {
         testRetainable(ByteBufferAccessor.instance.factory(), x -> new ByteBuffer[] {ByteBufferUtil.bytes(x)});
+    }
+
+    @Test
+    public void testRetainableOnHeapSliced()
+    {
+        for (int prepend = 0; prepend < 3; ++prepend)
+            for (int append = 0; append < 3; ++append)
+            {
+                testRetainable(ByteBufferAccessor.instance.factory(),
+                               slicingAllocator(prepend, append));
+            }
+    }
+
+    private Function<String, ByteBuffer[]> slicingAllocator(int prepend, int append)
+    {
+        return x ->
+        {
+            ByteBuffer bytes = ByteBufferUtil.bytes(x);
+            ByteBuffer sliced = ByteBuffer.allocate(bytes.remaining() + prepend + append);
+            for (int i = 0; i < prepend; ++i)
+                sliced.put((byte) ThreadLocalRandom.current().nextInt());
+            sliced.put(bytes);
+            bytes.flip();
+            for (int i = 0; i < append; ++i)
+                sliced.put((byte) ThreadLocalRandom.current().nextInt());
+            sliced.position(prepend).limit(prepend + bytes.remaining());
+            return new ByteBuffer[]{ sliced.slice() };
+        };
     }
 
     @Test
@@ -199,6 +225,8 @@ public class ClusteringPrefixTest
             assertFalse(b.isDirect());
             assertTrue(b.hasArray());
             assertTrue(b.capacity() == b.remaining());
+            assertEquals(0, b.arrayOffset());
+            assertEquals(b.capacity(), b.array().length);
         }
     }
 }
