@@ -31,10 +31,12 @@ import org.apache.lucene.analysis.custom.CustomAnalyzer;
 public class JSONAnalyzerParser
 {
     // unsupported because these filters open external files such as stop words
-    public static final HashSet<String> unsupportedFilters = Sets.newHashSet("synonymgraph",
-                                                                             "synonym",
-                                                                             "commongrams",
-                                                                             "stop");
+    public static final HashSet<String> unsupportedFilters =
+    Sets.newHashSet("synonymgraph", // same as synonym
+                    "synonym", // replaces words, loads external file, could be implemented
+                    "commongrams", // loads external file terms, search feature
+                    "stop", // stop words remove terms which doens't make sense for a database index
+                    "snowballporter"); // bug in reflection instantiation
 
     public static Analyzer parse(String json) throws Exception
     {

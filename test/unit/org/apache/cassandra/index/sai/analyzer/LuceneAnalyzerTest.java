@@ -43,36 +43,29 @@ import static org.junit.Assert.assertArrayEquals;
 public class LuceneAnalyzerTest
 {
     @Test
+    public void testPattern() throws Exception
+    {
+        String json = "[\n" +
+                      "{\"tokenizer\":\"simplepattern\", \"pattern\":\"[0123456789]{3}\"}" +
+                      "]";
+        String testString = "fd-786-335-514-x";
+        String[] expected = new String[]{ "786", "335", "514"  };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
     public void testNgram() throws Exception
     {
         String json = "[\n" +
-                      "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
-                      "\t{\"filter\":\"lowercase\"}\n" +
+                      "{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
+                      "{\"filter\":\"lowercase\"}\n" +
                       "]";
         String testString = "DoG";
         String[] expected = new String[]{ "do", "dog", "og" };
         List<String> list = tokenize(testString, json);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
-
-    // language
-    @Test
-    public void testPorterStemDanish() throws Exception
-    {
-        String json = "[\n" +
-                      "\t{\"tokenizer\":\"whitespace\"},\n" +
-                      "\t{\"filter\":\"lowercase\"},\n" +
-                      "\t{\"filter\":\"snowballporter\", \"language\":\"Danish\"}\n" +
-                      "]\n";
-        String testString = "blomstre";
-        String[] expected = new String[]{ "blomstr"};
-        List<String> list = tokenize(testString, json);
-        System.out.println("list="+list);
-        assertArrayEquals(expected, list.toArray(new String[0]));
-    }
-
-    // blomstre
-    // blomstr
 
     @Test
     public void testEnglishAnalyzer() throws Exception
