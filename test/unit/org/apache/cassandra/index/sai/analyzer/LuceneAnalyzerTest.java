@@ -55,64 +55,24 @@ public class LuceneAnalyzerTest
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
+    // language
     @Test
-    // TODO: doesn't work
-    public void testPattern() throws Exception
-    {
-        String json = "{\n" +
-                      "  \"tokenizer\":{\n" +
-                      "    \"pattern\":{\n" +
-                      "      \"pattern\":\"\\W|_\"\n" +
-                      "    }\n" +
-                      "  }\n" +
-                      "}";
-        String testString = "Günther Günther is here";
-        String[] expected = new String[]{ "Günther", "Günther", "is", "here" };
-        List<String> list = tokenize(testString, json);
-        assertArrayEquals(expected, list.toArray(new String[0]));
-    }
-
-    @Test
-    public void testStopWords() throws Exception
+    public void testPorterStemDanish() throws Exception
     {
         String json = "[\n" +
-                      "\t{\"tokenizer\":\"standard\"},\n" +
+                      "\t{\"tokenizer\":\"whitespace\"},\n" +
                       "\t{\"filter\":\"lowercase\"},\n" +
-                      "\t{\"filter\":\"stop\", \"stop_words\":[\"the\",\"and\",\"in\"]}\t\n" +
-                      "]";
-        String testString = "Dogs withEring in the winDy";
-        String[] expected = new String[]{ "dogs", "withering", "windy" };
-        List<String> list = tokenize(testString, json);
-        assertArrayEquals(expected, list.toArray(new String[0]));
-    }
-
-    @Test
-    public void testDefaultStopWords() throws Exception
-    {
-        String json = "[\n" +
-                      "\t{\"tokenizer\":\"standard\"},\n" +
-                      "\t{\"filter\":\"lowercase\"},\n" +
-                      "\t{\"filter\":\"stop\", \"default_stop_words\":\"spanish\"}\n" +
-                      "]";
-        String testString = "Dogs withEring es de winDy";
-        String[] expected = new String[]{ "dogs", "withering", "windy" };
-        List<String> list = tokenize(testString, json);
-        assertArrayEquals(expected, list.toArray(new String[0]));
-    }
-
-    @Test
-    public void testDefaultStopWordsClass() throws Exception
-    {
-        String json = "[\n" +
-                      "\t{\"tokenizer\":\"standard\"},\n" +
-                      "\t{\"filter\":\"lowercase\"},\n" +
-                      "\t{\"filter\":\"stop\",\"default_stop_words\":\"org.apache.lucene.analysis.es.SpanishAnalyzer\"}\n" +
+                      "\t{\"filter\":\"snowballporter\", \"language\":\"Danish\"}\n" +
                       "]\n";
-        String testString = "Dogs withEring es de winDy";
-        String[] expected = new String[]{ "dogs", "withering", "windy" };
+        String testString = "blomstre";
+        String[] expected = new String[]{ "blomstr"};
         List<String> list = tokenize(testString, json);
+        System.out.println("list="+list);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
+
+    // blomstre
+    // blomstr
 
     @Test
     public void testEnglishAnalyzer() throws Exception

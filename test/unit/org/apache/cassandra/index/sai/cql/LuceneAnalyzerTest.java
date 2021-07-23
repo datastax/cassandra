@@ -94,6 +94,28 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testNGramfilter() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
+                    "\t{\"filter\":\"lowercase\"}\n" +
+                    "]'}");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'DoG')");
+
+        flush();
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'do'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'og'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+
+    }
+
+    @Test
     public void testWhitespace() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
