@@ -83,7 +83,7 @@ public final class AggregationQueryPager implements QueryPager
         if (limits.isGroupByLimit())
             return new GroupByPartitionIterator(pageSize, subPageSize, consistency, queryState, queryStartNanoTime);
 
-        return new AggregationPartitionIterator(pageSize, subPageSize, consistency, queryState, queryStartNanoTime);
+        return new AggregationPartitionIterator(subPageSize, consistency, queryState, queryStartNanoTime);
     }
 
     @Override
@@ -107,7 +107,7 @@ public final class AggregationQueryPager implements QueryPager
         if (limits.isGroupByLimit())
             return new GroupByPartitionIterator(pageSize, subPageSize, executionController, System.nanoTime());
 
-        return new AggregationPartitionIterator(pageSize, subPageSize, executionController, System.nanoTime());
+        return new AggregationPartitionIterator(subPageSize, executionController, System.nanoTime());
     }
 
     @Override
@@ -457,21 +457,19 @@ public final class AggregationQueryPager implements QueryPager
      */
     public final class AggregationPartitionIterator extends GroupByPartitionIterator
     {
-        public AggregationPartitionIterator(PageSize pageSize,
-                                            PageSize subPageSize,
+        public AggregationPartitionIterator(PageSize subPageSize,
                                             ConsistencyLevel consistency,
                                             QueryState queryState,
                                             long queryStartNanoTime)
         {
-            super(pageSize, subPageSize, consistency, queryState, queryStartNanoTime);
+            super(PageSize.NULL, subPageSize, consistency, queryState, queryStartNanoTime);
         }
 
-        public AggregationPartitionIterator(PageSize pageSize,
-                                            PageSize subPageSize,
+        public AggregationPartitionIterator(PageSize subPageSize,
                                             ReadExecutionController executionController,
                                             long queryStartNanoTime)
         {
-            super(pageSize, subPageSize, executionController, queryStartNanoTime);
+            super(PageSize.NULL, subPageSize, executionController, queryStartNanoTime);
         }
 
         @Override
