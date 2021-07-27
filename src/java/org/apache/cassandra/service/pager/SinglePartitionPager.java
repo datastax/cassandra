@@ -85,15 +85,20 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
     }
 
     @Override
-    protected SinglePartitionReadQuery nextPageReadQuery(PageSize pageSize, int remaining)
+    protected SinglePartitionReadQuery nextPageReadQuery(PageSize pageSize, DataLimits limits)
     {
         Clustering<?> clustering = lastReturned == null ? null : lastReturned.clustering(query.metadata());
-        DataLimits limits = limits().withCountedLimit(Math.min(limits().count(), remaining));
         limits = lastReturned == null
                  ? limits.forPaging(pageSize)
                  : limits.forPaging(pageSize, key(), remainingInPartition());
 
         return query.forPaging(clustering, limits);
+    }
+
+    @Override
+    public boolean isExhausted()
+    {
+        return super.isExhausted() || remainingInPartition() == 0;
     }
 
     protected void recordLast(DecoratedKey key, Row last)

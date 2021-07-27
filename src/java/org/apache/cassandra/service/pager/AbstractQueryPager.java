@@ -19,6 +19,8 @@ package org.apache.cassandra.service.pager;
 
 import java.util.StringJoiner;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +34,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 
+@NotThreadSafe
 abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
@@ -43,8 +46,6 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
     protected final ProtocolVersion protocolVersion;
     private final boolean enforceStrictLiveness;
 
-    private int remaining;
-
     // This is the counter which was used for the last page we fetched. It can be used to obtain the number of
     // fetched rows or bytes.
     private DataLimits.Counter lastCounter;
@@ -53,9 +54,21 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
     // which remainingInPartition makes sense: if we're starting another key, we should reset remainingInPartition
     // (and this is done in PagerIterator). This can be null (when we start).
     private DecoratedKey lastKey;
+
+    // The remaining and remainingInPartition are initially set to the user limits provided in the query (via the
+    // LIMIT and PER PARTITION LIMIT clauses). When a page is fetched, iterated and closed, those values are updated
+    // with the number of items counted on that recently fetched page.
+    private int remaining;
     private int remainingInPartition;
 
+    // Whether the pager is exhausted or not - the pager gets exhausted if the recently fetched, iterated and closed
+    // page has less items than the requested page size
     private boolean exhausted;
+
+    // The paging transformation which is used for the recently requested page. It is set when we request the new page
+    // and then cleaned when the page is closed. We use it to prevent fetching a new page until the previous one is
+    // closed.
+    private PagerTransformation<?> currentPagerTransformation;
 
     protected AbstractQueryPager(T query, ProtocolVersion protocolVersion)
     {
@@ -75,66 +88,75 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 
     public PartitionIterator fetchPage(PageSize pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime)
     {
+        assert currentPagerTransformation == null;
+
         if (isExhausted())
             return EmptyIterators.partition();
 
-        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
-        Pager<Row> pager = new RowPager(updatedQueryLimits, query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
+        DataLimits updatedQueryLimits = nextPageLimits();
+        RowPagerTransformation pagerTransformation = new RowPagerTransformation(updatedQueryLimits.forPaging(pageSize), query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits);
         if (readQuery == null)
         {
             exhausted = true;
             return EmptyIterators.partition();
         }
-        return Transformation.apply(readQuery.execute(consistency, queryState, queryStartNanoTime), pager);
+        currentPagerTransformation = pagerTransformation;
+        return Transformation.apply(readQuery.execute(consistency, queryState, queryStartNanoTime), pagerTransformation);
     }
 
     @Override
     public PartitionIterator fetchPageInternal(PageSize pageSize, ReadExecutionController executionController)
     {
+        assert currentPagerTransformation == null;
+
         if (isExhausted())
             return EmptyIterators.partition();
 
-        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
-        RowPager pager = new RowPager(updatedQueryLimits, query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
+        DataLimits updatedQueryLimits = nextPageLimits();
+        RowPagerTransformation pagerTransformation = new RowPagerTransformation(updatedQueryLimits.forPaging(pageSize), query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits);
         if (readQuery == null)
         {
             exhausted = true;
             return EmptyIterators.partition();
         }
-        return Transformation.apply(readQuery.executeInternal(executionController), pager);
+        currentPagerTransformation = pagerTransformation;
+        return Transformation.apply(readQuery.executeInternal(executionController), pagerTransformation);
     }
 
     public UnfilteredPartitionIterator fetchPageUnfiltered(TableMetadata metadata, PageSize pageSize, ReadExecutionController executionController)
     {
+        assert currentPagerTransformation == null;
+
         if (isExhausted())
             return EmptyIterators.unfilteredPartition(metadata);
 
-        DataLimits updatedQueryLimits = nextPageLimits().forPaging(pageSize);
-        UnfilteredPager pager = new UnfilteredPager(updatedQueryLimits, query.nowInSec());
-        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits.count());
+        DataLimits updatedQueryLimits = nextPageLimits();
+        UnfilteredPagerTransformation pagerTransformation = new UnfilteredPagerTransformation(updatedQueryLimits.forPaging(pageSize), query.nowInSec());
+        ReadQuery readQuery = nextPageReadQuery(pageSize, updatedQueryLimits);
         if (readQuery == null)
         {
             exhausted = true;
             return EmptyIterators.unfilteredPartition(metadata);
         }
-        return Transformation.apply(readQuery.executeLocally(executionController), pager);
+        currentPagerTransformation = pagerTransformation;
+        return Transformation.apply(readQuery.executeLocally(executionController), pagerTransformation);
     }
 
     /**
      * For subsequent pages we want to limit the number of rows to the minimum of the currently set limit in the query
      * and the number of remaining rows in page. Note that paging itself will be applied separately.
      */
-    private DataLimits nextPageLimits()
+    protected DataLimits nextPageLimits()
     {
         return limits.withCountedLimit(Math.min(limits.count(), remaining));
     }
 
-    private class UnfilteredPager extends Pager<Unfiltered>
+    private class UnfilteredPagerTransformation extends PagerTransformation<Unfiltered>
     {
 
-        private UnfilteredPager(DataLimits pageLimits, int nowInSec)
+        private UnfilteredPagerTransformation(DataLimits pageLimits, int nowInSec)
         {
             super(pageLimits, nowInSec);
         }
@@ -145,10 +167,10 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         }
     }
 
-    private class RowPager extends Pager<Row>
+    private class RowPagerTransformation extends PagerTransformation<Row>
     {
 
-        private RowPager(DataLimits pageLimits, int nowInSec)
+        private RowPagerTransformation(DataLimits pageLimits, int nowInSec)
         {
             super(pageLimits, nowInSec);
         }
@@ -159,7 +181,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         }
     }
 
-    private abstract class Pager<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
+    private abstract class PagerTransformation<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
     {
         private final DataLimits pageLimits;
         protected final DataLimits.Counter counter;
@@ -167,10 +189,16 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         private Row lastRow;
         private boolean isFirstPartition = true;
 
-        private Pager(DataLimits pageLimits, int nowInSec)
+        private PagerTransformation(DataLimits pageLimits, int nowInSec)
         {
             this.counter = pageLimits.newCounter(nowInSec, true, query.selectsFullPartition(), enforceStrictLiveness);
             lastCounter = this.counter;
+
+            // Page limits are passed to the transformation for two reasons
+            // - to create a counter,
+            // - to determine if the query pager is exhausted when we reach the end of data (if the end of data
+            //   is reached before we reach the page limit, we conclude that the query pager is exhausted and there
+            //   are no more pages to fetch)
             this.pageLimits = pageLimits;
 
             if (logger.isTraceEnabled())
@@ -227,6 +255,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             }
             // if the counter did not count up to the page limits, then the iteration must have reached the end
             exhausted = pageLimits.isCounterBelowLimits(counter);
+            currentPagerTransformation = null;
         }
 
         public Row applyToStatic(Row row)
@@ -256,7 +285,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         @Override
         public String toString()
         {
-            return new StringJoiner(", ", Pager.class.getSimpleName() + "[", "]")
+            return new StringJoiner(", ", PagerTransformation.class.getSimpleName() + "[", "]")
                    .add("pageLimits=" + pageLimits)
                    .add("counter=" + counter)
                    .add("currentKey=" + currentKey)
@@ -275,7 +304,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 
     public boolean isExhausted()
     {
-        return exhausted || remaining == 0 || ((this instanceof SinglePartitionPager) && remainingInPartition == 0);
+        return exhausted || remaining == 0;
     }
 
     public int maxRemaining()
@@ -298,7 +327,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         return lastCounter;
     }
 
-    protected abstract T nextPageReadQuery(PageSize pageSize, int remaining);
+    protected abstract T nextPageReadQuery(PageSize pageSize, DataLimits limits);
     protected abstract void recordLast(DecoratedKey key, Row row);
     protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
 
