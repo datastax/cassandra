@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-                             CQL BINARY PROTOCOL v4
+                             CQL BINARY PROTOCOL v4.1
 
 
 Table of Contents
@@ -58,7 +58,7 @@ Table of Contents
   7. User Defined Type Serialization
   8. Result paging
   9. Error codes
-  10. Changes from v3
+  10. Changes from v4
 
 
 1. Overview
@@ -306,6 +306,7 @@ Table of Contents
     - "THROW_ON_OVERLOAD": In case of server overloaded with too many requests, by default the server puts
             back pressure on the client connection. Instead, the server can send an OverloadedException error message back to
             the client if this option is set to true.
+    - "PAGE_UNIT": a list of supported page units.
 
 
 4.1.2. AUTH_RESPONSE
@@ -347,42 +348,43 @@ Table of Contents
       in particular influence what the remainder of the message contains.
       A flag is set if the bit corresponding to its `mask` is set. Supported
       flags are, given their mask:
-        0x01: Values. If set, a [short] <n> followed by <n> [value]
-              values are provided. Those values are used for bound variables in
-              the query. Optionally, if the 0x40 flag is present, each value
-              will be preceded by a [string] name, representing the name of
-              the marker the value must be bound to.
-        0x02: Skip_metadata. If set, the Result Set returned as a response
-              to the query (if any) will have the NO_METADATA flag (see
-              Section 4.2.5.2).
-        0x04: Page_size. If set, <result_page_size> is an [int]
-              controlling the desired page size of the result (in CQL3 rows).
-              See the section on paging (Section 8) for more details.
-        0x08: With_paging_state. If set, <paging_state> should be present.
-              <paging_state> is a [bytes] value that should have been returned
-              in a result set (Section 4.2.5.2). The query will be
-              executed but starting from a given paging state. This is also to
-              continue paging on a different node than the one where it
-              started (See Section 8 for more details).
-        0x10: With serial consistency. If set, <serial_consistency> should be
-              present. <serial_consistency> is the [consistency] level for the
-              serial phase of conditional updates. That consitency can only be
-              either SERIAL or LOCAL_SERIAL and if not present, it defaults to
-              SERIAL. This option will be ignored for anything else other than a
-              conditional update/insert.
-        0x20: With default timestamp. If set, <timestamp> should be present.
-              <timestamp> is a [long] representing the default timestamp for the query
-              in microseconds (negative values are forbidden). This will
-              replace the server side assigned timestamp as default timestamp.
-              Note that a timestamp in the query itself will still override
-              this timestamp. This is entirely optional.
-        0x40: With names for values. This only makes sense if the 0x01 flag is set and
-              is ignored otherwise. If present, the values from the 0x01 flag will
-              be preceded by a name (see above). Note that this is only useful for
-              QUERY requests where named bind markers are used; for EXECUTE statements,
-              since the names for the expected values was returned during preparation,
-              a client can always provide values in the right order without any names
-              and using this flag, while supported, is almost surely inefficient.
+        0x00000001: Values. If set, a [short] <n> followed by <n> [value]
+                    values are provided. Those values are used for bound variables in
+                    the query. Optionally, if the 0x40 flag is present, each value
+                    will be preceded by a [string] name, representing the name of
+                    the marker the value must be bound to.
+        0x00000002: Skip_metadata. If set, the Result Set returned as a response
+                    to the query (if any) will have the NO_METADATA flag (see
+                    Section 4.2.5.2).
+        0x00000004: Page_size. If set, <result_page_size> is an [int]
+                    controlling the desired page size of the result (in CQL3 rows or bytes).
+                    See the section on paging (Section 8) for more details.
+        0x00000008: With_paging_state. If set, <paging_state> should be present.
+                    <paging_state> is a [bytes] value that should have been returned
+                    in a result set (Section 4.2.5.2). The query will be
+                    executed but starting from a given paging state. This is also to
+                    continue paging on a different node than the one where it
+                    started (See Section 8 for more details).
+        0x00000010: With serial consistency. If set, <serial_consistency> should be
+                    present. <serial_consistency> is the [consistency] level for the
+                    serial phase of conditional updates. That consitency can only be
+                    either SERIAL or LOCAL_SERIAL and if not present, it defaults to
+                    SERIAL. This option will be ignored for anything else other than a
+                    conditional update/insert.
+        0x00000020: With default timestamp. If set, <timestamp> should be present.
+                    <timestamp> is a [long] representing the default timestamp for the query
+                    in microseconds (negative values are forbidden). This will
+                    replace the server side assigned timestamp as default timestamp.
+                    Note that a timestamp in the query itself will still override
+                    this timestamp. This is entirely optional.
+        0x00000040: With names for values. This only makes sense if the 0x01 flag is set and
+                    is ignored otherwise. If present, the values from the 0x01 flag will
+                    be preceded by a name (see above). Note that this is only useful for
+                    QUERY requests where named bind markers are used; for EXECUTE statements,
+                    since the names for the expected values was returned during preparation,
+                    a client can always provide values in the right order without any names
+                    and using this flag, while supported, is almost surely inefficient.
+        0x40000000: When set, the <page_size> is provided in bytes rather than in rows.
 
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
@@ -1011,11 +1013,11 @@ Table of Contents
 
   The protocol allows for paging the result of queries. For that, the QUERY and
   EXECUTE messages have a <result_page_size> value that indicate the desired
-  page size in CQL3 rows.
+  page size in CQL3 rows or bytes.
 
   If a positive value is provided for <result_page_size>, the result set of the
   RESULT message returned for the query will contain at most the
-  <result_page_size> first rows of the query result. If that first page of results
+  <result_page_size> first rows or bytes of the query result. If that first page of results
   contains the full result set for the query, the RESULT message (of kind `Rows`)
   will have the Has_more_pages flag *not* set. However, if some results are not
   part of the first response, the Has_more_pages flag will be set and the result
@@ -1027,6 +1029,10 @@ Table of Contents
   Only CQL3 queries that return a result set (RESULT message with a Rows `kind`)
   support paging. For other type of queries, the <result_page_size> value is
   ignored.
+
+  In the previous protocol versions the page size was always provided in rows. Since 4.1
+  the page size can be provided in bytes as well. Whether the page size is specified in
+  rows or bytes is controlled by query flags (see section 4.1.4 for details).
 
   Note to client implementors:
   - While <result_page_size> can be as low as 1, it will likely be detrimental
@@ -1200,21 +1206,7 @@ Table of Contents
               this host. The rest of the ERROR message body will be [short
               bytes] representing the unknown ID.
 
-10. Changes from v3
+10. Changes from v4
 
-  * Prepared responses (Section 4.2.5.4) now include partition-key bind indexes
-  * The format of "SCHEMA_CHANGE" events (Section 4.2.6) (and implicitly
-    "Schema_change" results (Section 4.2.5.5)) has been modified, and now includes
-    changes related to user defined functions and user defined aggregates.
-  * Read_failure error code was added.
-  * Function_failure error code was added.
-  * Add custom payload to frames for custom QueryHandler implementations (ignored by
-    Cassandra's standard QueryHandler)
-  * Add warnings to frames for responses for which the server generated a warning
-    during processing, which the client needs to address.
-  * Add the date and time data types
-  * Add the tinyint and smallint data types
-  * The <paging_state> returned in the v4 protocol is not compatible with the v3
-    protocol. In other words, a <paging_state> returned by a node using protocol v4
-    should not be used to query a node using protocol v3 (and vice-versa).
-  * Added THROW_ON_OVERLOAD startup option (Section 4.1.1).
+  * Query flags (Section 4.1.4) includes a new flag 0x40000000 which denotes that
+    the page size is specified in bytes rather than in rows.
