@@ -40,7 +40,7 @@ public abstract class AbstractReadCommandBuilder
     protected int nowInSeconds;
 
     private int cqlLimit = -1;
-    private PageSize pagingLimit = PageSize.NULL;
+    private PageSize pagingLimit = PageSize.NONE;
     private int perPartitionLimit = -1;
     protected boolean reversed = false;
 

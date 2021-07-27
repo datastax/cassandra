@@ -65,7 +65,7 @@ public class PagingQueryTest extends CQLTester
     @Parameterized.Parameters(name = "aggregation_sub_page_size={0}")
     public static Collection<Object[]> generateParameters()
     {
-        return Arrays.asList(new Object[]{ PageSize.inBytes(1024) }, new Object[]{ PageSize.NULL });
+        return Arrays.asList(new Object[]{ PageSize.inBytes(1024) }, new Object[]{ PageSize.NONE });
     }
 
     public PagingQueryTest(PageSize subPageSize)
@@ -170,7 +170,7 @@ public class PagingQueryTest extends CQLTester
         int nowInSec = FBUtilities.nowInSeconds();
         assertThat(pager.isExhausted()).isFalse();
         try (ReadExecutionController executionController = pager.executionController();
-             PartitionIterator iter = pager.fetchPageInternal(PageSize.NULL, executionController))
+             PartitionIterator iter = pager.fetchPageInternal(PageSize.NONE, executionController))
         {
             rows = select.process(iter, nowInSec).rows;
         }

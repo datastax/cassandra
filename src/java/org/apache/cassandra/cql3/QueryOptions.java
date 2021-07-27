@@ -378,7 +378,7 @@ public abstract class QueryOptions
     // Options that are likely to not be present in most queries
     static class SpecificOptions
     {
-        private static final SpecificOptions DEFAULT = new SpecificOptions(PageSize.NULL, null, null, Long.MIN_VALUE, null, Integer.MIN_VALUE);
+        private static final SpecificOptions DEFAULT = new SpecificOptions(PageSize.NONE, null, null, Long.MIN_VALUE, null, Integer.MIN_VALUE);
 
         private final PageSize pageSize;
         private final PagingState state;
@@ -497,7 +497,7 @@ public abstract class QueryOptions
                                           ? flags.contains(Flag.PAGE_SIZE_IN_BYTES)
                                             ? PageSize.inBytes(body.readInt())
                                             : PageSize.inRows(body.readInt())
-                                          : PageSize.NULL;
+                                          : PageSize.NONE;
                 PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version) : null;
                 ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : null;
                 long timestamp = Long.MIN_VALUE;

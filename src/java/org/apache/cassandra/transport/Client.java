@@ -132,7 +132,7 @@ public class Client extends SimpleClient
             line = line.substring(6);
             // Ugly hack to allow setting a page size, but that's playground code anyway
             String query = line;
-            PageSize pageSize = PageSize.NULL;
+            PageSize pageSize = PageSize.NONE;
             if (line.matches(".+ !\\d+$"))
             {
                 int idx = line.lastIndexOf('!');

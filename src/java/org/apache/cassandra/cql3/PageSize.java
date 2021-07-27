@@ -25,7 +25,7 @@ public class PageSize
 {
     public static final int NO_LIMIT = Integer.MAX_VALUE;
 
-    public static final PageSize NULL = new PageSize(NO_LIMIT, PageUnit.ROWS);
+    public static final PageSize NONE = new PageSize(NO_LIMIT, PageUnit.ROWS);
 
     public enum PageUnit
     {

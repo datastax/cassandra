@@ -26,8 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.exceptions.OperationExecutionException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -468,14 +466,14 @@ public final class AggregationQueryPager implements QueryPager
                                             QueryState queryState,
                                             long queryStartNanoTime)
         {
-            super(PageSize.NULL, subPageSize, consistency, queryState, queryStartNanoTime);
+            super(PageSize.NONE, subPageSize, consistency, queryState, queryStartNanoTime);
         }
 
         public AggregationPartitionIterator(PageSize subPageSize,
                                             ReadExecutionController executionController,
                                             long queryStartNanoTime)
         {
-            super(PageSize.NULL, subPageSize, executionController, queryStartNanoTime);
+            super(PageSize.NONE, subPageSize, executionController, queryStartNanoTime);
         }
 
         @Override
