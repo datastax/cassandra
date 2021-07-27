@@ -32,20 +32,20 @@ public class PageSize
         ROWS, BYTES
     }
 
-    private final int count;
+    private final int size;
     private final PageUnit unit;
 
-    public PageSize(int count, PageUnit unit)
+    public PageSize(int size, PageUnit unit)
     {
-        Preconditions.checkArgument(count >= 0);
+        Preconditions.checkArgument(size >= 0);
         Preconditions.checkNotNull(unit);
-        this.count = count;
+        this.size = size;
         this.unit = unit;
     }
 
-    public int getCount()
+    public int getSize()
     {
-        return count;
+        return size;
     }
 
     public PageUnit getUnit()
@@ -55,12 +55,12 @@ public class PageSize
 
     public int bytes()
     {
-        return unit == PageUnit.BYTES ? count : NO_LIMIT;
+        return unit == PageUnit.BYTES ? size : NO_LIMIT;
     }
 
     public int rows()
     {
-        return unit == PageUnit.ROWS ? count : NO_LIMIT;
+        return unit == PageUnit.ROWS ? size : NO_LIMIT;
     }
 
     /**
@@ -89,7 +89,7 @@ public class PageSize
      */
     public int minRowsCount(int rowsCount)
     {
-        return unit == PageUnit.ROWS ? Math.min(rowsCount, count) : rowsCount;
+        return unit == PageUnit.ROWS ? Math.min(rowsCount, size) : rowsCount;
     }
 
     /**
@@ -98,23 +98,23 @@ public class PageSize
      */
     public int minBytesCount(int bytesCount)
     {
-        return unit == PageUnit.BYTES ? Math.min(bytesCount, count) : bytesCount;
+        return unit == PageUnit.BYTES ? Math.min(bytesCount, size) : bytesCount;
     }
 
     public boolean isDefined()
     {
-        return count < NO_LIMIT;
+        return size < NO_LIMIT;
     }
 
     public PageSize withDecreasedRows(int rowsCount) {
-        return unit == PageUnit.ROWS && count != NO_LIMIT
-               ? inRows(Math.max(0, count - rowsCount))
+        return unit == PageUnit.ROWS && size != NO_LIMIT
+               ? inRows(Math.max(0, size - rowsCount))
                : this;
     }
 
     public PageSize withDecreasedBytes(int bytesCount) {
-        return unit == PageUnit.BYTES && count != NO_LIMIT
-               ? inBytes(Math.max(0, count - bytesCount))
+        return unit == PageUnit.BYTES && size != NO_LIMIT
+               ? inBytes(Math.max(0, size - bytesCount))
                : this;
     }
 
@@ -124,7 +124,7 @@ public class PageSize
      */
     public boolean isCompleted(int count, PageUnit unit)
     {
-        return this.unit == unit && this.count <= count;
+        return this.unit == unit && this.size <= count;
     }
 
     @Override
@@ -133,21 +133,21 @@ public class PageSize
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         PageSize pageSize = (PageSize) o;
-        return count == pageSize.count && unit == pageSize.unit;
+        return size == pageSize.size && unit == pageSize.unit;
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(count, unit);
+        return Objects.hash(size, unit);
     }
 
     @Override
     public String toString()
     {
-        if (count == NO_LIMIT)
+        if (size == NO_LIMIT)
             return "unlimited";
         else
-            return count + " " + unit.name().toLowerCase();
+            return size + " " + unit.name().toLowerCase();
     }
 }

@@ -530,7 +530,7 @@ public abstract class QueryOptions
             if (flags.contains(Flag.VALUES))
                 CBUtil.writeValueList(options.getValues(), dest);
             if (flags.contains(Flag.PAGE_SIZE))
-                dest.writeInt(options.getPageSize().getCount());
+                dest.writeInt(options.getPageSize().getSize());
             if (flags.contains(Flag.PAGING_STATE))
                 CBUtil.writeValue(options.getPagingState().serialize(version), dest);
             if (flags.contains(Flag.SERIAL_CONSISTENCY))

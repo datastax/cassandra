@@ -123,7 +123,7 @@ public class ExecuteMessage extends Message.Request
             CQLStatement statement = prepared.statement;
             options.prepare(statement.getBindVariables());
 
-            if (options.getPageSize().getCount() == 0)
+            if (options.getPageSize().getSize() == 0)
                 throw new ProtocolException("The page size cannot be 0");
 
             if (traceRequest)
@@ -184,7 +184,7 @@ public class ExecuteMessage extends Message.Request
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         if (options.getPageSize().isDefined())
         {
-            builder.put("page_size", Integer.toString(options.getPageSize().getCount()));
+            builder.put("page_size", Integer.toString(options.getPageSize().getSize()));
             builder.put("page_size_unit", options.getPageSize().getUnit().name());
         }
         if (options.getConsistency() != null)

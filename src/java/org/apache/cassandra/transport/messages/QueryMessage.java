@@ -95,7 +95,7 @@ public class QueryMessage extends Message.Request
         CQLStatement statement = null;
         try
         {
-            if (options.getPageSize().getCount() == 0)
+            if (options.getPageSize().getSize() == 0)
                 throw new ProtocolException("The page size cannot be 0");
 
             if (traceRequest)
@@ -129,7 +129,7 @@ public class QueryMessage extends Message.Request
         builder.put("query", query);
         if (options.getPageSize().isDefined())
         {
-            builder.put("page_size", Integer.toString(options.getPageSize().getCount()));
+            builder.put("page_size", Integer.toString(options.getPageSize().getSize()));
             builder.put("page_size_unit", options.getPageSize().getUnit().name());
         }
         if (options.getConsistency() != null)

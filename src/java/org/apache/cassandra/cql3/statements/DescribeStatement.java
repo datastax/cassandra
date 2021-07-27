@@ -24,7 +24,6 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.audit.AuditLogContext;
@@ -169,7 +168,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         if (offset > 0L)
             stream = stream.skip(offset);
         if (pageSize.isDefined())
-            stream = stream.limit(pageSize.getCount());
+            stream = stream.limit(pageSize.getSize());
 
         List<List<ByteBuffer>> rows = stream.map(e -> toRow(e, includeInternalDetails))
                                             .collect(Collectors.toList());
@@ -177,9 +176,9 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(metadata(state.getClientState()));
         ResultSet result = new ResultSet(resultMetadata, rows);
 
-        if (pageSize.isDefined() && rows.size() == pageSize.getCount())
+        if (pageSize.isDefined() && rows.size() == pageSize.getSize())
         {
-            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getCount(), schemaVersion));
+            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getSize(), schemaVersion));
         }
 
         return new ResultMessage.Rows(result);
