@@ -290,7 +290,7 @@ public class SelectStatement implements CQLStatement
     {
         boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
-        DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize);
+        DataLimits limit = getDataLimits(userLimit, perPartitionLimit);
 
         if (isPartitionRangeQuery)
             return getRangeCommand(options, columnFilter, limit, nowInSec, queryState);
@@ -686,7 +686,7 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(int userLimit, int perPartitionLimit, PageSize pageSize)
+    private DataLimits getDataLimits(int userLimit, int perPartitionLimit)
     {
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
@@ -698,11 +698,6 @@ public class SelectStatement implements CQLStatement
                 cqlRowLimit = userLimit;
             cqlPerPartitionLimit = perPartitionLimit;
         }
-
-        // Group by and aggregation queries will always be paged internally to avoid OOM.
-        // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
-        if (!pageSize.isDefined())
-            pageSize = PageSize.inRows(DEFAULT_PAGE_SIZE);
 
         // Aggregation queries work fine on top of the group by paging but to maintain
         // backward compatibility we need to use the old way.
