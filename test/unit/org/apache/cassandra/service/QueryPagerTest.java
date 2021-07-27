@@ -35,7 +35,6 @@ import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -246,7 +245,7 @@ public class QueryPagerTest
         return ret;
     }
 
-    private static ReadCommand namesQuery(int count, int partitionCount, PageSize paging, ColumnFamilyStore cfs, String key, String... names)
+    private static ReadCommand namesQuery(int count, int partitionCount, PageSize pageSize, ColumnFamilyStore cfs, String key, String... names)
     {
         AbstractReadCommandBuilder builder = Util.cmd(cfs, key).withNowInSeconds(nowInSec);
         for (String name : names)
@@ -255,8 +254,8 @@ public class QueryPagerTest
             builder.withLimit(count);
         if (partitionCount > 0)
             builder.withPerPartitionLimit(partitionCount);
-        if (paging != null && !paging.equals(PageSize.NONE))
-            builder.withPagingLimit(paging);
+        if (pageSize != null && !pageSize.equals(PageSize.NONE))
+            builder.withPageSize(pageSize);
 
         return builder.build();
     }
@@ -281,7 +280,7 @@ public class QueryPagerTest
         if (partitionCount > 0)
             builder.withPerPartitionLimit(partitionCount);
         if (paging != null && !paging.equals(PageSize.NONE))
-            builder.withPagingLimit(paging);
+            builder.withPageSize(paging);
 
         return (SinglePartitionReadCommand) builder.build();
     }
@@ -299,7 +298,7 @@ public class QueryPagerTest
         if (partitionCount > 0)
             builder.withPerPartitionLimit(partitionCount);
         if (paging != null && !paging.equals(PageSize.NONE))
-            builder.withPagingLimit(paging);
+            builder.withPageSize(paging);
 
         return builder.build();
     }
@@ -317,7 +316,7 @@ public class QueryPagerTest
         if (partitionCount > 0)
             builder.withPerPartitionLimit(partitionCount);
         if (paging != null && !paging.equals(PageSize.NONE))
-            builder.withPagingLimit(paging);
+            builder.withPageSize(paging);
 
         return builder.build();
     }

@@ -20,32 +20,20 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Properties;
-import java.util.stream.Collectors;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 import static org.assertj.core.api.Assertions.assertThat;

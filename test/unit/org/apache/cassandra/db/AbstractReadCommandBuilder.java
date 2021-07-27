@@ -40,7 +40,7 @@ public abstract class AbstractReadCommandBuilder
     protected int nowInSeconds;
 
     private int cqlLimit = -1;
-    private PageSize pagingLimit = PageSize.NONE;
+    private PageSize pageSize = PageSize.NONE;
     private int perPartitionLimit = -1;
     protected boolean reversed = false;
 
@@ -116,9 +116,9 @@ public abstract class AbstractReadCommandBuilder
         return this;
     }
 
-    public AbstractReadCommandBuilder withPagingLimit(PageSize newLimit)
+    public AbstractReadCommandBuilder withPageSize(PageSize pageSize)
     {
-        this.pagingLimit = newLimit;
+        this.pageSize = pageSize;
         return this;
     }
 
@@ -222,8 +222,8 @@ public abstract class AbstractReadCommandBuilder
     {
         DataLimits limits = DataLimits.cqlLimits(cqlLimit < 0 ? DataLimits.NO_LIMIT : cqlLimit,
                                                  perPartitionLimit < 0 ? DataLimits.NO_LIMIT : perPartitionLimit);
-        if (pagingLimit.isDefined())
-            limits = limits.forPaging(pagingLimit);
+        if (pageSize.isDefined())
+            limits = limits.forPaging(pageSize);
         return limits;
     }
 
