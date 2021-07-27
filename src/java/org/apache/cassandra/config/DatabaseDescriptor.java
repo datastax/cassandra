@@ -3463,13 +3463,13 @@ public class DatabaseDescriptor
 
     public static PageSize getAggregationSubPageSize()
     {
-        return PageSize.inBytes(conf.aggretaion_sub_page_size_in_kb * 1024);
+        return PageSize.inBytes(conf.aggregation_subpage_size_in_kb * 1024);
     }
 
     public static void setAggregationSubPageSize(PageSize pageSize)
     {
         Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.BYTES);
         Preconditions.checkArgument(pageSize.bytes() >= 1024);
-        conf.aggretaion_sub_page_size_in_kb = pageSize.bytes() / 1024;
+        conf.aggregation_subpage_size_in_kb = pageSize.bytes() / 1024;
     }
 }
