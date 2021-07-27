@@ -236,6 +236,12 @@ public class SelectStatement implements CQLStatement
     {
         if (SchemaConstants.isUserKeyspace(table.keyspace))
             Guardrails.disallowedWriteConsistencies.ensureAllowed(options.getConsistency(), queryState);
+
+        PageSize pageSize = options.getPageSize();
+        if (pageSize != null && options.getPageSize().isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
+        {
+            Guardrails.pageSize.guard(pageSize.bytes(), "in bytes", false, queryState);
+        }
     }
 
     public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)

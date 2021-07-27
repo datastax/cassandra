@@ -43,7 +43,9 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Object in charge of tracking if we have fetched enough data for a given query.
@@ -428,9 +430,16 @@ public abstract class DataLimits
             if (Guardrails.pageSize.enabled(null))
             {
                 if (bytesLimit != NO_LIMIT)
+                {
                     Guardrails.pageSize.guard(bytesLimit, "in bytes", false, null);
+                }
                 else
+                {
                     bytesLimit = DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb * 1024;
+                    String limitStr = FBUtilities.prettyPrintMemory(bytesLimit);
+                    ClientWarn.instance.warn("Applied page size limit of " + limitStr);
+                    logger.trace("Applied page size limit of {}", limitStr);
+                }
             }
 
             this.bytesLimit = bytesLimit;
