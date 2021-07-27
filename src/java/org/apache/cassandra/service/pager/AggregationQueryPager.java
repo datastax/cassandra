@@ -26,6 +26,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.exceptions.OperationExecutionException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -63,19 +65,23 @@ public final class AggregationQueryPager implements QueryPager
 
     /**
      * This will return the iterator over the partitions. The iterator is limited by the provided page size and the user
-     * specified limit (in the query). That limit is applied to the number of groups covered by the returned data.
-     * Page size can be provided only in rows unit for the groups ({@link IllegalArgumentException} is thrown otherwise).
+     * specified limit (in the query). Both the limit and the page size are applied to the number of groups covered by
+     * the returned data.
+     * <p/>
+     * In case of group-by queries the page size can be provided only in rows unit ({@link OperationExecutionException}
+     * is thrown otherwise). In case of 'aggregate everything' queries, the provided page size and the limits are
+     * ignored as we always return a single row.
      *
-     * @param pageSize the maximum number of elements to return in the next page (groups)
+     * @param pageSize    the maximum number of elements to return in the next page (groups)
      * @param consistency the consistency level to achieve for the query
-     * @param queryState the {@code QueryState} for the query. In practice, this can be null unless
-     * {@code consistency} is a serial consistency
+     * @param queryState  the {@code QueryState} for the query. In practice, this can be null unless
+     *                    {@code consistency} is a serial consistency
      */
     @Override
     public PartitionIterator fetchPage(PageSize pageSize,
                                        ConsistencyLevel consistency,
                                        QueryState queryState,
-                                       long queryStartNanoTime)
+                                       long queryStartNanoTime) throws OperationExecutionException
     {
         if (pageSize.isDefined() && pageSize.getUnit() != PageSize.PageUnit.ROWS)
             throw new OperationExecutionException("Paging in bytes is not supported for aggregation queries. Please specify the page size in rows.");

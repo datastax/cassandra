@@ -896,6 +896,11 @@ public class DatabaseDescriptor
         }
 
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
+
+        if (conf.aggregation_subpage_size_in_kb < 1)
+            throw new ConfigurationException("aggregation_subpage_size_in_kb must be greater than 0");
+
+        setAggregationSubPageSize(getAggregationSubPageSize());
     }
 
     @VisibleForTesting

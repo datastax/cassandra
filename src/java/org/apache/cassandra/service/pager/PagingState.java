@@ -118,13 +118,16 @@ public class PagingState
                 if (isModernSerialized(bytes)) return modernDeserialize(bytes, ProtocolVersion.V4);
             }
         }
-        catch (Exception e)
+        catch (IOException e)
         {
-            logger.error("Protocol exception", e);
-            throw new ProtocolException("Invalid value for the paging state");
+            String msg =  "Failed to deserialize the paging state with protocol version: " + protocolVersion;
+            logger.trace(msg, e);
+            throw new ProtocolException(msg, protocolVersion);
         }
 
-        throw new ProtocolException("Invalid value for the paging state: " + protocolVersion);
+        String msg =  "The serialized paging state does not match any serialization format for protocol version: " + protocolVersion;
+        logger.trace(msg);
+        throw new ProtocolException(msg, protocolVersion);
     }
 
     /*
