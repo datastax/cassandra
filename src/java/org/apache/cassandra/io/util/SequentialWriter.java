@@ -187,7 +187,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         doFlush(true);
     }
 
-    private void syncInternal(boolean syncMetadata)
+    private void forceSync(boolean syncMetadata)
     {
         try
         {
@@ -223,7 +223,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         if (sync)
         {
             doFlush(0);
-            syncInternal(forceSyncWithMetadata);
+            forceSync(forceSyncWithMetadata);
         }
 
         // Remember that we wrote, so we don't write it again on next flush().
