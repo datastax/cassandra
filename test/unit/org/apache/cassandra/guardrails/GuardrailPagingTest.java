@@ -33,7 +33,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.guardrails.GuardrailTester;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -72,8 +71,14 @@ public class GuardrailPagingTest extends GuardrailTester
                 execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", i, j, "test message");
     }
 
+    @Test
+    public void testConfigValidation()
+    {
+        testValidationOfStrictlyPositiveProperty((c, v) -> c.page_size_failure_threshold_in_kb = v.intValue(),
+                                                 "page_size_failure_threshold_in_kb");
+    }
 
-    private ResultMessage.Rows selectWithPaging(int size, PageSize.PageUnit unit) throws InvalidRequestException
+    private ResultMessage.Rows selectWithPaging(int size, PageSize.PageUnit unit, ClientState clientState) throws InvalidRequestException
     {
         PageSize pageSize = new PageSize(size, unit);
         QueryOptions options = QueryOptions.create(ConsistencyLevel.LOCAL_QUORUM,
@@ -85,7 +90,6 @@ public class GuardrailPagingTest extends GuardrailTester
                                                    ProtocolVersion.CURRENT,
                                                    KEYSPACE);
 
-        ClientState clientState = ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER);
         clientState.setKeyspace(KEYSPACE);
         QueryState queryState = new QueryState(clientState);
 
@@ -101,7 +105,7 @@ public class GuardrailPagingTest extends GuardrailTester
     {
         // ask for more rows per page than can fit with the current guardrail
         int rowLimit = partitionCount * rowsPerPartition;
-        ResultMessage.Rows result = selectWithPaging(rowLimit, PageSize.PageUnit.ROWS);
+        ResultMessage.Rows result = selectWithPaging(rowLimit, PageSize.PageUnit.ROWS, ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
         assertTrue(result.result.rows.size() < rowLimit);
     }
 
@@ -111,7 +115,7 @@ public class GuardrailPagingTest extends GuardrailTester
     @Test(expected = InvalidRequestException.class)
     public void testQueryWithLargeBytePagesThrows() throws Throwable
     {
-        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES);
+        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
     }
 
     /**
@@ -121,9 +125,20 @@ public class GuardrailPagingTest extends GuardrailTester
     public void testQueryWithSmallBytePagesWorks() throws Throwable
     {
         int maxPageSize = 100 * 128;
-        ResultMessage.Rows result = selectWithPaging(maxPageSize, PageSize.PageUnit.BYTES);
+        ResultMessage.Rows result = selectWithPaging(maxPageSize, PageSize.PageUnit.BYTES, ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
         // technically incorrect as we compare a size of encoded message to be sent to a client to the page size,
         // but we can't know the page at this point.
         assertTrue(ResultMessage.codec.encodedSize(result, ProtocolVersion.CURRENT) < maxPageSize);
     }
+
+    /**
+     * Test that superusers and internal queries are excluded from the guardrail.
+     */
+    @Test
+    public void testExcludedUsers()
+    {
+        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forInternalCalls());
+        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forExternalCalls(new AuthenticatedUser("cassandfra")));
+    }
+
 }
