@@ -243,6 +243,10 @@ public abstract class DataLimits
      */
     public abstract DataLimits withoutState();
 
+    /**
+     * Returns a copy of this DataLimits with updated counted limit whatever it is (either the rows limit
+     * or groups limit depending on the actual implementation)
+     */
     public abstract DataLimits withCountedLimit(int newCountedLimit);
 
     public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter,
@@ -957,8 +961,7 @@ public abstract class DataLimits
         @Override
         public boolean isCounterBelowLimits(Counter counter)
         {
-            return ((GroupByAwareCounter) counter).rowsCounted < rowLimit && counter.bytesCounted() < bytesLimit
-                    && counter.counted() < groupLimit;
+            return counter.rowsCounted() < rowLimit && counter.bytesCounted() < bytesLimit && counter.counted() < groupLimit;
         }
 
         protected class GroupByAwareCounter extends Counter
@@ -1079,7 +1082,7 @@ public abstract class DataLimits
                 if (logger.isTraceEnabled())
                     logger.trace("{} - GroupByAwareCounter.applyToStatic {}/{}",
                                  hashCode(),
-                                 ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()),
+                                 currentPartitionKey != null ? ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()) : "null",
                                  row == null ? "null" : row.clustering().toString());
 
                 // It's possible that we're "done" if the partition we just started bumped the number of groups (in

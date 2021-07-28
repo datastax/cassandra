@@ -197,7 +197,7 @@ public class PagingQueryTest extends CQLTester
     {
         List<List<ByteBuffer>> rows = assertResults(pagerSupplier, PageSize.inRows(requestedPageSizeInRows), expectedCountOnFirstPage, expectedCount);
         assertThat(ByteBufferUtil.toLong(rows.get(0).get(0))).isEqualTo((long) expectedValue);
-//        assertResults(pagerSupplier, PageSize.inBytes(requestedPageSizeInRows * ROW_SIZE), expectedCountOnFirstPage, expectedCount);
+        assertResults(pagerSupplier, PageSize.inBytes(requestedPageSizeInRows * ROW_SIZE), expectedCountOnFirstPage, expectedCount);
     }
 
     /**

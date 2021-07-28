@@ -260,7 +260,7 @@ public class SelectStatement implements CQLStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        if (aggregationSpec == null && !pageSize.isCompleted(query.limits().count(), PageSize.PageUnit.ROWS))
+        if (aggregationSpec == null && !pageSize.isCompleted(query.limits().rows(), PageSize.PageUnit.ROWS) && !pageSize.isCompleted(query.limits().bytes(), PageSize.PageUnit.BYTES))
             return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
