@@ -222,7 +222,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
         if (sync)
         {
-            doFlush(0);
             forceSync(forceSyncWithMetadata);
         }
 
