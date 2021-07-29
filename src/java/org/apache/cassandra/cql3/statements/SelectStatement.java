@@ -244,6 +244,18 @@ public class SelectStatement implements CQLStatement
         }
     }
 
+    /**
+     * Returns whether the paging can be skipped based on the user limits and the page size - that is, if the user limit
+     * is provided and is lower than the page size, it means that we will only return at most one page and thus paging
+     * is unnecessary in this case. That applies to the page size defined in rows - if the page size is defined in bytes
+     * we cannot say anything about the relation beteween the user rows limit and the page size.
+     */
+    private boolean canSkipPaging(DataLimits userLimits, PageSize pageSize)
+    {
+        return !pageSize.isDefined() ||
+               pageSize.getUnit() == PageSize.PageUnit.ROWS && !pageSize.isCompleted(userLimits.count(), PageSize.PageUnit.ROWS);
+    }
+
     public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -260,7 +272,7 @@ public class SelectStatement implements CQLStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        if (aggregationSpec == null && !pageSize.isCompleted(query.limits().rows(), PageSize.PageUnit.ROWS) && !pageSize.isCompleted(query.limits().bytes(), PageSize.PageUnit.BYTES))
+        if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize))
             return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
@@ -462,7 +474,7 @@ public class SelectStatement implements CQLStatement
 
         try (ReadExecutionController executionController = query.executionController())
         {
-            if (aggregationSpec == null && !pageSize.isCompleted(query.limits().count(), PageSize.PageUnit.ROWS))
+            if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize))
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
