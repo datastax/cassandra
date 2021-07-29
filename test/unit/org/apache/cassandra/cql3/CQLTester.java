@@ -670,7 +670,7 @@ public abstract class CQLTester
         server.start();
     }
 
-    private static Cluster initClientCluster(User user, ProtocolVersion version)
+    private Cluster initClientCluster(User user, ProtocolVersion version)
     {
         SocketOptions socketOptions =
                 new SocketOptions().setConnectTimeoutMillis(TEST_DRIVER_CONNECTION_TIMEOUT_MS.getInt()) // default is 5000
@@ -698,9 +698,37 @@ public abstract class CQLTester
 
         Cluster cluster = builder.build();
 
-        logger.info("Started Java Driver instance for protocol version {}", version);
+        logger.info("Started Java Driver session for {} with protocol version {}", user, version);
 
         return cluster;
+    }
+
+    protected void closeClientCluster(String username, String password)
+    {
+        // Close driver cluster belonging to user
+        User user = new User(username, password);
+        for (ProtocolVersion protocolVersion : PROTOCOL_VERSIONS)
+        {
+            closeClientCluster(user, protocolVersion);
+        }
+    }
+
+    private void closeClientCluster(User user, ProtocolVersion protocolVersion)
+    {
+        Pair<User, ProtocolVersion> key = Pair.create(user, protocolVersion);
+        Session session = sessions.remove(key);
+        if (session != null)
+        {
+            session.close();
+        }
+
+        Cluster cluster = clusters.remove(key);
+        if (cluster != null)
+        {
+            cluster.close();
+        }
+
+        logger.info("Closed Java Driver session for {} with protocol version {}", user, protocolVersion);
     }
 
     protected void dropPerTestKeyspace() throws Throwable
@@ -2838,6 +2866,11 @@ public abstract class CQLTester
 
             return Objects.equal(username, u.username)
                 && Objects.equal(password, u.password);
+        }
+
+        public String toString()
+        {
+            return username;
         }
     }
 
