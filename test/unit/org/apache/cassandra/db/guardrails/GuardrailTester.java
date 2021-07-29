@@ -164,6 +164,7 @@ public abstract class GuardrailTester extends CQLTester
     public void afterGuardrailTest() throws Throwable
     {
         DiagnosticEventService.instance().unsubscribe(listener);
+        closeClientCluster(USERNAME, PASSWORD);
     }
 
     static Guardrails guardrails()
