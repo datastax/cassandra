@@ -138,7 +138,7 @@ public class GuardrailPagingTest extends GuardrailTester
     public void testExcludedUsers()
     {
         selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forInternalCalls());
-        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forExternalCalls(new AuthenticatedUser("cassandfra")));
+        selectWithPaging(140 * 1024, PageSize.PageUnit.BYTES, ClientState.forExternalCalls(new AuthenticatedUser("cassandra")));
     }
 
 }
