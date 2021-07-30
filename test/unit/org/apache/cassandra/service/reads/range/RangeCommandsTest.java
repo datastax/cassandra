@@ -28,6 +28,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.AbstractReadCommandBuilder;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -220,13 +221,13 @@ public class RangeCommandsTest extends CQLTester
         }
 
         @Override
-        public DataLimits forPaging(int pageSize)
+        public DataLimits forPaging(PageSize pageSize)
         {
             return wrapped.forPaging(pageSize);
         }
 
         @Override
-        public DataLimits forPaging(int pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
+        public DataLimits forPaging(PageSize pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
         {
             return wrapped.forPaging(pageSize, lastReturnedKey, lastReturnedKeyRemaining);
         }
@@ -250,6 +251,18 @@ public class RangeCommandsTest extends CQLTester
         }
 
         @Override
+        public int bytes()
+        {
+            return wrapped.bytes();
+        }
+
+        @Override
+        public int rows()
+        {
+            return wrapped.rows();
+        }
+
+        @Override
         public int count()
         {
             return wrapped.count();
@@ -265,6 +278,18 @@ public class RangeCommandsTest extends CQLTester
         public DataLimits withoutState()
         {
             return wrapped.withoutState();
+        }
+
+        @Override
+        public DataLimits withCountedLimit(int newCountedLimit)
+        {
+            return wrapped.withCountedLimit(newCountedLimit);
+        }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return wrapped.withBytesLimit(bytesLimit);
         }
     }
 
