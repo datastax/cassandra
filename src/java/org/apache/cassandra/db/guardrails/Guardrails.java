@@ -270,6 +270,20 @@ public final class Guardrails implements GuardrailsMBean
                                         what, value, threshold));
 
     /**
+     * Guardrail on the weight (bytes) of elements returned within page.
+     */
+    public static final MaxThreshold pageWeight =
+    new MaxThreshold("page_weight",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightWarnThreshold().toBytes(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightFailThreshold().toBytes(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Query for table %s with page weight %s bytes exceeds warning threshold of %s bytes.",
+                                        what, value, threshold)
+                               : format("Aborting query for table %s, page weight %s bytes exceeds fail threshold of %s bytes.",
+                                        what, value, threshold));
+
+    /**
      * Guardrail on the number of partition keys in the IN clause.
      */
     public static final MaxThreshold partitionKeysInSelect =
@@ -923,6 +937,26 @@ public final class Guardrails implements GuardrailsMBean
     }
 
     @Override
+    @Nullable
+    public String getPageWeightWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPageWeightWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getPageWeightFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPageWeightFailThreshold());
+    }
+
+    @Override
+    public void setPageWeightThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setPageWeightThreshold(intSizeFromString(warnSize), intSizeFromString(failSize));
+    }
+
+    @Override
     public boolean getReadBeforeWriteListOperationsEnabled()
     {
         return DEFAULT_CONFIG.getReadBeforeWriteListOperationsEnabled();
@@ -1372,6 +1406,11 @@ public final class Guardrails implements GuardrailsMBean
     private static DataStorageSpec.LongBytesBound sizeFromString(@Nullable String size)
     {
         return StringUtils.isEmpty(size) ? null : new DataStorageSpec.LongBytesBound(size);
+    }
+
+    private static DataStorageSpec.IntBytesBound intSizeFromString(@Nullable String size)
+    {
+        return StringUtils.isEmpty(size) ? null : new DataStorageSpec.IntBytesBound(size);
     }
 
     private static String durationToString(@Nullable DurationSpec duration)

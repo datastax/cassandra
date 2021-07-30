@@ -19,7 +19,18 @@ package org.apache.cassandra.index;
 
 import java.io.UncheckedIOException;
 import java.lang.reflect.Constructor;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -29,7 +40,6 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -49,7 +59,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.FutureTask;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -63,6 +73,7 @@ import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -102,7 +113,10 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.concurrent.*;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
+import org.apache.cassandra.utils.concurrent.Promise;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
@@ -519,13 +533,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     /**
-     * Validates all index groups against the specified SSTables. 
+     * Validates all index groups against the specified SSTables.
      *
      * @param sstables SSTables for which indexes in the group should be built
      * @param throwOnIncomplete whether to throw an error if any index in the group is incomplete
      *
      * @return true if all indexes in all groups are complete and valid
-     *         false if an index in any group is incomplete and {@code throwOnIncomplete} is false 
+     *         false if an index in any group is incomplete and {@code throwOnIncomplete} is false
      *
      * @throws IllegalStateException if {@code throwOnIncomplete} is true and an index in any group is incomplete
      * @throws UncheckedIOException if there is a problem validating any on-disk component in any group
@@ -810,7 +824,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         String indexName = index.getIndexMetadata().name;
         if (isFullRebuild)
             makeIndexQueryable(index, Index.Status.BUILD_SUCCEEDED);
-        
+
         AtomicInteger counter = inProgressBuilds.get(indexName);
         if (counter != null)
         {
@@ -1033,7 +1047,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return !indexes.isEmpty();
     }
 
-    public void indexPartition(DecoratedKey key, Set<Index> indexes, int pageSize)
+    public void indexPartition(DecoratedKey key, Set<Index> indexes, PageSize pageSize)
     {
         indexPartition(key, indexes, pageSize, baseCfs.metadata().regularAndStaticColumns());
     }
@@ -1046,7 +1060,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param pageSize the number of {@link Unfiltered} objects to process in a single page
      * @param columns the columns indexed by at least one of the supplied indexes
      */
-    public void indexPartition(DecoratedKey key, Set<Index> indexes, int pageSize, RegularAndStaticColumns columns)
+    public void indexPartition(DecoratedKey key, Set<Index> indexes, PageSize pageSize, RegularAndStaticColumns columns)
     {
         if (logger.isTraceEnabled())
             logger.trace("Indexing partition {}", baseCfs.metadata().partitionKeyType.getString(key.getKey()));
@@ -1141,39 +1155,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Return the page size used when indexing an entire partition
      */
-    public int calculateIndexingPageSize()
+    public PageSize calculateIndexingPageSize()
     {
         if (FORCE_DEFAULT_INDEXING_PAGE_SIZE.getBoolean())
-            return DEFAULT_PAGE_SIZE;
+            return PageSize.inRows(DEFAULT_PAGE_SIZE);
 
-        double targetPageSizeInBytes = 32 * 1024 * 1024;
-        double meanPartitionSize = baseCfs.getMeanPartitionSize();
-        if (meanPartitionSize <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanCellsPerPartition = baseCfs.getMeanEstimatedCellPerPartitionCount();
-        if (meanCellsPerPartition <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int columnsPerRow = baseCfs.metadata().regularColumns().size();
-        if (columnsPerRow <= 0)
-            return DEFAULT_PAGE_SIZE;
-
-        int meanRowsPerPartition = meanCellsPerPartition / columnsPerRow;
-        double meanRowSize = meanPartitionSize / meanRowsPerPartition;
-
-        int pageSize = (int) Math.max(1, Math.min(DEFAULT_PAGE_SIZE, targetPageSizeInBytes / meanRowSize));
-
-        logger.trace("Calculated page size {} for indexing {}.{} ({}/{}/{}/{})",
-                     pageSize,
-                     baseCfs.metadata.keyspace,
-                     baseCfs.metadata.name,
-                     meanPartitionSize,
-                     meanCellsPerPartition,
-                     meanRowsPerPartition,
-                     meanRowSize);
-
-        return pageSize;
+        return PageSize.inBytes(32 * 1024 * 1024);
     }
 
     /**
