@@ -29,6 +29,7 @@ import java.util.concurrent.Future;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -135,7 +136,7 @@ public class Coordinator implements ICoordinator
             QueryOptions initialOptions = QueryOptions.create(toCassandraCL(consistencyLevel),
                                                               boundBBValues,
                                                               false,
-                                                              pageSize,
+                                                              PageSize.inRows(pageSize),
                                                               null,
                                                               null,
                                                               ProtocolVersion.CURRENT,
@@ -158,7 +159,7 @@ public class Coordinator implements ICoordinator
                     QueryOptions nextOptions = QueryOptions.create(toCassandraCL(consistencyLevel),
                                                                    boundBBValues,
                                                                    true,
-                                                                   pageSize,
+                                                                   PageSize.inRows(pageSize),
                                                                    rows.result.metadata.getPagingState(),
                                                                    null,
                                                                    ProtocolVersion.CURRENT,
