@@ -18,18 +18,25 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
 
 import io.netty.buffer.ByteBuf;
-
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.CBCodec;
@@ -38,10 +45,6 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.CassandraUInt;
 import org.apache.cassandra.utils.Pair;
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
-
-import javax.annotation.Nullable;
 
 /**
  * Options for a query.
@@ -84,7 +87,7 @@ public abstract class QueryOptions
     public static QueryOptions create(ConsistencyLevel consistency,
                                       List<ByteBuffer> values,
                                       boolean skipMetadata,
-                                      int pageSize,
+                                      PageSize pageSize,
                                       PagingState pagingState,
                                       ConsistencyLevel serialConsistency,
                                       ProtocolVersion version,
@@ -96,7 +99,7 @@ public abstract class QueryOptions
     public static QueryOptions create(ConsistencyLevel consistency,
                                       List<ByteBuffer> values,
                                       boolean skipMetadata,
-                                      int pageSize,
+                                      PageSize pageSize,
                                       PagingState pagingState,
                                       ConsistencyLevel serialConsistency,
                                       ProtocolVersion version,
@@ -187,8 +190,8 @@ public abstract class QueryOptions
         throw new UnsupportedOperationException();
     }
 
-    /**  The pageSize for this query. Will be {@code <= 0} if not relevant for the query.  */
-    public int getPageSize()
+    /** The pageSize for this query. Will be {@code <= 0} if not relevant for the query.  */
+    public PageSize getPageSize()
     {
         return getSpecificOptions().pageSize;
     }
@@ -496,16 +499,16 @@ public abstract class QueryOptions
     // Options that are likely to not be present in most queries
     static class SpecificOptions
     {
-        private static final SpecificOptions DEFAULT = new SpecificOptions(-1, null, null, Long.MIN_VALUE, null, UNSET_NOWINSEC);
+        private static final SpecificOptions DEFAULT = new SpecificOptions(PageSize.NONE, null, null, Long.MIN_VALUE, null, UNSET_NOWINSEC);
 
-        private final int pageSize;
+        private final PageSize pageSize;
         private final PagingState state;
         private final ConsistencyLevel serialConsistency;
         private final long timestamp;
         private final String keyspace;
         private final long nowInSeconds;
 
-        private SpecificOptions(int pageSize,
+        private SpecificOptions(PageSize pageSize,
                                 PagingState state,
                                 ConsistencyLevel serialConsistency,
                                 long timestamp,
@@ -539,7 +542,30 @@ public abstract class QueryOptions
             TIMESTAMP,
             NAMES_FOR_VALUES,
             KEYSPACE,
-            NOW_IN_SECONDS;
+            NOW_IN_SECONDS,
+            UNUSED_9,
+            UNUSED_10,
+            UNUSED_11,
+            UNUSED_12,
+            UNUSED_13,
+            UNUSED_14,
+            UNUSED_15,
+            UNUSED_16,
+            UNUSED_17,
+            UNUSED_18,
+            UNUSED_19,
+            UNUSED_20,
+            UNUSED_21,
+            UNUSED_22,
+            UNUSED_23,
+            UNUSED_24,
+            UNUSED_25,
+            UNUSED_26,
+            UNUSED_27,
+            UNUSED_28,
+            UNUSED_29,
+            PAGE_SIZE_IN_BYTES,
+            UNUSED_31;
 
             private static final Flag[] ALL_VALUES = values();
 
@@ -593,7 +619,11 @@ public abstract class QueryOptions
             SpecificOptions options = SpecificOptions.DEFAULT;
             if (!flags.isEmpty())
             {
-                int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
+                PageSize pageSize = flags.contains(Flag.PAGE_SIZE)
+                                          ? flags.contains(Flag.PAGE_SIZE_IN_BYTES)
+                                            ? PageSize.inBytes(body.readInt())
+                                            : PageSize.inRows(body.readInt())
+                                          : PageSize.NONE;
                 PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValueNoCopy(body), version) : null;
                 ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : null;
                 long timestamp = Long.MIN_VALUE;
@@ -627,7 +657,7 @@ public abstract class QueryOptions
             if (flags.contains(Flag.VALUES))
                 CBUtil.writeValueList(options.getValues(), dest);
             if (flags.contains(Flag.PAGE_SIZE))
-                dest.writeInt(options.getPageSize());
+                dest.writeInt(options.getPageSize().getSize());
             if (flags.contains(Flag.PAGING_STATE))
                 CBUtil.writeValue(options.getPagingState().serialize(version), dest);
             if (flags.contains(Flag.SERIAL_CONSISTENCY))
@@ -678,7 +708,7 @@ public abstract class QueryOptions
                 flags.add(Flag.VALUES);
             if (options.skipMetadata())
                 flags.add(Flag.SKIP_METADATA);
-            if (options.getPageSize() >= 0)
+            if (options.getPageSize().isDefined())
                 flags.add(Flag.PAGE_SIZE);
             if (options.getPagingState() != null)
                 flags.add(Flag.PAGING_STATE);
@@ -693,6 +723,8 @@ public abstract class QueryOptions
                     flags.add(Flag.KEYSPACE);
                 if (options.getSpecificOptions().nowInSeconds != UNSET_NOWINSEC)
                     flags.add(Flag.NOW_IN_SECONDS);
+                if (options.getSpecificOptions().pageSize.getUnit() == PageSize.PageUnit.BYTES)
+                    flags.add(Flag.PAGE_SIZE_IN_BYTES);
             }
 
             return flags;

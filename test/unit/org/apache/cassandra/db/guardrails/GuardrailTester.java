@@ -46,8 +46,10 @@ import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.guardrails.GuardrailEvent.GuardrailEventType;
 import org.apache.cassandra.db.view.View;
@@ -473,7 +475,9 @@ public abstract class GuardrailTester extends CQLTester
         return warnings == null
                ? Collections.emptyList()
                : warnings.stream()
-                         .filter(w -> !w.equals(View.USAGE_WARNING) && !w.equals(SASIIndex.USAGE_WARNING))
+                         .filter(w -> !w.equals(View.USAGE_WARNING) 
+                                 && !w.equals(SASIIndex.USAGE_WARNING)
+                                 && !w.startsWith(SelectStatement.USAGE_WARNING_PAGE_WEIGHT))
                          .collect(Collectors.toList());
     }
 
@@ -519,7 +523,7 @@ public abstract class GuardrailTester extends CQLTester
         QueryOptions options = QueryOptions.create(cl,
                                                    Collections.emptyList(),
                                                    false,
-                                                   10,
+                                                   PageSize.inRows(10),
                                                    null,
                                                    serialCl,
                                                    ProtocolVersion.CURRENT,
