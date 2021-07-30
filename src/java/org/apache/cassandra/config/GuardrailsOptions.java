@@ -85,6 +85,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         config.table_properties_ignored = validateTableProperties(config.table_properties_ignored, "table_properties_ignored");
         config.table_properties_disallowed = validateTableProperties(config.table_properties_disallowed, "table_properties_disallowed");
         validateMaxIntThreshold(config.page_size_warn_threshold, config.page_size_fail_threshold, "page_size");
+        validateSizeThreshold(config.page_weight_warn_threshold, config.page_weight_fail_threshold, false, "page_weight");
         validateMaxIntThreshold(config.partition_keys_in_select_warn_threshold, config.partition_keys_in_select_fail_threshold, "partition_keys_in_select");
         validateMaxIntThreshold(config.in_select_cartesian_product_warn_threshold, config.in_select_cartesian_product_fail_threshold, "in_select_cartesian_product");
         config.read_consistency_levels_warned = validateConsistencyLevels(config.read_consistency_levels_warned, "read_consistency_levels_warned");
@@ -343,6 +344,18 @@ public class GuardrailsOptions implements GuardrailsConfig
         return config.page_size_fail_threshold;
     }
 
+    @Override
+    public DataStorageSpec.IntBytesBound getPageWeightWarnThreshold()
+    {
+        return config.page_weight_warn_threshold;
+    }
+
+    @Override
+    public DataStorageSpec.IntBytesBound getPageWeightFailThreshold()
+    {
+        return config.page_weight_fail_threshold;
+    }
+
     public void setPageSizeThreshold(int warn, int fail)
     {
         validateMaxIntThreshold(warn, fail, "page_size");
@@ -354,6 +367,19 @@ public class GuardrailsOptions implements GuardrailsConfig
                                   fail,
                                   () -> config.page_size_fail_threshold,
                                   x -> config.page_size_fail_threshold = x);
+    }
+
+    public void setPageWeightThreshold(DataStorageSpec.IntBytesBound warn, DataStorageSpec.IntBytesBound fail)
+    {
+        validateSizeThreshold(warn, fail, false, "page_weight");
+        updatePropertyWithLogging("page_weight_warn_threshold",
+                                  warn,
+                                  () -> config.page_weight_warn_threshold,
+                                  x -> config.page_weight_warn_threshold = x);
+        updatePropertyWithLogging("page_weight_fail_threshold",
+                                  fail,
+                                  () -> config.page_weight_fail_threshold,
+                                  x -> config.page_weight_fail_threshold = x);
     }
 
     @Override
@@ -753,7 +779,7 @@ public class GuardrailsOptions implements GuardrailsConfig
         return config.collection_size_fail_threshold;
     }
 
-    public void setCollectionSizeThreshold(@Nullable DataStorageSpec.LongBytesBound warn, @Nullable DataStorageSpec.LongBytesBound fail)
+        public void setCollectionSizeThreshold(@Nullable DataStorageSpec.LongBytesBound warn, @Nullable DataStorageSpec.LongBytesBound fail)
     {
         validateSizeThreshold(warn, fail, false, "collection_size");
         updatePropertyWithLogging("collection_size_warn_threshold",
@@ -1186,30 +1212,30 @@ public class GuardrailsOptions implements GuardrailsConfig
                                                       "than the fail threshold %d", warn, name, fail));
     }
 
-    private static void validateSize(DataStorageSpec.LongBytesBound size, boolean allowZero, String name)
+    private static void validateSize(DataStorageSpec size, boolean allowZero, String name)
     {
         if (size == null)
             return;
 
-        if (!allowZero && size.toBytes() == 0)
+        if (!allowZero && size.quantity() == 0)
             throw new IllegalArgumentException(format("Invalid value for %s: 0 is not allowed; " +
                                                       "if attempting to disable use an empty value",
                                                       name));
     }
 
-    private static void validateSizeThreshold(DataStorageSpec.LongBytesBound warn, DataStorageSpec.LongBytesBound fail, boolean allowZero, String name)
+    private static void validateSizeThreshold(DataStorageSpec warn, DataStorageSpec fail, boolean allowZero, String name)
     {
         validateSize(warn, allowZero, name + "_warn_threshold");
         validateSize(fail, allowZero, name + "_fail_threshold");
         validateWarnLowerThanFail(warn, fail, name);
     }
 
-    private static void validateWarnLowerThanFail(DataStorageSpec.LongBytesBound warn, DataStorageSpec.LongBytesBound fail, String name)
+    private static void validateWarnLowerThanFail(DataStorageSpec warn, DataStorageSpec fail, String name)
     {
         if (warn == null || fail == null)
             return;
 
-        if (fail.toBytes() < warn.toBytes())
+        if (fail.unit().toBytes(fail.quantity()) < warn.unit().toBytes(warn.quantity()))
             throw new IllegalArgumentException(format("The warn threshold %s for %s_warn_threshold should be lower " +
                                                       "than the fail threshold %s", warn, name, fail));
     }

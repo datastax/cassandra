@@ -379,6 +379,24 @@ public interface GuardrailsMBean
     void setPageSizeThreshold(int warn, int fail);
 
     /**
+     * @return The threshold to warn when requested page weight (bytes) greater than threshold.
+     * {@code null} means disabled.
+     */
+    int getPageWeightWarnThreshold();
+
+    /**
+     * @return The threshold to prevent requesting page with more data (bytes) than threshold.
+     * {@code null} means disabled.
+     */
+    int getPageWeightFailThreshold();
+
+    /**
+     * @param warn The threshold to warn when the requested page weight (bytes) is greater than threshold. -1 means disabled.
+     * @param fail The threshold to prevent requesting pages with more data (bytes) than threshold. -1 means disabled.
+     */
+    void setPageWeightThreshold(int warn, int fail);
+
+    /**
      * Returns whether list operations that require read before write are allowed.
      *
      * @return {@code true} if list operations that require read before write are allowed, {@code false} otherwise.

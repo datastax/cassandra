@@ -160,6 +160,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.config.SubnetGroups",
     "org.apache.cassandra.config.TrackWarnings",
     "org.apache.cassandra.config.StorageAttachedIndexOptions",
+    "org.apache.cassandra.cql3.PageSize",
     "org.apache.cassandra.db.ConsistencyLevel",
     "org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager",
     "org.apache.cassandra.db.commitlog.CommitLog",

@@ -33,21 +33,22 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.KIBIBYTES;
 
 /**
  * Tests the guardrail for the page size, {@link Guardrails#pageSize}.
  */
-public class GuardrailPageSizeTest extends ThresholdTester
+public class GuardrailPageWeightTest extends ThresholdTester
 {
-    private static final int PAGE_SIZE_WARN_THRESHOLD = 5;
-    private static final int PAGE_SIZE_FAIL_THRESHOLD = 10;
+    private static final int PAGE_WEIGHT_WARN_THRESHOLD = Math.toIntExact(KIBIBYTES.toBytes(2));
+    private static final int PAGE_WEIGHT_FAIL_THRESHOLD = Math.toIntExact(KIBIBYTES.toBytes(5));
 
-    public GuardrailPageSizeTest()
+    public GuardrailPageWeightTest()
     {
-        super(PAGE_SIZE_WARN_THRESHOLD,
-              PAGE_SIZE_FAIL_THRESHOLD,
-              Guardrails.pageSize,
-              Guardrails::setPageSizeThreshold,
+        super(PAGE_WEIGHT_WARN_THRESHOLD,
+              PAGE_WEIGHT_FAIL_THRESHOLD,
+              Guardrails.pageWeight,
+              Guardrails::setPageWeightThreshold,
               Guardrails::getPageSizeWarnThreshold,
               Guardrails::getPageSizeFailThreshold);
     }
@@ -64,41 +65,41 @@ public class GuardrailPageSizeTest extends ThresholdTester
         // regular query
         String query = "SELECT * FROM %s";
         assertPagingValid(query, 3);
-        assertPagingValid(query, PAGE_SIZE_WARN_THRESHOLD);
+        assertPagingValid(query, PAGE_WEIGHT_WARN_THRESHOLD);
         assertPagingWarns(query, 6);
-        assertPagingWarns(query, PAGE_SIZE_FAIL_THRESHOLD);
+        assertPagingWarns(query, PAGE_WEIGHT_FAIL_THRESHOLD);
         assertPagingFails(query, 11);
 
         // aggregation query
         query = "SELECT COUNT(*) FROM %s WHERE k=0";
         assertPagingValid(query, 3);
-        assertPagingValid(query, PAGE_SIZE_WARN_THRESHOLD);
+        assertPagingValid(query, PAGE_WEIGHT_WARN_THRESHOLD);
         assertPagingWarns(query, 6);
-        assertPagingWarns(query, PAGE_SIZE_FAIL_THRESHOLD);
+        assertPagingWarns(query, PAGE_WEIGHT_FAIL_THRESHOLD);
         assertPagingFails(query, 11);
 
         // query with limit over thresholds
         query = "SELECT * FROM %s LIMIT 100";
         assertPagingValid(query, 3);
-        assertPagingValid(query, PAGE_SIZE_WARN_THRESHOLD);
+        assertPagingValid(query, PAGE_WEIGHT_WARN_THRESHOLD);
         assertPagingWarns(query, 6);
-        assertPagingWarns(query, PAGE_SIZE_FAIL_THRESHOLD);
+        assertPagingWarns(query, PAGE_WEIGHT_FAIL_THRESHOLD);
         assertPagingFails(query, 11);
 
         // query with limit under thresholds
         query = "SELECT * FROM %s LIMIT 1";
         assertPagingValid(query, 3);
-        assertPagingValid(query, PAGE_SIZE_WARN_THRESHOLD);
+        assertPagingValid(query, PAGE_WEIGHT_WARN_THRESHOLD);
         assertPagingValid(query, 6);
-        assertPagingValid(query, PAGE_SIZE_FAIL_THRESHOLD);
+        assertPagingValid(query, PAGE_WEIGHT_FAIL_THRESHOLD);
         assertPagingValid(query, 11);
     }
 
     @Test
     public void testExcludedUsers() throws Throwable
     {
-        assertPagingIgnored("SELECT * FROM %s", PAGE_SIZE_WARN_THRESHOLD + 1);
-        assertPagingIgnored("SELECT * FROM %s", PAGE_SIZE_FAIL_THRESHOLD + 1);
+        assertPagingIgnored("SELECT * FROM %s", PAGE_WEIGHT_WARN_THRESHOLD + 1);
+        assertPagingIgnored("SELECT * FROM %s", PAGE_WEIGHT_FAIL_THRESHOLD + 1);
     }
 
     private void assertPagingValid(String query, int pageSize) throws Throwable
@@ -116,17 +117,17 @@ public class GuardrailPageSizeTest extends ThresholdTester
     {
         assertWarns(() -> executeWithPaging(userClientState, query, pageSize),
                     format("Query for table %s with page size %s exceeds warning threshold of %s.",
-                           currentTable(), pageSize, PAGE_SIZE_WARN_THRESHOLD));
+                           currentTable(), pageSize, PAGE_WEIGHT_WARN_THRESHOLD));
     }
 
     private void assertPagingFails(String query, int pageSize) throws Throwable
     {
         assertFails(() -> executeWithPaging(userClientState, query, pageSize),
                     format("Aborting query for table %s, page size %s exceeds fail threshold of %s.",
-                           currentTable(), pageSize, PAGE_SIZE_FAIL_THRESHOLD));
+                           currentTable(), pageSize, PAGE_WEIGHT_FAIL_THRESHOLD));
     }
 
-    private void executeWithPaging(ClientState state, String query, int pageSize)
+    private void executeWithPaging(ClientState state, String query, int pageWeightBytes)
     {
         QueryState queryState = new QueryState(state);
 
@@ -137,7 +138,7 @@ public class GuardrailPageSizeTest extends ThresholdTester
         QueryOptions options = QueryOptions.create(ConsistencyLevel.ONE,
                                                    Collections.emptyList(),
                                                    false,
-                                                   PageSize.inRows(pageSize),
+                                                   PageSize.inBytes(pageWeightBytes),
                                                    null,
                                                    null,
                                                    ProtocolVersion.CURRENT,

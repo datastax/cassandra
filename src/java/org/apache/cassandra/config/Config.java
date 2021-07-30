@@ -36,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogOptions;
+import org.apache.cassandra.config.DataStorageSpec.IntBytesBound;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -233,29 +234,29 @@ public class Config
     public boolean rpc_keepalive = true;
 
     @Replaces(oldName = "internode_max_message_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated=true)
-    public DataStorageSpec.IntBytesBound internode_max_message_size;
+    public IntBytesBound internode_max_message_size;
 
     @Replaces(oldName = "internode_socket_send_buffer_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
     @Replaces(oldName = "internode_send_buff_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_socket_send_buffer_size = new DataStorageSpec.IntBytesBound("0B");
+    public IntBytesBound internode_socket_send_buffer_size = new IntBytesBound("0B");
     @Replaces(oldName = "internode_socket_receive_buffer_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
     @Replaces(oldName = "internode_recv_buff_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_socket_receive_buffer_size = new DataStorageSpec.IntBytesBound("0B");
+    public IntBytesBound internode_socket_receive_buffer_size = new IntBytesBound("0B");
 
     // TODO: derive defaults from system memory settings?
     @Replaces(oldName = "internode_application_send_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_send_queue_capacity = new DataStorageSpec.IntBytesBound("4MiB");
+    public IntBytesBound internode_application_send_queue_capacity = new IntBytesBound("4MiB");
     @Replaces(oldName = "internode_application_send_queue_reserve_endpoint_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_send_queue_reserve_endpoint_capacity = new DataStorageSpec.IntBytesBound("128MiB");
+    public IntBytesBound internode_application_send_queue_reserve_endpoint_capacity = new IntBytesBound("128MiB");
     @Replaces(oldName = "internode_application_send_queue_reserve_global_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_send_queue_reserve_global_capacity = new DataStorageSpec.IntBytesBound("512MiB");
+    public IntBytesBound internode_application_send_queue_reserve_global_capacity = new IntBytesBound("512MiB");
 
     @Replaces(oldName = "internode_application_receive_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_receive_queue_capacity = new DataStorageSpec.IntBytesBound("4MiB");
+    public IntBytesBound internode_application_receive_queue_capacity = new IntBytesBound("4MiB");
     @Replaces(oldName = "internode_application_receive_queue_reserve_endpoint_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_receive_queue_reserve_endpoint_capacity = new DataStorageSpec.IntBytesBound("128MiB");
+    public IntBytesBound internode_application_receive_queue_reserve_endpoint_capacity = new IntBytesBound("128MiB");
     @Replaces(oldName = "internode_application_receive_queue_reserve_global_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound internode_application_receive_queue_reserve_global_capacity = new DataStorageSpec.IntBytesBound("512MiB");
+    public IntBytesBound internode_application_receive_queue_reserve_global_capacity = new IntBytesBound("512MiB");
 
     // Defensive settings for protecting Cassandra from true network partitions. See (CASSANDRA-14358) for details.
     // The amount of time to wait for internode tcp connections to establish.
@@ -293,7 +294,7 @@ public class Config
     public volatile boolean native_transport_rate_limiting_enabled = false;
     public volatile int native_transport_max_requests_per_second = 1000000;
     @Replaces(oldName = "native_transport_receive_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
-    public DataStorageSpec.IntBytesBound native_transport_receive_queue_capacity = new DataStorageSpec.IntBytesBound("1MiB");
+    public IntBytesBound native_transport_receive_queue_capacity = new IntBytesBound("1MiB");
 
     @Deprecated
     public Integer native_transport_max_negotiable_protocol_version = null;
@@ -780,6 +781,8 @@ public class Config
 
     public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
 
+    public volatile int aggregation_subpage_size_in_kb = 2048;
+
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
      */
@@ -856,6 +859,8 @@ public class Config
     public volatile int materialized_views_per_table_fail_threshold = -1;
     public volatile int page_size_warn_threshold = -1;
     public volatile int page_size_fail_threshold = -1;
+    public volatile DataStorageSpec.IntBytesBound page_weight_warn_threshold = null;
+    public volatile DataStorageSpec.IntBytesBound page_weight_fail_threshold = null;
     public volatile int partition_keys_in_select_warn_threshold = -1;
     public volatile int partition_keys_in_select_fail_threshold = -1;
     public volatile int in_select_cartesian_product_warn_threshold = -1;

@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.guardrails;
 
 import java.util.Collections;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -267,6 +268,20 @@ public final class Guardrails implements GuardrailsMBean
                      isWarning ? format("Query for table %s with page size %s exceeds warning threshold of %s.",
                                         what, value, threshold)
                                : format("Aborting query for table %s, page size %s exceeds fail threshold of %s.",
+                                        what, value, threshold));
+
+    /**
+     * Guardrail on the weight (bytes) of elements returned within page.
+     */
+    public static final MaxThreshold pageWeight =
+    new MaxThreshold("page_weight",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightWarnThreshold().toBytes(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightFailThreshold().toBytes(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Query for table %s with page weight %s bytes exceeds warning threshold of %s bytes.",
+                                        what, value, threshold)
+                               : format("Aborting query for table %s, page weight %s bytes exceeds fail threshold of %s bytes.",
                                         what, value, threshold));
 
     /**
@@ -920,6 +935,27 @@ public final class Guardrails implements GuardrailsMBean
     public void setPageSizeThreshold(int warn, int fail)
     {
         DEFAULT_CONFIG.setPageSizeThreshold(warn, fail);
+    }
+
+    @Override
+    public int getPageWeightWarnThreshold()
+    {
+        return Math.toIntExact(Optional.ofNullable(DEFAULT_CONFIG.getPageWeightWarnThreshold())
+                                       .map(DataStorageSpec::quantity).orElse(-1L));
+    }
+
+    @Override
+    public int getPageWeightFailThreshold()
+    {
+        return Math.toIntExact(Optional.ofNullable(DEFAULT_CONFIG.getPageWeightFailThreshold())
+                                       .map(DataStorageSpec::quantity).orElse(-1L));
+    }
+
+    @Override
+    public void setPageWeightThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setPageWeightThreshold(warn > 0 ? new DataStorageSpec.IntBytesBound(warn) : null,
+                                              fail > 0 ? new DataStorageSpec.IntBytesBound(fail) : null);
     }
 
     @Override
