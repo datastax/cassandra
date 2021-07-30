@@ -22,9 +22,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
-
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class LogReplicationSetTest
 {
@@ -38,7 +37,8 @@ public class LogReplicationSetTest
         replicas.addReplicas(spyFiles);
         spyFiles.forEach(f -> Mockito.when(f.exists()).thenThrow(new RuntimeException()));
 
-        assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> replicas.append(LogRecord.makeAbort(System.currentTimeMillis())));
+        Assertions.assertThatExceptionOfType(RuntimeException.class)
+                  .isThrownBy(() -> replicas.append(LogRecord.makeAbort(System.currentTimeMillis())));
     }
 
     @Test
