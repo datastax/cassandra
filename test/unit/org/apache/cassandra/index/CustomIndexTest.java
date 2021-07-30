@@ -35,7 +35,7 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -47,7 +47,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.db.*;
@@ -116,11 +115,11 @@ public class CustomIndexTest extends CQLTester
         flush();
 
         SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
-        IndexIncludedInBuild included = (IndexIncludedInBuild)indexManager.getIndexByName(toInclude);
+        IndexIncludedInBuild included = (IndexIncludedInBuild) indexManager.getIndexByName(toInclude);
         included.reset();
         assertTrue(included.rowsInserted.isEmpty());
 
-        IndexExcludedFromBuild excluded = (IndexExcludedFromBuild)indexManager.getIndexByName(toExclude);
+        IndexExcludedFromBuild excluded = (IndexExcludedFromBuild) indexManager.getIndexByName(toExclude);
         excluded.reset();
         assertTrue(excluded.rowsInserted.isEmpty());
 
@@ -144,7 +143,7 @@ public class CustomIndexTest extends CQLTester
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 3, 3);
 
         SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
-        StubIndex index = (StubIndex)indexManager.getIndexByName(indexName);
+        StubIndex index = (StubIndex) indexManager.getIndexByName(indexName);
         assertEquals(4, index.rowsInserted.size());
         assertTrue(index.partitionDeletions.isEmpty());
         assertTrue(index.rangeTombstones.isEmpty());
@@ -157,6 +156,7 @@ public class CustomIndexTest extends CQLTester
         assertEquals(1, index.partitionDeletions.size());
         assertEquals(1, index.rangeTombstones.size());
     }
+
     @Test
     public void nonCustomIndexesRequireExactlyOneTargetColumn() throws Throwable
     {
@@ -164,7 +164,7 @@ public class CustomIndexTest extends CQLTester
 
         assertInvalidMessage("Only CUSTOM indexes support multiple columns", "CREATE INDEX multi_idx on %s(v1,v2)");
         assertInvalidMessage("Only CUSTOM indexes can be created without specifying a target column",
-                           "CREATE INDEX no_targets on %s()");
+                             "CREATE INDEX no_targets on %s()");
 
         createIndex(String.format("CREATE CUSTOM INDEX multi_idx ON %%s(v1, v2) USING '%s'", StubIndex.class.getName()));
         assertIndexCreated("multi_idx", "v1", "v2");
@@ -410,7 +410,7 @@ public class CustomIndexTest extends CQLTester
                                   indexName,
                                   NoCustomExpressionsIndex.class.getName()));
         assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
-                                  String.format( IndexRestrictions.CUSTOM_EXPRESSION_NOT_SUPPORTED, indexName),
+                                  String.format(IndexRestrictions.CUSTOM_EXPRESSION_NOT_SUPPORTED, indexName),
                                   QueryValidationException.class,
                                   String.format("SELECT * FROM %%s WHERE expr(%s, 'foo bar baz')", indexName));
     }
@@ -469,9 +469,9 @@ public class CustomIndexTest extends CQLTester
                                   currentTable(),
                                   SettableSelectivityIndex.class.getName()));
         SettableSelectivityIndex moreSelective =
-            (SettableSelectivityIndex)getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_more_selective");
+        (SettableSelectivityIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_more_selective");
         SettableSelectivityIndex lessSelective =
-            (SettableSelectivityIndex)getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_less_selective");
+        (SettableSelectivityIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_less_selective");
         assertEquals(0, moreSelective.searchersProvided);
         assertEquals(0, lessSelective.searchersProvided);
 
@@ -500,9 +500,9 @@ public class CustomIndexTest extends CQLTester
                                   currentTable(),
                                   SettableSelectivityIndex.class.getName()));
         SettableSelectivityIndex moreSelective =
-            (SettableSelectivityIndex)getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_more_selective");
+        (SettableSelectivityIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_more_selective");
         SettableSelectivityIndex lessSelective =
-            (SettableSelectivityIndex)getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_less_selective");
+        (SettableSelectivityIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(currentTable() + "_less_selective");
         assertEquals(0, moreSelective.searchersProvided);
         assertEquals(0, lessSelective.searchersProvided);
 
@@ -551,7 +551,7 @@ public class CustomIndexTest extends CQLTester
         createIndex(String.format("CREATE CUSTOM INDEX reload_counter ON %%s() USING '%s'",
                                   CountMetadataReloadsIndex.class.getName()));
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        CountMetadataReloadsIndex index = (CountMetadataReloadsIndex)cfs.indexManager.getIndexByName("reload_counter");
+        CountMetadataReloadsIndex index = (CountMetadataReloadsIndex) cfs.indexManager.getIndexByName("reload_counter");
         assertEquals(0, index.reloads.get());
 
         // reloading the CFS, even without any metadata changes invokes the index's metadata reload task
@@ -565,7 +565,7 @@ public class CustomIndexTest extends CQLTester
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k,c))");
         createIndex(String.format("CREATE CUSTOM INDEX cleanup_index ON %%s() USING '%s'", StubIndex.class.getName()));
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        StubIndex index  = (StubIndex)cfs.indexManager.getIndexByName("cleanup_index");
+        StubIndex index = (StubIndex) cfs.indexManager.getIndexByName("cleanup_index");
 
         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 0, 0);
         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
@@ -594,7 +594,7 @@ public class CustomIndexTest extends CQLTester
         createTable("CREATE TABLE %s (k int, c int, PRIMARY KEY (k,c))");
         createIndex(String.format("CREATE CUSTOM INDEX row_ttl_test_index ON %%s() USING '%s'", StubIndex.class.getName()));
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        StubIndex index  = (StubIndex)cfs.indexManager.getIndexByName("row_ttl_test_index");
+        StubIndex index = (StubIndex) cfs.indexManager.getIndexByName("row_ttl_test_index");
 
         execute("INSERT INTO %s (k, c) VALUES (?, ?) USING TTL 1", 0, 0);
         execute("INSERT INTO %s (k, c) VALUES (?, ?)", 0, 1);
@@ -680,7 +680,7 @@ public class CustomIndexTest extends CQLTester
         // Index the partition with an Indexer which artificially simulates additional concurrent
         // flush activity by periodically issuing barriers on the read & write op groupings
         DecoratedKey targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(0));
-        indexManager.indexPartition(targetKey, Collections.singleton(index), totalRows / 10);
+        indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(totalRows / 10));
 
         // When indexing is done check that:
         // * The base table's read ordering at finish was > the one at the start (i.e. that
@@ -739,7 +739,7 @@ public class CustomIndexTest extends CQLTester
         for (int pageSize = 1; pageSize <= 5; pageSize++)
         {
             targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(1));
-            indexManager.indexPartition(targetKey, Collections.singleton(index), pageSize);
+            indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(pageSize));
             assertEquals(3, index.rowsInserted.size());
             assertEquals(0, index.rangeTombstones.size());
             assertTrue(index.partitionDeletions.get(0).isLive());
@@ -749,7 +749,7 @@ public class CustomIndexTest extends CQLTester
         for (int pageSize = 1; pageSize <= 5; pageSize++)
         {
             targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(2));
-            indexManager.indexPartition(targetKey, Collections.singleton(index), pageSize);
+            indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(pageSize));
             assertEquals(1, index.rowsInserted.size());
             assertEquals(0, index.rangeTombstones.size());
             assertTrue(index.partitionDeletions.get(0).isLive());
@@ -759,7 +759,7 @@ public class CustomIndexTest extends CQLTester
         for (int pageSize = 1; pageSize <= 5; pageSize++)
         {
             targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(3));
-            indexManager.indexPartition(targetKey, Collections.singleton(index), pageSize);
+            indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(pageSize));
             assertEquals(1, index.rowsInserted.size());
             assertEquals(2, index.rangeTombstones.size());
             assertTrue(index.partitionDeletions.get(0).isLive());
@@ -769,7 +769,7 @@ public class CustomIndexTest extends CQLTester
         for (int pageSize = 1; pageSize <= 5; pageSize++)
         {
             targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(5));
-            indexManager.indexPartition(targetKey, Collections.singleton(index), pageSize);
+            indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(pageSize));
             assertEquals(1, index.partitionDeletions.size());
             assertFalse(index.partitionDeletions.get(0).isLive());
             index.reset();
@@ -798,7 +798,7 @@ public class CustomIndexTest extends CQLTester
 
         // Index the partition
         DecoratedKey targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(0));
-        indexManager.indexPartition(targetKey, Collections.singleton(index), totalRows);
+        indexManager.indexPartition(targetKey, Collections.singleton(index), PageSize.inRows(totalRows));
 
         // Assert only one partition is counted
         assertEquals(1, index.beginCalls);
@@ -829,7 +829,7 @@ public class CustomIndexTest extends CQLTester
 
         // Index the partition
         DecoratedKey targetKey = getCurrentColumnFamilyStore().decorateKey(ByteBufferUtil.bytes(1));
-        indexManager.indexPartition(targetKey, Sets.newHashSet(index, index2), 1);
+        indexManager.indexPartition(targetKey, Sets.newHashSet(index, index2), PageSize.inRows(1));
 
         // and both indexes should have the same range tombstone
         assertEquals(index.rangeTombstones, index2.rangeTombstones);
@@ -973,8 +973,8 @@ public class CustomIndexTest extends CQLTester
 
         public Searcher searcherFor(ReadCommand command)
         {
-                searchersProvided++;
-                return super.searcherFor(command);
+            searchersProvided++;
+            return super.searcherFor(command);
         }
     }
 
@@ -1133,14 +1133,21 @@ public class CustomIndexTest extends CQLTester
                         readOrderingAtFinish = baseCfs.readOrdering.getCurrent();
                 }
 
-                public void partitionDelete(DeletionTime deletionTime) { }
+                public void partitionDelete(DeletionTime deletionTime)
+                {
+                }
 
-                public void rangeTombstone(RangeTombstone tombstone) { }
+                public void rangeTombstone(RangeTombstone tombstone)
+                {
+                }
 
-                public void updateRow(Row oldRowData, Row newRowData) { }
+                public void updateRow(Row oldRowData, Row newRowData)
+                {
+                }
 
-                public void removeRow(Row row) { }
-
+                public void removeRow(Row row)
+                {
+                }
             };
         }
     }
@@ -1225,7 +1232,8 @@ public class CustomIndexTest extends CQLTester
         @Override
         public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker)
         {
-            return new SSTableFlushObserver() {
+            return new SSTableFlushObserver()
+            {
 
                 @Override
                 public void begin()
@@ -1537,7 +1545,8 @@ public class CustomIndexTest extends CQLTester
                                                      .filter(Objects::nonNull)
                                                      .collect(Collectors.toSet());
 
-                return indexers.isEmpty() ? null : new Index.Indexer() {
+                return indexers.isEmpty() ? null : new Index.Indexer()
+                {
 
                     @Override
                     public void begin()
@@ -1605,7 +1614,8 @@ public class CustomIndexTest extends CQLTester
                                                              .filter(Objects::nonNull)
                                                              .collect(Collectors.toSet());
 
-                return new SSTableFlushObserver() {
+                return new SSTableFlushObserver()
+                {
 
                     @Override
                     public void begin()
