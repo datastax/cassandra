@@ -23,6 +23,7 @@ import java.util.Set;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.config.DataStorageSpec;
+import org.apache.cassandra.config.DataStorageSpec.IntBytesBound;
 import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.ConsistencyLevel;
 
@@ -213,14 +214,24 @@ public interface GuardrailsConfig
     boolean getDropKeyspaceEnabled();
 
     /**
-     * @return The threshold to warn when page size exceeds given size.
+     * @return The threshold to warn when page size exceeds given size in rows.
      */
     int getPageSizeWarnThreshold();
 
     /**
-     * @return The threshold to fail when page size exceeds given size.
+     * @return The threshold to fail when page size exceeds given size in rows.
      */
     int getPageSizeFailThreshold();
+
+    /**
+     * @return The threshold to warn when page size exceeds given size in bytes.
+     */
+    IntBytesBound getPageWeightWarnThreshold();
+
+    /**
+     * @return The threshold to fail when page size exceeds given size in bytes.
+     */
+    IntBytesBound getPageWeightFailThreshold();
 
     /**
      * Returns whether list operations that require read before write are allowed.
