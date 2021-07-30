@@ -78,6 +78,7 @@ import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.Config.CommitLogSync;
 import org.apache.cassandra.config.Config.PaxosOnLinearizabilityViolation;
 import org.apache.cassandra.config.Config.PaxosStatePurging;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.commitlog.AbstractCommitLogSegmentManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -980,6 +981,11 @@ public class DatabaseDescriptor
             throw new ConfigurationException(String.format("Invalid configuration. Heap dump is enabled but cannot create heap dump output path: %s.", conf.heap_dump_path != null ? conf.heap_dump_path : "null"));
 
         conf.sai_options.validate();
+
+        if (conf.aggregation_subpage_size_in_kb < 1)
+            throw new ConfigurationException("aggregation_subpage_size_in_kb must be greater than 0");
+
+        setAggregationSubPageSize(getAggregationSubPageSize());
     }
 
     @VisibleForTesting
@@ -4971,5 +4977,17 @@ public class DatabaseDescriptor
     public static boolean isEmulateDbaasDefaults()
     {
         return conf.emulate_dbaas_defaults;
+    }
+
+    public static PageSize getAggregationSubPageSize()
+    {
+        return PageSize.inBytes(conf.aggregation_subpage_size_in_kb * 1024);
+    }
+
+    public static void setAggregationSubPageSize(PageSize pageSize)
+    {
+        Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.BYTES);
+        Preconditions.checkArgument(pageSize.bytes() >= 1024);
+        conf.aggregation_subpage_size_in_kb = pageSize.bytes() / 1024;
     }
 }
