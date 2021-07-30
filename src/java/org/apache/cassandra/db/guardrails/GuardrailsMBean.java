@@ -379,6 +379,31 @@ public interface GuardrailsMBean
     void setPageSizeThreshold(int warn, int fail);
 
     /**
+     * @return The threshold to warn when requesting page with more data (bytes) than threshold, as a string formatted as in,
+     * for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}. A {@code null} value means disabled.
+     */
+    @Nullable
+    String getPageWeightWarnThreshold();
+
+    /**
+     * @return The threshold to fail when requesting page with more data (bytes) than threshold, as a string formatted as in,
+     * for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}. A {@code null} value means disabled.
+     */
+    @Nullable
+    String getPageWeightFailThreshold();
+
+    /**
+     * @param warnSize The threshold to warn when encountering page weights larger than threshold, as a string formatted
+     *                 as in, for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}.
+     *                 A {@code null} value means disabled.
+     * @param failSize The threshold to fail when encountering page weights larger than threshold, as a string formatted
+     *                 as in, for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}.
+     *                 A {@code null} value means disabled. Triggering a failure emits a log message and a diagnostic
+     *                 event, but it desn't throw an exception interrupting the offending sstable write.
+     */
+    void setPageWeightThreshold(@Nullable String warnSize, @Nullable String failSize);
+
+    /**
      * Returns whether list operations that require read before write are allowed.
      *
      * @return {@code true} if list operations that require read before write are allowed, {@code false} otherwise.

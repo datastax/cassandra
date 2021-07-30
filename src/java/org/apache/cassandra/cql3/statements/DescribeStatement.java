@@ -159,14 +159,17 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         //
 
         long offset = getOffset(pagingState, schema.getVersion());
-        int pageSize = options.getPageSize();
+        PageSize pageSize = options.getPageSize();
+
+        if (pageSize.isDefined() && pageSize.getUnit() != PageSize.PageUnit.ROWS)
+            throw new InvalidRequestException("Paging in bytes is not supported for describe statement. Please specify the page size in rows.");
 
         Stream<? extends T> stream = describe(state.getClientState(), keyspaces);
 
         if (offset > 0L)
             stream = stream.skip(offset);
-        if (pageSize > 0)
-            stream = stream.limit(pageSize);
+        if (pageSize.isDefined())
+            stream = stream.limit(pageSize.getSize());
 
         List<List<ByteBuffer>> rows = stream.map(e -> toRow(e, includeInternalDetails))
                                             .collect(Collectors.toList());
@@ -174,8 +177,10 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(metadata(state.getClientState()));
         ResultSet result = new ResultSet(resultMetadata, rows);
 
-        if (pageSize > 0 && rows.size() == pageSize)
-            result.metadata.setHasMorePages(getPagingState(offset + pageSize, schema.getVersion()));
+        if (pageSize.isDefined() && rows.size() == pageSize.getSize())
+        {
+            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getSize(), schema.getVersion()));
+        }
 
         return new ResultMessage.Rows(result);
     }
