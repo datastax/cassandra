@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
@@ -37,7 +36,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.fail;
 
 public class DataLimitsTest
@@ -98,25 +96,6 @@ public class DataLimitsTest
         assertThat(groupByLimitsForPagingInBytes.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("ROWS LIMIT").contains("BYTES LIMIT 13");
         assertThat(groupByLimitsForPagingInRowsWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").contains("ROWS LIMIT 13").doesNotContain("BYTES LIMIT").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
         assertThat(groupByLimitsForPagingInBytesWithLastRow.toString()).contains("GROUP LIMIT 19").contains("GROUP PER PARTITION LIMIT 17").doesNotContain("ROWS LIMIT").contains("BYTES LIMIT 13").contains(lastRetKeyStr).contains(lastRetKeyRemainingStr);
-    }
-
-    @Test
-    public void guardrailsTest()
-    {
-        try
-        {
-            assertThat(DataLimits.cqlLimits(19, 17).bytes()).isEqualTo(NO_LIMIT);
-
-            DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb = 512;
-            assertThat(DataLimits.cqlLimits(19, 17).bytes()).isEqualTo(512 * 1024);
-            assertThat(DataLimits.cqlLimits(19, 17).forPaging(PageSize.inBytes(256 * 1024)).bytes()).isEqualTo(256 * 1024);
-            assertThatExceptionOfType(InvalidRequestException.class).isThrownBy(() -> DataLimits.groupByLimits(19, 17, 2048 * 1024, 23, AggregationSpecification.AGGREGATE_EVERYTHING))
-                                                                    .withMessageContaining("2MB is greater than the maximum allowed (512kB)");
-        }
-        finally
-        {
-            DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb = -1;
-        }
     }
 
     private void checkSerialization(MessagingService.Version version, DataLimits limits, String name)

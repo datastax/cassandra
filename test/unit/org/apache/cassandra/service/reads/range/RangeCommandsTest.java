@@ -280,6 +280,12 @@ public class RangeCommandsTest extends CQLTester
         {
             return wrapped.withCountedLimit(newCountedLimit);
         }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return wrapped.withBytesLimit(bytesLimit);
+        }
     }
 
     public static final class MockedIndex extends StubIndex

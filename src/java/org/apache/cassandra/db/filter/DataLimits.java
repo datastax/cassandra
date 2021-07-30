@@ -27,25 +27,32 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.aggregation.GroupingState;
-import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.CachedPartition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
 import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Object in charge of tracking if we have fetched enough data for a given query.
@@ -69,7 +76,7 @@ public abstract class DataLimits
 
     public static final int NO_LIMIT = Integer.MAX_VALUE;
 
-    public static final DataLimits NONE = new CQLLimits(NO_LIMIT)
+    public static final DataLimits NONE = new CQLLimits(NO_LIMIT, NO_LIMIT, NO_LIMIT, false)
     {
         @Override
         public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
@@ -102,7 +109,7 @@ public abstract class DataLimits
 
     // We currently deal with distinct queries by querying full partitions but limiting the result at 1 row per
     // partition (see SelectStatement.makeFilter). So an "unbounded" distinct is still actually doing some filtering.
-    public static final DataLimits DISTINCT_NONE = new CQLLimits(NO_LIMIT, 1, true);
+    public static final DataLimits DISTINCT_NONE = new CQLLimits(NO_LIMIT, NO_LIMIT, 1, true);
 
     public enum Kind
     {
@@ -116,14 +123,14 @@ public abstract class DataLimits
 
     public static DataLimits cqlLimits(int cqlRowLimit)
     {
-        return cqlRowLimit == NO_LIMIT ? NONE : new CQLLimits(cqlRowLimit);
+        return cqlRowLimit == NO_LIMIT ? NONE : new CQLLimits(NO_LIMIT, cqlRowLimit, NO_LIMIT, false);
     }
 
     public static DataLimits cqlLimits(int cqlRowLimit, int perPartitionLimit)
     {
         return cqlRowLimit == NO_LIMIT && perPartitionLimit == NO_LIMIT
              ? NONE
-             : new CQLLimits(cqlRowLimit, perPartitionLimit);
+             : new CQLLimits(NO_LIMIT, cqlRowLimit, perPartitionLimit, false);
     }
 
     private static DataLimits cqlLimits(int bytesLimit, int cqlRowLimit, int perPartitionLimit, boolean isDistinct)
@@ -248,6 +255,11 @@ public abstract class DataLimits
      * or groups limit depending on the actual implementation)
      */
     public abstract DataLimits withCountedLimit(int newCountedLimit);
+
+    /**
+     * Returns a copy of this DataLimits with updated bytes limit.
+     */
+    public abstract DataLimits withBytesLimit(int bytesLimit);
 
     public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter,
                                               int nowInSec,
@@ -414,38 +426,8 @@ public abstract class DataLimits
         // Whether the query is a distinct query or not.
         protected final boolean isDistinct;
 
-        private CQLLimits(int rowLimit)
-        {
-            this(rowLimit, NO_LIMIT);
-        }
-
-        private CQLLimits(int rowLimit, int perPartitionLimit)
-        {
-            this(NO_LIMIT, rowLimit, perPartitionLimit, false);
-        }
-
-        private CQLLimits(int rowLimit, int perPartitionLimit, boolean isDistinct)
-        {
-            this(NO_LIMIT, rowLimit, perPartitionLimit, isDistinct);
-        }
-
         private CQLLimits(int bytesLimit, int rowsLimit, int perPartitionLimit, boolean isDistinct)
         {
-            if (Guardrails.pageSize.enabled(null))
-            {
-                if (bytesLimit != NO_LIMIT)
-                {
-                    Guardrails.pageSize.guard(bytesLimit, "in bytes", false, null);
-                }
-                else
-                {
-                    bytesLimit = DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb * 1024;
-                    String limitStr = FBUtilities.prettyPrintMemory(bytesLimit);
-                    ClientWarn.instance.warn("Applied page size limit of " + limitStr);
-                    logger.trace("Applied page size limit of {}", limitStr);
-                }
-            }
-
             this.bytesLimit = bytesLimit;
             this.rowLimit = rowsLimit;
             this.perPartitionLimit = perPartitionLimit;
@@ -454,7 +436,7 @@ public abstract class DataLimits
 
         private static CQLLimits distinct(int rowLimit)
         {
-            return new CQLLimits(rowLimit, 1, true);
+            return new CQLLimits(NO_LIMIT, rowLimit, 1, true);
         }
 
         public Kind kind()
@@ -558,6 +540,12 @@ public abstract class DataLimits
         public DataLimits withCountedLimit(int newCountedLimit)
         {
             return new CQLLimits(bytesLimit, newCountedLimit, perPartitionLimit, isDistinct);
+        }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return new CQLLimits(bytesLimit, rowLimit, perPartitionLimit, isDistinct);
         }
 
         public float estimateTotalResults(ColumnFamilyStore cfs)
@@ -731,6 +719,12 @@ public abstract class DataLimits
         }
 
         @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return new CQLPagingLimits(bytesLimit, rowLimit, perPartitionLimit, isDistinct, lastReturnedKey, lastReturnedKeyRemaining);
+        }
+
+        @Override
         public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             return new PagingAwareCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
@@ -847,7 +841,7 @@ public abstract class DataLimits
 
         public DataLimits forShortReadRetry(int toFetch)
         {
-            return new CQLLimits(toFetch);
+            return new CQLLimits(NO_LIMIT, toFetch, NO_LIMIT, false);
         }
 
         @Override
@@ -940,6 +934,14 @@ public abstract class DataLimits
         {
             return new CQLGroupByLimits(newCountedLimit, groupPerPartitionLimit, bytesLimit, rowLimit, groupBySpec, state);
         }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return new CQLGroupByLimits(groupLimit, groupPerPartitionLimit, bytesLimit, rowLimit, groupBySpec, state);
+        }
+
+
 
         @Override
         public String toString()
@@ -1313,6 +1315,14 @@ public abstract class DataLimits
         {
             return new CQLGroupByPagingLimits(newCountedLimit, groupPerPartitionLimit, bytesLimit, rowLimit, groupBySpec, state, lastReturnedKey, lastReturnedKeyRemaining);
         }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return new CQLGroupByPagingLimits(groupLimit, groupPerPartitionLimit, bytesLimit, rowLimit, groupBySpec, state, lastReturnedKey, lastReturnedKeyRemaining);
+        }
+
+
 
         private class PagingGroupByAwareCounter extends GroupByAwareCounter
         {

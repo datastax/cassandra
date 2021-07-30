@@ -70,6 +70,8 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -92,8 +94,6 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 public class SelectStatement implements CQLStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
-
-    public static final int DEFAULT_PAGE_SIZE = 10000;
 
     public final VariableSpecifications bindVariables;
     public final TableMetadata table;
@@ -272,6 +272,9 @@ public class SelectStatement implements CQLStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(queryState, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
+        if (query.limits().isGroupByLimit() && pageSize != null && pageSize.isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
+            throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
+
         if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize))
             return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
@@ -308,7 +311,7 @@ public class SelectStatement implements CQLStatement
     {
         boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
-        DataLimits limit = getDataLimits(userLimit, perPartitionLimit);
+        DataLimits limit = getDataLimits(queryState, userLimit, perPartitionLimit);
 
         if (isPartitionRangeQuery)
             return getRangeCommand(options, columnFilter, limit, nowInSec, queryState);
@@ -704,7 +707,7 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(int userLimit, int perPartitionLimit)
+    private DataLimits getDataLimits(QueryState queryState, int userLimit, int perPartitionLimit)
     {
         int cqlRowLimit = NO_LIMIT;
         int cqlPerPartitionLimit = NO_LIMIT;
@@ -717,24 +720,39 @@ public class SelectStatement implements CQLStatement
             cqlPerPartitionLimit = perPartitionLimit;
         }
 
+        DataLimits limits = null;
+
         // Aggregation queries work fine on top of the group by paging but to maintain
         // backward compatibility we need to use the old way.
         if (aggregationSpec != null && aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
             if (parameters.isDistinct)
-                return DataLimits.distinctLimits(cqlRowLimit);
-
-            return DataLimits.groupByLimits(cqlRowLimit,
-                                            cqlPerPartitionLimit,
-                                            NO_LIMIT,
-                                            NO_LIMIT,
-                                            aggregationSpec);
+                limits = DataLimits.distinctLimits(cqlRowLimit);
+            else
+                limits = DataLimits.groupByLimits(cqlRowLimit,
+                                                  cqlPerPartitionLimit,
+                                                  NO_LIMIT,
+                                                  NO_LIMIT,
+                                                  aggregationSpec);
+        }
+        else
+        {
+            if (parameters.isDistinct)
+                limits = cqlRowLimit == NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+            else
+                limits = DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
         }
 
-        if (parameters.isDistinct)
-            return cqlRowLimit == NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+        if (!limits.isGroupByLimit() && Guardrails.pageSize.enabled(queryState))
+        {
+            int bytesLimit = DatabaseDescriptor.getGuardrailsConfig().page_size_failure_threshold_in_kb * 1024;
+            String limitStr = "Applied page size limit of " + FBUtilities.prettyPrintMemory(bytesLimit);
+            ClientWarn.instance.warn(limitStr);
+            logger.trace(limitStr);
+            limits = limits.forPaging(PageSize.inBytes(bytesLimit));
+        }
 
-        return DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
+        return limits;
     }
 
     /**

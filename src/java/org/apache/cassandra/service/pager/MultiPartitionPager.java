@@ -219,13 +219,14 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
         {
             while (partitionIterator == null || !partitionIterator.hasNext())
             {
+                DataLimits.Counter lastPageCounter = null;
                 if (partitionIterator != null)
                 {
                     // we've just reached the end of partition,
                     // let's close the row iterator and update the global counters
                     partitionIterator.close();
 
-                    DataLimits.Counter lastPageCounter = pagers[current].getLastCounter();
+                    lastPageCounter = pagers[current].getLastCounter();
                     countedRows += lastPageCounter.rowsCounted();
                     countedBytes += lastPageCounter.bytesCounted();
                     counted += lastPageCounter.counted();
@@ -235,7 +236,10 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
                 // We are done if:
                 // - we have reached the page size,
                 // - or in the case of GROUP BY if the current pager is not exhausted - which means that we read all the rows withing the limit before exhausting the pager
-                boolean isDone = pageSize.isCompleted(countedRows, PageSize.PageUnit.ROWS) || pageSize.isCompleted(countedBytes, PageSize.PageUnit.BYTES) || limit.count() <= counted
+                boolean isDone = pageSize.isCompleted(countedRows, PageSize.PageUnit.ROWS)
+                                 || pageSize.isCompleted(countedBytes, PageSize.PageUnit.BYTES)
+                                 || limit.count() <= counted
+                                 || limit.bytes() <= countedBytes
                                  || (partitionIterator != null && limit.isGroupByLimit() && !pagers[current].isExhausted());
 
                 // isExhausted() will sets us on the first non-exhausted pager
@@ -245,15 +249,20 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
                     return endOfData();
                 }
 
-                PageSize remainingPagePart = pageSize.withDecreasedRows(countedRows)
-                                                     .withDecreasedBytes(countedBytes);
-
                 // we will update the limits for the current pager before using it so that we can be sure we don't fetch
                 // more than remaining or more than what was left to be fetched according to the recently set limits
                 // (for example in case of groups paging) - that later limit is just the limit which was set minus what
                 // we counted so far
-                int newCountedLimit = Math.min(remaining, limit.count() - counted);
-                pagers[current] = pagers[current].withUpdatedLimit(pagers[current].limits.withCountedLimit(newCountedLimit));
+                int newCountedLimit = Math.max(0, Math.min(remaining, limit.count() - counted));
+                // this works exactly the same way as above - it is required for the limits imposed by Guardrails,
+                // whihc are set on the query
+                int newBytesLimit = Math.max(0, limit.bytes() - countedBytes);
+
+                DataLimits updatedLimit = pagers[current].limits.withCountedLimit(newCountedLimit).withBytesLimit(newBytesLimit);
+                pagers[current] = pagers[current].withUpdatedLimit(updatedLimit);
+
+                PageSize remainingPagePart = pageSize.withDecreasedRows(countedRows)
+                                                     .withDecreasedBytes(countedBytes);
 
                 partitionIterator = consistency == null
                                     ? pagers[current].fetchPageInternal(remainingPagePart, executionController)
