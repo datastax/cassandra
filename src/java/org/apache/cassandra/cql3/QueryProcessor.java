@@ -570,7 +570,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public static UntypedResultSet executeInternalWithPaging(String query, int pageSize, Object... values)
+    public static UntypedResultSet executeInternalWithPaging(String query, PageSize pageSize, Object... values)
     {
         Prepared prepared = prepareInternal(query);
 

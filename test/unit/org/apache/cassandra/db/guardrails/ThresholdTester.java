@@ -103,6 +103,28 @@ public abstract class ThresholdTester extends GuardrailTester
         disabledValue = null;
     }
 
+    protected ThresholdTester(String warnThreshold,
+                              String failThreshold,
+                              Threshold threshold,
+                              TriConsumer<Guardrails, String, String> setter,
+                              Function<Guardrails, String> warnGetter,
+                              Function<Guardrails, String> failGetter,
+                              Function<Long, String> stringFormatter,
+                              ToLongFunction<String> stringParser,
+                              long maxValue)
+    {
+        super(threshold);
+        this.warnThreshold = stringParser.applyAsLong(warnThreshold);
+        this.failThreshold = stringParser.applyAsLong(failThreshold);
+        this.setter = (g, w, f) -> setter.accept(g,
+                                                 w == null ? null : stringFormatter.apply(w),
+                                                 f == null ? null : stringFormatter.apply(f));
+        this.warnGetter = g -> stringParser.applyAsLong(warnGetter.apply(g));
+        this.failGetter = g -> stringParser.applyAsLong(failGetter.apply(g));
+        this.maxValue = maxValue;
+        disabledValue = null;
+    }
+
     protected long currentValue()
     {
         throw new UnsupportedOperationException();
