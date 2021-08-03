@@ -135,6 +135,7 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     private final CompactionExecutor executor = new CompactionExecutor();
+    private final CompactionExecutor backgroundTaskExecutor = new CompactionExecutor(1, "BackgroundTaskExecutor");
     private final ValidationExecutor validationExecutor = new ValidationExecutor();
     private final CompactionExecutor cacheCleanupExecutor = new CacheCleanupExecutor();
     private final CompactionExecutor viewBuildExecutor = new ViewBuildExecutor();
@@ -216,7 +217,7 @@ public class CompactionManager implements CompactionManagerMBean
                      cfs.name,
                      cfs.getCompactionStrategy().getName());
 
-        ListenableFuture<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
+        ListenableFuture<?> fut = backgroundTaskExecutor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
         if (fut.isCancelled())
             compactingCF.remove(cfs);
         return fut;
@@ -225,7 +226,7 @@ public class CompactionManager implements CompactionManagerMBean
     private boolean hasEnoughCompactionsRunning(ColumnFamilyStore cfs)
     {
         int count = compactingCF.count(cfs);
-        if (count > 0 && executor.getActiveCount() >= executor.getMaximumPoolSize())
+        if (count > 0 && executor.exactRunningTasks.get() >= executor.getMaximumPoolSize())
         {
             logger.trace("Background compaction is still running for {}.{} ({} remaining). Skipping",
                          cfs.keyspace.getName(), cfs.name, count);
@@ -269,6 +270,7 @@ public class CompactionManager implements CompactionManagerMBean
     public void forceShutdown()
     {
         // shutdown executors to prevent further submission
+        backgroundTaskExecutor.shutdown();
         executor.shutdown();
         validationExecutor.shutdown();
         viewBuildExecutor.shutdown();
@@ -283,7 +285,7 @@ public class CompactionManager implements CompactionManagerMBean
         // wait for tasks to terminate
         // compaction tasks are interrupted above, so it shuold be fairy quick
         // until not interrupted tasks to complete.
-        for (ExecutorService exec : Arrays.asList(executor, validationExecutor, viewBuildExecutor, cacheCleanupExecutor))
+        for (ExecutorService exec : Arrays.asList(backgroundTaskExecutor, executor, validationExecutor, viewBuildExecutor, cacheCleanupExecutor))
         {
             try
             {
@@ -299,8 +301,10 @@ public class CompactionManager implements CompactionManagerMBean
 
     public void finishCompactionsAndShutdown(long timeout, TimeUnit unit) throws InterruptedException
     {
+        backgroundTaskExecutor.shutdown();
         executor.shutdown();
-        executor.awaitTermination(timeout, unit);
+        backgroundTaskExecutor.awaitTermination(timeout, unit);
+        executor.awaitTermination(timeout, unit); // TODO fix
     }
 
     // the actual sstables to compact are not determined until we run the BCT; that way, if new sstables
@@ -1914,6 +1918,10 @@ public class CompactionManager implements CompactionManagerMBean
 
     static class CompactionExecutor extends JMXEnabledThreadPoolExecutor
     {
+        // We will use this because getActiveCount returns only approximate number and should be used for anything but
+        // metering
+        private final AtomicInteger exactRunningTasks = new AtomicInteger();
+
         protected CompactionExecutor(int minThreads, int maxThreads, String name, BlockingQueue<Runnable> queue)
         {
             super(minThreads, maxThreads, 60, TimeUnit.SECONDS, queue, new NamedThreadFactory(name, Thread.MIN_PRIORITY), "internal");
@@ -2004,6 +2012,24 @@ public class CompactionManager implements CompactionManagerMBean
 
                 return Futures.immediateCancelledFuture();
             }
+        }
+
+        @Override
+        public void execute(Runnable command)
+        {
+            // we know that we use only this variant of execute here, but if we use other variants in the future,
+            // we should update this class with more overrides.
+            super.execute(() -> {
+                exactRunningTasks.incrementAndGet();
+                try
+                {
+                    command.run();
+                }
+                finally
+                {
+                    exactRunningTasks.decrementAndGet();
+                }
+            });
         }
     }
 
