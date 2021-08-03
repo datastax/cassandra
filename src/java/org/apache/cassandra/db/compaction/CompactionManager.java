@@ -303,8 +303,9 @@ public class CompactionManager implements CompactionManagerMBean
     {
         backgroundTaskExecutor.shutdown();
         executor.shutdown();
+        long deadline = System.nanoTime() + unit.toNanos(timeout);
         backgroundTaskExecutor.awaitTermination(timeout, unit);
-        executor.awaitTermination(timeout, unit); // TODO fix
+        executor.awaitTermination(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
     }
 
     // the actual sstables to compact are not determined until we run the BCT; that way, if new sstables
@@ -1942,12 +1943,15 @@ public class CompactionManager implements CompactionManagerMBean
             // can't set this in Thread factory, so we do it redundantly here
             isCompactionManager.set(true);
             super.beforeExecute(t, r);
+            exactRunningTasks.incrementAndGet();
         }
 
         // modified from DebuggableThreadPoolExecutor so that CompactionInterruptedExceptions are not logged
         @Override
         public void afterExecute(Runnable r, Throwable t)
         {
+            exactRunningTasks.decrementAndGet();
+
             DebuggableThreadPoolExecutor.maybeResetTraceSessionWrapper(r);
 
             if (t == null)
@@ -2012,24 +2016,6 @@ public class CompactionManager implements CompactionManagerMBean
 
                 return Futures.immediateCancelledFuture();
             }
-        }
-
-        @Override
-        public void execute(Runnable command)
-        {
-            // we know that we use only this variant of execute here, but if we use other variants in the future,
-            // we should update this class with more overrides.
-            super.execute(() -> {
-                exactRunningTasks.incrementAndGet();
-                try
-                {
-                    command.run();
-                }
-                finally
-                {
-                    exactRunningTasks.decrementAndGet();
-                }
-            });
         }
     }
 
