@@ -89,7 +89,7 @@ public class BackgroundCompactionRunner implements Runnable
     /**
      * CFSs for which a compaction was requested mapped to the promise returned to the requesting code
      */
-    private final ConcurrentMap<ColumnFamilyStore, CompletableFuture<RequestResult>> compactionRequests = new ConcurrentHashMap<>();
+    private final ConcurrentMap<ColumnFamilyStore, FutureRequestResult> compactionRequests = new ConcurrentHashMap<>();
 
     private final AtomicInteger currentlyBackgroundUpgrading = new AtomicInteger(0);
 
@@ -114,66 +114,64 @@ public class BackgroundCompactionRunner implements Runnable
     }
 
     /**
+     * This extends and behave like a {@link CompletableFuture}, with the exception that one cannot call
+     * {@link #cancel}, {@link #complete} and {@link #completeExceptionally} (they throw {@link UnsupportedOperationException}).
+     */
+    public static class FutureRequestResult extends CompletableFuture<RequestResult>
+    {
+        @Override
+        public boolean complete(RequestResult t)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean cancel(boolean interruptIfRunning)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean completeExceptionally(Throwable throwable)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        private void completeInternal(RequestResult t)
+        {
+            super.complete(t);
+        }
+
+        private void completeExceptionallyInternal(Throwable throwable)
+        {
+            super.completeExceptionally(throwable);
+        }
+    }
+
+    /**
      * Marks a CFS for compaction. Since marked, it will become a possible candidate for compaction. The mark will be
      * cleared when we actually run the compaction for CFS.
      *
-     * @return a promise which will be completed when the mark is cleared
+     * @return a promise which will be completed when the mark is cleared. The returned future should not be cancelled or
+     *         completed by the caller.
      */
     CompletableFuture<RequestResult> requestCompaction(ColumnFamilyStore cfs)
     {
         logger.trace("Requested background compaction for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
-        return requestCompactionInternal(cfs, null);
-    }
-
-    private CompletableFuture<RequestResult> requestCompactionInternal(ColumnFamilyStore cfs, CompletableFuture<RequestResult> newResult)
-    {
-        if (checkExecutor.isShutdown())
+        FutureRequestResult p = compactionRequests.computeIfAbsent(cfs, ignored -> new FutureRequestResult());
+        if (!maybeScheduleNextCheck())
         {
             logger.info("Executor has been shut down, background compactions check will not be scheduled");
-            CompletableFuture<RequestResult> cancelledResult = newResult;
-            if (cancelledResult == null)
-                cancelledResult = new CompletableFuture<>();
-
-            cancelledResult.cancel(false);
-            return cancelledResult;
+            p.completeInternal(RequestResult.ABORTED);
         }
-        else
-        {
-            CompletableFuture<RequestResult> p = compactionRequests.compute(cfs, (ignored, currentResult) -> {
-                if (currentResult == null && newResult == null)
-                    // no prior promise and no provided promise -> create a new one
-                    return new CompletableFuture<>();
-
-                else if (currentResult != null && (newResult == null || newResult == currentResult))
-                    // the provided promise is either undefined or equal the current one -> we can return the current one
-                    return currentResult;
-
-                else if (currentResult == null) // and newResult != null
-                    // no prior promise, we can return the provided one
-                    return newResult;
-
-                // otherwise, we have both current and provided promises defined, and we need to merge them
-                // we keep the original promise, but when it completes, the result is propagated to the provided one
-                currentResult.whenComplete((result, throwable) -> {
-                    if (throwable != null)
-                        newResult.completeExceptionally(throwable);
-                    else
-                        newResult.complete(result);
-                });
-                return currentResult;
-            });
-
-            if (!maybeScheduleNextCheck())
-                p.cancel(false);
-
-            return p;
-        }
+        return p;
     }
 
     void shutdown()
     {
         checkExecutor.shutdown();
-        compactionRequests.values().forEach(promise -> promise.cancel(false));
+        compactionRequests.values().forEach(promise -> promise.completeInternal(RequestResult.ABORTED));
+        // it's okay to complete a CompletableFuture more than one on race between request, run and shutdown
     }
 
     int getOngoingCompactionsCount(ColumnFamilyStore cfs)
@@ -193,13 +191,26 @@ public class BackgroundCompactionRunner implements Runnable
 
         for (ColumnFamilyStore cfs : compactionRequestsList)
         {
-            CompletableFuture<RequestResult> promise = compactionRequests.remove(cfs);
-
-            logger.trace("Checking compaction request for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
-
-            if (promise == null || promise.isDone())
+            // When the executor is fully occupied, we delay acting on this request until a thread is available. This
+            // helps make a better decision what exactly to compact (e.g. if we issue the request now we may select n
+            // sstables, while by the time this request actually has a thread to execute on more may have accumulated
+            // and it may be better to compact all).
+            if (compactionExecutor.getActiveTaskCount() >= compactionExecutor.getMaximumPoolSize())
             {
-                logger.trace("There are no awaiting requests for {}.{} (all the requests were cancelled)",
+                logger.trace("Background compaction is still running for {}.{} - the check will be done after completion",
+                             cfs.getKeyspaceName(), cfs.getTableName());
+                continue;
+            }
+
+            FutureRequestResult promise = compactionRequests.remove(cfs);
+            assert promise != null : "Background compaction checker must be single-threaded";
+
+            if (promise.isDone())
+            {
+                // A shutdown request may abort processing while we are still processing
+                assert promise.join() == RequestResult.ABORTED : "Background compaction checker must be single-threaded";
+
+                logger.trace("The request for {}.{} was aborted due to shutdown",
                              cfs.getKeyspaceName(), cfs.getTableName());
                 continue;
             }
@@ -207,24 +218,11 @@ public class BackgroundCompactionRunner implements Runnable
             if (!cfs.isValid())
             {
                 logger.trace("Aborting compaction for dropped CF {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
-                promise.complete(RequestResult.ABORTED);
+                promise.completeInternal(RequestResult.ABORTED);
                 continue;
             }
 
-            // when the compaction is already running for CFS and the executor is fully occupied,
-            // we make a new compaction request with the current promise, so that the promise is completed
-            // after the compaction really happens or there are no compaction tasks to be done
-            if (ongoingCompactions.count(cfs) > 0 && compactionExecutor.getActiveTaskCount() >= compactionExecutor.getMaximumPoolSize())
-            {
-                logger.trace("Background compaction is still running for {}.{} - the check will be done after completion",
-                             cfs.getKeyspaceName(), cfs.getTableName());
-
-                // propagate the promise for the next round
-                requestCompactionInternal(cfs, promise);
-                continue;
-            }
-
-            logger.trace("Scheduling a background task check for {}.{} with {}",
+            logger.trace("Running a background task check for {}.{} with {}",
                          cfs.keyspace.getName(),
                          cfs.name,
                          cfs.getCompactionStrategy().getName());
@@ -255,12 +253,12 @@ public class BackgroundCompactionRunner implements Runnable
                     {
                         logger.warn(String.format("Aborting compaction of %s.%s due to error", cfs.getKeyspaceName(), cfs.getTableName()), throwable);
                         handleCompactionError(throwable, cfs);
-                        promise.completeExceptionally(throwable);
+                        promise.completeExceptionallyInternal(throwable);
                     }
                     else
                     {
                         logger.trace("Finished compaction for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
-                        promise.complete(RequestResult.COMPLETED);
+                        promise.completeInternal(RequestResult.COMPLETED);
                     }
 
                     // if at least one compaction task completes successfully, the set of sstables may be changed,
@@ -273,7 +271,7 @@ public class BackgroundCompactionRunner implements Runnable
             }
             else
             {
-                promise.complete(RequestResult.NOT_NEEDED);
+                promise.completeInternal(RequestResult.NOT_NEEDED);
             }
         }
     }
