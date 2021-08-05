@@ -81,17 +81,17 @@ public class BackgroundCompactionRunner implements Runnable
     private final DebuggableScheduledThreadPoolExecutor checkExecutor;
 
     /**
-     * Each time we start a compaction, the CFS is added to this set; it is removed when the compaction finishes
-     * or when it is cancelled
-     */
-    private final Multiset<ColumnFamilyStore> ongoingCompactions = ConcurrentHashMultiset.create();
-
-    /**
      * CFSs for which a compaction was requested mapped to the promise returned to the requesting code
      */
     private final ConcurrentMap<ColumnFamilyStore, FutureRequestResult> compactionRequests = new ConcurrentHashMap<>();
 
     private final AtomicInteger currentlyBackgroundUpgrading = new AtomicInteger(0);
+
+    /**
+     * Tracks the number of currently requested compactions. Used to delay checking for new compactions until there's
+     * room in the executing threads.
+     */
+    private final AtomicInteger ongoingCompactions = new AtomicInteger(0);
 
     private final Random random = new Random();
 
@@ -174,15 +174,27 @@ public class BackgroundCompactionRunner implements Runnable
         // it's okay to complete a CompletableFuture more than one on race between request, run and shutdown
     }
 
-    int getOngoingCompactionsCount(ColumnFamilyStore cfs)
+    int getOngoingCompactionsCount()
     {
-        return ongoingCompactions.count(cfs);
+        return ongoingCompactions.get();
     }
 
     @Override
     public void run()
     {
         logger.trace("Running background compactions check");
+
+        // When the executor is fully occupied, we delay acting on this request until a thread is available. This
+        // helps make a better decision what exactly to compact (e.g. if we issue the request now we may select n
+        // sstables, while by the time this request actually has a thread to execute on more may have accumulated
+        // and it may be better to compact all).
+        // Note that we make a request whenever a task completes and thus this method is guaranteed to run again
+        // when threads free up.
+        if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
+        {
+            logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
+            return;
+        }
 
         // We shuffle the CFSs for which the compaction was requested so that with each run we traverse those CFSs
         // in different order and make each CFS have equal chance to be selected
@@ -191,15 +203,10 @@ public class BackgroundCompactionRunner implements Runnable
 
         for (ColumnFamilyStore cfs : compactionRequestsList)
         {
-            // When the executor is fully occupied, we delay acting on this request until a thread is available. This
-            // helps make a better decision what exactly to compact (e.g. if we issue the request now we may select n
-            // sstables, while by the time this request actually has a thread to execute on more may have accumulated
-            // and it may be better to compact all).
-            if (compactionExecutor.getActiveTaskCount() >= compactionExecutor.getMaximumPoolSize())
+            if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
             {
-                logger.trace("Background compaction is still running for {}.{} - the check will be done after completion",
-                             cfs.getKeyspaceName(), cfs.getTableName());
-                continue;
+                logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
+                return;
             }
 
             FutureRequestResult promise = compactionRequests.remove(cfs);
@@ -227,28 +234,13 @@ public class BackgroundCompactionRunner implements Runnable
                          cfs.name,
                          cfs.getCompactionStrategy().getName());
 
-            // When there are tasks to be done for a CFS, we add the CFS to ongoingCompactions for the time the tasks
-            // are being executed, and then remove it. When there is no task to be run, we do not add the CFS to the
-            // ongoingCompactions.
-            // The removal of the CFS from ongoingCompactions is tied to the completion of the tasks, therefore CFS has
-            // to be added to ongoingCompactions before the task is started because otherwise addition and removal could
-            // be reordered, and we would have a race.
-            // The supplier is used because it allows determining whether there are tasks to be run before starting
-            // them. We can also keep all the modifications of the ongoingCompactions in a single place rather than
-            // having them spread across the other methods
-            Supplier<CompletableFuture<?>[]> compactionTasks = lazyRunCompactionTasks(cfs);
+            CompletableFuture<Void> compactionTasks = startCompactionTasks(cfs);
             if (compactionTasks == null)
-                compactionTasks = lazyRunUpgradeTasks(cfs);
+                compactionTasks = startUpgradeTasks(cfs);
 
             if (compactionTasks != null)
             {
-                ongoingCompactions.add(cfs);
-
-                CompletableFuture<?>[] tasksResults = compactionTasks.get();
-
-                CompletableFuture.allOf(tasksResults).handle((ignored, throwable) -> {
-                    ongoingCompactions.remove(cfs);
-
+                compactionTasks.handle((ignored, throwable) -> {
                     if (throwable != null)
                     {
                         logger.warn(String.format("Aborting compaction of %s.%s due to error", cfs.getKeyspaceName(), cfs.getTableName()), throwable);
@@ -260,12 +252,6 @@ public class BackgroundCompactionRunner implements Runnable
                         logger.trace("Finished compaction for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
                         promise.completeInternal(RequestResult.COMPLETED);
                     }
-
-                    // if at least one compaction task completes successfully, the set of sstables may be changed,
-                    // therefore we check for new compaction possibilities
-                    if (Arrays.stream(tasksResults).anyMatch(f -> !f.isCancelled() && !f.isCompletedExceptionally()))
-                        requestCompaction(cfs);
-
                     return null;
                 });
             }
@@ -298,18 +284,18 @@ public class BackgroundCompactionRunner implements Runnable
         return true;
     }
 
-    private Supplier<CompletableFuture<?>[]> lazyRunCompactionTasks(ColumnFamilyStore cfs)
+    private CompletableFuture<Void> startCompactionTasks(ColumnFamilyStore cfs)
     {
         Collection<AbstractCompactionTask> compactionTasks = cfs.getCompactionStrategy()
                                                                 .getNextBackgroundTasks(CompactionManager.getDefaultGcBefore(cfs, FBUtilities.nowInSeconds()));
+
         if (!compactionTasks.isEmpty())
         {
-            return () -> {
-                logger.debug("Running compaction tasks: {}", compactionTasks);
-                return compactionTasks.stream()
-                                      .map(task -> CompletableFuture.runAsync(() -> task.execute(activeOperations), compactionExecutor))
-                                      .toArray(CompletableFuture<?>[]::new);
-            };
+            logger.debug("Running compaction tasks: {}", compactionTasks);
+            return CompletableFuture.allOf(
+                       compactionTasks.stream()
+                                      .map(task -> startTask(cfs, task))
+                                      .toArray(CompletableFuture<?>[]::new));
         }
         else
         {
@@ -318,21 +304,34 @@ public class BackgroundCompactionRunner implements Runnable
         }
     }
 
-    private Supplier<CompletableFuture<?>[]> lazyRunUpgradeTasks(ColumnFamilyStore cfs)
+    private CompletableFuture<Void> startTask(ColumnFamilyStore cfs, AbstractCompactionTask task)
+    {
+        ongoingCompactions.incrementAndGet();
+        return CompletableFuture.runAsync(
+        () -> {
+            try
+            {
+                task.execute(activeOperations);
+            }
+            finally
+            {
+                ongoingCompactions.decrementAndGet();
+                requestCompaction(cfs);
+            }
+        }, compactionExecutor);
+    }
+
+    private CompletableFuture<Void> startUpgradeTasks(ColumnFamilyStore cfs)
     {
         AbstractCompactionTask upgradeTask = getUpgradeSSTableTask(cfs);
 
         if (upgradeTask != null)
         {
-            return () -> {
-                logger.debug("Running upgrade task: {}", upgradeTask);
-                CompletableFuture<Object> result = CompletableFuture.runAsync(() -> upgradeTask.execute(activeOperations), compactionExecutor)
-                                                                    .handle((ignored1, ignored2) -> {
-                                                                        currentlyBackgroundUpgrading.decrementAndGet();
-                                                                        return null;
-                                                                    });
-                return new CompletableFuture[]{ result };
-            };
+            logger.debug("Running upgrade task: {}", upgradeTask);
+            return startTask(cfs, upgradeTask).handle((ignored1, ignored2) -> {
+                currentlyBackgroundUpgrading.decrementAndGet();
+                return null;
+            });
         }
         else
         {
