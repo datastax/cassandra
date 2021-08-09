@@ -351,6 +351,10 @@ public class BackgroundCompactionRunner implements Runnable
                 finally
                 {
                     ongoingCompactions.decrementAndGet();
+
+                    // Request a new round of checking for compactions. We do this for two reasons:
+                    //  - a task has completed and there may now be new compaction possibilities in this CFS,
+                    //  - a thread has freed up, and a new compaction task (from any CFS) can be scheduled on it
                     requestCompaction(cfs);
                 }
             }, compactionExecutor);
