@@ -20,7 +20,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.File;
 import java.io.IOError;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,7 +31,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -148,16 +146,16 @@ public class BackgroundCompactionRunner implements Runnable
     }
 
     /**
-     * Marks each CFS in a set for compaction. See {@link #requestCompaction(ColumnFamilyStore)} for details.
+     * Marks each CFS in a set for compaction. See {@link #markForCompactionCheck(ColumnFamilyStore)} for details.
      */
-    void requestCompaction(Set<ColumnFamilyStore> cfss)
+    void markForCompactionCheck(Set<ColumnFamilyStore> cfss)
     {
         List<FutureRequestResult> results = cfss.stream()
                                                 .map(this::requestCompactionInternal)
                                                 .filter(Objects::nonNull)
                                                 .collect(Collectors.toList());
 
-        if (!results.isEmpty() && !maybeScheduleNextCheck(Duration.ZERO))
+        if (!results.isEmpty() && !maybeScheduleNextCheck())
         {
             logger.info("Executor has been shut down, background compactions check will not be scheduled");
             results.forEach(r -> r.completeInternal(RequestResult.ABORTED));
@@ -171,13 +169,13 @@ public class BackgroundCompactionRunner implements Runnable
      * @return a promise which will be completed when the mark is cleared. The returned future should not be cancelled or
      * completed by the caller.
      */
-    CompletableFuture<RequestResult> requestCompaction(ColumnFamilyStore cfs)
+    CompletableFuture<RequestResult> markForCompactionCheck(ColumnFamilyStore cfs)
     {
         FutureRequestResult p = requestCompactionInternal(cfs);
         if (p == null)
             return CompletableFuture.completedFuture(RequestResult.ABORTED);
 
-        if (!maybeScheduleNextCheck(Duration.ZERO))
+        if (!maybeScheduleNextCheck())
         {
             logger.info("Executor has been shut down, background compactions check will not be scheduled");
             p.completeInternal(RequestResult.ABORTED);
@@ -290,7 +288,7 @@ public class BackgroundCompactionRunner implements Runnable
                 // the compaction again on that CFS early (without waiting for the currently scheduled/started
                 // compaction tasks to finish). We can start them in the next check round if we have free slots
                 // in the compaction executor.
-                requestCompaction(cfs);
+                markForCompactionCheck(cfs);
             }
             else
             {
@@ -299,13 +297,13 @@ public class BackgroundCompactionRunner implements Runnable
         }
     }
 
-    private boolean maybeScheduleNextCheck(Duration delay)
+    private boolean maybeScheduleNextCheck()
     {
         if (checkExecutor.getQueue().isEmpty())
         {
             try
             {
-                checkExecutor.schedule(this, delay.toNanos(), TimeUnit.NANOSECONDS);
+                checkExecutor.execute(this);
             }
             catch (RejectedExecutionException ex)
             {
@@ -359,7 +357,7 @@ public class BackgroundCompactionRunner implements Runnable
                     // Request a new round of checking for compactions. We do this for two reasons:
                     //  - a task has completed and there may now be new compaction possibilities in this CFS,
                     //  - a thread has freed up, and a new compaction task (from any CFS) can be scheduled on it
-                    requestCompaction(cfs);
+                    markForCompactionCheck(cfs);
                 }
             }, compactionExecutor);
         }

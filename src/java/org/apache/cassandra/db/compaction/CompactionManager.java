@@ -181,12 +181,12 @@ public class CompactionManager implements CompactionManagerMBean
      */
     public CompletableFuture<RequestResult> submitBackground(final ColumnFamilyStore cfs)
     {
-        return backgroundCompactionRunner.requestCompaction(cfs);
+        return backgroundCompactionRunner.markForCompactionCheck(cfs);
     }
 
     public void submitBackground(Set<ColumnFamilyStore> cfss)
     {
-        backgroundCompactionRunner.requestCompaction(cfss);
+        backgroundCompactionRunner.markForCompactionCheck(cfss);
     }
 
     public int getOngoingBackgroundCompactionsCount()
