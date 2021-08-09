@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.File;
 import java.io.IOError;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,6 +32,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -155,7 +157,7 @@ public class BackgroundCompactionRunner implements Runnable
                                                 .filter(Objects::nonNull)
                                                 .collect(Collectors.toList());
 
-        if (!results.isEmpty() && !maybeScheduleNextCheck())
+        if (!results.isEmpty() && !maybeScheduleNextCheck(Duration.ZERO))
         {
             logger.info("Executor has been shut down, background compactions check will not be scheduled");
             results.forEach(r -> r.completeInternal(RequestResult.ABORTED));
@@ -175,7 +177,7 @@ public class BackgroundCompactionRunner implements Runnable
         if (p == null)
             return CompletableFuture.completedFuture(RequestResult.ABORTED);
 
-        if (!maybeScheduleNextCheck())
+        if (!maybeScheduleNextCheck(Duration.ZERO))
         {
             logger.info("Executor has been shut down, background compactions check will not be scheduled");
             p.completeInternal(RequestResult.ABORTED);
@@ -226,6 +228,7 @@ public class BackgroundCompactionRunner implements Runnable
         if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
         {
             logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
+            maybeScheduleNextCheck(Duration.ofSeconds(5));
             return;
         }
 
@@ -239,6 +242,7 @@ public class BackgroundCompactionRunner implements Runnable
             if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
             {
                 logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
+                maybeScheduleNextCheck(Duration.ofSeconds(5));
                 return;
             }
 
@@ -291,13 +295,13 @@ public class BackgroundCompactionRunner implements Runnable
         }
     }
 
-    private boolean maybeScheduleNextCheck()
+    private boolean maybeScheduleNextCheck(Duration delay)
     {
         if (checkExecutor.getQueue().isEmpty())
         {
             try
             {
-                checkExecutor.execute(this);
+                checkExecutor.schedule(this, delay.toNanos(), TimeUnit.NANOSECONDS);
             }
             catch (RejectedExecutionException ex)
             {
