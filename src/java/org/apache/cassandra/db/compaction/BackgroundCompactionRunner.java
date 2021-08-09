@@ -221,14 +221,13 @@ public class BackgroundCompactionRunner implements Runnable
 
         // When the executor is fully occupied, we delay acting on this request until a thread is available. This
         // helps make a better decision what exactly to compact (e.g. if we issue the request now we may select n
-        // sstables, while by the time this request actually has a thread to execute on more may have accumulated
+        // sstables, while by the time this request actually has a thread to execute on more may have accumulated,
         // and it may be better to compact all).
         // Note that we make a request whenever a task completes and thus this method is guaranteed to run again
         // when threads free up.
         if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
         {
             logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
-            maybeScheduleNextCheck(Duration.ofSeconds(5));
             return;
         }
 
@@ -242,7 +241,6 @@ public class BackgroundCompactionRunner implements Runnable
             if (ongoingCompactions.get() >= compactionExecutor.getMaximumPoolSize())
             {
                 logger.trace("Background compaction threads are busy; delaying new compactions check until there are free threads");
-                maybeScheduleNextCheck(Duration.ofSeconds(5));
                 return;
             }
 
@@ -287,6 +285,12 @@ public class BackgroundCompactionRunner implements Runnable
                     }
                     return null;
                 });
+
+                // The compaction strategy may return more subsequent tasks if we ask for them. Therefore, we request
+                // the compaction again on that CFS early (without waiting for the currently scheduled/started
+                // compaction tasks to finish). We can start them in the next check round if we have free slots
+                // in the compaction executor.
+                requestCompaction(cfs);
             }
             else
             {
