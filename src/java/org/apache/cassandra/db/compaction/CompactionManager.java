@@ -179,20 +179,14 @@ public class CompactionManager implements CompactionManagerMBean
      * It's okay to over-call (within reason) if a call is unnecessary, it will
      * turn into a no-op in the bucketing/candidate-scan phase.
      */
-    public Future<RequestResult> submitBackground(final ColumnFamilyStore cfs)
+    public CompletableFuture<RequestResult> submitBackground(final ColumnFamilyStore cfs)
     {
-        if (!cfs.isValid())
-        {
-            logger.trace("Aborting compaction for dropped CF {}.{}", cfs.keyspace.getName(), cfs.name);
-            return CompletableFuture.completedFuture(RequestResult.ABORTED);
-        }
-        if (cfs.isAutoCompactionDisabled())
-        {
-            logger.trace("Autocompaction is disabled");
-            return CompletableFuture.completedFuture(RequestResult.NOT_NEEDED);
-        }
-
         return backgroundCompactionRunner.requestCompaction(cfs);
+    }
+
+    public void submitBackground(Set<ColumnFamilyStore> cfss)
+    {
+        backgroundCompactionRunner.requestCompaction(cfss);
     }
 
     public int getOngoingBackgroundCompactionsCount()

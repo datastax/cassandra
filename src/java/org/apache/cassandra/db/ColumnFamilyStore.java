@@ -310,11 +310,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static Runnable getBackgroundCompactionTaskSubmitter()
     {
-        return () -> {
-            for (Keyspace keyspace : Keyspace.all())
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    CompactionManager.instance.submitBackground(cfs);
-        };
+        return () -> CompactionManager.instance.submitBackground(ImmutableSet.copyOf(all()));
     }
 
     @VisibleForTesting
@@ -2576,10 +2572,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public String toString()
     {
-        return "CFS(" +
-               "Keyspace='" + keyspace.getName() + '\'' +
-               ", ColumnFamily='" + name + '\'' +
-               ')';
+        return String.format("%s.%s", getKeyspaceName(), getTableName());
     }
 
     public void disableAutoCompaction()
