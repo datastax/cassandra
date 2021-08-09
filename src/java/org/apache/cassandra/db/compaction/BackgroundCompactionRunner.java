@@ -21,7 +21,6 @@ package org.apache.cassandra.db.compaction;
 import java.io.File;
 import java.io.IOError;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -32,12 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ConcurrentHashMultiset;
-import com.google.common.collect.Multiset;
 import com.google.common.primitives.Longs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -153,7 +149,7 @@ public class BackgroundCompactionRunner implements Runnable
      * cleared when we actually run the compaction for CFS.
      *
      * @return a promise which will be completed when the mark is cleared. The returned future should not be cancelled or
-     *         completed by the caller.
+     * completed by the caller.
      */
     CompletableFuture<RequestResult> requestCompaction(ColumnFamilyStore cfs)
     {
@@ -293,9 +289,9 @@ public class BackgroundCompactionRunner implements Runnable
         {
             logger.debug("Running compaction tasks: {}", compactionTasks);
             return CompletableFuture.allOf(
-                       compactionTasks.stream()
-                                      .map(task -> startTask(cfs, task))
-                                      .toArray(CompletableFuture<?>[]::new));
+            compactionTasks.stream()
+                           .map(task -> startTask(cfs, task))
+                           .toArray(CompletableFuture<?>[]::new));
         }
         else
         {
@@ -307,18 +303,27 @@ public class BackgroundCompactionRunner implements Runnable
     private CompletableFuture<Void> startTask(ColumnFamilyStore cfs, AbstractCompactionTask task)
     {
         ongoingCompactions.incrementAndGet();
-        return CompletableFuture.runAsync(
-        () -> {
-            try
-            {
-                task.execute(activeOperations);
-            }
-            finally
-            {
-                ongoingCompactions.decrementAndGet();
-                requestCompaction(cfs);
-            }
-        }, compactionExecutor);
+        try
+        {
+            return CompletableFuture.runAsync(
+            () -> {
+                try
+                {
+                    task.execute(activeOperations);
+                }
+                finally
+                {
+                    ongoingCompactions.decrementAndGet();
+                    requestCompaction(cfs);
+                }
+            }, compactionExecutor);
+        }
+        catch (RejectedExecutionException ex)
+        {
+            ongoingCompactions.decrementAndGet();
+            logger.debug("Background compaction tasks for {}.{} were rejected", cfs.getKeyspaceName(), cfs.getTableName());
+            return CompletableFuture.completedFuture(null);
+        }
     }
 
     private CompletableFuture<Void> startUpgradeTasks(ColumnFamilyStore cfs)
