@@ -68,7 +68,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,15 +86,6 @@ import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
-import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.CompactionStrategy;
-import org.apache.cassandra.db.compaction.CompactionStrategyContainer;
-import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
-import org.apache.cassandra.db.compaction.CompactionStrategyManager;
-import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -420,11 +413,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static Runnable getBackgroundCompactionTaskSubmitter()
     {
-        return () -> {
-            for (Keyspace keyspace : Keyspace.all())
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    CompactionManager.instance.submitBackground(cfs);
-        };
+        return () -> CompactionManager.instance.submitBackground(ImmutableSet.copyOf(all()));
     }
 
     @VisibleForTesting
@@ -2884,10 +2873,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public String toString()
     {
-        return "CFS(" +
-               "Keyspace='" + getKeyspaceName() + '\'' +
-               ", ColumnFamily='" + name + '\'' +
-               ')';
+        return String.format("%s.%s", getKeyspaceName(), getTableName());
     }
 
     public void disableAutoCompaction()
@@ -2923,6 +2909,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public boolean isAutoCompactionDisabled()
     {
         return !this.strategyContainer.isEnabled();
+    }
+
+    public List<SSTableReader> getCandidatesForUpgrade()
+    {
+        Set<SSTableReader> compacting = getTracker().getCompacting();
+        return getLiveSSTables().stream()
+                                .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
+                                .sorted((o1, o2) -> {
+                                    File f1 = o1.descriptor.fileFor(Components.DATA);
+                                    File f2 = o2.descriptor.fileFor(Components.DATA);
+                                    return Longs.compare(f1.lastModified(), f2.lastModified());
+                                }).collect(Collectors.toList());
     }
 
     public SortedLocalRanges getLocalRanges()
