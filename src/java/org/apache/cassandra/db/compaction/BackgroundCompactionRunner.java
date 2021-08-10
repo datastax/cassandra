@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
 import java.io.IOError;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.primitives.Longs;
+import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +46,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -55,7 +53,7 @@ import org.apache.cassandra.utils.Throwables;
 
 public class BackgroundCompactionRunner implements Runnable
 {
-    private final static Logger logger = LoggerFactory.getLogger(BackgroundCompactionRunner.class);
+    private static final Logger logger = LoggerFactory.getLogger(BackgroundCompactionRunner.class);
 
     public enum RequestResult
     {
@@ -82,7 +80,7 @@ public class BackgroundCompactionRunner implements Runnable
      */
     private final ConcurrentMap<ColumnFamilyStore, FutureRequestResult> compactionRequests = new ConcurrentHashMap<>();
 
-    private final AtomicInteger currentlyBackgroundUpgrading = new AtomicInteger(0);
+    private final AtomicInteger ongoingUpgrades = new AtomicInteger(0);
 
     /**
      * Tracks the number of currently requested compactions. Used to delay checking for new compactions until there's
@@ -207,9 +205,22 @@ public class BackgroundCompactionRunner implements Runnable
         // it's okay to complete a CompletableFuture more than one on race between request, run and shutdown
     }
 
+    @VisibleForTesting
     int getOngoingCompactionsCount()
     {
         return ongoingCompactions.get();
+    }
+
+    @VisibleForTesting
+    int getOngoingUpgradesCount()
+    {
+        return ongoingUpgrades.get();
+    }
+
+    @VisibleForTesting
+    Set<ColumnFamilyStore> getMarkedCFSs()
+    {
+        return ImmutableSet.copyOf(compactionRequests.keySet());
     }
 
     @Override
@@ -377,7 +388,7 @@ public class BackgroundCompactionRunner implements Runnable
         {
             logger.debug("Running upgrade task: {}", upgradeTask);
             return startTask(cfs, upgradeTask).handle((ignored1, ignored2) -> {
-                currentlyBackgroundUpgrading.decrementAndGet();
+                ongoingUpgrades.decrementAndGet();
                 return null;
             });
         }
@@ -402,17 +413,9 @@ public class BackgroundCompactionRunner implements Runnable
             return null;
         }
 
-        if (currentlyBackgroundUpgrading.incrementAndGet() <= DatabaseDescriptor.maxConcurrentAutoUpgradeTasks())
+        if (ongoingUpgrades.incrementAndGet() <= DatabaseDescriptor.maxConcurrentAutoUpgradeTasks())
         {
-            Set<SSTableReader> compacting = cfs.getTracker().getCompacting();
-            List<SSTableReader> potentialUpgrade = cfs.getLiveSSTables()
-                                                      .stream()
-                                                      .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
-                                                      .sorted((o1, o2) -> {
-                                                          File f1 = new File(o1.descriptor.filenameFor(Component.DATA));
-                                                          File f2 = new File(o2.descriptor.filenameFor(Component.DATA));
-                                                          return Longs.compare(f1.lastModified(), f2.lastModified());
-                                                      }).collect(Collectors.toList());
+            List<SSTableReader> potentialUpgrade = cfs.getCandidatesForUpgrade();
             for (SSTableReader sstable : potentialUpgrade)
             {
                 LifecycleTransaction txn = cfs.getTracker().tryModify(sstable, OperationType.UPGRADE_SSTABLES);
@@ -429,7 +432,7 @@ public class BackgroundCompactionRunner implements Runnable
                          cfs, DatabaseDescriptor.maxConcurrentAutoUpgradeTasks());
         }
 
-        currentlyBackgroundUpgrading.decrementAndGet();
+        ongoingUpgrades.decrementAndGet();
         return null;
     }
 

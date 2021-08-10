@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.management.*;
@@ -38,6 +39,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
+import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2175,7 +2177,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     public void forceMajorCompaction(boolean splitOutput)
-   {
+    {
         CompactionManager.instance.performMaximal(this, splitOutput);
     }
 
@@ -2608,6 +2610,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public boolean isAutoCompactionDisabled()
     {
         return !this.strategyContainer.isEnabled();
+    }
+
+    public List<SSTableReader> getCandidatesForUpgrade()
+    {
+        Set<SSTableReader> compacting = getTracker().getCompacting();
+        return getLiveSSTables().stream()
+                                .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
+                                .sorted((o1, o2) -> {
+                                    File f1 = new File(o1.descriptor.filenameFor(Component.DATA));
+                                    File f2 = new File(o2.descriptor.filenameFor(Component.DATA));
+                                    return Longs.compare(f1.lastModified(), f2.lastModified());
+                                }).collect(Collectors.toList());
     }
 
     public SortedLocalRanges getLocalRanges()

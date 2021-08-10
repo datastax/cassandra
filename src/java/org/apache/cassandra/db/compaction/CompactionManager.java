@@ -194,6 +194,11 @@ public class CompactionManager implements CompactionManagerMBean
         return backgroundCompactionRunner.getOngoingCompactionsCount();
     }
 
+    public int getOngoingBackgroundUpgradesCount()
+    {
+        return backgroundCompactionRunner.getOngoingUpgradesCount();
+    }
+
     public boolean isCompacting(Iterable<ColumnFamilyStore> cfses, Predicate<SSTableReader> sstablePredicate)
     {
         for (ColumnFamilyStore cfs : cfses)
