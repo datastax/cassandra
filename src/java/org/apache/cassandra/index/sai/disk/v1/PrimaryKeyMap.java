@@ -22,20 +22,19 @@ import java.io.IOException;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
 
 public interface PrimaryKeyMap extends Closeable
 {
-    PrimaryKey primaryKeyFromRowId(long sstableRowId);
+    PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException;
 
     default PrimaryKeyMap copyOf()
     {
@@ -55,41 +54,37 @@ public interface PrimaryKeyMap extends Closeable
 
     class DefaultPrimaryKeyMap implements PrimaryKeyMap
     {
-        private final FileHandle primaryKeys;
-        private final BKDReader reader;
-        private final BKDReader.IteratorState iterator;
-        private final PrimaryKey.PrimaryKeyFactory keyFactory;
         private final long size;
+        private final FileHandle primaryKeysFile;
+        private final FileHandle primaryKeyOffsetsFile;
+        private final RandomAccessReader primaryKeys;
+        private final LongArray primaryKeyOffsets;
+
+        private final PrimaryKey.PrimaryKeyFactory keyFactory;
 
         public DefaultPrimaryKeyMap(IndexComponents indexComponents, TableMetadata tableMetadata) throws IOException
         {
             MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexComponents);
+            NumericValuesMeta meta = new NumericValuesMeta(metadataSource.get(IndexComponents.PRIMARY_KEY_OFFSETS.name));
+            this.size = meta.valueCount;
 
-            PartitionKeysMeta partitionKeysMeta = new PartitionKeysMeta(metadataSource.get(indexComponents.PRIMARY_KEYS.name));
+            this.primaryKeyOffsetsFile = indexComponents.createFileHandle(IndexComponents.PRIMARY_KEY_OFFSETS);
+            this.primaryKeyOffsets = new MonotonicBlockPackedReader(primaryKeyOffsetsFile, indexComponents, meta).open();
 
-            this.size = partitionKeysMeta.pointCount;
-
-            if (partitionKeysMeta.pointCount > 0)
-            {
-                this.primaryKeys = indexComponents.createFileHandle(IndexComponents.PRIMARY_KEYS);
-                this.reader = new BKDReader(indexComponents, primaryKeys, partitionKeysMeta.bkdPosition);
-                this.iterator = reader.iteratorState();
-            }
-            else
-            {
-                this.primaryKeys = null;
-                this.reader = null;
-                this.iterator = null;
-            }
+            this.primaryKeysFile = indexComponents.createFileHandle(IndexComponents.PRIMARY_KEYS);
+            this.primaryKeys = primaryKeysFile.createReader();
 
             this.keyFactory = PrimaryKey.factory(tableMetadata);
         }
 
-        private DefaultPrimaryKeyMap(DefaultPrimaryKeyMap orig) throws IOException
+        private DefaultPrimaryKeyMap(DefaultPrimaryKeyMap orig)
         {
-            this.reader = orig.reader;
-            this.primaryKeys = orig.primaryKeys;
-            this.iterator = reader.iteratorState();
+            this.primaryKeysFile = orig.primaryKeysFile.sharedCopy();
+            this.primaryKeyOffsetsFile = orig.primaryKeyOffsetsFile.sharedCopy();
+
+            this.primaryKeys = primaryKeysFile.createReader();
+            this.primaryKeyOffsets = orig.primaryKeyOffsets;
+
             this.keyFactory = orig.keyFactory.copyOf();
             this.size = orig.size();
         }
@@ -115,22 +110,32 @@ public interface PrimaryKeyMap extends Closeable
         }
 
         @Override
-        public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+        public PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException
         {
-            if (iterator != null)
-            {
-                iterator.seekTo(sstableRowId);
-                PrimaryKey key = keyFactory.createKey(iterator.asByteComparable(), sstableRowId);
-                return key;
-            }
-            return null;
+            long startOffset = primaryKeyOffsets.get(sstableRowId);
+            long endOffset = (sstableRowId + 1) < size
+                    ? primaryKeyOffsets.get(sstableRowId + 1)
+                    : primaryKeys.length();
+
+            if (endOffset - startOffset <= 0)
+                throw new IOException(
+                        "Primary key length <= 0 for row " + sstableRowId + " of " + primaryKeyOffsetsFile.path());
+            if (endOffset - startOffset > Integer.MAX_VALUE)
+                throw new IOException(
+                        "Primary key length too large for row " + sstableRowId + " of " + primaryKeyOffsetsFile.path());
+
+            int length = (int) (endOffset - startOffset);
+            byte[] serializedKeyBuf = new byte[length];
+
+            primaryKeys.seek(startOffset);
+            primaryKeys.readFully(serializedKeyBuf);
+            return keyFactory.createKey(serializedKeyBuf, sstableRowId);
         }
 
         @Override
         public void close() throws IOException
         {
-            FileUtils.closeQuietly(reader, iterator);
-            Throwables.maybeFail(Throwables.close(null, primaryKeys));
+            FileUtils.close(primaryKeyOffsets, primaryKeyOffsetsFile, primaryKeys, primaryKeysFile);
         }
     }
 }

@@ -113,9 +113,14 @@ public class IndexComponents
 
         // per-sstable components
         /**
-         * SSTableRowId to PrimaryKey map
+         * A list of primary keys in the sstable, one for each row, ordered by row ids
          */
         PRIMARY_KEYS("PrimaryKeys"),
+        /**
+         * A list of byte offsets into the PrimaryKeys component, in the same order as primary keys.
+         * Allows finding the primary key by row id.
+         */
+        PRIMARY_KEY_OFFSETS("PrimaryKeyOffsets"),
         /**
          * Stores {@link PartitionKeysMeta} for {@link NDIType#PRIMARY_KEYS}
          */
@@ -212,6 +217,8 @@ public class IndexComponents
     private static final NDIType[] ALL_PER_COLUMN_COMPONENTS = ObjectArrays.concat(NUMERIC_PER_COLUMN_COMPONENTS, STRING_COMPONENTS, NDIType.class);
 
     public static final IndexComponent PRIMARY_KEYS = NDIType.PRIMARY_KEYS.newComponent();
+
+    public static final IndexComponent PRIMARY_KEY_OFFSETS = NDIType.PRIMARY_KEY_OFFSETS.newComponent();
 
     public static final IndexComponent GROUP_META = NDIType.GROUP_META.newComponent();
 

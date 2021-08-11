@@ -138,7 +138,7 @@ public class Segment implements Closeable
      * @param context to track per sstable cache and per query metrics
      * @return range iterator that matches given expression
      */
-    public List<RangeIterator> search(Expression expression, SSTableQueryContext context)
+    public List<RangeIterator> search(Expression expression, SSTableQueryContext context) throws IOException
     {
         return index.search(expression, context);
     }

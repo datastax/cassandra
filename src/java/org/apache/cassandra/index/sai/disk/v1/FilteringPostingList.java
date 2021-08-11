@@ -106,7 +106,7 @@ public class FilteringPostingList implements PostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public PrimaryKey mapRowId(long rowId) throws IOException
     {
         return delegate.mapRowId(rowId);
     }

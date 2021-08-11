@@ -409,15 +409,15 @@ public final class FileUtils
         }
     }
 
-    public static void close(Closeable... cs) throws IOException
+    public static void close(AutoCloseable... cs) throws IOException
     {
         close(Arrays.asList(cs));
     }
 
-    public static void close(Iterable<? extends Closeable> cs) throws IOException
+    public static void close(Iterable<? extends AutoCloseable> cs) throws IOException
     {
         Throwable e = null;
-        for (Closeable c : cs)
+        for (AutoCloseable c : cs)
         {
             try
             {

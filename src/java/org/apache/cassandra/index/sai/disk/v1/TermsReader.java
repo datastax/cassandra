@@ -319,7 +319,7 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public PrimaryKey mapRowId(long rowId) throws IOException
         {
             return wrapped.mapRowId(rowId);
         }

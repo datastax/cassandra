@@ -33,6 +33,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
+import org.mortbay.util.IO;
 
 
 /**
@@ -249,7 +250,7 @@ public class PostingsReader implements OrdinalPostingList
         return END_OF_STREAM;
     }
 
-    private int binarySearchBlock(PrimaryKey primaryKey)
+    private int binarySearchBlock(PrimaryKey primaryKey) throws IOException
     {
         int low = postingsBlockIdx - 1;
         int high = Math.toIntExact(blockMaxValues.length()) - 1;
@@ -301,7 +302,7 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public PrimaryKey mapRowId(long rowId) throws IOException
     {
         return primaryKeyMap.primaryKeyFromRowId(rowId);
     }

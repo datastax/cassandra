@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -99,8 +100,8 @@ public class NativeIndexDDLTest extends SAITester
                                                                           .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                           .build();
 
-    private static final Injection failNumericIndexWriter = Injections.newCustom("fail_numeric_index_writer")
-                                                                      .add(InvokePointBuilder.newInvokePoint().onClass(NumericIndexWriter.class).onMethod("writeIndex"))
+    private static final Injection failNumericValuesWriter = Injections.newCustom("fail_numeric_values_writer")
+                                                                      .add(InvokePointBuilder.newInvokePoint().onClass(NumericValuesWriter.class).onMethod("add"))
                                                                       .add(ActionBuilder.newActionBuilder().actions().doThrow(IOException.class, Expression.quote("Injected failure!")))
                                                                       .build();
 
@@ -1023,8 +1024,8 @@ public class NativeIndexDDLTest extends SAITester
         flush();
 
         // Inject failure
-        Injections.inject(failNumericIndexWriter);
-        failNumericIndexWriter.enable();
+        Injections.inject(failNumericValuesWriter);
+        failNumericValuesWriter.enable();
 
         try
         {
@@ -1042,7 +1043,7 @@ public class NativeIndexDDLTest extends SAITester
         }
         finally
         {
-            failNumericIndexWriter.disable();
+            failNumericValuesWriter.disable();
         }
     }
 

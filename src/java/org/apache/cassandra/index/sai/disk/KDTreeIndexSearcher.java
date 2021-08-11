@@ -72,7 +72,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     @Override
     @SuppressWarnings("resource")
-    public List<RangeIterator> search(Expression exp, SSTableQueryContext context)
+    public List<RangeIterator> search(Expression exp, SSTableQueryContext context) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);

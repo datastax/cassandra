@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.test.microbench.index.sai.v1;
 
+import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.index.sai.disk.v1.BKDReader;
@@ -84,7 +85,7 @@ public class PrimaryKeyMapBenchmark extends AbstractOnDiskBenchmark
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode(Mode.AverageTime)
-    public void primaryKeyFromRowId(Blackhole bh)
+    public void primaryKeyFromRowId(Blackhole bh) throws IOException
     {
         for (int i = 0; i < rowIds.length;)
         {

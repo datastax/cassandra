@@ -101,9 +101,9 @@ public abstract class IndexSearcher implements Closeable
      *
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext);
+    public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext) throws IOException;
 
-    List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext)
+    List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext) throws IOException
     {
         if (postingLists == null || postingLists.isEmpty())
             return Collections.EMPTY_LIST;
@@ -130,7 +130,7 @@ public abstract class IndexSearcher implements Closeable
         final PostingList.PeekablePostingList postingList;
         final PrimaryKeyMap primaryKeyMap;
 
-        SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
+        SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList) throws IOException
         {
             this.context = context;
             this.postingList = postingList;

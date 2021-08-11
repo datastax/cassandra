@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
@@ -174,7 +175,7 @@ public class SSTableIndex
         return metadata.maxKey;
     }
 
-    public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context)
+    public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context) throws IOException
     {
         return segment.intersects(keyRange) ? segment.search(expression, context) : Collections.EMPTY_LIST;
     }

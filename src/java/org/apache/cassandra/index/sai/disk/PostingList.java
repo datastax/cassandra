@@ -61,7 +61,7 @@ public interface PostingList extends Closeable
      */
     long advance(PrimaryKey nextPrimaryKey) throws IOException;
 
-    PrimaryKey mapRowId(long rowId);
+    PrimaryKey mapRowId(long rowId) throws IOException;
 
     /**
      * @return peekable wrapper of current posting list
@@ -144,7 +144,7 @@ public interface PostingList extends Closeable
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public PrimaryKey mapRowId(long rowId) throws IOException
         {
             return wrapped.mapRowId(rowId);
         }

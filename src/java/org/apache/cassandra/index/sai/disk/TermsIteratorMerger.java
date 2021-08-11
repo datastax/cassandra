@@ -136,7 +136,7 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public PrimaryKey mapRowId(long rowId)
+        public PrimaryKey mapRowId(long rowId) throws IOException
         {
             return monitored.mapRowId(rowId);
         }

@@ -48,11 +48,6 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
     private final PackedLongValues minValues;
     private final float[] averages;
 
-    public MonotonicBlockPackedReader(FileHandle file, Component component, IndexComponents components, MetadataSource source) throws IOException
-    {
-        this(file, components, new NumericValuesMeta(source.get(component.name())));
-    }
-
     @SuppressWarnings("resource")
     public MonotonicBlockPackedReader(FileHandle file, IndexComponents components, NumericValuesMeta meta) throws IOException
     {

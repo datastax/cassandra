@@ -23,6 +23,8 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.v1.OrdinalPostingList;
 import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 
+import java.io.IOException;
+
 //TODO Change this whole lot to use longs
 public class ArrayPostingList implements OrdinalPostingList
 {
@@ -74,7 +76,7 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
-    public PrimaryKey mapRowId(long rowId)
+    public PrimaryKey mapRowId(long rowId) throws IOException
     {
         return PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(rowId);
     }

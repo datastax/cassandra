@@ -50,11 +50,6 @@ public class BlockPackedReader implements LongArray.Factory
     private final long[] blockOffsets;
     private final long[] minValues;
 
-    public BlockPackedReader(FileHandle file, Component component, IndexComponents components, MetadataSource source) throws IOException
-    {
-        this(file, components, new NumericValuesMeta(source.get(component.name())));
-    }
-
     @SuppressWarnings("resource")
     public BlockPackedReader(FileHandle file, IndexComponents components, NumericValuesMeta meta) throws IOException
     {
