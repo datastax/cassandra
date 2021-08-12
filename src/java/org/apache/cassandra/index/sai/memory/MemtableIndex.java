@@ -50,7 +50,7 @@ public class MemtableIndex
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder estimatedMemoryUsed = new LongAdder();
 
-    public MemtableIndex(ColumnContext columnContext, Memtable mt)
+    public MemtableIndex(ColumnContext columnContext, Memtable memtable)
     {
         this.index = new TrieMemoryIndex(columnContext);
         this.validator = columnContext.getValidator();
@@ -82,12 +82,12 @@ public class MemtableIndex
         return index.getMaxTerm();
     }
 
-    public long index(DecoratedKey key, Clustering clustering, ByteBuffer value)
+    public long index(DecoratedKey key, Clustering clustering, ByteBuffer value, boolean isUnique)
     {
         if (value == null || value.remaining() == 0)
             return 0;
 
-        long ram = index.add(key, clustering, value);
+        long ram = index.add(key, clustering, value, isUnique);
         writeCount.increment();
         estimatedMemoryUsed.add(ram);
         return ram;

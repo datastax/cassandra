@@ -45,6 +45,11 @@ public interface PostingList extends Closeable
      */
     long nextPosting() throws IOException;
 
+    default long currentPosting()
+    {
+        throw new UnsupportedOperationException("class="+getClass());
+    }
+
     long size();
 
     /**
@@ -59,7 +64,10 @@ public interface PostingList extends Closeable
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
+
     long advance(PrimaryKey nextPrimaryKey) throws IOException;
+
+    long advance(long targetRowID) throws IOException;
 
     PrimaryKey mapRowId(long rowId);
 
@@ -83,6 +91,12 @@ public interface PostingList extends Closeable
             this.wrapped = wrapped;
         }
 
+        @Override
+        public long currentPosting()
+        {
+            return wrapped.currentPosting();
+        }
+
         public long peek()
         {
             if (peeked)
@@ -97,6 +111,19 @@ public interface PostingList extends Closeable
             {
                 throw Throwables.cleaned(e);
             }
+        }
+
+        public long advanceWithoutConsuming(long targetRowID) throws IOException
+        {
+            if (peek() == END_OF_STREAM)
+                return END_OF_STREAM;
+
+            if (peek() >= targetRowID)
+                return peek();
+
+            peeked = true;
+            next = wrapped.advance(targetRowID);
+            return next;
         }
 
         public long advanceWithoutConsuming(PrimaryKey primaryKey) throws IOException
@@ -127,6 +154,19 @@ public interface PostingList extends Closeable
         public long size()
         {
             return wrapped.size();
+        }
+
+        @Override
+        public long advance(long targetRowID) throws IOException
+        {
+            if (peeked && next >= targetRowID)
+            {
+                peeked = false;
+                return next;
+            }
+
+            peeked = false;
+            return wrapped.advance(targetRowID);
         }
 
         @Override

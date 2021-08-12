@@ -143,6 +143,11 @@ public class Segment implements Closeable
         return index.search(expression, context);
     }
 
+    public PostingList searchPostingList(Expression expression, SSTableQueryContext context)
+    {
+        return index.searchPostingList(expression, context);
+    }
+
     public AbstractType<?> getColumnType()
     {
         return columnType;

@@ -85,6 +85,21 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @Override
+    public PostingList searchPostingList(Expression exp, SSTableQueryContext context)
+    {
+        if (logger.isTraceEnabled())
+        logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
+
+        if (!exp.getOp().isEquality())
+            throw new IllegalArgumentException(indexComponents.logMessage("Unsupported expression: " + exp));
+
+        final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
+        QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
+
+        return reader.exactMatch(term, listener, context.queryContext);
+    }
+
+    @Override
     @SuppressWarnings("resource")
     public List<RangeIterator> search(Expression exp, SSTableQueryContext context)
     {

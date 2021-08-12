@@ -130,6 +130,12 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
+        public long advance(long targetRowID) throws IOException
+        {
+            return monitored.advance(targetRowID);
+        }
+
+        @Override
         public long advance(PrimaryKey primaryKey) throws IOException
         {
             return monitored.advance(primaryKey);

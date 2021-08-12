@@ -51,7 +51,7 @@ public abstract class MemoryIndex
         this.columnContext = columnContext;
     }
 
-    public abstract long add(DecoratedKey key, Clustering clustering, ByteBuffer value);
+    public abstract long add(DecoratedKey key, Clustering clustering, ByteBuffer value, boolean isUnique);
 
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 

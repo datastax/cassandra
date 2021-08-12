@@ -76,8 +76,8 @@ public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchma
         int keyCount = 0;
         for (int i = 0; i < numberOfTerms; i++)
         {
-            stringIndex.add(partitionKeys[keyCount], Clustering.EMPTY, stringTerms[i]);
-            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, integerTerms[i]);
+            stringIndex.add(partitionKeys[keyCount], Clustering.EMPTY, stringTerms[i], true);
+            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, integerTerms[i], true);
             if (++rowCount == rowsPerPartition)
             {
                 rowCount = 0;

@@ -65,6 +65,9 @@ public class PostingsReader implements OrdinalPostingList
     private DirectReaders.Reader currentFORValues;
     private long postingsDecoded = 0;
 
+    private long currentPosting = 0;
+
+
     @VisibleForTesting
     PostingsReader(SharedIndexInput sharedInput, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
     {
@@ -89,6 +92,11 @@ public class PostingsReader implements OrdinalPostingList
         this.summary = summary;
 
         reBuffer();
+    }
+
+    public long currentPosting()
+    {
+        return currentPosting;
     }
 
     @Override
@@ -196,6 +204,94 @@ public class PostingsReader implements OrdinalPostingList
     public long size()
     {
         return numPostings;
+    }
+
+    @Override
+    public long advance(long targetRowID) throws IOException
+    {
+        try
+        {
+            listener.onAdvance();
+
+            int block = binarySearchBlock(targetRowID);
+
+            if (block < 0)
+            {
+                block = -block - 1;
+            }
+
+            if (postingsBlockIdx == block + 1)
+            {
+                // we're in the same block, just iterate through
+                return currentPosting = slowAdvance(targetRowID);
+            }
+            assert block > 0;
+            // Even if there was an exact match, block might contain duplicates.
+            // We iterate to the target token from the beginning.
+            lastPosInBlock(block - 1);
+            return currentPosting = slowAdvance(targetRowID);
+        }
+        finally
+        {
+            System.out.println("advance targetRowID="+targetRowID+" currentPosting="+currentPosting);
+        }
+    }
+
+    private int binarySearchBlock(long targetRowID)
+    {
+        int low = postingsBlockIdx - 1;
+        int high = Math.toIntExact(blockMaxValues.length()) - 1;
+
+        // in current block
+        if (low <= high && targetRowID <= blockMaxValues.get(low))
+            return low;
+
+        while (low <= high)
+        {
+            int mid = low + ((high - low) >> 1) ;
+
+            long midVal = blockMaxValues.get(mid);
+
+            if (midVal < targetRowID)
+            {
+                low = mid + 1;
+            }
+            else if (midVal > targetRowID)
+            {
+                high = mid - 1;
+            }
+            else
+            {
+                // target found, but we need to check for duplicates
+                if (mid > 0 && blockMaxValues.get(mid - 1L) == targetRowID)
+                {
+                    // there are duplicates, pivot left
+                    high = mid - 1;
+                }
+                else
+                {
+                    // no duplicates
+                    return mid;
+                }
+            }
+        }
+        return -(low + 1);  // target not found
+    }
+
+    private long slowAdvance(long targetRowID) throws IOException
+    {
+        while (totalPostingsRead < numPostings)
+        {
+            long segmentRowId = peekNext();
+
+            advanceOnePosition(segmentRowId);
+
+            if (segmentRowId >= targetRowID)
+            {
+                return segmentRowId;
+            }
+        }
+        return END_OF_STREAM;
     }
 
     /**
@@ -316,6 +412,8 @@ public class PostingsReader implements OrdinalPostingList
         }
 //        System.out.println(this.getClass().getSimpleName()+ "@" + this.hashCode() + ".nextPosting = " + next);
 
+        this.currentPosting = next;
+
         return next;
     }
 
@@ -336,10 +434,10 @@ public class PostingsReader implements OrdinalPostingList
             reBuffer();
         }
 
-        return actualSegmentRowId + nextRowID();
+        return actualSegmentRowId + nextDelta();
     }
 
-    private int nextRowID()
+    private int nextDelta()
     {
         // currentFORValues is null when the all the values in the block are the same
         if (currentFORValues == null)

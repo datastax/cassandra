@@ -196,7 +196,7 @@ public class ColumnContext
         return table;
     }
 
-    public long index(DecoratedKey key, Row row, Memtable mt)
+    public long index(DecoratedKey key, Row row, Memtable mt, boolean isUnique)
     {
         MemtableIndex current = liveMemtables.get(mt);
 
@@ -218,14 +218,14 @@ public class ColumnContext
                 while (bufferIterator.hasNext())
                 {
                     ByteBuffer value = bufferIterator.next();
-                    bytes += target.index(key, row.clustering(), value);
+                    bytes += target.index(key, row.clustering(), value, isUnique);
                 }
             }
         }
         else
         {
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
-            target.index(key, row.clustering(), value);
+            target.index(key, row.clustering(), value, isUnique);
         }
         indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         return bytes;

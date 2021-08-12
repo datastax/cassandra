@@ -40,6 +40,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -330,7 +331,7 @@ public class Operation
         @Override
         RangeIterator rangeIterator(QueryController controller)
         {
-            RangeIterator.Builder builder = controller.getIndexes(OperationType.AND, expressionMap.values());
+            RangeIterator.Builder builder = controller.getIndexesPostings(OperationType.AND, expressionMap.values());
             for (Node child : children)
                 if (child.canFilter())
                     builder.add(child.rangeIterator(controller));
@@ -355,7 +356,7 @@ public class Operation
         @Override
         RangeIterator rangeIterator(QueryController controller)
         {
-            RangeIterator.Builder builder = controller.getIndexes(OperationType.OR, expressionMap.values());
+            RangeIterator.Builder builder = controller.getIndexesPostings(OperationType.OR, expressionMap.values());
             for (Node child : children)
                 if (child.canFilter())
                     builder.add(child.rangeIterator(controller));
@@ -367,6 +368,11 @@ public class Operation
     {
         RowFilter.Expression expression;
 
+        public ExpressionNode(RowFilter.Expression expression)
+        {
+            this.expression = expression;
+        }
+
         @Override
         public void analyze(List<RowFilter.Expression> expressionList, QueryController controller)
         {
@@ -377,11 +383,6 @@ public class Operation
         FilterTree filterTree()
         {
             return new FilterTree(OperationType.AND, expressionMap);
-        }
-
-        public ExpressionNode(RowFilter.Expression expression)
-        {
-            this.expression = expression;
         }
 
         @Override

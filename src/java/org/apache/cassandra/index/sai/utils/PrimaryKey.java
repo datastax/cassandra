@@ -62,6 +62,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
     private long sstableRowId;
     private boolean mutable = false;
     private long mutableId;
+    private boolean isUnique;
+    private boolean supportsIsUnique = false;
 
     public static class PrimaryKeyFactory
     {
@@ -85,12 +87,17 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
         public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
         {
-            return makeMutableKey(partitionKey, clustering, sstableRowId);
+            return makeMutableKey(partitionKey, clustering, sstableRowId, false, false);
         }
 
         public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering)
         {
-            return makeMutableKey(partitionKey, clustering, -1);
+            return makeMutableKey(partitionKey, clustering, -1, false, false);
+        }
+
+        public PrimaryKey createKey(DecoratedKey partitionKey, Clustering clustering, boolean isUnique, boolean supportsIsUnique)
+        {
+            return makeMutableKey(partitionKey, clustering, -1, isUnique, supportsIsUnique);
         }
 
         public PrimaryKey createKey(ByteComparable comparable, long sstableRowId)
@@ -142,10 +149,10 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
             Clustering clustering = Clustering.make(values);
 
-            return makeMutableKey(key, clustering, sstableRowId);
+            return makeMutableKey(key, clustering, sstableRowId, true, true);
         }
 
-        private PrimaryKey makeMutableKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId)
+        private PrimaryKey makeMutableKey(DecoratedKey partitionKey, Clustering clustering, long sstableRowId, boolean isUnique, boolean supportsIsUnique)
         {
 //            if (mutable)
 //            {
@@ -156,7 +163,9 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 //                mutablePrimaryKey.sstableRowId = sstableRowId;
 //                return mutablePrimaryKey;
 //            }
-            return new PrimaryKey(partitionKey, clustering, comparator, sstableRowId);
+
+            // isUnique here implicitly sets supportsIsUnique in the PrimaryKey
+            return new PrimaryKey(partitionKey, clustering, comparator, sstableRowId, isUnique, supportsIsUnique);
         }
     }
 
@@ -192,6 +201,16 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         this(partitionKey, clustering, comparator, -1);
     }
 
+    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, boolean isUnique, boolean supportsIsUnique)
+    {
+        this(partitionKey, clustering, comparator, -1, isUnique, supportsIsUnique);
+    }
+
+    private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId, boolean isUnique, boolean supportsIsUnique)
+    {
+        this(sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId, isUnique, supportsIsUnique);
+    }
+
     private PrimaryKey(DecoratedKey partitionKey, Clustering clustering, ClusteringComparator comparator, long sstableRowId)
     {
         this(sstableRowId >= 0 ? Kind.MAPPED : Kind.UNMAPPED, partitionKey, clustering, comparator, sstableRowId);
@@ -214,6 +233,17 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         this.clustering = clustering;
         this.clusteringComparator = clusteringComparator;
         this.sstableRowId = sstableRowId;
+    }
+
+    private PrimaryKey(Kind kind, DecoratedKey partitionKey, Clustering clustering, ClusteringComparator clusteringComparator, long sstableRowId, boolean isUnique, boolean supportsIsUnique)
+    {
+        this.kind = kind;
+        this.partitionKey = partitionKey;
+        this.clustering = clustering;
+        this.clusteringComparator = clusteringComparator;
+        this.sstableRowId = sstableRowId;
+        this.isUnique = isUnique;
+        this.supportsIsUnique = supportsIsUnique;
     }
 
     public int size()

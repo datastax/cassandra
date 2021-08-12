@@ -113,7 +113,7 @@ public class TrieMemoryIndexTest
         final TrieMemoryIndex index = newTrieMemoryIndex(type);
         for (int i = 0; i < 99; ++i)
         {
-            index.add(key, Clustering.EMPTY, decompose.apply(i));
+            index.add(key, Clustering.EMPTY, decompose.apply(i), true);
         }
 
         final Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();

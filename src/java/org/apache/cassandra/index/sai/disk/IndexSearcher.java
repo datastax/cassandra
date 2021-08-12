@@ -103,6 +103,8 @@ public abstract class IndexSearcher implements Closeable
      */
     public abstract List<RangeIterator> search(Expression expression, SSTableQueryContext queryContext);
 
+    public abstract PostingList searchPostingList(Expression expression, SSTableQueryContext queryContext);
+
     List<RangeIterator> toIterators(List<PostingList.PeekablePostingList> postingLists, SSTableQueryContext queryContext)
     {
         if (postingLists == null || postingLists.isEmpty())
@@ -112,34 +114,45 @@ public abstract class IndexSearcher implements Closeable
 
         for (PostingList.PeekablePostingList postingList : postingLists)
         {
-            SearcherContext searcherContext = new SearcherContext(queryContext, postingList);
-            if (!searcherContext.noOverlap)
-                iterators.add(new PostingListRangeIterator(searcherContext, indexComponents));
+            if (postingList.peek() != PostingList.END_OF_STREAM)
+            {
+                SearcherContext searcherContext = new SearcherContext(queryContext,
+                                                                      postingList,
+                                                                      metadata.maxKey,
+                                                                      IndexSearcher.this.primaryKeyMap.copyOf());
+                if (!searcherContext.noOverlap)
+                    iterators.add(new PostingListRangeIterator(searcherContext, indexComponents));
+            }
         }
 
         return iterators;
     }
 
-    public class SearcherContext
+    public static class SearcherContext
     {
-        PrimaryKey minimumKey;
-        PrimaryKey maximumKey;
-        long maxPartitionOffset;
-        boolean noOverlap;
+        public PrimaryKey minimumKey;
+        public PrimaryKey maximumKey;
+        public long maxPartitionOffset;
+        public boolean noOverlap;
         final SSTableQueryContext context;
         final PostingList.PeekablePostingList postingList;
         final PrimaryKeyMap primaryKeyMap;
 
-        SearcherContext(SSTableQueryContext context, PostingList.PeekablePostingList postingList)
+        public SearcherContext(SSTableQueryContext context,
+                               PostingList.PeekablePostingList postingList,
+                               PrimaryKey maximumKey,
+                               PrimaryKeyMap primaryKeyMap)
         {
             this.context = context;
             this.postingList = postingList;
-            this.primaryKeyMap = IndexSearcher.this.primaryKeyMap.copyOf();
+            this.primaryKeyMap = primaryKeyMap;
+            //this.primaryKeyMap = IndexSearcher.this.primaryKeyMap.copyOf();
 
-            minimumKey = this.primaryKeyMap.primaryKeyFromRowId(postingList.peek());
+            this.minimumKey = this.primaryKeyMap.primaryKeyFromRowId(postingList.peek());
 
             // use segment's metadata for the range iterator, may not be accurate, but should not matter to performance.
-            maximumKey = metadata.maxKey;
+            //maximumKey = metadata.maxKey;
+            this.maximumKey = maximumKey;
 
             maxPartitionOffset = Long.MAX_VALUE;
         }

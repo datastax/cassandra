@@ -53,6 +53,12 @@ public class FilteringPostingList implements PostingList
         delegate.close();
     }
 
+    @Override
+    public long currentPosting()
+    {
+        return delegate.currentPosting();
+    }
+
     /**
      *
      * @return the segment row ID of the next match
@@ -80,6 +86,29 @@ public class FilteringPostingList implements PostingList
     public long size()
     {
         return cardinality;
+    }
+
+    @Override
+    public  long advance(long targetRowID) throws IOException
+    {
+        long segmentRowId = delegate.advance(targetRowID);
+
+        if (segmentRowId == PostingList.END_OF_STREAM)
+        {
+            return PostingList.END_OF_STREAM;
+        }
+
+        // these are always for leaf kdtree postings so the max is 1024
+        position = (int)delegate.getOrdinal();
+
+        // If the ordinal of the ID we just read satisfies the filter, just return it...
+        if (filter.get(position - 1))
+        {
+            return segmentRowId;
+        }
+
+        // ...but if the ID doesn't satisfy the filter, get the next match.
+        return nextPosting();
     }
 
     @Override

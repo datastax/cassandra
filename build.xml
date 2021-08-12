@@ -738,6 +738,7 @@
         <dependency groupId="org.jacoco" artifactId="org.jacoco.ant"/>
 
         <dependency groupId="org.apache.lucene" artifactId="lucene-core"/>
+
         <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
       </artifact:pom>

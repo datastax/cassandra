@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
@@ -102,6 +103,12 @@ public class MemtableTermsIterator implements TermsIterator
             public long size()
             {
                 return list.size();
+            }
+
+            @Override
+            public long advance(long targetRowID) throws IOException
+            {
+                throw new UnsupportedOperationException();
             }
 
             @Override

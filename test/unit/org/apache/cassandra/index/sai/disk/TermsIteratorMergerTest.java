@@ -134,6 +134,12 @@ public class TermsIteratorMergerTest extends SAITester
                 }
 
                 @Override
+                public long advance(long targetRowID) throws IOException
+                {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
                 public long advance(PrimaryKey primaryKey) throws IOException
                 {
                     throw new UnsupportedOperationException();

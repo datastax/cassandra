@@ -19,7 +19,9 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -27,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.v1.BKDReader;
+import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -68,6 +71,36 @@ public class KDTreeIndexSearcher extends IndexSearcher
     public long indexFileCacheSize()
     {
         return bkdReader.memoryUsage();
+    }
+
+    @Override
+    @SuppressWarnings("resource")
+    public PostingList searchPostingList(Expression exp, SSTableQueryContext context)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace(indexComponents.logMessage("Searching on expression '{}'..."), exp);
+
+        if (exp.getOp().isEqualityOrRange())
+        {
+            final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
+            QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
+
+            List<PostingList.PeekablePostingList> postingLists = bkdReader.intersect(query, listener, context.queryContext);
+
+            if (postingLists == null)
+            {
+                return null;
+            }
+
+            final PriorityQueue<PostingList.PeekablePostingList> queueLists = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+            queueLists.addAll(postingLists);
+
+            return MergePostingList.merge(queueLists);
+        }
+        else
+        {
+            throw new IllegalArgumentException(indexComponents.logMessage(indexComponents.logMessage("Unsupported expression during index query: " + exp)));
+        }
     }
 
     @Override

@@ -36,6 +36,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.Segment;
 import org.apache.cassandra.index.sai.disk.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -66,10 +67,10 @@ public class SSTableIndex
     private final Version version;
     private final SSTableContext sstableContext;
     private final ColumnContext columnContext;
-    private final SSTableReader sstable;
-    private final IndexComponents components;
+    public final SSTableReader sstable;
+    public final IndexComponents components;
 
-    private final Segment segment;
+    public final Segment segment;
     private PerIndexFiles indexFiles;
 
     private final SegmentMetadata metadata;
@@ -177,6 +178,11 @@ public class SSTableIndex
     public List<RangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context)
     {
         return segment.intersects(keyRange) ? segment.search(expression, context) : Collections.EMPTY_LIST;
+    }
+
+    public PostingList searchPostingList(Expression expression, AbstractBounds<PartitionPosition> keyRange, SSTableQueryContext context)
+    {
+        return segment.intersects(keyRange) ? segment.searchPostingList(expression, context) : null;
     }
 
     public SegmentMetadata segment()

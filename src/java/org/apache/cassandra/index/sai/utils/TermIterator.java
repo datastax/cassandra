@@ -52,11 +52,11 @@ public class TermIterator extends RangeIterator
     }
 
     @SuppressWarnings("resource")
-    public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext)
+    public static TermIterator build(final Expression expression, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext)
     {
         final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());;
 
-        RangeIterator memtableIterator = e.context.searchMemtable(e, keyRange);
+        RangeIterator memtableIterator = expression.context.searchMemtable(expression, keyRange);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
@@ -69,7 +69,7 @@ public class TermIterator extends RangeIterator
                 assert !index.isReleased();
 
                 SSTableQueryContext context = queryContext.getSSTableQueryContext(index.getSSTable());
-                List<RangeIterator> keyIterators = index.search(e, keyRange, context);
+                List<RangeIterator> keyIterators = index.search(expression, keyRange, context);
 
                 if (keyIterators == null || keyIterators.isEmpty())
                     continue;

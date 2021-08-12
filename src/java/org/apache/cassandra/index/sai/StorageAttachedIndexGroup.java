@@ -31,9 +31,12 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.hash.Funnels;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -44,6 +47,8 @@ import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.cuckoofilter.CuckooFilter;
+import org.apache.cassandra.index.sai.cuckoofilter.Utils;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.metrics.IndexGroupMetrics;
@@ -64,6 +69,9 @@ import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 /**
  * Orchestrates building of storage-attached indices, and manages lifecycle of resources shared between them.
@@ -80,6 +88,9 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     private final ColumnFamilyStore baseCfs;
 
     private final SSTableContextManager contextManager;
+    private final CuckooFilter<byte[]> filter;
+
+    public static final int DEFAULT_CUCKOO_SIZE = 1024 * 1024 * 128; // 100 mil
 
     StorageAttachedIndexGroup(ColumnFamilyStore baseCfs)
     {
@@ -91,6 +102,9 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
         Tracker tracker = baseCfs.getTracker();
         tracker.subscribe(this);
+
+        filter = new CuckooFilter.Builder<>(Funnels.byteArrayFunnel(), DEFAULT_CUCKOO_SIZE)
+                 .withFalsePositiveRate(0.01).withHashAlgorithm(Utils.Algorithm.Murmur3_128).build();
     }
 
     @Nullable
@@ -162,7 +176,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
     @Override
     public Index.Indexer indexerFor(Predicate<Index> indexSelector,
-                                    DecoratedKey key,
+                                    final DecoratedKey partitionKey,
                                     RegularAndStaticColumns columns,
                                     int nowInSec,
                                     WriteContext ctx,
@@ -171,7 +185,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     {
         final Set<Index.Indexer> indexers =
                 indices.stream().filter(indexSelector)
-                                .map(i -> i.indexerFor(key, columns, nowInSec, ctx, transactionType, memtable))
+                                .map(i -> i.indexerFor(partitionKey, columns, nowInSec, ctx, transactionType, memtable))
                                 .filter(Objects::nonNull)
                                 .collect(Collectors.toSet());
 
@@ -180,9 +194,22 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             @Override
             public void insertRow(Row row)
             {
+                final ByteSource totalKeyBytes = asComparableBytes(partitionKey,
+                                                          row.clustering(),
+                                                          ByteComparable.Version.OSS41);
+
+                final byte[] totalKey = ByteSourceInverse.readBytes(totalKeyBytes);
+
+                final boolean went = filter.put(totalKey);
+
+
+
+                // TODO: mark the row as unique or not
+
                 forEach(indexer -> indexer.insertRow(row));
             }
 
+            // TODO: impelement cuckoo in updateRow
             @Override
             public void updateRow(Row oldRow, Row newRow)
             {
@@ -194,6 +221,23 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
                 indexers.forEach(action::accept);
             }
         };
+    }
+
+    public static ByteSource asComparableBytes(final DecoratedKey partitionKey,
+                                               Clustering clustering,
+                                               ByteComparable.Version version)
+    {
+        ByteSource[] sources = new ByteSource[clustering.size() + 2];
+        sources[0] = partitionKey.getToken().asComparableBytes(version);
+        sources[1] = ByteSource.of(partitionKey.getKey(), version);
+        for (int index = 0; index < clustering.size(); index++)
+        {
+            sources[index + 2] = ByteSource.of(clustering.bufferAt(index), version);
+        }
+        return ByteSource.withTerminator(version == ByteComparable.Version.LEGACY
+                                         ? ByteSource.END_OF_STREAM
+                                         : ByteSource.TERMINATOR,
+                                         sources);
     }
 
     @Override

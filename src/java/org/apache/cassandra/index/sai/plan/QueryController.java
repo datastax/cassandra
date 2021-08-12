@@ -20,17 +20,23 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,8 +59,17 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.IndexSearcher;
+import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
+import org.apache.cassandra.index.sai.disk.v1.PostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.utils.ConjunctionPostingList;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -206,6 +221,128 @@ public class QueryController
             throw t;
         }
         return builder;
+    }
+
+    public RangeIterator.Builder getIndexesPostings(Operation.OperationType op,
+                                                    Collection<Expression> expressions)
+    {
+        final RangeIterator.Builder builder = RangeUnionIterator.builder();
+
+        final List<RangeIterator> memoryRangeIterators = new ArrayList<>();
+        for (final Expression expression : expressions)
+        {
+            final RangeIterator memtableIterator = expression.context.searchMemtable(expression, mergeRange);
+            memoryRangeIterators.add(memtableIterator);
+        }
+
+        final RangeIterator primaryMemoryRangeIterator;
+
+        if (op == Operation.OperationType.AND)
+        {
+            RangeIntersectionIterator.Builder andBuilder = RangeIntersectionIterator.builder();
+            for (RangeIterator it : memoryRangeIterators)
+            {
+                andBuilder.add(it);
+            }
+            primaryMemoryRangeIterator = andBuilder.build();
+        }
+        else
+        {
+            assert op == Operation.OperationType.OR;
+            RangeUnionIterator.Builder orBuilder = RangeUnionIterator.builder();
+            orBuilder.add(memoryRangeIterators);
+            primaryMemoryRangeIterator = orBuilder.build();
+        }
+
+        builder.add(primaryMemoryRangeIterator);
+
+        final Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
+
+        final HashMultimap<SSTableReader.UniqueIdentifier,Pair<Expression,SSTableIndex>> map = HashMultimap.create();
+
+        final List<PostingList> toClose = new ArrayList<>();
+
+        try
+        {
+            for (Map.Entry<Expression, NavigableSet<SSTableIndex>> entry : view)
+            {
+                for (SSTableIndex ssTableIndex : entry.getValue())
+                {
+                    map.put(ssTableIndex.getSSTable().instanceId, Pair.create(entry.getKey(), ssTableIndex));
+                }
+            }
+
+            // iterate per-sstable expressions and create a posting list for the sstable
+            for (final Map.Entry<SSTableReader.UniqueIdentifier,Collection<Pair<Expression,SSTableIndex>>> entry : map.asMap().entrySet())
+            {
+                final PriorityQueue<PostingList.PeekablePostingList> postingLists = new PriorityQueue<>(100, Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+
+                SSTableQueryContext ssTableQueryContext = null;
+                PrimaryKey maxKey = null;
+                PrimaryKeyMap primaryKeyMap = null;
+                IndexComponents comps = null;
+
+                // for each expression create a posting list
+                for (Pair<Expression,SSTableIndex> pair : entry.getValue())
+                {
+                    // TODO: saving variables this way seems off, is the max key the same
+                    //       across SSTableIndex's?
+                    //       primaryKeyMap same?
+                    maxKey = pair.right.segment.metadata.maxKey;
+                    primaryKeyMap = pair.right.getSSTableContext().primaryKeyMap;
+                    comps = pair.right.components;
+                    ssTableQueryContext = queryContext.getSSTableQueryContext(pair.right.getSSTable());
+                    PostingList postings = pair.right.searchPostingList(pair.left, mergeRange, ssTableQueryContext);
+                    if (postings != null)
+                    {
+                        toClose.add(postings);
+                        postingLists.add(postings.peekable());
+                    }
+                }
+
+                if (postingLists.size() == 0)
+                {
+                    continue;
+                }
+
+                final PostingList sstablePostings;
+
+                if (op == Operation.OperationType.OR)
+                {
+                    sstablePostings = MergePostingList.merge(postingLists);
+                }
+                else
+                {
+                    assert op == Operation.OperationType.AND;
+
+                    sstablePostings = new ConjunctionPostingList(new ArrayList(postingLists));
+                }
+
+                PostingList.PeekablePostingList peekablePostingList = sstablePostings.peekable();
+
+                if (peekablePostingList.peek() != PostingList.END_OF_STREAM)
+                {
+                    IndexSearcher.SearcherContext searcherContext = new IndexSearcher.SearcherContext(ssTableQueryContext,
+                                                                                                      peekablePostingList,
+                                                                                                      maxKey,
+                                                                                                      primaryKeyMap.copyOf());
+                    if (!searcherContext.noOverlap)
+                    {
+                        PostingListRangeIterator sstableRangeIterator = new PostingListRangeIterator(searcherContext,
+                                                                                                     comps);
+                        builder.add(sstableRangeIterator);
+                    }
+                }
+            }
+            return builder;
+        }
+        catch (Throwable t)
+        {
+            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
+            FileUtils.closeQuietly(toClose);
+            view.forEach(e -> e.getValue().forEach(SSTableIndex::release));
+            throw t;
+        }
     }
 
     private ClusteringIndexFilter makeFilter(PrimaryKey key)

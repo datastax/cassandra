@@ -57,6 +57,23 @@ public class ArrayPostingList implements OrdinalPostingList
     }
 
     @Override
+    public long advance(long targetRowID)
+    {
+        for (int i = idx; i < postings.length; ++i)
+        {
+            final int segmentRowId = getPostingAt(i);
+
+            idx++;
+
+            if (segmentRowId >= targetRowID)
+            {
+                return segmentRowId;
+            }
+        }
+        return PostingList.END_OF_STREAM;
+    }
+
+    @Override
     public long advance(PrimaryKey primaryKey)
     {
         for (int i = idx; i < postings.length; ++i)

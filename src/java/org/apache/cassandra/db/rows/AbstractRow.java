@@ -39,6 +39,18 @@ import org.apache.cassandra.serializers.MarshalException;
  */
 public abstract class AbstractRow implements Row
 {
+    private boolean isUnique = true;
+
+    public void setUnique(boolean isUnique)
+    {
+        this.isUnique = isUnique;
+    }
+
+    public boolean isUnique()
+    {
+        return isUnique;
+    }
+
     public Unfiltered.Kind kind()
     {
         return Unfiltered.Kind.ROW;

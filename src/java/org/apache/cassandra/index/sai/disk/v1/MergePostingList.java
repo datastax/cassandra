@@ -64,7 +64,7 @@ public class MergePostingList implements PostingList
 
     public static PostingList merge(PriorityQueue<PeekablePostingList> postings)
     {
-        return merge(postings, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
+        return merge(postings, () -> FileUtils.closeQuietly(postings));
     }
 
     @SuppressWarnings("resource")
@@ -95,6 +95,12 @@ public class MergePostingList implements PostingList
         return PostingList.END_OF_STREAM;
     }
 
+    @Override
+    public long currentPosting()
+    {
+        return postingLists.peek().currentPosting();
+    }
+
     @SuppressWarnings("resource")
     @Override
     public long advance(PrimaryKey key) throws IOException
@@ -105,6 +111,24 @@ public class MergePostingList implements PostingList
         {
             PeekablePostingList peekable = postingLists.poll();
             peekable.advanceWithoutConsuming(key);
+            if (peekable.peek() != PostingList.END_OF_STREAM)
+                temp.add(peekable);
+        }
+        postingLists.addAll(temp);
+
+        return nextPosting();
+    }
+
+    @SuppressWarnings("resource")
+    @Override
+    public long advance(long targetRowID) throws IOException
+    {
+        temp.clear();
+
+        while (!postingLists.isEmpty())
+        {
+            PeekablePostingList peekable = postingLists.poll();
+            peekable.advanceWithoutConsuming(targetRowID);
             if (peekable.peek() != PostingList.END_OF_STREAM)
                 temp.add(peekable);
         }
