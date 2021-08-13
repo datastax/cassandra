@@ -126,7 +126,17 @@ public class CommitLogReader
         for (File file: filteredLogs)
         {
             i++;
-            readCommitLogSegment(handler, file, minPosition, ALL_MUTATIONS, i == filteredLogs.size());
+            try
+            {
+                readCommitLogSegment(handler, file, minPosition, ALL_MUTATIONS, i == filteredLogs.size());
+            }
+            catch (Throwable t)
+            {
+                logger.error("Error encountered reading commit log {}, which may indicate corruption. You may need to (re)move " +
+                             "this file and then restart the server followed by a repair operation to restore potentially corrupted " +
+                             "data from other replicas.", file.getName());
+                throw t;
+            }
         }
     }
 
