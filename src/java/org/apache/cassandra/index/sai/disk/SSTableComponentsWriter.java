@@ -17,11 +17,11 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
-import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompressionParams;
@@ -62,6 +62,7 @@ public interface SSTableComponentsWriter
             this.descriptor = descriptor;
             this.indexComponents = IndexComponents.perSSTable(descriptor, compressionParams);
             this.primaryKeys = indexComponents.createOutput(IndexComponents.PRIMARY_KEYS);
+            SAICodecUtils.writeHeader(this.primaryKeys);
 
             this.metadataWriter = new MetadataWriter(indexComponents.createOutput(IndexComponents.GROUP_META));
             this.primaryKeyOffsets = new NumericValuesWriter(
@@ -81,6 +82,7 @@ public interface SSTableComponentsWriter
 
         public void complete() throws IOException
         {
+            SAICodecUtils.writeFooter(primaryKeys);
             FileUtils.close(primaryKeys, primaryKeyOffsets, metadataWriter);
             indexComponents.createGroupCompletionMarker();
         }
