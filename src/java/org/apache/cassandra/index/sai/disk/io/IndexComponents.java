@@ -228,7 +228,8 @@ public class IndexComponents
     /**
      * Files that are shared by all storage-attached indexes for each SSTable
      */
-    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS = Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, GROUP_META);
+    public static final List<IndexComponent> PER_SSTABLE_COMPONENTS =
+            Arrays.asList(GROUP_COMPLETION_MARKER, PRIMARY_KEYS, PRIMARY_KEY_OFFSETS, GROUP_META);
 
     public final IndexComponent termsData, postingLists, meta, groupCompletionMarker, kdTree, kdTreePostingLists, columnCompletionMarker;
 
