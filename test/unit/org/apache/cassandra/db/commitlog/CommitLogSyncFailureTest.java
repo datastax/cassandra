@@ -25,8 +25,7 @@ import java.util.ArrayList;
 import java.util.Random;
 
 import org.junit.Assert;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.Ignore;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Config;
@@ -39,28 +38,19 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.jboss.byteman.contrib.bmunit.BMRule;
-import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
-/**
- * Tests the commitlog to make sure we can replay it - explicitly for the case where we update the chained markers
- * in the commit log segment but do not flush the file to disk.
- */
-@RunWith(BMUnitRunner.class)
-public class CommitLogChainedMarkersTest
+@Ignore
+abstract class CommitLogSyncFailureTest
 {
     private static final String KEYSPACE1 = "CommitLogTest";
     private static final String STANDARD1 = "CommitLogChainedMarkersTest";
 
-    @Test
-    @BMRule(name = "force all calls to sync() to not flush to disk",
-    targetClass = "CommitLogSegment",
-    targetMethod = "sync(boolean)",
-    action = "$flush = false")
-    public void replayCommitLogWithoutFlushing() throws IOException
+    ColumnFamilyStore cfs1;
+
+    void setUp(Config.DiskAccessMode accessMode)
     {
-        // this method is blend of CommitLogSegmentBackpressureTest & CommitLogReaderTest methods
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setDiskAccessMode(accessMode);
         DatabaseDescriptor.setCommitLogSegmentSize(5);
         DatabaseDescriptor.setCommitLogSync(Config.CommitLogSync.periodic);
         DatabaseDescriptor.setCommitLogSyncPeriod(10000 * 1000);
@@ -71,20 +61,30 @@ public class CommitLogChainedMarkersTest
 
         CompactionManager.instance.disableAutoCompaction();
 
-        ColumnFamilyStore cfs1 = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
+        cfs1 = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
+    }
+
+    void replayCommitLogAfterSyncFailure(boolean doSync) throws IOException
+    {
+        if (CommitLog.instance.configuration.useCompression() || CommitLog.instance.configuration.useEncryption())
+        {
+            System.out.println("Test does not make sense with commit log compression.");
+            return;
+        }
 
         byte[] entropy = new byte[1024];
         new Random().nextBytes(entropy);
         final Mutation m = new RowUpdateBuilder(cfs1.metadata.get(), 0, "k")
-                           .clustering("bytes")
-                           .add("val", ByteBuffer.wrap(entropy))
-                           .build();
+        .clustering("bytes")
+        .add("val", ByteBuffer.wrap(entropy))
+        .build();
 
         int samples = 10000;
         for (int i = 0; i < samples; i++)
             CommitLog.instance.add(m);
 
-        CommitLog.instance.sync(false);
+        if (doSync)
+            CommitLog.instance.sync(false);
 
         ArrayList<File> toCheck = CommitLogReaderTest.getCommitLogs();
         CommitLogReader reader = new CommitLogReader();

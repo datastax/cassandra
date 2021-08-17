@@ -26,6 +26,11 @@ import javax.crypto.Cipher;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.AbstractIterator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.EncryptedFileSegmentInputStream.ChunkProvider;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler.*;
 import org.apache.cassandra.io.FSReadError;
@@ -46,6 +51,8 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  */
 public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.SyncSegment>
 {
+    private static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentReader.class);
+
     private final CommitLogReadHandler handler;
     private final CommitLogDescriptor descriptor;
     private final RandomAccessReader reader;
@@ -146,7 +153,8 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
 
     private int readSyncMarker(CommitLogDescriptor descriptor, int offset, RandomAccessReader reader) throws IOException
     {
-        if (offset > reader.length() - SYNC_MARKER_SIZE)
+        int fileLength = (int) reader.length();
+        if (offset > fileLength - SYNC_MARKER_SIZE)
         {
             // There was no room in the segment to write a final header. No data could be present here.
             return -1;
@@ -156,22 +164,58 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         updateChecksumInt(crc, (int) (descriptor.id & 0xFFFFFFFFL));
         updateChecksumInt(crc, (int) (descriptor.id >>> 32));
         updateChecksumInt(crc, (int) reader.getPosition());
-        final int end = reader.readInt();
+        int end = reader.readInt();
         long filecrc = reader.readInt() & 0xffffffffL;
-        if (crc.getValue() != filecrc)
+
+        if (end == 0)
         {
-            if (end != 0 || filecrc != 0)
-            {
-                String msg = String.format("Encountered bad header at position %d of commit log %s, with invalid CRC. " +
-                             "The end of segment marker should be zero.", offset, reader.getPath());
-                throw new SegmentReadException(msg, true);
-            }
-            return -1;
+            // 0 marker means the segment was not properly closed (e.g. because the process died). There may still be
+            // replayable data in it, though, if the segment is not compressed/encrypted. To deal with this case,
+            // we will act as if the rest of the file is one section.
+
+            // Generally this should not happen unless this is an uncompressed preallocated memory-mapped segment,
+            // but it doesn't hurt to make sure.
+            if (descriptor.compression != null
+                || descriptor.getEncryptionContext().isEnabled()
+                || DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.standard)
+                return -1;
+
+            // Note: If we were still reading pre-2.2 format logs and this is one such log, we would have to honour the
+            // end section marker because this might be a partially-overwritten recycled segment, where we may find
+            // stale data that must not be replayed.
+
+            end = fileLength;
         }
-        else if (end < offset || end > reader.length())
+        else if (crc.getValue() != filecrc)
+        {
+            String msg = String.format("Encountered bad header at position %d of commit log %s, with invalid CRC. " +
+                                       "The end of segment marker should be zero.", offset, reader.getPath());
+            throw new SegmentReadException(msg, true);
+        }
+        else if (end < offset)
         {
             String msg = String.format("Encountered bad header at position %d of commit log %s, with bad position but valid CRC", offset, reader.getPath());
             throw new SegmentReadException(msg, false);
+        }
+        else if (end > fileLength)
+        {
+            if (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard)
+            {
+                String msg = String.format("Encountered bad header at position %d of commit log %s, with bad position but valid CRC", offset, reader.getPath());
+                throw new SegmentReadException(msg, false);
+            }
+            else
+            {
+                // If the section end/next section marker position is past EOF and we are using direct, uncompressed
+                // segments, we can opportunistically replay all mutations until we reach EOF.
+                logger.debug("Encountered bad header at position {} of commit log {}, with section end {} past EOF {} but valid CRC. " +
+                             "Attempting to read until EOF...",
+                             offset,
+                             reader.getPath(),
+                             end,
+                             fileLength);
+                end = fileLength;
+            }
         }
         return end;
     }
