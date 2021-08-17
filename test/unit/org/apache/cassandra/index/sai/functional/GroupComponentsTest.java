@@ -54,7 +54,7 @@ public class GroupComponentsTest extends SAITester
         Set<Component> components = group.getLiveComponents(sstables.iterator().next(), getIndexesFromGroup(group));
 
         // 3 per-sstable components and column complete marker
-        assertEquals(4, components.size());
+        assertEquals(5, components.size());
     }
 
     @Test
@@ -75,7 +75,7 @@ public class GroupComponentsTest extends SAITester
         Set<Component> components = group.getLiveComponents(sstables.iterator().next(), getIndexesFromGroup(group));
 
         // 3 per-sstable components and 4 column components
-        assertEquals(7, components.size());
+        assertEquals(8, components.size());
     }
 
     private Collection<StorageAttachedIndex> getIndexesFromGroup(StorageAttachedIndexGroup group)
