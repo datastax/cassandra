@@ -59,9 +59,6 @@ import static org.junit.Assert.assertTrue;
 
 public class SSTableComponentsTest extends SAITester
 {
-    protected static final Injections.Counter FLUSH_COUNTER = Injections.newCounter("FlushCounter")
-                                                                        .add(newInvokePoint().onClass(SSTableComponentsWriter.class).onMethod("flush"))
-                                                                        .build();
 
     private Descriptor descriptor;
 
@@ -97,24 +94,8 @@ public class SSTableComponentsTest extends SAITester
     }
 
     @Test
-    public void testSegmented() throws Throwable
+    public void testNonEmptyKeys() throws Throwable
     {
-        testWithMemtableSizeThreshold(1);
-        assertTrue(FLUSH_COUNTER.get() >= 1);
-    }
-
-    @Test
-    public void testUnsegmented() throws Throwable
-    {
-        testWithMemtableSizeThreshold(2047);
-        assertEquals(1, FLUSH_COUNTER.get());
-    }
-
-    private void testWithMemtableSizeThreshold(int sizeThresholdMB) throws Throwable
-    {
-        setMemtableTrieAllocatedSizeThreshold(sizeThresholdMB);
-        Injections.inject(FLUSH_COUNTER);
-        FLUSH_COUNTER.reset();
         SSTableComponentsWriter writer = new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, null);
 
         TableMetadata tableMetadata = TableMetadata.builder("test", "test")
