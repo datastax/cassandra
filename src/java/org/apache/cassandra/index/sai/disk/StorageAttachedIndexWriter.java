@@ -88,7 +88,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         this.sstableComponentsWriter = perColumnOnly
                                        ? SSTableComponentsWriter.NONE
-                                       : new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, tableMetadata.params.compression);
+                                       : new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(
+                                               descriptor, primaryKeyFactory, tableMetadata.params.compression);
     }
 
     @Override

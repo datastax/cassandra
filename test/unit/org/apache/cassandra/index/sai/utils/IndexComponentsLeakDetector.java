@@ -37,10 +37,14 @@ public class IndexComponentsLeakDetector extends TestRuleAdapter
 {
     private final static Set<TrackingIndexComponents> trackedIndexComponents = Collections.synchronizedSet(new HashSet<>());
 
-    public IndexComponents newIndexComponents(String column, Descriptor descriptor, SequentialWriterOption sequentialWriterOption,
+    public IndexComponents newIndexComponents(String column,
+                                              Descriptor descriptor,
+                                              PrimaryKey.PrimaryKeyFactory keyFactory,
+                                              SequentialWriterOption sequentialWriterOption,
                                               CompressionParams params)
     {
-        final TrackingIndexComponents components = new TrackingIndexComponents(column, descriptor, sequentialWriterOption, params);
+        final TrackingIndexComponents components = new TrackingIndexComponents(
+                column, descriptor, keyFactory, sequentialWriterOption, params);
         trackedIndexComponents.add(components);
         return components;
     }

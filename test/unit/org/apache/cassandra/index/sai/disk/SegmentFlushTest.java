@@ -132,7 +132,7 @@ public class SegmentFlushTest
 
         writer.flush();
 
-        IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, null);
+        IndexComponents components = IndexComponents.create(context.getIndexName(), descriptor, null, null);
         MetadataSource source = MetadataSource.loadColumnMetadata(components);
 
         SegmentMetadata segmentMetadata = SegmentMetadata.load(source, PrimaryKey.factory(), null);

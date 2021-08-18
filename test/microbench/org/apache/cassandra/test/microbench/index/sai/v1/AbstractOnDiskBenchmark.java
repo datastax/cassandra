@@ -61,6 +61,7 @@ public abstract class AbstractOnDiskBenchmark
 
     TableMetadata metadata;
     IndexComponents groupComponents;
+    private PrimaryKey.PrimaryKeyFactory keyFactory;
     private FileHandle primaryKeys;
     PrimaryKeyMap primaryKeyMap;
 
@@ -110,8 +111,9 @@ public abstract class AbstractOnDiskBenchmark
                 .build();
 
         descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), metadata.keyspace, metadata.name, 1);
-        groupComponents = IndexComponents.perSSTable(descriptor, null);
-        indexComponents = IndexComponents.create("col", descriptor, null);
+        keyFactory = PrimaryKey.factory(metadata);
+        groupComponents = IndexComponents.perSSTable(descriptor, keyFactory, null);
+        indexComponents = IndexComponents.create("col", descriptor, keyFactory, null);
 
         writePrimaryKeysComponent(numRows());
         primaryKeys = groupComponents.createFileHandle(IndexComponents.PRIMARY_KEYS);
@@ -181,7 +183,7 @@ public abstract class AbstractOnDiskBenchmark
             primaryKeys.add(dk);
         }
 
-        SSTableComponentsWriter writer = new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, null);
+        SSTableComponentsWriter writer = new SSTableComponentsWriter.OnDiskSSTableComponentsWriter(descriptor, keyFactory,null);
         long rowId = 0;
         for (DecoratedKey dk: primaryKeys)
         {

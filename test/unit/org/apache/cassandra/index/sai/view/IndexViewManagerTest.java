@@ -222,7 +222,12 @@ public class IndexViewManagerTest extends SAITester
 
         MockSSTableIndex(SSTableContext group, ColumnContext context) throws IOException
         {
-            super(group, context, IndexComponents.create(context.getIndexName(), group.descriptor(), CryptoUtils.getCompressionParams(group.sstable())));
+            super(group, context,
+                    IndexComponents.create(
+                            context.getIndexName(),
+                            group.descriptor(),
+                            context.keyFactory(),
+                            CryptoUtils.getCompressionParams(group.sstable())));
         }
 
         @Override

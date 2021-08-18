@@ -72,6 +72,7 @@ public class NdiRandomizedTest extends RandomizedTest
                                                                              randomSimpleString(5, 13),
                                                                              randomSimpleString(3, 17),
                                                                              randomIntBetween(0, 128)),
+                                                              PrimaryKey.factory(),
                                                               SequentialWriterOption.newBuilder()
                                                                                     .bufferSize(randomIntBetween(17, 1 << 13))
                                                                                     .bufferType(randomBoolean() ? BufferType.ON_HEAP : BufferType.OFF_HEAP)

@@ -57,10 +57,12 @@ public interface SSTableComponentsWriter
         private final IndexOutput primaryKeys;
         private final NumericValuesWriter primaryKeyOffsets;
 
-        public OnDiskSSTableComponentsWriter(Descriptor descriptor, CompressionParams compressionParams) throws IOException
+        public OnDiskSSTableComponentsWriter(Descriptor descriptor,
+                                             PrimaryKey.PrimaryKeyFactory keyFactory,
+                                             CompressionParams compressionParams) throws IOException
         {
             this.descriptor = descriptor;
-            this.indexComponents = IndexComponents.perSSTable(descriptor, compressionParams);
+            this.indexComponents = IndexComponents.perSSTable(descriptor, keyFactory, compressionParams);
             this.primaryKeys = indexComponents.createOutput(IndexComponents.PRIMARY_KEYS);
             SAICodecUtils.writeHeader(this.primaryKeys);
 

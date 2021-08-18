@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -195,7 +196,9 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, Integer.BYTES);
 
-        IndexComponents components = IndexComponents.create("test", new Descriptor(temporaryFolder.newFolder(), "test", "test", 20), null);
+        Descriptor descriptor = new Descriptor(temporaryFolder.newFolder(), "test", "test", 20);
+        IndexComponents components = IndexComponents.create(
+                "test", descriptor, PrimaryKey.factory(),null);
 
         try (NumericIndexWriter indexWriter = new NumericIndexWriter(components, Integer.BYTES, maxSegmentRowId, totalRows, IndexWriterConfig.defaultConfig("test"), false))
         {
@@ -245,7 +248,8 @@ public class KDTreeSegmentMergerTest extends SAITester
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int generation) throws Throwable
     {
-        IndexComponents components = IndexComponents.create("test", new Descriptor(temporaryFolder.newFolder(), "test", "test", generation), null);
+        Descriptor descriptor = new Descriptor(temporaryFolder.newFolder(), "test", "test", generation);
+        IndexComponents components = IndexComponents.create("test", descriptor, PrimaryKey.factory(), null);
 
         final NumericIndexWriter writer = new NumericIndexWriter(components, Integer.BYTES, maxSegmentRowId, buffer.numRows(), IndexWriterConfig.defaultConfig("test"), false);
 

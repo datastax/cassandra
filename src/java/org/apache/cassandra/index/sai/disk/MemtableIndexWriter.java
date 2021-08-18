@@ -68,8 +68,8 @@ public class MemtableIndexWriter implements ColumnIndexWriter
         this.rowMapping = rowMapping;
         this.context = context;
         this.descriptor = descriptor;
-
-        this.indexComponents = IndexComponents.create(context.getIndexName(), descriptor, compressionParams);
+        this.indexComponents = IndexComponents.create(
+                context.getIndexName(), descriptor, context.keyFactory(), compressionParams);
     }
 
     @Override

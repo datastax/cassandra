@@ -24,6 +24,7 @@ import java.util.Map;
 
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
@@ -36,10 +37,13 @@ public class TrackingIndexComponents extends IndexComponents
 {
     private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
 
-    public TrackingIndexComponents(String indexName, Descriptor descriptor, SequentialWriterOption sequentialWriterOption,
+    public TrackingIndexComponents(String indexName,
+                                   Descriptor descriptor,
+                                   PrimaryKey.PrimaryKeyFactory keyFactory,
+                                   SequentialWriterOption sequentialWriterOption,
                                    final CompressionParams compressionParams)
     {
-        super(indexName, descriptor, sequentialWriterOption, compressionParams);
+        super(indexName, descriptor, keyFactory, sequentialWriterOption, compressionParams);
     }
 
     @Override
