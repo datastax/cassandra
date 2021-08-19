@@ -73,7 +73,7 @@ public class FailureDetectorTest
 
         InetAddressAndPort leftHost = hosts.get(1);
 
-        FailureDetector.instance.report(leftHost);
+        IFailureDetector.instance.report(leftHost);
 
         // trigger handleStateLeft in StorageService
         ss.onChange(leftHost, ApplicationState.STATUS_WITH_PORT,
@@ -83,7 +83,7 @@ public class FailureDetectorTest
         assertFalse("Left endpoint not removed from TokenMetadata", tmd.isMember(leftHost));
 
         // confirm the FD's history for leftHost didn't get wiped by status jump to LEFT
-        FailureDetector.instance.interpret(leftHost);
-        assertFalse("Left endpoint not convicted", FailureDetector.instance.isAlive(leftHost));
+        IFailureDetector.instance.interpret(leftHost);
+        assertFalse("Left endpoint not convicted", IFailureDetector.instance.isAlive(leftHost));
     }
 }
