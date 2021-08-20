@@ -35,8 +35,10 @@ import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 public class FailureDetectorTest
@@ -85,5 +87,50 @@ public class FailureDetectorTest
         // confirm the FD's history for leftHost didn't get wiped by status jump to LEFT
         IFailureDetector.instance.interpret(leftHost);
         assertFalse("Left endpoint not convicted", IFailureDetector.instance.isAlive(leftHost));
+    }
+
+    @Test
+    public void testConvictAfterReplace() throws UnknownHostException
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+        IPartitioner partitioner = new RandomPartitioner();
+        VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
+
+        ArrayList<Token> endpointTokens = new ArrayList<>();
+        ArrayList<Token> keyTokens = new ArrayList<>();
+        List<InetAddressAndPort> hosts = new ArrayList<>();
+        List<UUID> hostIds = new ArrayList<>();
+
+        // we want to convict if there is any heartbeat data present in the FD
+        DatabaseDescriptor.setPhiConvictThreshold(0);
+
+        // create a ring of 3 nodes
+        Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
+
+        // Add a new node with old node's tokens
+        InetAddressAndPort oldNode = hosts.get(1);
+        InetAddressAndPort newNode = InetAddressAndPort.getByName("127.0.0.100");
+        Token token = endpointTokens.get(1);
+
+        Gossiper.instance.initializeNodeUnsafe(newNode, UUID.randomUUID(), MessagingService.current_version, 1);
+        Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        ss.onChange(newNode,
+                    ApplicationState.STATUS_WITH_PORT,
+                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+
+        // Mark the old node as dead.
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(oldNode, endpointState));
+        IFailureDetector.instance.report(oldNode);
+        IFailureDetector.instance.interpret(oldNode);
+        assertFalse("Old node not convicted", IFailureDetector.instance.isAlive(oldNode));
+
+        // trigger handleStateBootreplacing in StorageService
+        ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
+                    valueFactory.bootReplacingWithPort(oldNode));
+
+        assertEquals("Old node did not replace new node", newNode, tmd.getReplacementNode(oldNode).get());
     }
 }
