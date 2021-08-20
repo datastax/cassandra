@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -424,7 +425,9 @@ public class CacheService implements CacheServiceMBean
             tableMetadata.id.serialize(out);
             out.writeUTF(tableMetadata.indexName().orElse(""));
             ByteArrayUtil.writeWithLength(key.key, out);
-            out.writeInt(key.desc.generation);
+            out.writeInt(Integer.MIN_VALUE); // backwards compatibility for "int based generation only"
+            // use string representation so that we can use the stored id to search for an sstable right away, without knowing the exact id builder
+            ByteBufferUtil.writeWithShortLength(ByteBufferUtil.bytes(key.desc.generation.asString()), out);
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
@@ -443,9 +446,13 @@ public class CacheService implements CacheServiceMBean
             }
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
+            String generationId = generation == Integer.MIN_VALUE
+                                  ? ByteBufferUtil.string(ByteBufferUtil.readWithShortLength(input))
+                                  : String.valueOf(generation); // Backwards compatibility for "int based generation sstables"
+
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
             SSTableReader reader;
-            if (cfs == null || !cfs.isKeyCacheEnabled() || (reader = findDesc(generation, cfs.getSSTables(SSTableSet.CANONICAL))) == null)
+            if (cfs == null || !cfs.isKeyCacheEnabled() || (reader = findDesc(generationId, cfs.getSSTables(SSTableSet.CANONICAL))) == null)
             {
                 // The sstable doesn't exist anymore, so we can't be sure of the exact version and assume its the current version. The only case where we'll be
                 // wrong is during upgrade, in which case we fail at deserialization. This is not a huge deal however since 1) this is unlikely enough that
@@ -459,11 +466,11 @@ public class CacheService implements CacheServiceMBean
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 
-        private SSTableReader findDesc(int generation, Iterable<SSTableReader> collection)
+        private SSTableReader findDesc(String generation, Iterable<SSTableReader> collection)
         {
             for (SSTableReader sstable : collection)
             {
-                if (sstable.descriptor.generation == generation)
+                if (Objects.equals(sstable.descriptor.generation.asString(), generation))
                     return sstable;
             }
             return null;

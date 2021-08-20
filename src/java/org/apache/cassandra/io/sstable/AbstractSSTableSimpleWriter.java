@@ -17,15 +17,15 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
-import java.io.FileFilter;
-import java.io.IOException;
 import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -84,36 +84,24 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
 
     private static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat.Type fmt)
     {
-        int maxGen = getNextGeneration(directory, columnFamily);
-        return new Descriptor(directory, keyspace, columnFamily, maxGen + 1, fmt);
+        SSTableUniqueIdentifier nextGen = getNextGeneration(directory, columnFamily);
+        return new Descriptor(directory, keyspace, columnFamily, nextGen, fmt);
     }
 
-    private static int getNextGeneration(File directory, final String columnFamily)
+    private static SSTableUniqueIdentifier getNextGeneration(File directory, final String columnFamily)
     {
-        final Set<Descriptor> existing = new HashSet<>();
-        directory.listFiles(new FileFilter()
+        try (Stream<SSTableUniqueIdentifier> existingIds = Files.list(directory.toPath())
+                                                                .map(Path::toFile)
+                                                                .map(SSTable::tryDescriptorFromFilename)
+                                                                .filter(d -> d != null && d.cfname.equals(columnFamily))
+                                                                .map(d -> d.generation))
         {
-            public boolean accept(File file)
-            {
-                Descriptor desc = SSTable.tryDescriptorFromFilename(file);
-                if (desc == null)
-                    return false;
-
-                if (desc.cfname.equals(columnFamily))
-                    existing.add(desc);
-
-                return false;
-            }
-        });
-        int maxGen = generation.getAndIncrement();
-        for (Descriptor desc : existing)
-        {
-            while (desc.generation > maxGen)
-            {
-                maxGen = generation.getAndIncrement();
-            }
+            return SSTableUniqueIdentifierFactory.instance.defaultBuilder().generator(existingIds).get();
         }
-        return maxGen;
+        catch (IOException e)
+        {
+            throw new RuntimeException("Failed to access sstables directory " + directory.getAbsolutePath(), e);
+        }
     }
 
     PartitionUpdate.Builder getUpdateFor(ByteBuffer key) throws IOException
