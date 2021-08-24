@@ -29,7 +29,7 @@ import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
-import org.tartarus.snowball.SnowballStemmer;
+import org.tartarus.snowball.SnowballProgram;
 import org.tartarus.snowball.ext.DanishStemmer;
 import org.tartarus.snowball.ext.DutchStemmer;
 import org.tartarus.snowball.ext.EnglishStemmer;
@@ -93,7 +93,7 @@ public class StemmerFactory
         SUPPORTED_LANGUAGES.put("tr", TurkishStemmer.class);
     }
 
-    public static SnowballStemmer getStemmer(Locale locale)
+    public static SnowballProgram getStemmer(Locale locale)
     {
         if (locale == null)
             return null;
@@ -105,7 +105,7 @@ public class StemmerFactory
             if(clazz == null)
                 return null;
             Constructor<?> ctor = STEMMER_CONSTRUCTOR_CACHE.get(clazz);
-            return (SnowballStemmer) ctor.newInstance();
+            return (SnowballProgram) ctor.newInstance();
         }
         catch (Exception e)
         {
