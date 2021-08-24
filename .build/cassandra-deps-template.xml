@@ -386,7 +386,7 @@
     </dependency>
     <dependency>
       <groupId>org.apache.lucene</groupId>
-      <artifactId>lucene-analysis-common</artifactId>
+      <artifactId>lucene-analyzers-common</artifactId>
     </dependency>
   </dependencies>
 </project>

@@ -109,15 +109,19 @@ public class ColumnContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
+    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
+    private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
 
-    public ColumnContext(TableMetadata tableMeta, IndexMetadata metadata)
+    public ColumnContext(TableMetadata tableMeta, IndexMetadata config)
     {
+        assert config != null;
+
         this.keyspace = tableMeta.keyspace;
         this.table = tableMeta.name;
         this.partitionKeyType = tableMeta.partitionKeyType;
         this.clusteringComparator = tableMeta.comparator;
-        this.target = TargetParser.parse(tableMeta, metadata);
-        this.config = metadata;
+        this.target = TargetParser.parse(tableMeta, config);
+        this.config = config;
         this.viewManager = new IndexViewManager(this);
         this.indexMetrics = new IndexMetrics(this, tableMeta);
         this.validator = TypeUtil.cellValueType(target.left, target.right);
@@ -126,6 +130,12 @@ public class ColumnContext
         this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(getIndexName(), tableMeta)
                                               : new ColumnQueryMetrics.BKDIndexMetrics(getIndexName(), tableMeta);
+
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
+
+        this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
+                                    ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
+                                    : this.analyzerFactory;
 
         logger.info(logMessage("Initialized column context with index writer config: {}"),
                 this.indexWriterConfig.toString());
@@ -151,6 +161,12 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = indexWriterConfig;
+        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
+
+        this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(options)
+                                    ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options)
+                                    : this.analyzerFactory;
     }
 
     public ColumnContext(TableMetadata table, ColumnMetadata column)
@@ -166,6 +182,11 @@ public class ColumnContext
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
+        Map<String, String> options = Collections.emptyMap();
+        this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
+        this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(options)
+                                    ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options)
+                                    : this.analyzerFactory;
     }
 
     public AbstractType<?> keyValidator()
@@ -321,10 +342,14 @@ public class ColumnContext
         return this.config == null ? null : config.name;
     }
 
-    public AbstractAnalyzer getAnalyzer()
+    public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
-        Map<String, String> options = config != null ? config.options : Collections.emptyMap();
-        return AbstractAnalyzer.fromOptions(getValidator(), options);
+        return analyzerFactory;
+    }
+
+    public AbstractAnalyzer.AnalyzerFactory getQueryAnalyzerFactory()
+    {
+        return queryAnalyzerFactory;
     }
 
     public IndexWriterConfig getIndexWriterConfig()
@@ -365,6 +390,12 @@ public class ColumnContext
         viewManager.invalidate();
         indexMetrics.release();
         columnQueryMetrics.release();
+
+        analyzerFactory.close();
+        if (queryAnalyzerFactory != analyzerFactory)
+        {
+            queryAnalyzerFactory.close();
+        }
     }
 
     @VisibleForTesting
