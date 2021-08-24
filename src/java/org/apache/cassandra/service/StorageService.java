@@ -2994,12 +2994,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         InetAddressAndPort myAddress = FBUtilities.getBroadcastAddressAndPort();
         EndpointsByRange rangeReplicas = Keyspace.open(keyspaceName).getReplicationStrategy().getRangeAddresses(tokenMetadata.cloneOnlyTokenMap());
+
+        logger.debug("Getting new source replicas for {}", leavingReplicas);
+        return findLiveReplicasForRanges(leavingReplicas, rangeReplicas, myAddress);
+    }
+
+    // find alive sources for ranges
+    @VisibleForTesting
+    public Multimap<InetAddressAndPort, FetchReplica> findLiveReplicasForRanges(Set<LeavingReplica> leavingReplicas, EndpointsByRange rangeReplicas, InetAddressAndPort myAddress)
+    {
         Multimap<InetAddressAndPort, FetchReplica> sourceRanges = HashMultimap.create();
         IFailureDetector failureDetector = IFailureDetector.instance;
 
-        logger.debug("Getting new source replicas for {}", leavingReplicas);
-
-        // find alive sources for our new ranges
         for (LeavingReplica leaver : leavingReplicas)
         {
             //We need this to find the replicas from before leaving to supply the data
@@ -3069,7 +3075,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private static class LeavingReplica
+    @VisibleForTesting
+    public static class LeavingReplica
     {
         //The node that is leaving
         private final Replica leavingReplica;
