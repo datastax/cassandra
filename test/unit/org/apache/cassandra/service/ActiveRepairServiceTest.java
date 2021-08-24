@@ -54,14 +54,22 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -77,8 +85,11 @@ import static org.apache.cassandra.repair.messages.RepairOption.RANGES_KEY;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 import static org.apache.cassandra.service.ActiveRepairService.getRepairedAt;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 public class ActiveRepairServiceTest
 {
@@ -484,6 +495,50 @@ public class ActiveRepairServiceTest
         {
             Uninterruptibles.awaitUninterruptibly(blocked, TASK_SECONDS, TimeUnit.SECONDS);
             complete.countDown();
+        }
+    }
+
+    @Test
+    public void testPrepareRepairWithDeadNodes()
+    {
+        Set<Range<Token>> ranges = StorageService.instance.getLocalReplicas(KEYSPACE5).ranges();
+        UUID parentRepairSession = UUID.randomUUID();
+        List<ColumnFamilyStore> columnFamilyStores = Arrays.asList(prepareColumnFamilyStore());
+        boolean isForcedRepair = false;
+
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        Token token = tmd.partitioner.getMinimumToken();
+        IPartitioner partitioner = tmd.partitioner;
+
+        UUID hostId = UUID.randomUUID();
+        Gossiper.instance.initializeNodeUnsafe(REMOTE, hostId, MessagingService.current_version, 1);
+        Gossiper.instance.injectApplicationState(REMOTE,
+                                                 ApplicationState.TOKENS,
+                                                 new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        StorageService.instance.onChange(REMOTE,
+                                         ApplicationState.STATUS_WITH_PORT,
+                                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+
+        // Mark local node as dead
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(REMOTE);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(REMOTE, endpointState));
+        IFailureDetector.instance.report(REMOTE);
+        IFailureDetector.instance.interpret(REMOTE);
+        assertFalse("REMOTE node not convicted", IFailureDetector.instance.isAlive(REMOTE));
+
+        Set<InetAddressAndPort> endpoints = new HashSet<>();
+        endpoints.add(REMOTE);
+
+        RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true, false, 1, ranges, false, false, false,  PreviewKind.ALL, false, false);
+        try
+        {
+            ActiveRepairService.instance.prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);
+            fail();
+        }
+        catch (RuntimeException ex)
+        {
+            String msg = ex.getMessage();
+            assertTrue("Did not see expected 'Endpoint not alive' message", msg.contains("Endpoint not alive"));
         }
     }
 }
