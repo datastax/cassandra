@@ -506,27 +506,10 @@ public class ActiveRepairServiceTest
         List<ColumnFamilyStore> columnFamilyStores = Arrays.asList(prepareColumnFamilyStore());
         boolean isForcedRepair = false;
 
-        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
-        Token token = tmd.partitioner.getMinimumToken();
-        IPartitioner partitioner = tmd.partitioner;
-
-        UUID hostId = UUID.randomUUID();
-        Gossiper.instance.initializeNodeUnsafe(REMOTE, hostId, MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(REMOTE,
-                                                 ApplicationState.TOKENS,
-                                                 new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
-        StorageService.instance.onChange(REMOTE,
-                                         ApplicationState.STATUS_WITH_PORT,
-                                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
-
-        // Mark local node as dead
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(REMOTE);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(REMOTE, endpointState));
-        IFailureDetector.instance.report(REMOTE);
-        IFailureDetector.instance.interpret(REMOTE);
-        assertFalse("REMOTE node not convicted", IFailureDetector.instance.isAlive(REMOTE));
-
         Set<InetAddressAndPort> endpoints = new HashSet<>();
+
+        // Mark remote node as dead
+        markNodeAsDead(REMOTE);
         endpoints.add(REMOTE);
 
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true, false, 1, ranges, false, false, false,  PreviewKind.ALL, false, false);
@@ -540,5 +523,40 @@ public class ActiveRepairServiceTest
             String msg = ex.getMessage();
             assertTrue("Did not see expected 'Endpoint not alive' message", msg.contains("Endpoint not alive"));
         }
+    }
+
+    private void markNodeAsDead(InetAddressAndPort address)
+    {
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        Token token = tmd.partitioner.getMinimumToken();
+        IPartitioner partitioner = tmd.partitioner;
+
+        UUID hostId = UUID.randomUUID();
+        Gossiper.instance.initializeNodeUnsafe(address, hostId, MessagingService.current_version, 1);
+        Gossiper.instance.injectApplicationState(address,
+                                                 ApplicationState.TOKENS,
+                                                 new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        StorageService.instance.onChange(address,
+                                         ApplicationState.STATUS_WITH_PORT,
+                                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
+        IFailureDetector.instance.report(address);
+        IFailureDetector.instance.interpret(address);
+        assertFalse("address node not convicted", IFailureDetector.instance.isAlive(address));
+    }
+
+    @Test
+    public void testCleanUpLiveAndDeadNodes()
+    {
+        UUID parentRepairSession = UUID.randomUUID();
+        Set<InetAddressAndPort> endpoints = new HashSet<>();
+        endpoints.add(LOCAL);
+
+        markNodeAsDead(REMOTE);
+        endpoints.add(REMOTE);
+
+        ActiveRepairService.instance.cleanUp(parentRepairSession, endpoints);
     }
 }
