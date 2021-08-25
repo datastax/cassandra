@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.service;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -37,6 +39,7 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.EndpointsByRange;
 import org.apache.cassandra.locator.EndpointsByReplica;
+import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.ReplicaCollection;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -53,6 +56,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaMultimap;
 import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
 
 import org.apache.cassandra.net.MessagingService;
@@ -230,5 +234,22 @@ public class StorageServiceTest
         IFailureDetector.instance.report(address);
         IFailureDetector.instance.interpret(address);
         assertFalse("Node not convicted", IFailureDetector.instance.isAlive(address));
+    }
+
+    @Test
+    public void testStreamCandidatesDontIncludeDeadNodes()
+    {
+        List<InetAddressAndPort> endpoints = Arrays.asList(aAddress, bAddress);
+
+        joinNodeToRing(aAddress, threeToken);
+        joinNodeToRing(bAddress, sixToken);
+
+        Replica liveReplica = SystemReplicas.getSystemReplica(aAddress);
+        Replica deadReplica = SystemReplicas.getSystemReplica(bAddress);
+        markNodeAsDead(bAddress);
+
+        EndpointsForRange result = StorageService.getStreamCandidates(endpoints);
+        assertTrue("Live node should be in replica list", result.contains(liveReplica));
+        assertFalse("Dead node should not be in replica list", result.contains(deadReplica));
     }
 }

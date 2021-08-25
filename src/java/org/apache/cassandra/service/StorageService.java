@@ -4533,7 +4533,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return HintsService.instance.transferHints(this::getPreferredHintsStreamTarget);
     }
 
-    private static EndpointsForRange getStreamCandidates(Collection<InetAddressAndPort> endpoints)
+    @VisibleForTesting
+    public static EndpointsForRange getStreamCandidates(Collection<InetAddressAndPort> endpoints)
     {
         endpoints = endpoints.stream()
                              .filter(endpoint -> IFailureDetector.instance.isAlive(endpoint) && !FBUtilities.getBroadcastAddressAndPort().equals(endpoint))
