@@ -41,6 +41,7 @@ import org.apache.cassandra.service.StorageService;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class FailureDetectorTest
 {
@@ -136,6 +137,56 @@ public class FailureDetectorTest
     }
 
     @Test
+    public void testStateBootReplacingFailsForLiveNode() throws UnknownHostException
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+        IPartitioner partitioner = new RandomPartitioner();
+        VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
+
+        ArrayList<Token> endpointTokens = new ArrayList<>();
+        ArrayList<Token> keyTokens = new ArrayList<>();
+        List<InetAddressAndPort> hosts = new ArrayList<>();
+        List<UUID> hostIds = new ArrayList<>();
+
+        // we want to convict if there is any heartbeat data present in the FD
+        DatabaseDescriptor.setPhiConvictThreshold(0);
+
+        // create a ring of 3 nodes
+        Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
+
+        // Add a new node with old node's tokens
+        InetAddressAndPort oldNode = hosts.get(1);
+        InetAddressAndPort newNode = InetAddressAndPort.getByName("127.0.0.100");
+        Token token = endpointTokens.get(1);
+
+        Gossiper.instance.initializeNodeUnsafe(newNode, UUID.randomUUID(), MessagingService.current_version, 1);
+        Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        ss.onChange(newNode,
+                    ApplicationState.STATUS_WITH_PORT,
+                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(oldNode, endpointState));
+        assertTrue(Gossiper.instance.isAlive(oldNode));
+
+        // trigger handleStateBootreplacing in StorageService
+        try
+        {
+            ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
+                        valueFactory.bootReplacingWithPort(oldNode));
+            fail();
+        }
+        catch (RuntimeException ex)
+        {
+            String msg = ex.getMessage();
+            final String expected = "trying to replace alive node";
+            assertTrue(String.format("Didn't see expected '%s' message", expected), msg.contains(expected));
+        }
+    }
+
+    @Test
     public void testReplacingLiveNodeFails() throws UnknownHostException
     {
         StorageService ss = StorageService.instance;
@@ -185,6 +236,5 @@ public class FailureDetectorTest
                     ApplicationState.STATUS_WITH_PORT,
                     new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
         assertTrue("Expected old node to be live but it was removed", Gossiper.instance.liveEndpoints.contains(oldNode));
-
     }
 }
