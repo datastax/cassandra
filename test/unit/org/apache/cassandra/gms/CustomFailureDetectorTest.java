@@ -73,12 +73,6 @@ public class CustomFailureDetectorTest extends TestCase
     }
 
     @Test
-    public void testCustomFailureDetectorCtor()
-    {
-        CustomFailureDetector failureDetector = new CustomFailureDetector();
-    }
-
-    @Test
     public void testInvalidFailureClassThrows()
     {
         final String invalidClassName = "invalidClass";

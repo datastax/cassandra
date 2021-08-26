@@ -18,6 +18,12 @@ package org.apache.cassandra.gms;
 
 public class CustomFailureDetector
 {
+    // Explicitly make the constructor private so that test coverage tools don't expect tests for
+    // the default constructor which is never used.
+    private CustomFailureDetector()
+    {
+    }
+
     public static IFailureDetector make(String customImpl)
     {
         try
