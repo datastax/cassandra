@@ -20,6 +20,12 @@ package org.apache.cassandra.locator;
 
 public class CustomTokenMetadataProvider
 {
+    // Make this constructor private so that test coverage tools won't complain that this class
+    // isn't covered by a test even though there are no callers of the default constructor.
+    private CustomTokenMetadataProvider()
+    {
+
+    }
     public static TokenMetadataProvider make(String customImpl)
     {
         try
