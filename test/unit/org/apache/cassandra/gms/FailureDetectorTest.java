@@ -123,11 +123,7 @@ public class FailureDetectorTest
                     new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
 
         // Mark the old node as dead.
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(oldNode, endpointState));
-        IFailureDetector.instance.report(oldNode);
-        IFailureDetector.instance.interpret(oldNode);
-        assertFalse("Old node not convicted", IFailureDetector.instance.isAlive(oldNode));
+        Util.markNodeAsDead(oldNode);
 
         // trigger handleStateBootreplacing in StorageService
         ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
@@ -161,11 +157,7 @@ public class FailureDetectorTest
         InetAddressAndPort newNode = InetAddressAndPort.getByName("127.0.0.100");
         Token token = endpointTokens.get(1);
 
-        Gossiper.instance.initializeNodeUnsafe(newNode, UUID.randomUUID(), MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
-        ss.onChange(newNode,
-                    ApplicationState.STATUS_WITH_PORT,
-                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+        Util.joinNodeToRing(newNode, token, partitioner);
 
         EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(oldNode, endpointState));
@@ -215,11 +207,7 @@ public class FailureDetectorTest
         Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
 
         // Mark the old node as dead.
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(oldNode, endpointState));
-        IFailureDetector.instance.report(oldNode);
-        IFailureDetector.instance.interpret(oldNode);
-        assertFalse("Old node not convicted", IFailureDetector.instance.isAlive(oldNode));
+        Util.markNodeAsDead(oldNode);
 
         // trigger handleStateBootreplacing in StorageService
         ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
@@ -228,6 +216,7 @@ public class FailureDetectorTest
         assertEquals("Old node did not replace new node", newNode, tmd.getReplacementNode(oldNode).get());
 
         // Resurrect old node and mark alive
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(oldNode, endpointState));
 
         // trigger handleStateNormal in StorageService which should fail and cause the old node to still be

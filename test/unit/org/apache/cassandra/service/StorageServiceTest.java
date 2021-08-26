@@ -19,24 +19,17 @@
 package org.apache.cassandra.service;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RangeStreamer;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.IFailureDetector;
-import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.EndpointsByRange;
 import org.apache.cassandra.locator.EndpointsByReplica;
 import org.apache.cassandra.locator.EndpointsForRange;
@@ -59,7 +52,6 @@ import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
 
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService.LeavingReplica;
 
 import static org.junit.Assert.assertFalse;
@@ -189,17 +181,18 @@ public class StorageServiceTest
     @Test
     public void testSourceReplicasIsEmptyWithDeadNodes()
     {
+        RandomPartitioner partitioner = new RandomPartitioner();
         TokenMetadata tmd = new TokenMetadata();
         tmd.updateNormalToken(threeToken, aAddress);
-        joinNodeToRing(aAddress, threeToken);
+        Util.joinNodeToRing(aAddress, threeToken, partitioner);
         tmd.updateNormalToken(sixToken, bAddress);
-        joinNodeToRing(bAddress, sixToken);
+        Util.joinNodeToRing(bAddress, sixToken, partitioner);
         tmd.updateNormalToken(nineToken, cAddress);
-        joinNodeToRing(cAddress, nineToken);
+        Util.joinNodeToRing(cAddress, nineToken, partitioner);
         tmd.updateNormalToken(elevenToken, dAddress);
-        joinNodeToRing(dAddress, elevenToken);
+        Util.joinNodeToRing(dAddress, elevenToken, partitioner);
         tmd.updateNormalToken(oneToken, eAddress);
-        joinNodeToRing(eAddress, oneToken);
+        Util.joinNodeToRing(eAddress, oneToken, partitioner);
 
         AbstractReplicationStrategy strat = simpleStrategy(tmd);
         EndpointsByRange rangeReplicas = strat.getRangeAddresses(tmd);;
@@ -209,31 +202,11 @@ public class StorageServiceTest
         Set<LeavingReplica> leavingReplicas = Stream.of(new LeavingReplica(leaving, ourReplica)).collect(Collectors.toCollection(HashSet::new));
 
         // Mark the leaving replica as dead as well as the potential replica
-        markNodeAsDead(aAddress);
-        markNodeAsDead(bAddress);
+        Util.markNodeAsDead(aAddress);
+        Util.markNodeAsDead(bAddress);
 
         Multimap<InetAddressAndPort, RangeStreamer.FetchReplica> result = StorageService.instance.findLiveReplicasForRanges(leavingReplicas, rangeReplicas, cAddress);
         assertTrue("Replica set should be empty since replicas are dead", result.isEmpty());
-    }
-
-    private void joinNodeToRing(InetAddressAndPort address, Token token)
-    {
-        IPartitioner partitioner = new RandomPartitioner();
-        UUID hostId = UUID.randomUUID();
-        Gossiper.instance.initializeNodeUnsafe(address, hostId, MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(address, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
-        StorageService.instance.onChange(address,
-                    ApplicationState.STATUS_WITH_PORT,
-                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
-    }
-
-    private void markNodeAsDead(InetAddressAndPort address)
-    {
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
-        IFailureDetector.instance.report(address);
-        IFailureDetector.instance.interpret(address);
-        assertFalse("Node not convicted", IFailureDetector.instance.isAlive(address));
     }
 
     @Test
@@ -241,12 +214,13 @@ public class StorageServiceTest
     {
         List<InetAddressAndPort> endpoints = Arrays.asList(aAddress, bAddress);
 
-        joinNodeToRing(aAddress, threeToken);
-        joinNodeToRing(bAddress, sixToken);
+        RandomPartitioner partitioner = new RandomPartitioner();
+        Util.joinNodeToRing(aAddress, threeToken, partitioner);
+        Util.joinNodeToRing(bAddress, sixToken, partitioner);
 
         Replica liveReplica = SystemReplicas.getSystemReplica(aAddress);
         Replica deadReplica = SystemReplicas.getSystemReplica(bAddress);
-        markNodeAsDead(bAddress);
+        Util.markNodeAsDead(bAddress);
 
         EndpointsForRange result = StorageService.getStreamCandidates(endpoints);
         assertTrue("Live node should be in replica list", result.contains(liveReplica));

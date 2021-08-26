@@ -19,28 +19,15 @@
 package org.apache.cassandra.schema;
 
 import java.net.UnknownHostException;
-import java.util.Collections;
-import java.util.UUID;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.TestCase;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.dht.RandomPartitioner;
-import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.IFailureDetector;
-import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.StorageService;
 
-import static org.junit.Assert.assertFalse;
+import org.apache.cassandra.locator.InetAddressAndPort;
 
 public class SchemaMigrationEventTest extends TestCase
 {
@@ -54,23 +41,9 @@ public class SchemaMigrationEventTest extends TestCase
         SchemaMigrationEvent e2 = new SchemaMigrationEvent(SchemaMigrationEvent.MigrationManagerEventType.TASK_CREATED, liveEndpoint, null);
 
         InetAddressAndPort deadEndpoint = InetAddressAndPort.getByName("127.0.0.2");
-        markNodeAsDead(deadEndpoint, new RandomPartitioner.BigIntegerToken("3"));
-        SchemaMigrationEvent e3 = new SchemaMigrationEvent(SchemaMigrationEvent.MigrationManagerEventType.TASK_CREATED, deadEndpoint, null);
-    }
+        Util.joinNodeToRing(deadEndpoint, new RandomPartitioner.BigIntegerToken("3"), new RandomPartitioner());
+        Util.markNodeAsDead(deadEndpoint);
 
-    private void markNodeAsDead(InetAddressAndPort address, Token token)
-    {
-        IPartitioner partitioner = new RandomPartitioner();
-        UUID hostId = UUID.randomUUID();
-        Gossiper.instance.initializeNodeUnsafe(address, hostId, MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(address, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
-        StorageService.instance.onChange(address,
-                                         ApplicationState.STATUS_WITH_PORT,
-                                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
-        IFailureDetector.instance.report(address);
-        IFailureDetector.instance.interpret(address);
-        assertFalse("Node not convicted", IFailureDetector.instance.isAlive(address));
+        SchemaMigrationEvent e3 = new SchemaMigrationEvent(SchemaMigrationEvent.MigrationManagerEventType.TASK_CREATED, deadEndpoint, null);
     }
 }

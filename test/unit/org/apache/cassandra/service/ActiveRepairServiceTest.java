@@ -58,17 +58,11 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.IFailureDetector;
-import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -86,7 +80,6 @@ import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABL
 import static org.apache.cassandra.service.ActiveRepairService.getRepairedAt;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
@@ -508,8 +501,13 @@ public class ActiveRepairServiceTest
 
         Set<InetAddressAndPort> endpoints = new HashSet<>();
 
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        Token token = tmd.partitioner.getMinimumToken();
+        IPartitioner partitioner = tmd.partitioner;
+        Util.joinNodeToRing(REMOTE, token, partitioner);
+
         // Mark remote node as dead
-        markNodeAsDead(REMOTE);
+        Util.markNodeAsDead(REMOTE);
         endpoints.add(REMOTE);
 
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true, false, 1, ranges, false, false, false,  PreviewKind.ALL, false, false);
@@ -525,28 +523,6 @@ public class ActiveRepairServiceTest
         }
     }
 
-    private void markNodeAsDead(InetAddressAndPort address)
-    {
-        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
-        Token token = tmd.partitioner.getMinimumToken();
-        IPartitioner partitioner = tmd.partitioner;
-
-        UUID hostId = UUID.randomUUID();
-        Gossiper.instance.initializeNodeUnsafe(address, hostId, MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(address,
-                                                 ApplicationState.TOKENS,
-                                                 new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
-        StorageService.instance.onChange(address,
-                                         ApplicationState.STATUS_WITH_PORT,
-                                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
-
-        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
-        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
-        IFailureDetector.instance.report(address);
-        IFailureDetector.instance.interpret(address);
-        assertFalse("address node not convicted", IFailureDetector.instance.isAlive(address));
-    }
-
     @Test
     public void testCleanUpLiveAndDeadNodes()
     {
@@ -554,7 +530,13 @@ public class ActiveRepairServiceTest
         Set<InetAddressAndPort> endpoints = new HashSet<>();
         endpoints.add(LOCAL);
 
-        markNodeAsDead(REMOTE);
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        Token token = tmd.partitioner.getMinimumToken();
+        IPartitioner partitioner = tmd.partitioner;
+
+        Util.joinNodeToRing(REMOTE, token, partitioner);
+        Util.markNodeAsDead(REMOTE);
+
         endpoints.add(REMOTE);
 
         ActiveRepairService.instance.cleanUp(parentRepairSession, endpoints);
