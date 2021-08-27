@@ -67,6 +67,11 @@ public class TermsReader implements Closeable
     private final long termDictionaryRoot;
     private final PrimaryKeyMap primaryKeyMap;
 
+    /**
+     * Creates a new TermsReader.
+     * The primaryKeyMap, termsData and postingLists passed to this constructor
+     * will become owned by this object and released by close().
+     */
     public TermsReader(IndexComponents components,
                        PrimaryKeyMap primaryKeyMap,
                        FileHandle termsData,
@@ -109,14 +114,7 @@ public class TermsReader implements Closeable
     @Override
     public void close()
     {
-        try
-        {
-            termDictionaryFile.close();
-        }
-        finally
-        {
-            postingsFile.close();
-        }
+        FileUtils.closeQuietly(termDictionaryFile, postingsFile, primaryKeyMap);
     }
 
     public TermsIterator allTerms(long segmentOffset, QueryEventListener.TrieIndexEventListener listener)

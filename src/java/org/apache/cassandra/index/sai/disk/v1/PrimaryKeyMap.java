@@ -54,22 +54,25 @@ public interface PrimaryKeyMap extends Closeable
 
     class DefaultPrimaryKeyMap implements PrimaryKeyMap
     {
-        private final long size;
         private final FileHandle primaryKeysFile;
         private final FileHandle primaryKeyOffsetsFile;
         private final RandomAccessReader primaryKeys;
         private final LongArray primaryKeyOffsets;
+        private final IndexComponents indexComponents;
+        private final NumericValuesMeta metadata;
 
         private final PrimaryKey.PrimaryKeyFactory keyFactory;
 
         public DefaultPrimaryKeyMap(IndexComponents indexComponents, TableMetadata tableMetadata) throws IOException
         {
+            this.indexComponents = indexComponents;
+
             MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexComponents);
-            NumericValuesMeta meta = new NumericValuesMeta(metadataSource.get(IndexComponents.PRIMARY_KEY_OFFSETS.name));
-            this.size = meta.valueCount;
+            this.metadata = new NumericValuesMeta(metadataSource.get(IndexComponents.PRIMARY_KEY_OFFSETS.name));
 
             this.primaryKeyOffsetsFile = indexComponents.createFileHandle(IndexComponents.PRIMARY_KEY_OFFSETS);
-            this.primaryKeyOffsets = new MonotonicBlockPackedReader(primaryKeyOffsetsFile, indexComponents, meta).open();
+            this.primaryKeyOffsets = new MonotonicBlockPackedReader(primaryKeyOffsetsFile, indexComponents, metadata)
+                    .open();
 
             this.primaryKeysFile = indexComponents.createFileHandle(IndexComponents.PRIMARY_KEYS);
             this.primaryKeys = primaryKeysFile.createReader();
@@ -77,18 +80,20 @@ public interface PrimaryKeyMap extends Closeable
             this.keyFactory = PrimaryKey.factory(tableMetadata);
         }
 
-        private DefaultPrimaryKeyMap(DefaultPrimaryKeyMap orig)
+        private DefaultPrimaryKeyMap(DefaultPrimaryKeyMap orig) throws IOException
         {
+            this.indexComponents = orig.indexComponents;
+            this.metadata = orig.metadata;
+
             this.primaryKeysFile = orig.primaryKeysFile.sharedCopy();
             this.primaryKeyOffsetsFile = orig.primaryKeyOffsetsFile.sharedCopy();
 
             this.primaryKeys = primaryKeysFile.createReader();
-            this.primaryKeyOffsets = orig.primaryKeyOffsets;
+            this.primaryKeyOffsets = new MonotonicBlockPackedReader(primaryKeyOffsetsFile, indexComponents, metadata)
+                    .open();
 
             this.keyFactory = orig.keyFactory.copyOf();
-            this.size = orig.size();
         }
-
 
         @Override
         public PrimaryKeyMap copyOf()
@@ -106,14 +111,14 @@ public interface PrimaryKeyMap extends Closeable
         @Override
         public long size()
         {
-            return size;
+            return metadata.valueCount;
         }
 
         @Override
         public PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException
         {
             long startOffset = primaryKeyOffsets.get(sstableRowId);
-            long endOffset = (sstableRowId + 1) < size
+            long endOffset = (sstableRowId + 1) < size()
                     ? primaryKeyOffsets.get(sstableRowId + 1)
                     : primaryKeys.length();
 

@@ -134,7 +134,7 @@ public abstract class IndexSearcher implements Closeable
         {
             this.context = context;
             this.postingList = postingList;
-            this.primaryKeyMap = IndexSearcher.this.primaryKeyMap.copyOf();
+            this.primaryKeyMap = IndexSearcher.this.primaryKeyMap;
 
             minimumKey = this.primaryKeyMap.primaryKeyFromRowId(postingList.peek());
 

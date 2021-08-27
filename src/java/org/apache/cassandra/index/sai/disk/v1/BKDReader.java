@@ -437,7 +437,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
         finally
         {
-            FileUtils.closeQuietly(postingsFile);
+            FileUtils.closeQuietly(postingsFile, primaryKeyMap);
         }
     }
 
