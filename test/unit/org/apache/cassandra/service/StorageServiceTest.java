@@ -19,6 +19,7 @@
 package org.apache.cassandra.service;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -28,7 +29,9 @@ import java.util.stream.Stream;
 import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.locator.EndpointsByRange;
 import org.apache.cassandra.locator.EndpointsByReplica;
@@ -53,7 +56,9 @@ import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
 
 import org.apache.cassandra.service.StorageService.LeavingReplica;
+import org.apache.cassandra.utils.FBUtilities;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -225,5 +230,39 @@ public class StorageServiceTest
         EndpointsForRange result = StorageService.getStreamCandidates(endpoints);
         assertTrue("Live node should be in replica list", result.contains(liveReplica));
         assertFalse("Dead node should not be in replica list", result.contains(deadReplica));
+    }
+
+    @Test
+    public void testSetTokens()
+    {
+        InetAddressAndPort broadcastAddress = FBUtilities.getBroadcastAddressAndPort();
+        IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+
+        Token token = StorageService.instance.getTokenFactory().fromString("3");
+        Util.joinNodeToRing(broadcastAddress, token, partitioner);
+        StorageService.instance.setTokens(Collections.singleton(token));
+
+        assertEquals("Unexpected endpoint for token", StorageService.instance.getTokenMetadata().getEndpoint(token), FBUtilities.getBroadcastAddressAndPort());
+    }
+
+    @Test
+    public void testPopulateTokenMetadata()
+    {
+        IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+        Token origToken = StorageService.instance.getTokenFactory().fromString("42");
+        Token newToken = StorageService.instance.getTokenFactory().fromString("88");
+
+        Util.joinNodeToRing(cAddress, origToken, partitioner);
+
+        // Update system.peers with a new token and check that the changes isn't visible until we call
+        // populateTokenMetadata().
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        SystemKeyspace.updateTokens(cAddress, Collections.singleton(newToken));
+        assertTrue("Original token is missing but should be present", tmd.getTokens(cAddress).contains(origToken));
+        assertFalse("New token is present but should be missing", tmd.getTokens(cAddress).contains(newToken));
+
+        StorageService.instance.populateTokenMetadata();
+        assertFalse("Original token is present but should be missing", tmd.getTokens(cAddress).contains(origToken));
+        assertTrue("New token is missing but should be present", tmd.getTokens(cAddress).contains(newToken));
     }
 }
