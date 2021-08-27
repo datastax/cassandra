@@ -117,10 +117,10 @@ public class FailureDetectorTest
         Token oldToken = endpointTokens.get(1);
 
         Gossiper.instance.initializeNodeUnsafe(newNode, UUID.randomUUID(), MessagingService.current_version, 1);
-        Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        Gossiper.instance.injectApplicationState(newNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(oldToken)));
         ss.onChange(newNode,
                     ApplicationState.STATUS_WITH_PORT,
-                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(oldToken)));
 
         // Mark the old node as dead.
         Util.markNodeAsDead(oldNode);
