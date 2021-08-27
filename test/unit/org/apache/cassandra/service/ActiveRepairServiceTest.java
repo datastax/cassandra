@@ -519,7 +519,8 @@ public class ActiveRepairServiceTest
         catch (RuntimeException ex)
         {
             String msg = ex.getMessage();
-            assertTrue("Did not see expected 'Endpoint not alive' message", msg.contains("Endpoint not alive"));
+            final String expected = "Endpoint not alive";
+            assertTrue(String.format("Did not see expected '%s' message", expected), msg.contains(expected));
         }
     }
 
