@@ -32,7 +32,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Predicate;
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.CompositeDataSupport;
 import javax.management.openmbean.CompositeType;
@@ -49,7 +48,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -57,7 +55,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.FD_INITIAL
 import static org.apache.cassandra.config.CassandraRelevantProperties.FD_MAX_INTERVAL_MS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.LINE_SEPARATOR;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MAX_LOCAL_PAUSE_IN_MS;
-import static org.apache.cassandra.config.DatabaseDescriptor.newFailureDetector;
 import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 
 /**
@@ -86,10 +83,6 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
 
         return pause * 1000000L;
     }
-
-    public static final IFailureDetector instance = newFailureDetector();
-    public static final Predicate<InetAddressAndPort> isEndpointAlive = instance::isAlive;
-    public static final Predicate<Replica> isReplicaAlive = r -> isEndpointAlive.test(r.endpoint());
 
     // this is useless except to provide backwards compatibility in phi_convict_threshold,
     // because everyone seems pretty accustomed to the default of 8, and users who have
