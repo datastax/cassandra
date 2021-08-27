@@ -105,10 +105,10 @@ public class FailureDetectorTest
         List<InetAddressAndPort> hosts = new ArrayList<>();
         List<UUID> hostIds = new ArrayList<>();
 
-        // we want to convict if there is any heartbeat data present in the FD
+        // We want to convict if there is any heartbeat data present in the FD
         DatabaseDescriptor.setPhiConvictThreshold(0);
 
-        // create a ring of 3 nodes
+        // Create a ring of 3 nodes
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
 
         // Add a new node with old node's tokens
@@ -125,7 +125,7 @@ public class FailureDetectorTest
         // Mark the old node as dead.
         Util.markNodeAsDead(oldNode);
 
-        // trigger handleStateBootreplacing in StorageService
+        // Trigger handleStateBootreplacing in StorageService
         ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
                     valueFactory.bootReplacingWithPort(oldNode));
 
@@ -146,10 +146,10 @@ public class FailureDetectorTest
         List<InetAddressAndPort> hosts = new ArrayList<>();
         List<UUID> hostIds = new ArrayList<>();
 
-        // we want to convict if there is any heartbeat data present in the FD
+        // We want to convict if there is any heartbeat data present in the FD
         DatabaseDescriptor.setPhiConvictThreshold(0);
 
-        // create a ring of 3 nodes
+        // Create a ring of 3 nodes
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
 
         // Add a new node with old node's tokens
@@ -163,7 +163,7 @@ public class FailureDetectorTest
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(oldNode, endpointState));
         assertTrue(Gossiper.instance.isAlive(oldNode));
 
-        // trigger handleStateBootreplacing in StorageService
+        // Trigger handleStateBootreplacing in StorageService
         try
         {
             ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
@@ -192,10 +192,10 @@ public class FailureDetectorTest
         List<InetAddressAndPort> hosts = new ArrayList<>();
         List<UUID> hostIds = new ArrayList<>();
 
-        // we want to convict if there is any heartbeat data present in the FD
+        // We want to convict if there is any heartbeat data present in the FD
         DatabaseDescriptor.setPhiConvictThreshold(0);
 
-        // create a ring of 3 nodes
+        // Create a ring of 3 nodes
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
 
         // Add a new node with old node's tokens
@@ -209,7 +209,7 @@ public class FailureDetectorTest
         // Mark the old node as dead.
         Util.markNodeAsDead(oldNode);
 
-        // trigger handleStateBootreplacing in StorageService
+        // Trigger handleStateBootreplacing in StorageService
         ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT,
                     valueFactory.bootReplacingWithPort(oldNode));
 
@@ -219,7 +219,7 @@ public class FailureDetectorTest
         EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(oldNode);
         Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(oldNode, endpointState));
 
-        // trigger handleStateNormal in StorageService which should fail and cause the old node to still be
+        // Trigger handleStateNormal in StorageService which should fail and cause the old node to still be
         // marked as a live endpoint.
         ss.onChange(newNode,
                     ApplicationState.STATUS_WITH_PORT,
