@@ -490,7 +490,7 @@ public class GossiperTest
             EndpointState initialRemoteState = Gossiper.instance.getEndpointStateForEndpoint(remoteHostAddress);
             HeartBeatState initialRemoteHeartBeat = initialRemoteState.getHeartBeatState();
 
-            //Util.createInitialRing should have initialized remoteHost's HeartBeatState's generation to 1
+            // Util.createInitialRing should have initialized remoteHost's HeartBeatState's generation to 1
             assertEquals(initialRemoteHeartBeat.getGeneration(), 1);
 
             VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(null);
