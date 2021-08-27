@@ -597,6 +597,8 @@ public enum CassandraRelevantProperties
                 prev = next;
         }
     }
+    /** Which class to use for failure detection */
+    CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

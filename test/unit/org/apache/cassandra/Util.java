@@ -113,6 +113,8 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableLoader;
@@ -1298,5 +1300,24 @@ public class Util
         {
             throw new AssertionError("Failed to read supported file modification time granularity");
         }
+    }
+
+    public static void markNodeAsDead(InetAddressAndPort address)
+    {
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
+        IFailureDetector.instance.report(address);
+        IFailureDetector.instance.interpret(address);
+        assertFalse("Node not convicted", IFailureDetector.instance.isAlive(address));
+    }
+
+    public static void joinNodeToRing(InetAddressAndPort address, Token token, IPartitioner partitioner)
+    {
+        Gossiper.instance.initializeNodeUnsafe(address, UUID.randomUUID(), MessagingService.current_version, 1);
+        Gossiper.instance.injectApplicationState(address, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        StorageService.instance.onChange(address,
+                    ApplicationState.STATUS_WITH_PORT,
+                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+
     }
 }
