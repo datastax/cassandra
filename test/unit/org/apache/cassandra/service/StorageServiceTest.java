@@ -20,6 +20,14 @@ package org.apache.cassandra.service;
 
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.google.common.collect.Multimap;
 
 import com.google.common.collect.ImmutableMultimap;
 import org.junit.Assert;
@@ -32,10 +40,13 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.EndpointsByRange;
 import org.apache.cassandra.locator.EndpointsByReplica;
+import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -43,7 +54,10 @@ import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.ReplicaMultimap;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.service.StorageService.LeavingReplica;
+import org.apache.cassandra.Util;
 import org.mockito.Mockito;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
@@ -108,6 +122,7 @@ public class StorageServiceTest
         };
 
         DatabaseDescriptor.setEndpointSnitch(snitch);
+
         CommitLog.instance.start();
     }
 
@@ -376,5 +391,53 @@ public class StorageServiceTest
         Mockito.when(spiedMetadata.cloneOnlyTokenMap()).thenReturn(spiedMetadata);
 
         return spiedStorageService;
+    }
+    @Test
+    public void testSourceReplicasIsEmptyWithDeadNodes()
+    {
+        RandomPartitioner partitioner = new RandomPartitioner();
+        TokenMetadata tmd = new TokenMetadata();
+        tmd.updateNormalToken(threeToken, aAddress);
+        Util.joinNodeToRing(aAddress, threeToken, partitioner);
+        tmd.updateNormalToken(sixToken, bAddress);
+        Util.joinNodeToRing(bAddress, sixToken, partitioner);
+        tmd.updateNormalToken(nineToken, cAddress);
+        Util.joinNodeToRing(cAddress, nineToken, partitioner);
+        tmd.updateNormalToken(elevenToken, dAddress);
+        Util.joinNodeToRing(dAddress, elevenToken, partitioner);
+        tmd.updateNormalToken(oneToken, eAddress);
+        Util.joinNodeToRing(eAddress, oneToken, partitioner);
+
+        AbstractReplicationStrategy strat = simpleStrategy(tmd);
+        EndpointsByRange rangeReplicas = strat.getRangeAddresses(tmd);;
+
+        Replica leaving = new Replica(aAddress, aRange, true);
+        Replica ourReplica = new Replica(cAddress, cRange, true);
+        Set<LeavingReplica> leavingReplicas = Stream.of(new LeavingReplica(leaving, ourReplica)).collect(Collectors.toCollection(HashSet::new));
+
+        // Mark the leaving replica as dead as well as the potential replica
+        Util.markNodeAsDead(aAddress);
+        Util.markNodeAsDead(bAddress);
+
+        Multimap<InetAddressAndPort, RangeStreamer.FetchReplica> result = StorageService.instance.findLiveReplicasForRanges(leavingReplicas, rangeReplicas, cAddress);
+        assertTrue("Replica set should be empty since replicas are dead", result.isEmpty());
+    }
+
+    @Test
+    public void testStreamCandidatesDontIncludeDeadNodes()
+    {
+        List<InetAddressAndPort> endpoints = Arrays.asList(aAddress, bAddress);
+
+        RandomPartitioner partitioner = new RandomPartitioner();
+        Util.joinNodeToRing(aAddress, threeToken, partitioner);
+        Util.joinNodeToRing(bAddress, sixToken, partitioner);
+
+        Replica liveReplica = SystemReplicas.getSystemReplica(aAddress);
+        Replica deadReplica = SystemReplicas.getSystemReplica(bAddress);
+        Util.markNodeAsDead(bAddress);
+
+        EndpointsForRange result = StorageService.getStreamCandidates(endpoints);
+        assertTrue("Live node should be in replica list", result.contains(liveReplica));
+        assertFalse("Dead node should not be in replica list", result.contains(deadReplica));
     }
 }
