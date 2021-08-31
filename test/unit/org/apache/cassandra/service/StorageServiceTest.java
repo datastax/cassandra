@@ -66,6 +66,7 @@ import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService.LeavingReplica;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -310,14 +311,42 @@ public class StorageServiceTest
         }
         finally
         {
-            if (oldPropertyVal == null)
-            {
-                System.clearProperty(replaceAddressProperty);
-            }
-            else
-            {
-                System.setProperty(replaceAddressProperty, oldPropertyVal);
-            }
+            restorePropertyValue(replaceAddressProperty, oldPropertyVal);
+        }
+    }
+
+    @Test
+    public void testBootstrapPreparationFailsWithLeavingEndpoint()
+    {
+        String oldPropertyVal = System.getProperty(BOOTSTRAP_SKIP_SCHEMA_CHECK.toString());
+        System.setProperty(BOOTSTRAP_SKIP_SCHEMA_CHECK.toString(), "true");
+        try
+        {
+            TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+            tmd.addLeavingEndpoint(bAddress);
+            StorageService.instance.prepareForBootstrap(0);
+            fail();
+        }
+        catch (UnsupportedOperationException exception)
+        {
+            final String expected = "Other bootstrapping/leaving/moving nodes detected";
+            assertTrue(String.format("Expected '%s' in exception message", expected), exception.getMessage().contains(expected));
+        }
+        finally
+        {
+            restorePropertyValue(BOOTSTRAP_SKIP_SCHEMA_CHECK.toString(), oldPropertyVal);
+        }
+    }
+
+    private static void restorePropertyValue(String property, String value)
+    {
+        if (value == null)
+        {
+            System.clearProperty(property);
+        }
+        else
+        {
+            System.setProperty(property, value);
         }
     }
 }

@@ -115,6 +115,7 @@ import org.apache.cassandra.utils.progress.ProgressListener;
 import org.apache.cassandra.utils.progress.jmx.JMXBroadcastExecutor;
 import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
 
+import static com.google.common.collect.Iterables.all;
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
 import static java.util.Arrays.asList;
