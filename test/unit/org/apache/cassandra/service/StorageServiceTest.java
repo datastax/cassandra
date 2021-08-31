@@ -18,11 +18,15 @@
 
 package org.apache.cassandra.service;
 
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -33,6 +37,10 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RangeStreamer;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.EndpointsByRange;
 import org.apache.cassandra.locator.EndpointsByReplica;
 import org.apache.cassandra.locator.EndpointsForRange;
@@ -264,5 +272,52 @@ public class StorageServiceTest
         StorageService.instance.populateTokenMetadata();
         assertFalse("Original token is present but should be missing", tmd.getTokens(cAddress).contains(origToken));
         assertTrue("New token is missing but should be present", tmd.getTokens(cAddress).contains(newToken));
+    }
+
+    @Test
+    public void testReplaceNodeAndOwnTokens() throws UnknownHostException
+    {
+        final String replaceAddressProperty = "cassandra.replace_address_first_boot";
+        String oldPropertyVal = System.getProperty(replaceAddressProperty);
+        try
+        {
+            String replaceAddressString = "127.0.0.100";
+            System.setProperty(replaceAddressProperty, replaceAddressString);
+            InetAddressAndPort replaceAddress = InetAddressAndPort.getByName(replaceAddressString);
+
+            IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+
+            HeartBeatState hbState = HeartBeatState.empty();
+            EndpointState gossipState = new EndpointState(hbState);
+            EndpointState localState = new EndpointState(hbState);
+
+            Token token = StorageService.instance.getTokenFactory().fromString("123");
+
+            UUID oldHostId = UUID.randomUUID();
+            TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+            tmd.updateHostId(oldHostId, replaceAddress);
+            assertEquals("Replaced address had unexpected host ID", oldHostId, StorageService.instance.getHostIdForEndpoint(replaceAddress));
+
+            UUID newHostId = UUID.randomUUID();
+            gossipState.addApplicationState(ApplicationState.HOST_ID, StorageService.instance.valueFactory.hostId(newHostId));
+            Map<InetAddressAndPort, EndpointState> endpointStateMap = new HashMap<>();
+            endpointStateMap.put(replaceAddress, gossipState);
+
+            localState.addApplicationState(ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+            StorageService.instance.replaceNodeAndOwnTokens(replaceAddress, endpointStateMap, localState);
+            assertEquals("Replaced address had unexpected host ID", newHostId, StorageService.instance.getHostIdForEndpoint(replaceAddress));
+            assertEquals("Replaced address had unexpected token", Arrays.asList(token), tmd.getTokens(replaceAddress));
+        }
+        finally
+        {
+            if (oldPropertyVal == null)
+            {
+                System.clearProperty(replaceAddressProperty);
+            }
+            else
+            {
+                System.setProperty(replaceAddressProperty, oldPropertyVal);
+            }
+        }
     }
 }

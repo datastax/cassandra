@@ -531,7 +531,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new RuntimeException(String.format("Cannot replace_address %s because it doesn't exist in gossip", replaceAddress));
 
         validateEndpointSnitch(epStates.values().iterator());
+        replaceNodeAndOwnTokens(replaceAddress, epStates, state);
 
+        UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
+
+        if (isReplacingSameAddress())
+        {
+            localHostId = Gossiper.instance.getHostId(replaceAddress, epStates);
+            SystemKeyspace.setLocalHostId(localHostId); // use the replacee's host Id as our own so we receive hints, etc
+        }
+
+        return localHostId;
+    }
+
+    @VisibleForTesting
+    public void replaceNodeAndOwnTokens(InetAddressAndPort replaceAddress, Map<InetAddressAndPort, EndpointState> epStates, EndpointState state)
+    {
         try
         {
             VersionedValue tokensVersionedValue = state.getApplicationState(ApplicationState.TOKENS);
@@ -593,16 +608,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             throw new RuntimeException(e);
         }
-
-        UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
-
-        if (isReplacingSameAddress())
-        {
-            localHostId = Gossiper.instance.getHostId(replaceAddress, epStates);
-            SystemKeyspace.setLocalHostId(localHostId); // use the replacee's host Id as our own so we receive hints, etc
-        }
-
-        return localHostId;
     }
 
     private static Collection<Token> validateReplacementBootstrapTokens(TokenMetadata tokenMetadata,
@@ -849,6 +854,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private boolean isReplacing()
     {
+        logger.info("Replacing {}", System.getProperty("cassandra.replace_address_first_boot", null));
         if (System.getProperty("cassandra.replace_address_first_boot", null) != null && SystemKeyspace.bootstrapComplete())
         {
             logger.info("Replace address on first boot requested; this node is already bootstrapped");
