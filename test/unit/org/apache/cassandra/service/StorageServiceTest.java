@@ -19,6 +19,7 @@
 package org.apache.cassandra.service;
 
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -32,6 +33,7 @@ import java.util.stream.Stream;
 
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -39,6 +41,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.HeartBeatState;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.EndpointsByRange;
@@ -63,6 +66,8 @@ import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
 
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService.LeavingReplica;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -348,5 +353,76 @@ public class StorageServiceTest
         {
             System.setProperty(property, value);
         }
+    }
+
+    @Test
+    public void testTokensInLocalDC()
+    {
+        InetAddressAndPort localAddress = FBUtilities.getBroadcastAddressAndPort();
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        Token startToken = StorageService.instance.getTokenFactory().fromString("788");
+        Token endToken = StorageService.instance.getTokenFactory().fromString("789");
+        tmd.updateNormalTokens(Arrays.asList(startToken, endToken), localAddress);
+
+        String keyspace = "StorageServiceTest";
+        String columnFamily = "testTokensInLocalDC";
+        SchemaLoader.prepareServer();
+        SchemaLoader.createKeyspace(keyspace,
+                                    KeyspaceParams.local(),
+                                    SchemaLoader.standardCFMD(keyspace, columnFamily));
+        EndpointsByRange endpointsByRange = StorageService.instance.getRangeToAddressMapInLocalDC(keyspace);
+        boolean rangeCoversEndpoint = endpointsByRange.get(new Range(startToken, endToken)).endpointList().contains(localAddress);
+        assertTrue("Endpoint was not in EndpointsByRange", rangeCoversEndpoint);
+    }
+
+    @Test
+    public void testNormalStateExistingEndpoint() throws UnknownHostException
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+        IPartitioner partitioner = new RandomPartitioner();
+        VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
+
+        ArrayList<Token> endpointTokens = new ArrayList<>();
+        ArrayList<Token> keyTokens = new ArrayList<>();
+        List<InetAddressAndPort> hosts = new ArrayList<>();
+        List<UUID> hostIds = new ArrayList<>();
+
+        // Create a ring of 3 nodes
+        Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 3);
+
+        // Start a new node with unique host ID and verify token metadata is updated
+        Token token = new RandomPartitioner.BigIntegerToken("1");
+        UUID uniqueHostId = UUID.randomUUID();
+        assertEquals("Host ID was registered to node before we added it to gossip", null, tmd.getEndpointForHostId(uniqueHostId));
+        InetAddressAndPort uniqueNode = InetAddressAndPort.getByName("127.0.0.99");
+        Util.joinNodeToRing(uniqueNode, token, partitioner, uniqueHostId, 1);
+        assertEquals("Host ID not registered to node", uniqueNode, tmd.getEndpointForHostId(uniqueHostId));
+
+        // Start new node with same hostId as us, we should win (retain the hostId).
+        InetAddressAndPort newNode = InetAddressAndPort.getByName("127.0.0.100");
+        InetAddressAndPort localAddress = FBUtilities.getBroadcastAddressAndPort();
+        UUID localHostId = Gossiper.instance.getHostId(localAddress);
+        Util.joinNodeToRing(newNode, token, partitioner, localHostId, 1);
+        assertEquals("Host ID not registered to local address", localAddress, tmd.getEndpointForHostId(localHostId));
+        ss.onChange(newNode, ApplicationState.STATUS_WITH_PORT, valueFactory.normal(Collections.singleton(token)));
+        assertEquals("Local address didn't win host ID", localAddress, tmd.getEndpointForHostId(localHostId));
+
+        // Start two nodes with the same hostId and generationNbr. First node should win.
+        InetAddressAndPort firstNode = InetAddressAndPort.getByName("127.0.0.101");
+        InetAddressAndPort secondNode = InetAddressAndPort.getByName("127.0.0.102");
+        UUID hostId = UUID.randomUUID();
+        Util.joinNodeToRing(firstNode, token, partitioner, hostId, 1);
+        assertEquals("Host ID not registered to first node", firstNode, tmd.getEndpointForHostId(hostId));
+        Util.joinNodeToRing(secondNode, token, partitioner, hostId, 1);
+        assertEquals("First node didn't win host ID", firstNode, tmd.getEndpointForHostId(hostId));
+
+        // Start a new node with same hostId but newer generationNbr. Newest node should win.
+        InetAddressAndPort newestNode = InetAddressAndPort.getByName("127.0.0.103");
+        Gossiper.instance.initializeNodeUnsafe(newestNode, hostId, MessagingService.current_version, 12);
+        Gossiper.instance.injectApplicationState(newestNode, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        ss.onChange(newestNode, ApplicationState.STATUS_WITH_PORT, valueFactory.normal(Collections.singleton(token)));
+        assertEquals("Newest node didn't win host ID", newestNode, tmd.getEndpointForHostId(hostId));
     }
 }
