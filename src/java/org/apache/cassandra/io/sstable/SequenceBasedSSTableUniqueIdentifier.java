@@ -24,7 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 /**
@@ -35,7 +34,6 @@ public class SequenceBasedSSTableUniqueIdentifier implements SSTableUniqueIdenti
 {
     public final int generation;
 
-    @VisibleForTesting
     public SequenceBasedSSTableUniqueIdentifier(final int generation)
     {
         assert generation >= 0;
@@ -71,7 +69,7 @@ public class SequenceBasedSSTableUniqueIdentifier implements SSTableUniqueIdenti
     public ByteBuffer asBytes()
     {
         ByteBuffer bytes = ByteBuffer.allocate(Integer.BYTES);
-        bytes.putInt(generation).flip();
+        bytes.putInt(0, generation);
         return bytes;
     }
 
@@ -117,8 +115,8 @@ public class SequenceBasedSSTableUniqueIdentifier implements SSTableUniqueIdenti
         @Override
         public SequenceBasedSSTableUniqueIdentifier fromBytes(ByteBuffer bytes) throws IllegalArgumentException
         {
-            Preconditions.checkArgument(bytes.remaining() >= Integer.BYTES, "Buffer does not have enough data");
-            return new SequenceBasedSSTableUniqueIdentifier(bytes.getInt());
+            Preconditions.checkArgument(bytes.remaining() >= Integer.BYTES, "Buffer does not have enough data: %s", bytes.remaining());
+            return new SequenceBasedSSTableUniqueIdentifier(bytes.getInt(0));
         }
     }
 }

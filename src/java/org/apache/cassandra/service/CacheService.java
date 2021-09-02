@@ -43,6 +43,9 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifierFactory;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -426,8 +429,7 @@ public class CacheService implements CacheServiceMBean
             out.writeUTF(tableMetadata.indexName().orElse(""));
             ByteArrayUtil.writeWithLength(key.key, out);
             out.writeInt(Integer.MIN_VALUE); // backwards compatibility for "int based generation only"
-            // use string representation so that we can use the stored id to search for an sstable right away, without knowing the exact id builder
-            ByteBufferUtil.writeWithShortLength(ByteBufferUtil.bytes(key.desc.generation.asString()), out);
+            ByteBufferUtil.writeWithShortLength(key.desc.generation.asBytes(), out);
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
@@ -446,9 +448,9 @@ public class CacheService implements CacheServiceMBean
             }
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
-            String generationId = generation == Integer.MIN_VALUE
-                                  ? ByteBufferUtil.string(ByteBufferUtil.readWithShortLength(input))
-                                  : String.valueOf(generation); // Backwards compatibility for "int based generation sstables"
+            SSTableUniqueIdentifier generationId = generation == Integer.MIN_VALUE
+                                  ? SSTableUniqueIdentifierFactory.instance.fromBytes(ByteBufferUtil.readWithShortLength(input))
+                                  : new SequenceBasedSSTableUniqueIdentifier(generation); // Backwards compatibility for "int based generation sstables"
 
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
             SSTableReader reader;
@@ -466,11 +468,11 @@ public class CacheService implements CacheServiceMBean
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 
-        private SSTableReader findDesc(String generation, Iterable<SSTableReader> collection)
+        private SSTableReader findDesc(SSTableUniqueIdentifier generation, Iterable<SSTableReader> collection)
         {
             for (SSTableReader sstable : collection)
             {
-                if (Objects.equals(sstable.descriptor.generation.asString(), generation))
+                if (Objects.equals(sstable.descriptor.generation, generation))
                     return sstable;
             }
             return null;

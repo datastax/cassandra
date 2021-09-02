@@ -39,7 +39,9 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
@@ -75,6 +77,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -92,14 +95,17 @@ public class DirectoriesTest
 
     private ConcurrentMap<Integer, SSTableUniqueIdentifier> ids = new ConcurrentHashMap<>();
 
-    @Parameterized.Parameter
+    @Parameterized.Parameter(0)
+    public SSTableUniqueIdentifier.Builder<? extends SSTableUniqueIdentifier> idBuilder;
+
+    @Parameterized.Parameter(1)
     public Supplier<? extends SSTableUniqueIdentifier> idGenerator;
 
     @Parameterized.Parameters
     public static Collection<Object[]> idBuilders()
     {
-        return Arrays.asList(new Object[]{ SequenceBasedSSTableUniqueIdentifier.Builder.instance.generator(Stream.empty()) },
-                             new Object[]{ ULIDBasedSSTableUniqueIdentifier.Builder.instance.generator(Stream.empty()) });
+        return Arrays.asList(new Object[]{ SequenceBasedSSTableUniqueIdentifier.Builder.instance, SequenceBasedSSTableUniqueIdentifier.Builder.instance.generator(Stream.empty()) },
+                             new Object[]{ ULIDBasedSSTableUniqueIdentifier.Builder.instance, ULIDBasedSSTableUniqueIdentifier.Builder.instance.generator(Stream.empty()) });
     }
 
     @BeforeClass
@@ -213,6 +219,9 @@ public class DirectoriesTest
 
             File backupsDir = new File(cfDir(cfm),  File.separator + Directories.BACKUPS_SUBDIR);
             assertEquals(backupsDir.getCanonicalFile(), Directories.getBackupsDirectory(desc));
+
+            Supplier<? extends SSTableUniqueIdentifier> uidGen = directories.getUIDGenerator(idBuilder);
+            assertThat(Stream.generate(uidGen).limit(100).filter(generated -> ids.containsValue(generated)).collect(Collectors.toList())).isEmpty();
         }
     }
 

@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * Represents a unique identfier in the sstable descriptor filename.
+ * Represents a unique identifier in the sstable descriptor filename.
  * This ensures each sstable files uniqueness in the system.
  * <p>
  * A new iteration implementation must adhere to the following invariants:
@@ -51,11 +51,11 @@ public interface SSTableUniqueIdentifier extends Comparable<SSTableUniqueIdentif
     /**
      * Builder that can create instances of certain implementation of {@link SSTableUniqueIdentifier}.
      */
-    public interface Builder<T extends SSTableUniqueIdentifier>
+    interface Builder<T extends SSTableUniqueIdentifier>
     {
         /**
-         * Creates a new generator of identifiers. Each supplied value must be greater than all the previously generated
-         * values and greater than all the provided existing identifiers.
+         * Creates a new generator of identifiers. Each supplied value must be different to all the previously generated
+         * values and different to all the provided existing identifiers.
          */
         Supplier<T> generator(Stream<SSTableUniqueIdentifier> existingIdentifiers);
 

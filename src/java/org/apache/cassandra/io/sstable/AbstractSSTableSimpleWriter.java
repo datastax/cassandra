@@ -63,8 +63,7 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
         this.makeRangeAware = makeRangeAware;
     }
 
-
-    protected SSTableTxnWriter createWriter()
+    protected SSTableTxnWriter createWriter() throws IOException
     {
         SerializationHeader header = new SerializationHeader(true, metadata.get(), columns, EncodingStats.NO_STATS);
 
@@ -82,13 +81,13 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
                                        Collections.emptySet());
     }
 
-    private static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat.Type fmt)
+    private static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat.Type fmt) throws IOException
     {
         SSTableUniqueIdentifier nextGen = getNextGeneration(directory, columnFamily);
         return new Descriptor(directory, keyspace, columnFamily, nextGen, fmt);
     }
 
-    private static SSTableUniqueIdentifier getNextGeneration(File directory, final String columnFamily)
+    private static SSTableUniqueIdentifier getNextGeneration(File directory, final String columnFamily) throws IOException
     {
         try (Stream<SSTableUniqueIdentifier> existingIds = Files.list(directory.toPath())
                                                                 .map(Path::toFile)
@@ -97,10 +96,6 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
                                                                 .map(d -> d.generation))
         {
             return SSTableUniqueIdentifierFactory.instance.defaultBuilder().generator(existingIds).get();
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException("Failed to access sstables directory " + directory.getAbsolutePath(), e);
         }
     }
 

@@ -28,9 +28,9 @@ public class SSTableUniqueIdentifierFactory
      * Tries to guess the exact identifier type and create an instance of {@link SSTableUniqueIdentifier} using
      * {@link SSTableUniqueIdentifier.Builder#fromString(String)} from the guessed builder
      *
-     * @throws IllegalArgumentException whenn the provided string representation is malformed
+     * @throws IllegalArgumentException when the provided string representation is malformed
      */
-    SSTableUniqueIdentifier fromString(String str) throws IllegalArgumentException
+    public SSTableUniqueIdentifier fromString(String str) throws IllegalArgumentException
     {
         SSTableUniqueIdentifier.Builder<?> builder = str.length() == ULIDBasedSSTableUniqueIdentifier.STRING_LEN
                                                      ? ULIDBasedSSTableUniqueIdentifier.Builder.instance
@@ -44,7 +44,7 @@ public class SSTableUniqueIdentifierFactory
      *
      * @throws IllegalArgumentException whenn the provided binary representation is malformed
      */
-    SSTableUniqueIdentifier fromBytes(ByteBuffer bytes)
+    public SSTableUniqueIdentifier fromBytes(ByteBuffer bytes)
     {
         SSTableUniqueIdentifier.Builder<?> builder = bytes.remaining() == ULIDBasedSSTableUniqueIdentifier.BYTES_LEN
                                                      ? ULIDBasedSSTableUniqueIdentifier.Builder.instance
@@ -55,8 +55,10 @@ public class SSTableUniqueIdentifierFactory
     /**
      * Returns default identifiers builder.
      */
-    public SSTableUniqueIdentifier.Builder<? extends SSTableUniqueIdentifier> defaultBuilder()
+    @SuppressWarnings("unchecked")
+    public SSTableUniqueIdentifier.Builder<SSTableUniqueIdentifier> defaultBuilder()
     {
-        return ULIDBasedSSTableUniqueIdentifier.Builder.instance;
+        SSTableUniqueIdentifier.Builder<? extends SSTableUniqueIdentifier> builder = ULIDBasedSSTableUniqueIdentifier.Builder.instance;
+        return (SSTableUniqueIdentifier.Builder<SSTableUniqueIdentifier>) builder;
     }
 }

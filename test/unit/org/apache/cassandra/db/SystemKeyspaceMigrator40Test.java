@@ -248,6 +248,9 @@ public class SystemKeyspaceMigrator40Test extends CQLTester
 
         execute(insert, "ks", "tab", 5, 123.234d, 345.456d);
 
+        ColumnFamilyStore cf = getColumnFamilyStore(SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.SSTABLE_ACTIVITY_V2);
+        cf.truncateBlocking();
+        cf.clearUnsafe();
         SystemKeyspaceMigrator40.migrateSSTableActivity();
 
         int rowCount = 0;
