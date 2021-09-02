@@ -425,4 +425,66 @@ public class StorageServiceTest
         ss.onChange(newestNode, ApplicationState.STATUS_WITH_PORT, valueFactory.normal(Collections.singleton(token)));
         assertEquals("Newest node didn't win host ID", newestNode, tmd.getEndpointForHostId(hostId));
     }
+
+    private static class TestEndpointSubscriber implements IEndpointLifecycleSubscriber
+    {
+        private boolean sawUpCall = false;
+
+        @Override
+        public void onJoinCluster(InetAddressAndPort endpoint) {}
+
+        @Override
+        public void onLeaveCluster(InetAddressAndPort endpoint) {}
+
+        @Override
+        public void onMove(InetAddressAndPort endpoint)  {}
+
+        @Override
+        public void onDown(InetAddressAndPort endpoint) {}
+
+        @Override
+        public void onUp(InetAddressAndPort endpoint)
+        {
+            sawUpCall = true;
+        }
+
+        public boolean upCalled()
+        {
+            return sawUpCall;
+        }
+
+        public void reset()
+        {
+            sawUpCall = false;
+        }
+    }
+
+    @Test
+    public void testAddAndRemoveNotifications() throws UnknownHostException
+    {
+        StorageService ss = StorageService.instance;
+        IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+        TestEndpointSubscriber subscriber = new TestEndpointSubscriber();
+        ss.register(subscriber);
+        InetAddressAndPort liveNode = InetAddressAndPort.getByName("127.0.0.200");
+        Token token = ss.getTokenFactory().fromString("200");
+        Util.joinNodeToRing(liveNode, token, partitioner);
+        Gossiper.instance.injectApplicationState(liveNode, ApplicationState.RPC_READY, new VersionedValue.VersionedValueFactory(partitioner).rpcReady(true));
+
+        TokenMetadata tmd = ss.getTokenMetadata();
+        assertTrue("liveNode was not member of ring", tmd.isMember(liveNode));
+        ss.onAlive(liveNode, null);
+        assertTrue("onUp() notification never called", subscriber.upCalled());
+        ss.onRemove(liveNode);
+        assertFalse("liveNode is still member of ring but was removed", tmd.isMember(liveNode));
+
+        subscriber.reset();
+
+        InetAddressAndPort deadNode = InetAddressAndPort.getByName("127.0.0.201");
+        assertFalse("deadNode was member of ring but shouldn't be", tmd.isMember(deadNode));
+        ss.onAlive(deadNode, null);
+        assertFalse("onUp() notification should not have been called", subscriber.upCalled());
+        ss.onRemove(deadNode);
+        assertFalse("deadNode somehow was added to the ring", tmd.isMember(deadNode));
+    }
 }
