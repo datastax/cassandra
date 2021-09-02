@@ -754,5 +754,6 @@ public class LeaveAndBootstrapTest
         assertEquals(removeNode, tmd.getEndpointForHostId(removeHostId));
         ss.onChange(removeNode, ApplicationState.STATUS_WITH_PORT, valueFactory.removingNonlocal(UUID.randomUUID()));
         assertTrue("Removed node should be marked as leaving", tmd.isLeaving(removeNode));
+        assertTrue("Removed node not in list of leaving nodes", ss.getLeavingNodes().contains(removeNode.getHostAddress(false)));
     }
 }
