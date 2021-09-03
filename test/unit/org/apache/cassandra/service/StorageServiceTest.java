@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service;
 
+import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,6 +80,8 @@ import static org.junit.Assert.fail;
 
 public class StorageServiceTest
 {
+    public static final String KEYSPACE = "StorageServiceTest";
+    public static final String COLUMN_FAMILY = "StorageServiceTestColumnFamily";
     static InetAddressAndPort aAddress;
     static InetAddressAndPort bAddress;
     static InetAddressAndPort cAddress;
@@ -93,6 +96,11 @@ public class StorageServiceTest
         cAddress = InetAddressAndPort.getByName("127.0.0.3");
         dAddress = InetAddressAndPort.getByName("127.0.0.4");
         eAddress = InetAddressAndPort.getByName("127.0.0.5");
+
+        SchemaLoader.prepareServer();
+        SchemaLoader.createKeyspace(KEYSPACE,
+                                    KeyspaceParams.local(),
+                                    SchemaLoader.standardCFMD(KEYSPACE, COLUMN_FAMILY));
     }
 
     private static final Token threeToken = new RandomPartitioner.BigIntegerToken("3");
@@ -364,13 +372,7 @@ public class StorageServiceTest
         Token endToken = StorageService.instance.getTokenFactory().fromString("789");
         tmd.updateNormalTokens(Arrays.asList(startToken, endToken), localAddress);
 
-        String keyspace = "StorageServiceTest";
-        String columnFamily = "testTokensInLocalDC";
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(keyspace,
-                                    KeyspaceParams.local(),
-                                    SchemaLoader.standardCFMD(keyspace, columnFamily));
-        EndpointsByRange endpointsByRange = StorageService.instance.getRangeToAddressMapInLocalDC(keyspace);
+        EndpointsByRange endpointsByRange = StorageService.instance.getRangeToAddressMapInLocalDC(KEYSPACE);
         boolean rangeCoversEndpoint = endpointsByRange.get(new Range(startToken, endToken)).endpointList().contains(localAddress);
         assertTrue("Endpoint was not in EndpointsByRange", rangeCoversEndpoint);
     }
@@ -486,5 +488,39 @@ public class StorageServiceTest
         assertFalse("onUp() notification should not have been called", subscriber.upCalled());
         ss.onRemove(deadNode);
         assertFalse("deadNode somehow was added to the ring", tmd.isMember(deadNode));
+    }
+
+    @Test
+    public void testTokenOwnership() throws UnknownHostException
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = ss.getTokenMetadata();
+        tmd.clearUnsafe();
+
+        ArrayList<Token> endpointTokens = new ArrayList<>();
+        ArrayList<Token> keyTokens = new ArrayList<>();
+        List<InetAddressAndPort> hosts = new ArrayList<>();
+        List<UUID> hostIds = new ArrayList<>();
+        Util.createInitialRing(ss, new RandomPartitioner(), endpointTokens, keyTokens, hosts, hostIds, 1);
+
+        Map<InetAddress, Float> map =  ss.getOwnership();
+        List<Float> ownershipList = map.values().stream().collect(Collectors.toList());
+        List<Float> singleValueList = Arrays.asList(Float.valueOf(1.0f));
+        assertEquals("Only node in the ring should own all tokens", singleValueList, ownershipList);
+    }
+
+    @Test
+    public void testForcedNodeRemovalCompletion()
+    {
+        StorageService ss = StorageService.instance;
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        tmd.addLeavingEndpoint(bAddress);
+
+        Set<InetAddressAndPort> leavingSet = new HashSet<>(Arrays.asList(bAddress));
+        Set<InetAddressAndPort> emptySet = new HashSet<>();
+
+        assertEquals("Singlular leaving endpoint not found", leavingSet, tmd.getLeavingEndpoints());
+        ss.forceRemoveCompletion();
+        assertEquals("Leaving endpoints still exist after forceRemoveCompletion()", emptySet, tmd.getLeavingEndpoints());
     }
 }
