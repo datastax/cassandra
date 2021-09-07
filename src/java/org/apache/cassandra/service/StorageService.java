@@ -536,7 +536,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     @VisibleForTesting
-    public UUID replaceNodeAndOwnTokens(InetAddressAndPort replaceAddress, Map<InetAddressAndPort, EndpointState> epStates, EndpointState state)
+    UUID replaceNodeAndOwnTokens(InetAddressAndPort replaceAddress, Map<InetAddressAndPort, EndpointState> epStates, EndpointState state)
     {
         try
         {
