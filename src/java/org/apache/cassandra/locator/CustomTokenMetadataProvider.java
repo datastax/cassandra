@@ -26,6 +26,7 @@ public class CustomTokenMetadataProvider
     {
 
     }
+
     public static TokenMetadataProvider make(String customImpl)
     {
         try
