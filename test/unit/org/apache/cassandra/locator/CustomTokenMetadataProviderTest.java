@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.locator;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
+
 import org.junit.Test;
 
 import junit.framework.TestCase;
@@ -57,6 +59,27 @@ public class CustomTokenMetadataProviderTest extends TestCase
         catch (IllegalStateException ex)
         {
             assertEquals(ex.getMessage(), "Unknown token metadata provider: " + invalidClassName);
+        }
+    }
+
+    @Test
+    public void testCustomTokenMetadataProperty() throws ClassNotFoundException
+    {
+        String oldValue = CUSTOM_TMD_PROVIDER_PROPERTY.getString();
+        CUSTOM_TMD_PROVIDER_PROPERTY.setString(TestTokenMetadataProvider.class.getName());
+        ClassLoader classLoader = CustomTokenMetadataProvider.class.getClassLoader();
+        try
+        {
+            classLoader.loadClass("org.apache.cassandra.locator.TokenMetadataProvider");
+            boolean instanceIsExpectedClass = TokenMetadataProvider.instance instanceof TestTokenMetadataProvider;
+            assertTrue("TokenMetadataProvider has unexpected instance class", instanceIsExpectedClass);
+        }
+        finally
+        {
+            if (oldValue != null)
+            {
+                CUSTOM_TMD_PROVIDER_PROPERTY.setString(oldValue);
+            }
         }
     }
 }
