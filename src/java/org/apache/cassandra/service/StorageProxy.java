@@ -164,6 +164,8 @@ public class StorageProxy implements StorageProxyMBean
         }
     };
 
+    private static volatile QueryInfoTracker queryInfoTracker = QueryInfoTracker.NOOP;
+
     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
     private static final boolean disableSerialReadLinearizability =
         Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
@@ -215,6 +217,23 @@ public class StorageProxy implements StorageProxyMBean
                         "the restricted case of upgrading from a pre-CASSANDRA-12126 version, and only if you " +
                         "understand the tradeoff.", DISABLE_SERIAL_READ_LINEARIZABILITY_KEY);
         }
+    }
+
+    /**
+     * Registers the provided query info tracker
+     *
+     * <p>Note that only 1 query tracker can be registered at a time, so the provided tracker will unconditionally
+     * replace the currently registered tracker.
+     *
+     * @param tracker the tracker to register.
+     */
+    public void register(QueryInfoTracker tracker) {
+        Objects.requireNonNull(tracker);
+        queryInfoTracker = tracker;
+    }
+
+    public QueryInfoTracker queryTracker() {
+        return queryInfoTracker;
     }
 
     /**
