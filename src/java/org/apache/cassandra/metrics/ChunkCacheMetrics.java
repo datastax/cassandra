@@ -28,14 +28,13 @@ import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.github.benmanes.caffeine.cache.stats.StatsCounter;
 import org.apache.cassandra.cache.ChunkCache;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
+
 public interface ChunkCacheMetrics extends StatsCounter
 {
-    /** Set this property to true in order to switch to micrometer metrics */
-    boolean USE_MICROMETER = Boolean.getBoolean(System.getProperty("cassandra.use_micrometer_metrics", "false"));
-
     static ChunkCacheMetrics create(ChunkCache cache)
     {
-        return USE_MICROMETER ? new MicrometerChunkCacheMetrics(cache) : new CodahaleChunkCacheMetrics(cache);
+        return USE_MICROMETER.getBoolean() ? new MicrometerChunkCacheMetrics(cache) : new CodahaleChunkCacheMetrics(cache);
     }
 
     @Override

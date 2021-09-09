@@ -19,16 +19,17 @@
 package org.apache.cassandra.metrics;
 
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY;
+
 /**
  * Provides access to the {@link CoordinatorClientRequestMetrics} instance used by this node
  * and provides per-tenant metrics in CNDB.
  */
 public interface CoordinatorClientRequestMetricsProvider
 {
-    String CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY = "cassandra.custom_client_request_metrics_provider_class";
-    CoordinatorClientRequestMetricsProvider instance = System.getProperty(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY) == null ?
+    CoordinatorClientRequestMetricsProvider instance = CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString() == null ?
                                                        new DefaultCoordinatorMetricsProvider() :
-                                                       make(System.getProperty(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY));
+                                                       make(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString());
 
     CoordinatorClientRequestMetrics metrics(String keyspace);
 
