@@ -815,6 +815,8 @@ public class StorageProxy implements StorageProxyMBean
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
 
+        QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
+
         long startTime = System.nanoTime();
 
         List<AbstractWriteResponseHandler<IMutation>> responseHandlers = new ArrayList<>(mutations.size());
@@ -840,6 +842,8 @@ public class StorageProxy implements StorageProxyMBean
             // wait for writes.  throws TimeoutException if necessary
             for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
                 responseHandler.get();
+
+            writeTracker.onDone();
         }
         catch (WriteTimeoutException|WriteFailureException ex)
         {
@@ -864,6 +868,7 @@ public class StorageProxy implements StorageProxyMBean
                     WriteTimeoutException te = (WriteTimeoutException)ex;
                     Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
                 }
+                writeTracker.onError(ex);
                 throw ex;
             }
         }
@@ -872,6 +877,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetrics.unavailables.mark();
             metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
+            writeTracker.onError(e);
             throw e;
         }
         catch (OverloadedException e)
@@ -879,6 +885,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetrics.unavailables.mark();
             metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Overloaded");
+            writeTracker.onError(e);
             throw e;
         }
         finally
@@ -887,7 +894,6 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetrics.addNano(latency);
             metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
-            writeTracker.onDone();
         }
     }
 
@@ -1085,12 +1091,12 @@ public class StorageProxy implements StorageProxyMBean
      * After: remove the batchlog entry (after writing hints for the batch rows, if necessary).
      *
      * @param mutations the Mutations to be applied across the replicas
-     * @param consistency_level the consistency level for the operation
+     * @param consistencyLevel the consistency level for the operation
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
     public static void mutateAtomically(Collection<Mutation> mutations,
-                                        ConsistencyLevel consistency_level,
+                                        ConsistencyLevel consistencyLevel,
                                         boolean requireQuorumForRemove,
                                         long queryStartNanoTime,
                                         CoordinatorClientRequestMetrics metrics,
@@ -1099,6 +1105,8 @@ public class StorageProxy implements StorageProxyMBean
     {
         Tracing.trace("Determining replicas for atomic batch");
         long startTime = System.nanoTime();
+
+        QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
         List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
 
@@ -1112,13 +1120,13 @@ public class StorageProxy implements StorageProxyMBean
             // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
             ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
                                                      ? ConsistencyLevel.QUORUM
-                                                     : consistency_level;
+                                                     : consistencyLevel;
 
-            switch (consistency_level)
+            switch (consistencyLevel)
             {
                 case ALL:
                 case EACH_QUORUM:
-                    batchConsistencyLevel = consistency_level;
+                    batchConsistencyLevel = consistencyLevel;
             }
 
             ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY);
@@ -1131,7 +1139,7 @@ public class StorageProxy implements StorageProxyMBean
             for (Mutation mutation : mutations)
             {
                 WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
-                                                                               consistency_level,
+                                                                               consistencyLevel,
                                                                                batchConsistencyLevel,
                                                                                WriteType.BATCH,
                                                                                cleanup,
@@ -1145,33 +1153,38 @@ public class StorageProxy implements StorageProxyMBean
 
             // now actually perform the writes and wait for them to complete
             syncWriteBatchedMutations(wrappers, Stage.MUTATION);
+
+            writeTracker.onDone();
         }
         catch (UnavailableException e)
         {
             metrics.writeMetrics.unavailables.mark();
-            metrics.writeMetricsMap.get(consistency_level).unavailables.mark();
+            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
+            writeTracker.onError(e);
             throw e;
         }
         catch (WriteTimeoutException e)
         {
             metrics.writeMetrics.timeouts.mark();
-            metrics.writeMetricsMap.get(consistency_level).timeouts.mark();
+            metrics.writeMetricsMap.get(consistencyLevel).timeouts.mark();
             Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+            writeTracker.onError(e);
             throw e;
         }
         catch (WriteFailureException e)
         {
             metrics.writeMetrics.failures.mark();
-            metrics.writeMetricsMap.get(consistency_level).failures.mark();
+            metrics.writeMetricsMap.get(consistencyLevel).failures.mark();
             Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+            writeTracker.onError(e);
             throw e;
         }
         finally
         {
             long latency = System.nanoTime() - startTime;
             metrics.writeMetrics.addNano(latency);
-            metrics.writeMetricsMap.get(consistency_level).addNano(latency);
+            metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
         }
     }
