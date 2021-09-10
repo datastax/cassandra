@@ -232,7 +232,7 @@ public class StorageProxy implements StorageProxyMBean
         queryInfoTracker = tracker;
     }
 
-    public QueryInfoTracker queryTracker() {
+    private static QueryInfoTracker queryTracker() {
         return queryInfoTracker;
     }
 
@@ -805,7 +805,11 @@ public class StorageProxy implements StorageProxyMBean
      * @param consistencyLevel the consistency level for the operation
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
-    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
+    public static void mutate(List<? extends IMutation> mutations,
+                              ConsistencyLevel consistencyLevel,
+                              long queryStartNanoTime,
+                              CoordinatorClientRequestMetrics metrics,
+                              ClientState state)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
@@ -883,6 +887,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetrics.addNano(latency);
             metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+            writeTracker.onDone();
         }
     }
 
@@ -1046,7 +1051,8 @@ public class StorageProxy implements StorageProxyMBean
     public static void mutateWithTriggers(List<? extends IMutation> mutations,
                                           ConsistencyLevel consistencyLevel,
                                           boolean mutateAtomically,
-                                          long queryStartNanoTime)
+                                          long queryStartNanoTime,
+                                          ClientState state)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
@@ -1062,13 +1068,13 @@ public class StorageProxy implements StorageProxyMBean
         metrics.writeMetricsMap.get(consistencyLevel).mutationSize.update(size);
 
         if (augmented != null)
-            mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime, metrics);
+            mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime, metrics, state);
         else
         {
             if (mutateAtomically || updatesView)
-                mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime, metrics);
+                mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime, metrics, state);
             else
-                mutate(mutations, consistencyLevel, queryStartNanoTime, metrics);
+                mutate(mutations, consistencyLevel, queryStartNanoTime, metrics, state);
         }
     }
 
@@ -1087,7 +1093,8 @@ public class StorageProxy implements StorageProxyMBean
                                         ConsistencyLevel consistency_level,
                                         boolean requireQuorumForRemove,
                                         long queryStartNanoTime,
-                                        CoordinatorClientRequestMetrics metrics)
+                                        CoordinatorClientRequestMetrics metrics,
+                                        ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
         Tracing.trace("Determining replicas for atomic batch");
@@ -1324,7 +1331,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                             AtomicLong baseComplete,
                                                                             WriteType writeType,
                                                                             BatchlogCleanup cleanup,
-                                                                            long queryStartNanoTime, 
+                                                                            long queryStartNanoTime,
                                                                             CoordinatorClientRequestMetrics metrics)
     {
         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
@@ -2248,7 +2255,7 @@ public class StorageProxy implements StorageProxyMBean
     private static class ViewWriteMetricsWrapped extends BatchlogResponseHandler<IMutation>
     {
         CoordinatorClientRequestMetrics metrics;
-        
+
         public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
         {
             super(writeHandler, i, cleanup, queryStartNanoTime);

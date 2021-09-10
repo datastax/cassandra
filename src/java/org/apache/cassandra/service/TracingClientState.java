@@ -20,7 +20,7 @@ package org.apache.cassandra.service;
 import javax.annotation.Nullable;
 
 /**
- * As tracing can happen at both coordinator and replicas, at replica side, CNDB needs to knows the traced keyspace for billing
+ * As tracing can happen at both coordinator and replicas, at replica side, CNDB needs to know the traced keyspace for billing
  */
 public class TracingClientState extends ClientState
 {
