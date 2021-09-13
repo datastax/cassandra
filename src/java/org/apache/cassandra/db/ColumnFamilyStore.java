@@ -84,7 +84,6 @@ import org.apache.cassandra.metrics.Sampler.Sample;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.repair.TableRepairManager;
-import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
@@ -2188,7 +2187,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static Iterable<ColumnFamilyStore> all()
     {
-        List<Iterable<ColumnFamilyStore>> stores = new ArrayList<>(Schema.instance.getKeyspaces().size());
+        List<Iterable<ColumnFamilyStore>> stores = new ArrayList<>(SchemaManager.instance.getKeyspaces().size());
         for (Keyspace keyspace : Keyspace.all())
         {
             stores.add(keyspace.getColumnFamilyStores());
@@ -3045,7 +3044,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
      */
     public static ColumnFamilyStore getIfExists(TableId id)
     {
-        TableMetadata metadata = Schema.instance.getTableMetadata(id);
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata(id);
         if (metadata == null)
             return null;
 
@@ -3071,7 +3070,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (keyspace == null)
             return null;
 
-        TableMetadata table = Schema.instance.getTableMetadata(ksName, cfName);
+        TableMetadata table = SchemaManager.instance.getTableMetadata(ksName, cfName);
         if (table == null)
             return null;
 
