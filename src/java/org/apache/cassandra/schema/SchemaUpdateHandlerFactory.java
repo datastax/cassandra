@@ -18,21 +18,12 @@
 
 package org.apache.cassandra.schema;
 
-import org.apache.cassandra.diag.DiagnosticEventService;
-import org.apache.cassandra.schema.SchemaMigrationEvent.MigrationManagerEventType;
+public class SchemaUpdateHandlerFactory
+{
+    public static final SchemaUpdateHandlerFactory instance = new SchemaUpdateHandlerFactory();
 
-final class SchemaMigrationDiagnostics {
-    private static final DiagnosticEventService service = DiagnosticEventService.instance();
-
-    private SchemaMigrationDiagnostics() {
-    }
-
-    static void resetLocalSchema() {
-        if (isEnabled(MigrationManagerEventType.RESET_LOCAL_SCHEMA))
-            service.publish(new SchemaMigrationEvent(MigrationManagerEventType.RESET_LOCAL_SCHEMA, null, null));
-    }
-
-    private static boolean isEnabled(MigrationManagerEventType type) {
-        return service.isEnabled(SchemaMigrationEvent.class, type);
+    public SchemaUpdateHandler getSchemaUpdateHandler()
+    {
+        return new DefaultSchemaUpdateHandler();
     }
 }

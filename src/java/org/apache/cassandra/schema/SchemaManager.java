@@ -18,6 +18,7 @@
 package org.apache.cassandra.schema;
 
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
@@ -38,7 +39,9 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -50,7 +53,12 @@ import static java.lang.String.format;
 
 import static com.google.common.collect.Iterables.size;
 
-public final class SchemaManager implements SchemaProvider
+/**
+ * Manages keyspace instances. It provides methods to query schema, but it does not provide any methods to modify the
+ * schema. All schema modification are managed by the implementation of {@link SchemaUpdateHandler}. Once the schema is
+ * updated, {@link SchemaUpdateHandler} applies the changes to the keyspace instances stored by {@link SchemaManager}.
+ */
+public final class SchemaManager implements SchemaProvider, IEndpointStateChangeSubscriber
 {
     public static final SchemaManager instance = new SchemaManager();
 
@@ -69,6 +77,8 @@ public final class SchemaManager implements SchemaProvider
 
     private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();
 
+    SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactory.instance.getSchemaUpdateHandler();
+
     /**
      * Initialize empty schema object and load the hardcoded system tables
      */
@@ -79,6 +89,16 @@ public final class SchemaManager implements SchemaProvider
             load(SchemaKeyspace.metadata());
             load(SystemKeyspace.metadata());
         }
+    }
+
+    public void startSync()
+    {
+        updateHandler.start();
+    }
+
+    public boolean waitUntilReady(Duration timeout)
+    {
+        return updateHandler.waitUntilReady(timeout);
     }
 
     /**
@@ -552,6 +572,13 @@ public final class SchemaManager implements SchemaProvider
         passiveAnnounceVersion();
     }
 
+    @Override
+    public void onRemove(InetAddressAndPort endpoint)
+    {
+        if (updateHandler instanceof IEndpointStateChangeSubscriber)
+            ((IEndpointStateChangeSubscriber) updateHandler).onRemove(endpoint);
+    }
+
     /**
      * Announce my version passively over gossip.
      * Used to notify nodes as they arrive in the cluster.
@@ -894,7 +921,6 @@ public final class SchemaManager implements SchemaProvider
         changeListeners.forEach(l -> l.onDropAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
     }
 
-
     /**
      * Converts the given schema version to a string. Returns {@code unknown}, if {@code version} is {@code null}
      * or {@code "(empty)"}, if {@code version} refers to an {@link SchemaConstants#emptyVersion empty) schema.
@@ -907,4 +933,5 @@ public final class SchemaManager implements SchemaProvider
                  ? "(empty)"
                  : version.toString();
     }
+
 }

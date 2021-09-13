@@ -21,9 +21,7 @@ package org.apache.cassandra.schema;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Queue;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 
 import javax.annotation.Nullable;
 
@@ -47,7 +45,6 @@ final class SchemaMigrationEvent extends DiagnosticEvent
     private final UUID localSchemaVersion;
     private final Integer localMessagingVersion;
     private final SystemKeyspace.BootstrapState bootstrapState;
-    private final Integer inflightTaskCount;
     @Nullable
     private Integer endpointMessagingVersion;
     @Nullable
@@ -76,8 +73,6 @@ final class SchemaMigrationEvent extends DiagnosticEvent
         localSchemaVersion = SchemaManager.instance.getVersion();
         localMessagingVersion = MessagingService.current_version;
 
-        inflightTaskCount = MigrationCoordinator.instance.getInflightTasks();
-
         this.bootstrapState = SystemKeyspace.getBootstrapState();
 
         if (endpoint == null) return;
@@ -105,7 +100,6 @@ final class SchemaMigrationEvent extends DiagnosticEvent
         if (endpointGossipOnlyMember != null) ret.put("endpointGossipOnlyMember", endpointGossipOnlyMember);
         if (isAlive != null) ret.put("endpointIsAlive", isAlive);
         if (bootstrapState != null) ret.put("bootstrapState", bootstrapState.name());
-        if (inflightTaskCount != null) ret.put("inflightTaskCount", inflightTaskCount);
         return ret;
     }
 }

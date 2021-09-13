@@ -279,12 +279,26 @@ public class MigrationManager
         for (InetAddressAndPort node : liveEndpoints)
         {
             EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(node);
-            Future<Void> pull = MigrationCoordinator.instance.reportEndpointVersion(node, state);
+            Future<Void> pull = reportEndpointVersion(node, state);
             if (pull != null)
                 FBUtilities.waitOnFuture(pull);
         }
 
         logger.info("Local schema reset is complete.");
+    }
+
+    public static Future<Void> reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
+    {
+        Future<Void> defaultResult = Futures.immediateFuture(null);
+        if (state == null)
+            return defaultResult;
+
+        UUID version = state.getSchemaVersion();
+
+        if (version == null)
+            return defaultResult;
+
+        return MigrationCoordinator.instance.reportEndpointVersion(endpoint, version);
     }
 
     /**

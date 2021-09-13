@@ -74,7 +74,6 @@ public class MigrationCoordinator
         getUptimeFn = supplier;
     }
 
-
     private static final int MIGRATION_DELAY_IN_MS = 60000;
     private static final int MAX_OUTSTANDING_VERSION_REQUESTS = 3;
 
@@ -170,11 +169,7 @@ public class MigrationCoordinator
         ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES);
     }
 
-    public synchronized void reset()
-    {
-        versionInfo.clear();
-    }
-
+    @VisibleForTesting
     synchronized List<Future<Void>> pullUnreceivedSchemaVersions()
     {
         List<Future<Void>> futures = new ArrayList<>();
@@ -191,7 +186,7 @@ public class MigrationCoordinator
         return futures;
     }
 
-    synchronized Future<Void> maybePullSchema(VersionInfo info)
+    private synchronized Future<Void> maybePullSchema(VersionInfo info)
     {
         if (info.endpoints.isEmpty() || info.wasReceived() || !shouldPullSchema(info.version))
             return FINISHED_FUTURE;
@@ -199,7 +194,7 @@ public class MigrationCoordinator
         if (info.outstandingRequests.size() >= getMaxOutstandingVersionRequests())
             return FINISHED_FUTURE;
 
-        for (int i=0, isize=info.requestQueue.size(); i<isize; i++)
+        for (int i = 0, isize = info.requestQueue.size(); i < isize; i++)
         {
             InetAddressAndPort endpoint = info.requestQueue.remove();
             if (!info.endpoints.contains(endpoint))
@@ -220,6 +215,7 @@ public class MigrationCoordinator
         return null;
     }
 
+    // used only in log message
     public synchronized Map<UUID, Set<InetAddressAndPort>> outstandingVersions()
     {
         HashMap<UUID, Set<InetAddressAndPort>> map = new HashMap<>();
@@ -266,13 +262,6 @@ public class MigrationCoordinator
             return false;
         }
         return true;
-    }
-
-    // Since 3.0.14 protocol contains only a CASSANDRA-13004 bugfix, it is safe to accept schema changes
-    // from both 3.0 and 3.0.14.
-    private static boolean is30Compatible(int version)
-    {
-        return version == MessagingService.current_version || version == MessagingService.VERSION_3014;
     }
 
     @VisibleForTesting
@@ -340,7 +329,7 @@ public class MigrationCoordinator
     /**
      * If a previous schema update brought our version the same as the incoming schema, don't apply it
      */
-    synchronized boolean shouldApplySchemaFor(VersionInfo info)
+    private synchronized boolean shouldApplySchemaFor(VersionInfo info)
     {
         if (info.wasReceived())
             return false;
@@ -414,7 +403,7 @@ public class MigrationCoordinator
         }
     }
 
-    Future<Void> scheduleSchemaPull(InetAddressAndPort endpoint, VersionInfo info)
+    private Future<Void> scheduleSchemaPull(InetAddressAndPort endpoint, VersionInfo info)
     {
         FutureTask<Void> task = new FutureTask<>(() -> pullSchema(new Callback(endpoint, info)), null);
         if (shouldPullImmediately(endpoint, info.version))
@@ -445,6 +434,7 @@ public class MigrationCoordinator
         SchemaManager.instance.mergeAndAnnounceVersion(mutations);
     }
 
+    @VisibleForTesting
     class Callback implements RequestCallback<Collection<Mutation>>
     {
         final InetAddressAndPort endpoint;
@@ -520,6 +510,7 @@ public class MigrationCoordinator
         sendMigrationMessage(callback);
     }
 
+    @VisibleForTesting
     protected void sendMigrationMessage(Callback callback)
     {
         inflightTasks.getAndIncrement();
@@ -555,9 +546,7 @@ public class MigrationCoordinator
             Gossiper.waitToSettle();
 
         if (versionInfo.isEmpty())
-        {
             logger.debug("Nothing in versionInfo - so no schemas to wait for");
-        }
 
         WaitQueue.Signal signal = null;
         try

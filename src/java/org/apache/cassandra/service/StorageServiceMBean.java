@@ -839,11 +839,6 @@ public interface StorageServiceMBean extends NotificationEmitter
     /** Returns the resize factor to use when growing/resizing a RangeTombstoneList */
     public double getRangeTombstoneResizeListGrowthFactor();
 
-    /** Returns a map of schema version -> list of endpoints reporting that version that we need schema updates for */
-    @Deprecated
-    public Map<String, Set<InetAddress>> getOutstandingSchemaVersions();
-    public Map<String, Set<String>> getOutstandingSchemaVersionsWithPort();
-
     // see CASSANDRA-3200
     public boolean autoOptimiseIncRepairStreams();
     public void setAutoOptimiseIncRepairStreams(boolean enabled);
