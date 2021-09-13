@@ -19,6 +19,7 @@
 package org.apache.cassandra.schema;
 
 import java.time.Duration;
+import java.util.UUID;
 
 /**
  * Schema update handler is responsible for maintaining the current schema and synchronizing it with other nodes in
@@ -51,5 +52,15 @@ public interface SchemaUpdateHandler
      *
      * @return the current schema
      */
-    SchemaManager schema();
+    Schema schema();
+
+    // temporary, todo remove
+    void addOrUpdate(KeyspaceMetadata ksm);
+
+    // temporary, todo remove
+    void remove(String ksName);
+
+    // temporary, todo remove
+    void updateVersion(UUID version);
+
 }

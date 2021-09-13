@@ -18,7 +18,6 @@
 package org.apache.cassandra.schema;
 
 import java.net.UnknownHostException;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
@@ -66,8 +65,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 {
     public static final SchemaManager instance = new SchemaManager();
 
-    private volatile Keyspaces keyspaces = Keyspaces.none();
-
     private final LocalKeyspaces localKeyspaces;
 
     // UUID -> mutable metadata ref map. We have to update these in place every time a table changes.
@@ -78,8 +75,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
-
-    private volatile UUID version;
 
     private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();
 
@@ -135,14 +130,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     synchronized public void load(KeyspaceMetadata ksm)
     {
-        KeyspaceMetadata previous = keyspaces.getNullable(ksm.name);
+        KeyspaceMetadata previous = SchemaUpdateHandler.instance.schema().getKeyspaces().getNullable(ksm.name);
 
         if (previous == null)
             loadNew(ksm);
         else
             reload(previous, ksm);
 
-        keyspaces = keyspaces.withAddedOrUpdated(ksm);
+        SchemaUpdateHandler.instance.addOrUpdate(ksm);
     }
 
     private void loadNew(KeyspaceMetadata ksm)
@@ -264,7 +259,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public Keyspaces snapshot()
     {
-        return Keyspaces.builder().add(localKeyspaces.getAll()).add(updateHandler.schema().keyspaces).build();
+        return Keyspaces.builder().add(localKeyspaces.getAll()).add(SchemaUpdateHandler.instance.schema().getKeyspaces()).build();
     }
 
     /**
@@ -274,7 +269,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     synchronized void unload(KeyspaceMetadata ksm)
     {
-        keyspaces = keyspaces.without(ksm.name);
+        SchemaUpdateHandler.instance.remove(ksm.name);
 
         ksm.tablesAndViews()
            .forEach(t -> metadataRefs.remove(t.id));
@@ -289,13 +284,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public int getNumberOfTables()
     {
-        return keyspaces.stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
+        return SchemaUpdateHandler.instance.schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
     }
 
     public ViewMetadata getView(String keyspaceName, String viewName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> keyspaces.getNullable(keyspaceName),
+        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> SchemaUpdateHandler.instance.schema().getKeyspaces().getNullable(keyspaceName),
                                                            () -> localKeyspaces.get(keyspaceName));
         return (ksm == null) ? null : ksm.views.getNullable(viewName);
     }
@@ -311,7 +306,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        return ObjectUtils.getFirstNonNull(() -> keyspaces.getNullable(keyspaceName),
+        return ObjectUtils.getFirstNonNull(() -> SchemaUpdateHandler.instance.schema().getKeyspaces().getNullable(keyspaceName),
                                            () -> localKeyspaces.get(keyspaceName),
                                            () -> VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName));
     }
@@ -323,7 +318,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public ImmutableList<String> getNonSystemKeyspaces()
     {
-        return ImmutableList.copyOf(keyspaces.names());
+        return ImmutableList.copyOf(SchemaUpdateHandler.instance.schema().getKeyspaces().names());
     }
 
     /**
@@ -331,10 +326,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getNonLocalStrategyKeyspaces()
     {
-        return keyspaces.stream()
-                        .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
-                        .map(keyspace -> keyspace.name)
-                        .collect(Collectors.toList());
+        return SchemaUpdateHandler.instance.schema().getKeyspaces().stream()
+                            .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
+                            .map(keyspace -> keyspace.name)
+                            .collect(Collectors.toList());
     }
 
     /**
@@ -342,10 +337,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getPartitionedKeyspaces()
     {
-        return keyspaces.stream()
-                        .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
-                        .map(keyspace -> keyspace.name)
-                        .collect(Collectors.toList());
+        return SchemaUpdateHandler.instance.schema().getKeyspaces().stream()
+                            .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
+                            .map(keyspace -> keyspace.name)
+                            .collect(Collectors.toList());
     }
 
     /**
@@ -353,7 +348,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getUserKeyspaces()
     {
-        return ImmutableList.copyOf(Sets.difference(keyspaces.names(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+        return ImmutableList.copyOf(Sets.difference(SchemaUpdateHandler.instance.schema().getKeyspaces().names(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
     }
 
     /**
@@ -374,7 +369,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public Iterable<TableMetadata> getTablesAndViews(String keyspaceName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> keyspaces.getNullable(keyspaceName),
+        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> SchemaUpdateHandler.instance.schema().getKeyspaces().getNullable(keyspaceName),
                                                            () -> localKeyspaces.get(keyspaceName));
         Preconditions.checkNotNull(ksm, "Keyspace %s not found", keyspaceName);
         return ksm.tablesAndViews();
@@ -385,7 +380,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public Set<String> getKeyspaces()
     {
-        return new ImmutableSet.Builder<String>().addAll(keyspaces.names())
+        return new ImmutableSet.Builder<String>().addAll(SchemaUpdateHandler.instance.schema().getKeyspaces().names())
                                                  .addAll(localKeyspaces.getAllNames())
                                                  .build();
     }
@@ -466,7 +461,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadata getTableMetadata(TableId id)
     {
-        return ObjectUtils.getFirstNonNull(() -> keyspaces.getTableOrViewNullable(id),
+        return ObjectUtils.getFirstNonNull(() -> SchemaUpdateHandler.instance.schema().getKeyspaces().getTableOrViewNullable(id),
                                            () -> localKeyspaces.getTableOrView(id),
                                            () -> VirtualKeyspaceRegistry.instance.getTableMetadataNullable(id));
     }
@@ -538,7 +533,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public UUID getVersion()
     {
-        return version;
+        return SchemaUpdateHandler.instance.schema().getVersion();
     }
 
     /**
@@ -546,7 +541,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public boolean isSameVersion(UUID schemaVersion)
     {
-        return schemaVersion != null && schemaVersion.equals(version);
+        return schemaVersion != null && schemaVersion.equals(getVersion());
     }
 
     /**
@@ -554,7 +549,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public boolean isEmpty()
     {
-        return SchemaConstants.emptyVersion.equals(version);
+        return SchemaUpdateHandler.instance.schema().isEmpty();
     }
 
     /**
@@ -563,7 +558,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public void updateVersion()
     {
-        version = SchemaKeyspace.calculateSchemaDigest();
+        UUID version = SchemaKeyspace.calculateSchemaDigest();
+        SchemaUpdateHandler.instance.updateVersion(version);
         SystemKeyspace.updateSchemaVersion(version);
         SchemaDiagnostics.versionUpdated(this);
     }
@@ -590,7 +586,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     private void passiveAnnounceVersion()
     {
-        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
+        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(getVersion()));
         SchemaDiagnostics.versionAnnounced(this);
     }
 
@@ -610,7 +606,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public synchronized void reloadSchemaAndAnnounceVersion()
     {
-        Keyspaces before = keyspaces;
+        Keyspaces before = SchemaUpdateHandler.instance.schema().getKeyspaces();
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
         merge(Keyspaces.diff(before, after));
         updateVersionAndAnnounce();
@@ -635,7 +631,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         KeyspacesDiff diff;
         try
         {
-            Keyspaces before = keyspaces;
+            Keyspaces before = SchemaUpdateHandler.instance.schema().getKeyspaces();
             Keyspaces after = transformation.apply(before);
             diff = Keyspaces.diff(before, after);
         }
@@ -690,7 +686,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(mutations);
 
         // fetch the current state of schema for the affected keyspaces only
-        Keyspaces before = keyspaces.filter(k -> affectedKeyspaces.contains(k.name));
+        Keyspaces before = SchemaUpdateHandler.instance.schema().getKeyspaces().filter(k -> affectedKeyspaces.contains(k.name));
 
         // apply the schema mutations
         SchemaKeyspace.applyChanges(mutations);

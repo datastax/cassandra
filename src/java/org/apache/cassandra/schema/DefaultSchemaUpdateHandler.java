@@ -47,6 +47,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     private final MigrationCoordinator migrationCoordinator;
     private final Clock clock;
     private final boolean requireSchemas;
+    private volatile Schema schema;
 
     public DefaultSchemaUpdateHandler()
     {
@@ -60,6 +61,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         this.migrationCoordinator = migrationCoordinator;
         this.requireSchemas = requireSchemas;
         this.clock = clock;
+        this.schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
         Gossiper.instance.register(this);
     }
 
@@ -70,9 +72,9 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     }
 
     @Override
-    public SchemaManager schema()
+    public Schema schema()
     {
-        return SchemaManager.instance;
+        return schema;
     }
 
     @Override
@@ -106,6 +108,24 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         }
 
         return true;
+    }
+
+    @Override
+    public void addOrUpdate(KeyspaceMetadata ksm)
+    {
+        schema = new Schema(schema.getKeyspaces().withAddedOrUpdated(ksm), schema.getVersion());
+    }
+
+    @Override
+    public void remove(String ksName)
+    {
+        schema = new Schema(schema.getKeyspaces().without(ksName), schema.getVersion());
+    }
+
+    @Override
+    public void updateVersion(UUID version)
+    {
+        schema = new Schema(schema.getKeyspaces(), version);
     }
 
     @Override
