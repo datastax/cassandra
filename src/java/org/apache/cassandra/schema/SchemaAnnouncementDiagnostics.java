@@ -24,7 +24,7 @@ import org.apache.cassandra.diag.DiagnosticEventService;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.SchemaAnnouncementEvent.SchemaAnnouncementEventType;
 
-final class SchemaAnnouncementDiagnostics
+public final class SchemaAnnouncementDiagnostics
 {
     private static final DiagnosticEventService service = DiagnosticEventService.instance();
 
@@ -46,7 +46,7 @@ final class SchemaAnnouncementDiagnostics
                                                         null, null, null, from));
     }
 
-    static void schemaTransformationAnnounced(Set<InetAddressAndPort> schemaDestinationEndpoints, Set<InetAddressAndPort> schemaEndpointsIgnored, SchemaTransformation transformation)
+    public static void schemaTransformationAnnounced(Set<InetAddressAndPort> schemaDestinationEndpoints, Set<InetAddressAndPort> schemaEndpointsIgnored, SchemaTransformation transformation)
     {
         if (isEnabled(SchemaAnnouncementEventType.SCHEMA_TRANSFORMATION_ANNOUNCED))
             service.publish(new SchemaAnnouncementEvent(SchemaAnnouncementEventType.SCHEMA_TRANSFORMATION_ANNOUNCED,

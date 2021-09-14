@@ -21,25 +21,32 @@ package org.apache.cassandra.schema;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 @NotThreadSafe
 public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
@@ -142,6 +149,40 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(node);
             migrationCoordinator.reportEndpointVersion(node, state, true);
         }
+    }
+
+    @Override
+    public void pushSchema(SchemaManager.TransformationResult result)
+    {
+        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
+        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
+        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
+        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
+        {
+            if (shouldPushSchemaTo(endpoint))
+            {
+                MessagingService.instance().send(message, endpoint);
+                schemaDestinationEndpoints.add(endpoint);
+            }
+            else
+            {
+                schemaEndpointsIgnored.add(endpoint);
+            }
+        }
+
+        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints,
+                                                                    schemaEndpointsIgnored,
+                                                                    result.transformation);
+
+    }
+
+    @VisibleForTesting
+    public boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
+    {
+        // only push schema to nodes with known and equal versions
+        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
+               && MessagingService.instance().versions.knows(endpoint)
+               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
     }
 
     @Override

@@ -24,7 +24,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -50,8 +49,6 @@ import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.StorageService;
@@ -66,7 +63,6 @@ import static java.lang.String.format;
 
 import static com.google.common.collect.Iterables.size;
 import static org.apache.cassandra.concurrent.Stage.MIGRATION;
-import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 /**
  * Manages keyspace instances. It provides methods to query schema, but it does not provide any methods to modify the
@@ -651,11 +647,11 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         }
         catch (RuntimeException e)
         {
-            return new TransformationResult(e);
+            return new TransformationResult(e, transformation);
         }
 
         if (diff.isEmpty())
-            return new TransformationResult(diff, Collections.emptyList());
+            return new TransformationResult(diff, Collections.emptyList(), transformation);
 
         Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, now);
         SchemaKeyspace.applyChanges(mutations);
@@ -665,7 +661,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         if (!locally)
             passiveAnnounceVersion();
 
-        return new TransformationResult(diff, mutations);
+        return new TransformationResult(diff, mutations, transformation);
     }
 
     public static final class TransformationResult
@@ -674,23 +670,25 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         public final RuntimeException exception;
         public final KeyspacesDiff diff;
         public final Collection<Mutation> mutations;
+        public final SchemaTransformation transformation;
 
-        private TransformationResult(boolean success, RuntimeException exception, KeyspacesDiff diff, Collection<Mutation> mutations)
+        private TransformationResult(boolean success, RuntimeException exception, KeyspacesDiff diff, Collection<Mutation> mutations, SchemaTransformation transformation)
         {
             this.success = success;
             this.exception = exception;
             this.diff = diff;
             this.mutations = mutations;
+            this.transformation = transformation;
         }
 
-        TransformationResult(RuntimeException exception)
+        TransformationResult(RuntimeException exception, SchemaTransformation transformation)
         {
-            this(false, exception, null, null);
+            this(false, exception, null, null, transformation);
         }
 
-        TransformationResult(KeyspacesDiff diff, Collection<Mutation> mutations)
+        TransformationResult(KeyspacesDiff diff, Collection<Mutation> mutations, SchemaTransformation transformation)
         {
-            this(true, null, diff, mutations);
+            this(true, null, diff, mutations, transformation);
         }
     }
 
@@ -965,18 +963,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         logger.info("Local schema reset is complete.");
     }
 
-    @VisibleForTesting
-    boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
-    {
-        // only push schema to nodes with known and equal versions
-        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
-               && MessagingService.instance().versions.knows(endpoint)
-               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
-    }
-
     public Future<?> applyWithoutPush(Collection<Mutation> schema)
     {
-        return MIGRATION.submit(() -> SchemaManager.instance.mergeAndAnnounceVersion(schema));
+        return MIGRATION.submit(() -> mergeAndAnnounceVersion(schema));
     }
 
     // used from AlterSchemaStatement
@@ -985,7 +974,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         long now = FBUtilities.timestampMicros();
 
         Future<SchemaManager.TransformationResult> future =
-        MIGRATION.submit(() -> SchemaManager.instance.transform(transformation, locally, now));
+        MIGRATION.submit(() -> transform(transformation, locally, now));
 
         SchemaManager.TransformationResult result = Futures.getUnchecked(future);
         if (!result.success)
@@ -994,26 +983,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         if (locally || result.diff.isEmpty())
             return result.diff;
 
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints, schemaEndpointsIgnored,
-                                                                    transformation);
+        updateHandler.pushSchema(result);
 
         return result.diff;
+    }
+
+    public void pushSchema(TransformationResult transformationResult)
+    {
+        updateHandler.pushSchema(transformationResult);
     }
 
 }

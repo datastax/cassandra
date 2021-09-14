@@ -20,9 +20,7 @@ package org.apache.cassandra.schema;
 
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Future;
 
 import org.slf4j.Logger;
@@ -31,13 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 public class SchemaTestUtil
 {
@@ -158,24 +150,7 @@ public class SchemaTestUtil
     public static void announce(Collection<Mutation> schema)
     {
         Future<?> f = SchemaManager.instance.applyWithoutPush(schema);
-
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schema);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (SchemaManager.instance.shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaMutationsAnnounced(schemaDestinationEndpoints, schemaEndpointsIgnored);
+        SchemaManager.instance.pushSchema(new SchemaManager.TransformationResult(null, schema, null));
         FBUtilities.waitOnFuture(f);
     }
 }

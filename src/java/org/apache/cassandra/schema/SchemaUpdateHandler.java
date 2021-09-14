@@ -66,4 +66,7 @@ public interface SchemaUpdateHandler
     // temporary, todo remove
     void reset();
 
+    // temporary, todo remove
+    void pushSchema(SchemaManager.TransformationResult result);
+
 }
