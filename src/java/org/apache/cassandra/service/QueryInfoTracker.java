@@ -19,9 +19,13 @@
 package org.apache.cassandra.service;
 
 import java.util.Collection;
+import java.util.List;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * A tracker objects that can be registered against {@link StorageProxy} to be called back with information on executed
@@ -53,6 +57,24 @@ public interface QueryInfoTracker
         {
             return WriteTracker.NOOP;
         }
+
+        @Override
+        public ReadTracker onRead(ClientState state,
+                                  TableMetadata table,
+                                  List<SinglePartitionReadCommand> commands,
+                                  ConsistencyLevel consistencyLevel)
+        {
+            return ReadTracker.NOOP;
+        }
+
+        @Override
+        public ReadTracker onRangeRead(ClientState state,
+                                       TableMetadata table,
+                                       PartitionRangeReadCommand command,
+                                       ConsistencyLevel consistencyLevel)
+        {
+            return ReadTracker.NOOP;
+        }
     };
 
     /**
@@ -68,6 +90,36 @@ public interface QueryInfoTracker
                          boolean isLogged,
                          Collection<? extends IMutation> mutations,
                          ConsistencyLevel consistencyLevel);
+
+    /**
+     * Called before every non-range read coordinated on the local node.
+     *
+     * @param state the state of the client that performed the read
+     * @param table the metadata for the table read.
+     * @param commands the commands for the read performed.
+     * @param consistencyLevel the consistency level of the read.
+     * @return a tracker from which a {@link ReadReconciliationObserver} should be otained for the read, and that should
+     * be notified when either the read error out or completes successfully.
+     */
+    ReadTracker onRead(ClientState state,
+                       TableMetadata table,
+                       List<SinglePartitionReadCommand> commands,
+                       ConsistencyLevel consistencyLevel);
+
+    /**
+     * Called before every range read coordinated on the local node.
+     *
+     * @param state the state of the client that performed the range read
+     * @param table the metadata for the table read.
+     * @param command the command for the read performed.
+     * @param consistencyLevel the consistency level of the read.
+     * @return a tracker from which a {@link ReadReconciliationObserver} should be otained for the read, and that should
+     * be notified when either the read error out or completes successfully.
+     */
+    ReadTracker onRangeRead(ClientState state,
+                            TableMetadata table,
+                            PartitionRangeReadCommand command,
+                            ConsistencyLevel consistencyLevel);
 
     /**
      * A tracker for a specific query.
@@ -89,6 +141,24 @@ public interface QueryInfoTracker
     interface WriteTracker extends Tracker
     {
         WriteTracker NOOP = new WriteTracker() {
+            @Override
+            public void onDone()
+            {
+            }
+
+            @Override
+            public void onError(Throwable exception)
+            {
+            }
+        };
+    }
+
+    /**
+     * Tracker for a read query.
+     */
+    interface ReadTracker extends Tracker
+    {
+        ReadTracker NOOP = new ReadTracker() {
             @Override
             public void onDone()
             {

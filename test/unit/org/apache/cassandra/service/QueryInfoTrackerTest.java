@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Iterables;
@@ -31,6 +32,8 @@ import com.datastax.driver.core.Session;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -88,7 +91,13 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(expectedRows, tracker.writtenRows.get());
         assertEquals(0, tracker.loggedWrites.get());
 
+        assertEquals(0, tracker.reads.get());
         session.execute("SELECT * FROM " + TABLE + " WHERE k = ?", 0);
+        assertEquals(1, tracker.reads.get());
+
+        assertEquals(0, tracker.rangeReads.get());
+        session.execute("SELECT * FROM " + TABLE);
+        assertEquals(1, tracker.rangeReads.get());
 
         session.execute("UPDATE " + TABLE + " SET v = ? WHERE k = ? AND c IN ?", 42, 0, Arrays.asList(0, 2, 3));
         expectedWrites += 1; // We only did one more write ...
@@ -132,6 +141,11 @@ public class QueryInfoTrackerTest extends CQLTester
         public final AtomicInteger writtenRows = new AtomicInteger();
         public final AtomicInteger errorWrites = new AtomicInteger();
 
+        public final AtomicInteger reads = new AtomicInteger();
+        public final AtomicInteger rangeReads = new AtomicInteger();
+        public final AtomicInteger readRows = new AtomicInteger();
+        public final AtomicInteger errorReads = new AtomicInteger();
+
         private boolean shouldIgnore(TableMetadata table)
         {
             // We exclude anything that isn't on our test keyspace to be sure no "system" query interferes.
@@ -174,6 +188,58 @@ public class QueryInfoTrackerTest extends CQLTester
                     errorWrites.incrementAndGet();
                 }
             };
+        }
+
+        @Override
+        public ReadTracker onRead(ClientState state,
+                                  TableMetadata table,
+                                  List<SinglePartitionReadCommand> commands,
+                                  ConsistencyLevel consistencyLevel)
+        {
+            if (shouldIgnore(table))
+                return ReadTracker.NOOP;
+            return new TestReadTracker();
+        }
+
+        @Override
+        public ReadTracker onRangeRead(ClientState state,
+                                       TableMetadata table,
+                                       PartitionRangeReadCommand command,
+                                       ConsistencyLevel consistencyLevel)
+        {
+            if (shouldIgnore(table))
+                return ReadTracker.NOOP;
+            return new TestRangeReadTracker();
+        }
+
+        private class TestReadTracker implements ReadTracker
+        {
+            @Override
+            public void onDone()
+            {
+                reads.incrementAndGet();
+            }
+
+            @Override
+            public void onError(Throwable exception)
+            {
+                errorReads.incrementAndGet();
+            }
+        }
+
+        private class TestRangeReadTracker implements ReadTracker
+        {
+            @Override
+            public void onDone()
+            {
+                rangeReads.incrementAndGet();
+            }
+
+            @Override
+            public void onError(Throwable exception)
+            {
+                errorReads.incrementAndGet();
+            }
         }
     }
 }

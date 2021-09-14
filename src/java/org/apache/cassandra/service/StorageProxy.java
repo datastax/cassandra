@@ -1759,7 +1759,7 @@ public class StorageProxy implements StorageProxyMBean
 
         return consistencyLevel.isSerialConsistency()
              ? readWithPaxos(group, consistencyLevel, queryState, queryStartNanoTime)
-             : readRegular(group, consistencyLevel, queryStartNanoTime);
+             : readRegular(group, consistencyLevel, queryStartNanoTime, queryState.getClientState());
     }
 
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
@@ -1851,11 +1851,18 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("resource")
-    private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group,
+                                                 ConsistencyLevel consistencyLevel,
+                                                 long queryStartNanoTime,
+                                                 ClientState clientState)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
+        // TODO: The read for paxos shouldn't go in the QueryInfoTracker#onRead method, as it has its own dedicated method
+        // which already has been called.
+        QueryInfoTracker.ReadTracker readTracker = queryTracker().onRead(clientState, group.metadata(), group.queries, consistencyLevel);
+
         try
         {
             PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime);
@@ -1866,24 +1873,27 @@ public class StorageProxy implements StorageProxyMBean
             // might not honor it and so we should enforce it
             if (group.queries.size() > 1)
                 result = group.limits().filter(result, group.nowInSec(), group.selectsFullPartition(), enforceStrictLiveness);
-            return result;
+            return PartitionIterators.doOnClose(result, readTracker::onDone);
         }
         catch (UnavailableException e)
         {
             metrics.readMetrics.unavailables.mark();
             metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+            readTracker.onError(e);
             throw e;
         }
         catch (ReadTimeoutException e)
         {
             metrics.readMetrics.timeouts.mark();
             metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+            readTracker.onError(e);
             throw e;
         }
         catch (ReadFailureException e)
         {
             metrics.readMetrics.failures.mark();
             metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+            readTracker.onError(e);
             throw e;
         }
         finally
@@ -2053,9 +2063,16 @@ public class StorageProxy implements StorageProxyMBean
 
     public static PartitionIterator getRangeSlice(PartitionRangeReadCommand command,
                                                   ConsistencyLevel consistencyLevel,
-                                                  long queryStartNanoTime)
+                                                  long queryStartNanoTime,
+                                                  ClientState clientState)
     {
-        return RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime);
+        QueryInfoTracker.ReadTracker readTracker = queryTracker().onRangeRead(clientState,
+                                                                              command.metadata(),
+                                                                              command,
+                                                                              consistencyLevel);
+
+        PartitionIterator result = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime);
+        return PartitionIterators.doOnClose(result, readTracker::onDone);
     }
 
     public Map<String, List<String>> getSchemaVersions()
