@@ -157,14 +157,14 @@ public class SchemaTestUtil
 
     public static void announce(Collection<Mutation> schema)
     {
-        Future<?> f = MigrationManager.announceWithoutPush(schema);
+        Future<?> f = SchemaManager.instance.applyWithoutPush(schema);
 
         Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
         Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
         Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schema);
         for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
         {
-            if (MigrationManager.shouldPushSchemaTo(endpoint))
+            if (SchemaManager.instance.shouldPushSchemaTo(endpoint))
             {
                 MessagingService.instance().send(message, endpoint);
                 schemaDestinationEndpoints.add(endpoint);

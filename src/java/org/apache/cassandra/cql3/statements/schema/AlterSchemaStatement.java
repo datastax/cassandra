@@ -99,7 +99,7 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
 
         validateKeyspaceName();
 
-        KeyspacesDiff diff = MigrationManager.announce(this, locally);
+        KeyspacesDiff diff = SchemaManager.instance.apply(this, locally);
 
         clientWarnings(diff).forEach(ClientWarn.instance::warn);
 

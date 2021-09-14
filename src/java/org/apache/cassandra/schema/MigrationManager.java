@@ -18,27 +18,18 @@
 package org.apache.cassandra.schema;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Optional;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.Futures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.gms.*;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.concurrent.Stage.MIGRATION;
-import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 public class MigrationManager
 {
@@ -46,55 +37,6 @@ public class MigrationManager
 
     private MigrationManager() {}
 
-    @VisibleForTesting
-    static boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
-    {
-        // only push schema to nodes with known and equal versions
-        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
-               && MessagingService.instance().versions.knows(endpoint)
-               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
-    }
-
-    public static Future<?> announceWithoutPush(Collection<Mutation> schema)
-    {
-        return MIGRATION.submit(() -> SchemaManager.instance.mergeAndAnnounceVersion(schema));
-    }
-
-    public static KeyspacesDiff announce(SchemaTransformation transformation, boolean locally)
-    {
-        long now = FBUtilities.timestampMicros();
-
-        Future<SchemaManager.TransformationResult> future =
-            MIGRATION.submit(() -> SchemaManager.instance.transform(transformation, locally, now));
-
-        SchemaManager.TransformationResult result = Futures.getUnchecked(future);
-        if (!result.success)
-            throw result.exception;
-
-        if (locally || result.diff.isEmpty())
-            return result.diff;
-
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints, schemaEndpointsIgnored,
-                                                                    transformation);
-
-        return result.diff;
-    }
 
     /**
      * We have a set of non-local, distributed system keyspaces, e.g. system_traces, system_auth, etc.

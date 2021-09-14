@@ -95,7 +95,6 @@ import org.apache.cassandra.repair.*;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.ReplicationParams;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -1161,7 +1160,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (setUpSchema)
             {
                 Optional<Mutation> mutation = evolveSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
-                mutation.ifPresent(value -> FBUtilities.waitOnFuture(MigrationManager.announceWithoutPush(Collections.singleton(value))));
+                mutation.ifPresent(value -> FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(Collections.singleton(value))));
             }
 
             DatabaseDescriptor.getRoleManager().setup();
@@ -1188,7 +1187,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         evolveSystemKeyspace(             AuthKeyspace.metadata(),              AuthKeyspace.GENERATION).ifPresent(changes::add);
 
         if (!changes.isEmpty())
-            FBUtilities.waitOnFuture(MigrationManager.announceWithoutPush(changes));
+            FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(changes));
     }
 
     public boolean isJoined()
