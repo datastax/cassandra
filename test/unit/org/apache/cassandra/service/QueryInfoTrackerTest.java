@@ -28,9 +28,11 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
@@ -134,6 +136,59 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(6, tracker.writtenRows.get());
     }
 
+    @Test
+    public void testLWTQueryTracing()
+    {
+        String TABLE = KEYSPACE + ".lwt";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+
+        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
+        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 1, 1);
+        assertEquals(2, tracker.writes.get());
+        assertEquals(2, tracker.writtenRows.get());
+
+        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+        // This should apply, so on top of the lwt specific increases, we'll have a new written row (but no read
+        // row since while we will do a read, it will come up empty).
+        assertEquals(1, tracker.lwts.get());
+        assertEquals(0, tracker.nonAppliedLwts.get());
+        assertEquals(1, tracker.appliedLwts.get());
+        assertEquals(3, tracker.writtenRows.get());
+        // The writes or reads shouldn't have changed though.
+        assertEquals(2, tracker.writes.get());
+        assertEquals(0, tracker.reads.get());
+
+        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+        // This should not apply now and on top of the lwt specific increases, we should have read 1 additional row.
+        assertEquals(2, tracker.lwts.get());
+        assertEquals(1, tracker.nonAppliedLwts.get());
+        assertEquals(1, tracker.appliedLwts.get());
+        assertEquals(3, tracker.writtenRows.get());
+        // The writes or reads shouldn't have changed though.
+        assertEquals(2, tracker.writes.get());
+        assertEquals(0, tracker.reads.get());
+
+        // More complex LWT batch.
+        session.execute("BEGIN BATCH "
+                        + "UPDATE " + TABLE + " SET v = 42 WHERE k = 0 AND c = 0 IF v = 0; "
+                        + "UPDATE " + TABLE + " SET v = 42 WHERE k = 0 AND c = 1 IF v = 1; "
+                        + "APPLY BATCH");
+        // This should apply. Further this will have read 2 rows and written 2.
+        assertEquals(3, tracker.lwts.get());
+        assertEquals(1, tracker.nonAppliedLwts.get());
+        assertEquals(2, tracker.appliedLwts.get());
+        assertEquals(5, tracker.writtenRows.get());
+        // Still no updates of writes or reads expected.
+        assertEquals(2, tracker.writes.get());
+        assertEquals(0, tracker.reads.get());
+
+
+        PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
+                                         .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
+        session.execute(statement.bind(0));
+        assertEquals(1, tracker.reads.get());
+    }
+
     private static class TestQueryInfoTracker implements QueryInfoTracker
     {
         public final AtomicInteger writes = new AtomicInteger();
@@ -145,6 +200,11 @@ public class QueryInfoTrackerTest extends CQLTester
         public final AtomicInteger rangeReads = new AtomicInteger();
         public final AtomicInteger readRows = new AtomicInteger();
         public final AtomicInteger errorReads = new AtomicInteger();
+
+        public final AtomicInteger lwts = new AtomicInteger();
+        public final AtomicInteger nonAppliedLwts = new AtomicInteger();
+        public final AtomicInteger appliedLwts = new AtomicInteger();
+        public final AtomicInteger errorLwts = new AtomicInteger();
 
         private boolean shouldIgnore(TableMetadata table)
         {
@@ -166,7 +226,8 @@ public class QueryInfoTrackerTest extends CQLTester
             if (shouldIgnore(extractTable(mutations)))
                 return WriteTracker.NOOP;
 
-            return new WriteTracker() {
+            return new WriteTracker()
+            {
                 @Override
                 public void onDone()
                 {
@@ -212,6 +273,17 @@ public class QueryInfoTrackerTest extends CQLTester
             return new TestRangeReadTracker();
         }
 
+        @Override
+        public LWTWriteTracker onLWTWrite(ClientState state,
+                                          TableMetadata table,
+                                          DecoratedKey key,
+                                          ConsistencyLevel serialConsistency,
+                                          ConsistencyLevel commitConsistency)
+        {
+            return new TestLWTWriteTracker();
+        }
+
+
         private class TestReadTracker implements ReadTracker
         {
             @Override
@@ -239,6 +311,34 @@ public class QueryInfoTrackerTest extends CQLTester
             public void onError(Throwable exception)
             {
                 errorReads.incrementAndGet();
+            }
+        }
+
+        private class TestLWTWriteTracker implements LWTWriteTracker
+        {
+            @Override
+            public void onDone()
+            {
+                lwts.incrementAndGet();
+            }
+
+            @Override
+            public void onError(Throwable exception)
+            {
+                errorLwts.incrementAndGet();
+            }
+
+            @Override
+            public void onNotApplied()
+            {
+                nonAppliedLwts.incrementAndGet();
+            }
+
+            @Override
+            public void onApplied(PartitionUpdate update)
+            {
+                appliedLwts.incrementAndGet();
+                writtenRows.addAndGet(update.rowCount());
             }
         }
     }

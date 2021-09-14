@@ -290,9 +290,14 @@ public class StorageProxy implements StorageProxyMBean
     {
         final long startTimeForMetrics = System.nanoTime();
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
+        TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+        QueryInfoTracker.LWTWriteTracker lwtTracker = queryTracker().onLWTWrite(state.getClientState(),
+                                                                                metadata,
+                                                                                key,
+                                                                                consistencyForPaxos,
+                                                                                consistencyForCommit);;
         try
         {
-            TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
             consistencyForPaxos.validateForCas(keyspaceName, state);
             consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
 
@@ -312,12 +317,16 @@ public class StorageProxy implements StorageProxyMBean
                 if (!request.appliesTo(current))
                 {
                     Tracing.trace("CAS precondition does not match current values {}", current);
+                    lwtTracker.onNotApplied();
+                    lwtTracker.onDone();
                     metrics.casWriteMetrics.conditionNotMet.inc();
                     return Pair.create(PartitionUpdate.emptyUpdate(metadata, key), current.rowIterator());
                 }
 
                 // Create the desired updates
                 PartitionUpdate updates = request.makeUpdates(current, state);
+                lwtTracker.onApplied(updates);
+                lwtTracker.onDone();
 
                 long size = updates.dataSize();
                 metrics.casWriteMetrics.mutationSize.update(size);
@@ -349,30 +358,40 @@ public class StorageProxy implements StorageProxyMBean
         catch (CasWriteUnknownResultException e)
         {
             metrics.casWriteMetrics.unknownResult.mark();
+            if (lwtTracker != null)
+                lwtTracker.onError(e);
             throw e;
         }
         catch (CasWriteTimeoutException wte)
         {
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+            if (lwtTracker != null)
+                lwtTracker.onError(wte);
             throw new CasWriteTimeoutException(wte.writeType, wte.consistency, wte.received, wte.blockFor, wte.contentions);
         }
         catch (ReadTimeoutException e)
         {
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+            if (lwtTracker != null)
+                lwtTracker.onError(e);
             throw e;
         }
         catch (WriteFailureException | ReadFailureException e)
         {
             metrics.casWriteMetrics.failures.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).failures.mark();
+            if (lwtTracker != null)
+                lwtTracker.onError(e);
             throw e;
         }
         catch (UnavailableException e)
         {
             metrics.casWriteMetrics.unavailables.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
+            if (lwtTracker != null)
+                lwtTracker.onError(e);
             throw e;
         }
         finally
@@ -1759,7 +1778,7 @@ public class StorageProxy implements StorageProxyMBean
 
         return consistencyLevel.isSerialConsistency()
              ? readWithPaxos(group, consistencyLevel, queryState, queryStartNanoTime)
-             : readRegular(group, consistencyLevel, queryStartNanoTime, queryState.getClientState());
+             : readRegular(group, consistencyLevel, queryState, queryStartNanoTime);
     }
 
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
@@ -1771,6 +1790,11 @@ public class StorageProxy implements StorageProxyMBean
 
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
+        QueryInfoTracker.ReadTracker readTracker = queryTracker().onRead(queryState.getClientState(),
+                                                                         group.metadata(),
+                                                                         group.queries,
+                                                                         consistencyLevel);
+
         SinglePartitionReadCommand command = group.queries.get(0);
         TableMetadata metadata = command.metadata();
         DecoratedKey key = command.partitionKey();
@@ -1822,6 +1846,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.unavailables.mark();
             metrics.casReadMetrics.unavailables.mark();
             metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+            readTracker.onError(e);
             throw e;
         }
         catch (ReadTimeoutException e)
@@ -1829,6 +1854,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.timeouts.mark();
             metrics.casReadMetrics.timeouts.mark();
             metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+            readTracker.onError(e);
             throw e;
         }
         catch (ReadFailureException e)
@@ -1836,6 +1862,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetrics.failures.mark();
             metrics.casReadMetrics.failures.mark();
             metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+            readTracker.onError(e);
             throw e;
         }
         finally
@@ -1846,22 +1873,25 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
-
-        return result;
+        return PartitionIterators.doOnClose(result, readTracker::onDone);
     }
 
     @SuppressWarnings("resource")
     private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group,
                                                  ConsistencyLevel consistencyLevel,
-                                                 long queryStartNanoTime,
-                                                 ClientState clientState)
+                                                 QueryState queryState,
+                                                 long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
-        // TODO: The read for paxos shouldn't go in the QueryInfoTracker#onRead method, as it has its own dedicated method
+        // The read for paxos shouldn't go in the QueryInfoTracker#onRead method, as it has its own dedicated method
         // which already has been called.
-        QueryInfoTracker.ReadTracker readTracker = queryTracker().onRead(clientState, group.metadata(), group.queries, consistencyLevel);
+        QueryInfoTracker.ReadTracker readTracker = queryState == null ? QueryInfoTracker.ReadTracker.NOOP :
+                                                   queryTracker().onRead(queryState.getClientState(),
+                                                                         group.metadata(),
+                                                                         group.queries,
+                                                                         consistencyLevel);
 
         try
         {

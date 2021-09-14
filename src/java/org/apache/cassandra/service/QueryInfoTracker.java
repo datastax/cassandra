@@ -22,9 +22,11 @@ import java.util.Collection;
 import java.util.List;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -75,6 +77,16 @@ public interface QueryInfoTracker
         {
             return ReadTracker.NOOP;
         }
+
+        @Override
+        public LWTWriteTracker onLWTWrite(ClientState state,
+                                          TableMetadata table,
+                                          DecoratedKey key,
+                                          ConsistencyLevel serialConsistency,
+                                          ConsistencyLevel commitConsistency)
+        {
+            return LWTWriteTracker.NOOP;
+        }
     };
 
     /**
@@ -120,6 +132,22 @@ public interface QueryInfoTracker
                             TableMetadata table,
                             PartitionRangeReadCommand command,
                             ConsistencyLevel consistencyLevel);
+
+    /**
+     * Called before every LWT coordinated by the local node.
+     *
+     * @param state the state of the client that performed the LWT
+     * @param table the metadata of the table on which the LWT applies.
+     * @param key the partition key on which the LWT operates.
+     * @param serialConsistency the serial consistency of the LWT.
+     * @param commitConsistency the commit consistency of the LWT.
+     * @return a {@link LWTWriteTracker} objects whose methods are called as part of the LWT execution.
+     */
+    LWTWriteTracker onLWTWrite(ClientState state,
+                               TableMetadata table,
+                               DecoratedKey key,
+                               ConsistencyLevel serialConsistency,
+                               ConsistencyLevel commitConsistency);
 
     /**
      * A tracker for a specific query.
@@ -169,5 +197,54 @@ public interface QueryInfoTracker
             {
             }
         };
+    }
+
+
+    /**
+     * Tracker for LWTs, used to get information on the actual work done by the LWT.
+     *
+     * <p>For a given LWT, the tracker created by {@link #onLWTWrite} will first have its {@link #readObserver()}
+     * method called. Then, based on that read result and the LWT conditions, either the {@link #onNotApplied()} or
+     * the {@link #onApplied} method will be called.
+     */
+    interface LWTWriteTracker extends ReadTracker
+    {
+        /**
+         * A tracker that does nothing.
+         */
+        LWTWriteTracker NOOP = new LWTWriteTracker()
+        {
+            @Override
+            public void onNotApplied()
+            {
+            }
+
+            @Override
+            public void onApplied(PartitionUpdate update)
+            {
+            }
+
+            @Override
+            public void onDone()
+            {
+            }
+
+            @Override
+            public void onError(Throwable exception)
+            {
+            }
+        };
+
+        /**
+         * Called if the LWT this is tracking does not applies (it's condition evaluates to {@code false}).
+         */
+        void onNotApplied();
+
+        /**
+         * Called if the LWT this is tracking does applies.
+         *
+         * @param update the update that is committed by the LWT.
+         */
+        void onApplied(PartitionUpdate update);
     }
 }
