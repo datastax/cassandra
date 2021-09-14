@@ -129,7 +129,6 @@ import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
-import static org.apache.cassandra.schema.MigrationManager.evolveSystemKeyspace;
 
 /**
  * This abstraction contains the token/identifier of this node
@@ -1159,7 +1158,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             if (setUpSchema)
             {
-                Optional<Mutation> mutation = evolveSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
+                Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
                 mutation.ifPresent(value -> FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(Collections.singleton(value))));
             }
 
@@ -1182,9 +1181,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         Collection<Mutation> changes = new ArrayList<>(3);
 
-        evolveSystemKeyspace(            TraceKeyspace.metadata(),             TraceKeyspace.GENERATION).ifPresent(changes::add);
-        evolveSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION).ifPresent(changes::add);
-        evolveSystemKeyspace(             AuthKeyspace.metadata(),              AuthKeyspace.GENERATION).ifPresent(changes::add);
+        SchemaManager.instance.evolveSystemKeyspace(            TraceKeyspace.metadata(),             TraceKeyspace.GENERATION).ifPresent(changes::add);
+        SchemaManager.instance.evolveSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION).ifPresent(changes::add);
+        SchemaManager.instance.evolveSystemKeyspace(             AuthKeyspace.metadata(),              AuthKeyspace.GENERATION).ifPresent(changes::add);
 
         if (!changes.isEmpty())
             FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(changes));

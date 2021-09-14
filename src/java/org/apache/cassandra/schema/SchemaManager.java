@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.schema;
 
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.*;
@@ -46,7 +47,10 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
@@ -690,6 +694,37 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         {
             this(true, null, diff, mutations, transformation);
         }
+
+        public static class Serializer implements IVersionedSerializer<Collection<Mutation>>
+        {
+            public static Serializer instance = new Serializer();
+
+            public void serialize(Collection<Mutation> schema, DataOutputPlus out, int version) throws IOException
+            {
+                out.writeInt(schema.size());
+                for (Mutation mutation : schema)
+                    Mutation.serializer.serialize(mutation, out, version);
+            }
+
+            public Collection<Mutation> deserialize(DataInputPlus in, int version) throws IOException
+            {
+                int count = in.readInt();
+                Collection<Mutation> schema = new ArrayList<>(count);
+
+                for (int i = 0; i < count; i++)
+                    schema.add(Mutation.serializer.deserialize(in, version));
+
+                return schema;
+            }
+
+            public long serializedSize(Collection<Mutation> schema, int version)
+            {
+                int size = TypeSizes.sizeof(schema.size());
+                for (Mutation mutation : schema)
+                    size += mutation.serializedSize(version);
+                return size;
+            }
+        }
     }
 
     synchronized void merge(Collection<Mutation> mutations)
@@ -991,6 +1026,51 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void pushSchema(TransformationResult transformationResult)
     {
         updateHandler.pushSchema(transformationResult);
+    }
+
+    /**
+     * We have a set of non-local, distributed system keyspaces, e.g. system_traces, system_auth, etc.
+     * (see {@link SchemaConstants#REPLICATED_SYSTEM_KEYSPACE_NAMES}), that need to be created on cluster initialisation,
+     * and later evolved on major upgrades (sometimes minor too). This method compares the current known definitions
+     * of the tables (if the keyspace exists) to the expected, most modern ones expected by the running version of C*;
+     * if any changes have been detected, a schema Mutation will be created which, when applied, should make
+     * cluster's view of that keyspace aligned with the expected modern definition.
+     *
+     * @param keyspace   the expected modern definition of the keyspace
+     * @param generation timestamp to use for the table changes in the schema mutation
+     *
+     * @return empty Optional if the current definition is up to date, or an Optional with the Mutation that would
+     *         bring the schema in line with the expected definition.
+     */
+    public Optional<Mutation> evolveSystemKeyspace(KeyspaceMetadata keyspace, long generation)
+    {
+        Mutation.SimpleBuilder builder = null;
+
+        KeyspaceMetadata definedKeyspace = instance.getKeyspaceMetadata(keyspace.name);
+        Tables definedTables = null == definedKeyspace ? Tables.none() : definedKeyspace.tables;
+
+        for (TableMetadata table : keyspace.tables)
+        {
+            if (table.equals(definedTables.getNullable(table.name)))
+                continue;
+
+            if (null == builder)
+            {
+                // for the keyspace definition itself (name, replication, durability) always use generation 0;
+                // this ensures that any changes made to replication by the user will never be overwritten.
+                builder = SchemaKeyspace.makeCreateKeyspaceMutation(keyspace.name, keyspace.params, 0);
+
+                // now set the timestamp to generation, so the tables have the expected timestamp
+                builder.timestamp(generation);
+            }
+
+            // for table definitions always use the provided generation; these tables, unlike their containing
+            // keyspaces, are *NOT* meant to be altered by the user; if their definitions need to change,
+            // the schema must be updated in code, and the appropriate generation must be bumped.
+            SchemaKeyspace.addTableToSchemaMutation(table, true, builder);
+        }
+
+        return builder == null ? Optional.empty() : Optional.of(builder.build());
     }
 
 }

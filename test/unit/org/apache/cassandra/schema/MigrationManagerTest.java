@@ -573,7 +573,7 @@ public class MigrationManagerTest
         TableMetadata table = addTestTable("ks0", "t", "");
         KeyspaceMetadata keyspace = KeyspaceMetadata.create("ks0", KeyspaceParams.simple(1), Tables.of(table));
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace, 0);
+        Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace, 0);
         assertTrue(mutation.isPresent());
 
         SchemaManager.instance.merge(singleton(mutation.get()));
@@ -590,7 +590,7 @@ public class MigrationManagerTest
         SchemaManager.instance.merge(singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace, 0).build()));
         assertEquals(keyspace, SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace, 0);
+        Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace, 0);
         assertFalse(mutation.isPresent());
     }
 
@@ -607,7 +607,7 @@ public class MigrationManagerTest
         TableMetadata table1 = table0.unbuild().comment("comment").build();
         KeyspaceMetadata keyspace1 = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table1));
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace1, 1);
+        Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace1, 1);
         assertTrue(mutation.isPresent());
 
         SchemaManager.instance.merge(singleton(mutation.get()));

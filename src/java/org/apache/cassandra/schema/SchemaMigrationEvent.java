@@ -33,7 +33,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 
 /**
- * Internal events emitted by {@link MigrationManager}.
+ * Internal events emitted around schema propagation.
  */
 final class SchemaMigrationEvent extends DiagnosticEvent
 {
