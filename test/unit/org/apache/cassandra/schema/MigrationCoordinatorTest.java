@@ -141,12 +141,12 @@ public class MigrationCoordinatorTest
         Assert.assertTrue(coordinator.requests.isEmpty());
 
         // first schema report should send a migration request
-        getUnchecked(coordinator.reportEndpointVersion(EP1, V1));
+        coordinator.reportEndpointVersion(EP1, V1, true);
         Assert.assertEquals(1, coordinator.requests.size());
         Assert.assertFalse(coordinator.awaitSchemaRequests(1));
 
         // second should not
-        getUnchecked(coordinator.reportEndpointVersion(EP2, V1));
+        coordinator.reportEndpointVersion(EP2, V1, true);
         Assert.assertEquals(1, coordinator.requests.size());
         Assert.assertFalse(coordinator.awaitSchemaRequests(1));
 
@@ -167,7 +167,7 @@ public class MigrationCoordinatorTest
         Assert.assertTrue(coordinator.awaitSchemaRequests(1));
 
         // and migration tasks should not be sent out for subsequent version reports
-        getUnchecked(coordinator.reportEndpointVersion(EP3, V1));
+        coordinator.reportEndpointVersion(EP3, V1, true);
         Assert.assertTrue(coordinator.requests.isEmpty());
 
     }
@@ -215,9 +215,7 @@ public class MigrationCoordinatorTest
     private static void assertNoContact(InstrumentedCoordinator coordinator, InetAddressAndPort endpoint, UUID version, boolean startupShouldBeUnblocked)
     {
         Assert.assertTrue(coordinator.requests.isEmpty());
-        Future<Void> future = coordinator.reportEndpointVersion(EP1, V1);
-        if (future != null)
-            getUnchecked(future);
+        coordinator.reportEndpointVersion(EP1, V1, true);
         Assert.assertTrue(coordinator.requests.isEmpty());
 
         Assert.assertEquals(startupShouldBeUnblocked, coordinator.awaitSchemaRequests(1));
@@ -280,11 +278,11 @@ public class MigrationCoordinatorTest
     {
         InstrumentedCoordinator coordinator = new InstrumentedCoordinator();
 
-        getUnchecked(coordinator.reportEndpointVersion(EP3, V2));
+        coordinator.reportEndpointVersion(EP3, V2, true);
         coordinator.requests.remove().response(Collections.emptyList());
 
-        getUnchecked(coordinator.reportEndpointVersion(EP1, V1));
-        getUnchecked(coordinator.reportEndpointVersion(EP2, V1));
+        coordinator.reportEndpointVersion(EP1, V1, true);
+        coordinator.reportEndpointVersion(EP2, V1, true);
 
         MigrationCoordinator.Callback prev = null;
         Set<InetAddressAndPort> EPs = Sets.newHashSet(EP1, EP2);

@@ -20,8 +20,6 @@ package org.apache.cassandra.schema;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.lang.management.ManagementFactory;
-import java.util.function.LongSupplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
@@ -29,8 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.exceptions.AlreadyExistsException;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -98,53 +94,6 @@ public class MigrationManager
                                                                     transformation);
 
         return result.diff;
-    }
-
-    /**
-     * Clear all locally stored schema information and reset schema to initial state.
-     * Called by user (via JMX) who wants to get rid of schema disagreement.
-     */
-    public static void resetLocalSchema()
-    {
-        logger.info("Starting local schema reset...");
-
-        logger.debug("Truncating schema tables...");
-
-        SchemaMigrationDiagnostics.resetLocalSchema();
-
-        SchemaKeyspace.truncate();
-
-        logger.debug("Clearing local schema keyspace definitions...");
-
-        SchemaManager.instance.clear();
-
-        Set<InetAddressAndPort> liveEndpoints = Gossiper.instance.getLiveMembers();
-        liveEndpoints.remove(FBUtilities.getBroadcastAddressAndPort());
-
-        // force migration if there are nodes around
-        for (InetAddressAndPort node : liveEndpoints)
-        {
-            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(node);
-            Future<Void> pull = reportEndpointVersion(node, state);
-            if (pull != null)
-                FBUtilities.waitOnFuture(pull);
-        }
-
-        logger.info("Local schema reset is complete.");
-    }
-
-    public static Future<Void> reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
-    {
-        Future<Void> defaultResult = Futures.immediateFuture(null);
-        if (state == null)
-            return defaultResult;
-
-        UUID version = state.getSchemaVersion();
-
-        if (version == null)
-            return defaultResult;
-
-        return MigrationCoordinator.instance.reportEndpointVersion(endpoint, version);
     }
 
     /**

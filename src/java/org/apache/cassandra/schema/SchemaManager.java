@@ -53,6 +53,9 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static java.lang.String.format;
 
 import static com.google.common.collect.Iterables.size;
@@ -64,6 +67,8 @@ import static com.google.common.collect.Iterables.size;
  */
 public final class SchemaManager implements SchemaProvider, IEndpointStateChangeSubscriber
 {
+    private final static Logger logger = LoggerFactory.getLogger(SchemaManager.class);
+
     public static final SchemaManager instance = new SchemaManager();
 
     private final LocalKeyspaces localKeyspaces;
@@ -934,6 +939,22 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                : SchemaConstants.emptyVersion.equals(version)
                  ? "(empty)"
                  : version.toString();
+    }
+
+    /**
+     * Clear all locally stored schema information and reset schema to initial state.
+     * Called by user (via JMX) who wants to get rid of schema disagreement.
+     */
+    public void resetLocalSchema()
+    {
+        logger.info("Starting local schema reset...");
+
+        SchemaMigrationDiagnostics.resetLocalSchema();
+        SchemaKeyspace.truncate();
+        clear();
+        updateHandler.reset();
+
+        logger.info("Local schema reset is complete.");
     }
 
 }

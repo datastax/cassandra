@@ -348,6 +348,7 @@ public final class SchemaKeyspace
 
     public static void truncate()
     {
+        logger.debug("Truncating schema tables...");
         ALL.reverse().forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
@@ -1063,7 +1064,7 @@ public final class SchemaKeyspace
                                  ? ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase())
                                  : ColumnMetadata.Kind.REGULAR;
         assert kind == ColumnMetadata.Kind.REGULAR || kind == ColumnMetadata.Kind.STATIC
-            : "Unexpected dropped column kind: " + kind.toString();
+            : "Unexpected dropped column kind: " + kind;
 
         ColumnMetadata column = new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, ColumnMetadata.NO_POSITION, kind);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));

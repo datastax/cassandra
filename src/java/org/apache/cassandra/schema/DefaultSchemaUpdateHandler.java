@@ -21,6 +21,7 @@ package org.apache.cassandra.schema;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -38,6 +39,7 @@ import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 
 @NotThreadSafe
 public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
@@ -126,6 +128,20 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     public void updateVersion(UUID version)
     {
         schema = new Schema(schema.getKeyspaces(), version);
+    }
+
+    @Override
+    public void reset()
+    {
+        Set<InetAddressAndPort> liveEndpoints = Gossiper.instance.getLiveMembers();
+        liveEndpoints.remove(FBUtilities.getBroadcastAddressAndPort());
+
+        // force migration if there are nodes around
+        for (InetAddressAndPort node : liveEndpoints)
+        {
+            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(node);
+            migrationCoordinator.reportEndpointVersion(node, state, true);
+        }
     }
 
     @Override

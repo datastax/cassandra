@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 
 import java.lang.management.ManagementFactory;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -336,7 +337,7 @@ public class MigrationCoordinator
         return !isLocalVersion(info.version);
     }
 
-    public synchronized Future<Void> reportEndpointVersion(InetAddressAndPort endpoint, UUID version)
+    private synchronized Future<Void> reportEndpointVersionInternal(InetAddressAndPort endpoint, UUID version)
     {
         if (ignoredEndpoints.contains(endpoint) || IGNORED_VERSIONS.contains(version))
         {
@@ -361,17 +362,34 @@ public class MigrationCoordinator
         return maybePullSchema(info);
     }
 
-    public Future<Void> reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
+    public void reportEndpointVersion(InetAddressAndPort endpoint, UUID version)
     {
-        if (state == null)
-            return FINISHED_FUTURE;
+        reportEndpointVersionInternal(endpoint, version);
+    }
 
-        UUID version = state.getSchemaVersion();
+    public void reportEndpointVersion(InetAddressAndPort endpoint, UUID version, boolean waitForPull)
+    {
+        Future<Void> result = reportEndpointVersionInternal(endpoint, version);
+        if (result != null && waitForPull)
+            FBUtilities.waitOnFuture(result, Duration.ofMinutes(10));
+    }
 
-        if (version == null)
-            return FINISHED_FUTURE;
+    public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
+    {
+        reportEndpointVersion(endpoint, state, false);
+    }
 
-        return reportEndpointVersion(endpoint, version);
+    public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state, boolean waitForPull)
+    {
+        if (state != null) {
+            UUID version = state.getSchemaVersion();
+            if (version != null)
+            {
+                Future<Void> result = reportEndpointVersionInternal(endpoint, version);
+                if (result != null && waitForPull)
+                    FBUtilities.waitOnFuture(result, Duration.ofMinutes(10));
+            }
+        }
     }
 
     private synchronized void removeEndpointFromVersion(InetAddressAndPort endpoint, UUID version)

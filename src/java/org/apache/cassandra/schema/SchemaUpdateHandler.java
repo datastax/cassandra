@@ -63,4 +63,7 @@ public interface SchemaUpdateHandler
     // temporary, todo remove
     void updateVersion(UUID version);
 
+    // temporary, todo remove
+    void reset();
+
 }

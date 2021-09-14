@@ -257,7 +257,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /* the probability for tracing any particular request, 0 disables tracing and 1 enables for all */
     private double traceProbability = 0.0;
 
-    private static enum Mode { STARTING, NORMAL, JOINING, LEAVING, DECOMMISSIONED, MOVING, DRAINING, DRAINED }
+    private enum Mode { STARTING, NORMAL, JOINING, LEAVING, DECOMMISSIONED, MOVING, DRAINING, DRAINED }
     private volatile Mode operationMode = Mode.STARTING;
 
     /* Used for tracking drain progress */
@@ -375,8 +375,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             boolean validTokens = tokens != null && !tokens.isEmpty();
 
             // shouldn't be called before these are set if we intend to join the ring/are in the process of doing so
-            if (joined || joinRing)
-                assert validTokens : "Cannot start gossiping for a node intended to join without valid tokens";
+            assert !joined && !joinRing || validTokens : "Cannot start gossiping for a node intended to join without valid tokens";
 
             if (validTokens)
                 setGossipTokens(tokens);
@@ -493,9 +492,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean isDaemonSetupCompleted()
     {
-        return daemon == null
-               ? false
-               : daemon.setupCompleted();
+        return daemon != null && daemon.setupCompleted();
     }
 
     public void stopDaemon()
@@ -3233,9 +3230,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 //This transition requires streaming to occur
                 //Full -> transient is handled by nodetool cleanup
                 //transient -> transient and full -> full don't require any action
-                if (currentReplica.isTransient() && newReplica.isFull())
-                    return true;
-                return false;
+                return currentReplica.isTransient() && newReplica.isFull();
             });
 
             if (logger.isDebugEnabled())
@@ -3800,7 +3795,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Map<Keyspace, List<String>> keyspaceColumnfamily = new HashMap<Keyspace, List<String>>();
         for (String table : tableList)
         {
-            String splittedString[] = StringUtils.split(table, '.');
+            String[] splittedString = StringUtils.split(table, '.');
             if (splittedString.length == 2)
             {
                 String keyspaceName = splittedString[0];
@@ -4427,7 +4422,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
 
             startLeaving();
-            long timeout = Math.max(RING_DELAY, BatchlogManager.instance.getBatchlogTimeout());
+            long timeout = Math.max(RING_DELAY, BatchlogManager.getBatchlogTimeout());
             setMode(Mode.LEAVING, "sleeping " + timeout + " ms for batch processing and pending range setup", true);
             Thread.sleep(timeout);
 
@@ -5562,7 +5557,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void resetLocalSchema() throws IOException
     {
-        MigrationManager.resetLocalSchema();
+        SchemaManager.instance.resetLocalSchema();
     }
 
     public void reloadLocalSchema()
