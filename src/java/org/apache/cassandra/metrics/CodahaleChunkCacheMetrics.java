@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.codahale.metrics.Timer;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Codahale implementation for the chunk cache metrics.
@@ -51,12 +52,14 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     @Override
     public void recordHits(int count)
     {
+        metrics.requests.mark(count);
         metrics.hits.mark(count);
     }
 
     @Override
     public void recordMisses(int count)
     {
+        metrics.requests.mark(count);
         metrics.misses.mark(count);
     }
 
@@ -91,7 +94,7 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     @Override
     public long misses()
     {
-        return missLatency.getCount();
+        return metrics.misses.getCount();
     }
 
     @Override
@@ -145,7 +148,20 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     @VisibleForTesting
     public void reset()
     {
-        metrics.hits.mark(-metrics.hits.getCount());
-        metrics.misses.mark(-metrics.misses.getCount());
+        metrics.reset();
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Chunk cache metrics: " + System.lineSeparator() +
+               "Miss latency in seconds: " + missLatency() + System.lineSeparator() +
+               "Misses count: " + misses() + System.lineSeparator() +
+               "Hits count: " + hits() + System.lineSeparator() +
+               "Cache requests count: " + requests() + System.lineSeparator() +
+               "Moving hit rate: " + hitRate() + System.lineSeparator() +
+               "Num entries: " + entries() + System.lineSeparator() +
+               "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
     }
 }

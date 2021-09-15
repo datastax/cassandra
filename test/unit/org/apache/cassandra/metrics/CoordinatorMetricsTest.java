@@ -20,12 +20,14 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
 public class CoordinatorMetricsTest
@@ -40,6 +42,38 @@ public class CoordinatorMetricsTest
 
         c1 = new CoordinatorClientRequestMetrics("tenant1");
         c2 = new CoordinatorClientRequestMetrics("tenant2");
+    }
+
+    @AfterClass
+    public static void teardown()
+    {
+        releaseAll(c1);
+        releaseAll(c2);
+    }
+
+    protected static void releaseAll(CoordinatorClientRequestMetrics ccrm)
+    {
+        ccrm.readMetrics.release();
+        ccrm.rangeMetrics.release();
+        ccrm.writeMetrics.release();
+        ccrm.casWriteMetrics.release();
+        ccrm.casReadMetrics.release();
+        ccrm.viewWriteMetrics.release();
+        for (ConsistencyLevel level : ConsistencyLevel.values())
+        {
+            ccrm.readMetricsMap.get(level).release();
+            ccrm.writeMetricsMap.get(level).release();
+        }
+    }
+
+    @Test
+    public void testDefaultMetrics()
+    {
+        CoordinatorClientRequestMetricsProvider defaultMetricsProvider = CoordinatorClientRequestMetricsProvider.instance;
+        assertThat(defaultMetricsProvider).isInstanceOf(CoordinatorClientRequestMetricsProvider.DefaultCoordinatorMetricsProvider.class);
+
+        CoordinatorClientRequestMetrics defaultMetrics = defaultMetricsProvider.metrics("");
+        assertThat(defaultMetrics).isInstanceOf(CoordinatorClientRequestMetrics.class);
     }
 
     @Test

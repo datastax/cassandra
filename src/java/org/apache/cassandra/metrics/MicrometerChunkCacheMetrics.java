@@ -47,9 +47,9 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     public static final String CHUNK_CACHE_SIZE = "chunk_cache_size";
     public static final String CHUNK_CACHE_NUM_ENTRIES = "chunk_cache_num_entries";
     public static final String CHUNK_CACHE_HIT_RATE = "chunk_cache_hit_rate";
-    public static final String CHUNK_CACHE_NOT_IN_CACHE_EXCEPTIONS = "chunk_cache_not_in_cache_exceptions";
 
-    private final static long hitRateUpdateInterval = TimeUnit.MILLISECONDS.toNanos(100);
+    @VisibleForTesting
+    protected final static long hitRateUpdateInterval = TimeUnit.MILLISECONDS.toNanos(100);
 
     private final CacheSize cache;
     private final MovingAverage hitRate;
@@ -60,7 +60,6 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile Counter hits;
     private volatile Counter requests;
     private volatile Counter evictions;
-    private volatile Counter notInCacheExceptions;
 
     MicrometerChunkCacheMetrics(CacheSize cache)
     {
@@ -73,7 +72,6 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
         this.hits = counter(CHUNK_CACHE_HITS);
         this.requests = counter(CHUNK_CACHE_REQUESTS);
         this.evictions = counter(CHUNK_CACHE_EVICTIONS);
-        this.notInCacheExceptions = counter(CHUNK_CACHE_NOT_IN_CACHE_EXCEPTIONS);
     }
 
     @Override
@@ -91,7 +89,6 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
         this.hits = counter(CHUNK_CACHE_HITS);
         this.requests = counter(CHUNK_CACHE_REQUESTS);
         this.evictions = counter(CHUNK_CACHE_EVICTIONS);
-        this.notInCacheExceptions = counter(CHUNK_CACHE_NOT_IN_CACHE_EXCEPTIONS);
     }
 
     @Override
@@ -224,17 +221,14 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     @Override
     public String toString()
     {
-        String ret = "Chunk cache metrics: " + System.lineSeparator() +
-                "Miss latency in seconds: " + missLatency.mean(TimeUnit.SECONDS) + System.lineSeparator() +
-                "Misses count: " + misses.count() + System.lineSeparator() +
-                "Hits count: " + hits.count() + System.lineSeparator() +
-                "Cache requests count: " + requests.count() + System.lineSeparator() +
-                "Moving hit rate: " + hitRate.get() + System.lineSeparator() +
-                "NotInCacheExceptions: " + notInCacheExceptions.count() + System.lineSeparator() +
-                "Num entries: " + cache.size() + System.lineSeparator() +
-                "Size in memory: " + FBUtilities.prettyPrintMemory(cache.weightedSize()) + System.lineSeparator() +
-                "Capacity: " + FBUtilities.prettyPrintMemory(cache.capacity());
-
-        return ret;
+        return "Chunk cache metrics: " + System.lineSeparator() +
+               "Miss latency in seconds: " + missLatency() + System.lineSeparator() +
+               "Misses count: " + misses() + System.lineSeparator() +
+               "Hits count: " + hits() + System.lineSeparator() +
+               "Cache requests count: " + requests() + System.lineSeparator() +
+               "Moving hit rate: " + hitRate() + System.lineSeparator() +
+               "Num entries: " + entries() + System.lineSeparator() +
+               "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
     }
 }

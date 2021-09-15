@@ -665,6 +665,7 @@
           </dependency>
             
           <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
+          <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -849,6 +850,7 @@
         <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit"/>
 
         <dependency groupId="io.micrometer" artifactId="micrometer-core"/>
+        <dependency groupId="org.latencyutils" artifactId="LatencyUtils"/>
       </artifact:pom>
     </target>
 
