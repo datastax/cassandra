@@ -27,9 +27,11 @@ import com.google.common.collect.Iterables;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -38,15 +40,18 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableMetadata;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
 
 /**
  * Tests that the methods of the {@link QueryInfoTracker} interface are correctly called.
  *
- * <p>The tests below use "drivers" sessions so as to ensure that queries go through {@link StorageProxy}, where
+ * <p>The tests below use "drivers" sessions to ensure that queries go through {@link StorageProxy}, where
  * {@link QueryInfoTracker} is setup.
  */
+@RunWith(BMUnitRunner.class)
 public class QueryInfoTrackerTest extends CQLTester
 {
     private static final String KEYSPACE = "test_ks";
@@ -187,6 +192,132 @@ public class QueryInfoTrackerTest extends CQLTester
                                          .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
         session.execute(statement.bind(0));
         assertEquals(1, tracker.reads.get());
+    }
+
+    @Test
+    @BMRule(name = "Simulate cas read failure",
+    targetClass = "StorageProxy",
+    targetMethod = "doPaxos",
+    targetLocation = "AT ENTRY",
+    action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
+    public void testCasReadFailureCount()
+    {
+        String TABLE = KEYSPACE + ".cas_read_failure";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        assertEquals(0, tracker.errorReads.get());
+
+        PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
+                                             .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
+
+        try
+        {
+            session.execute(statement.bind(0));
+        }
+        catch (NoHostAvailableException ex)
+        { /* NOOP */ }
+
+        assertEquals(1, tracker.errorReads.get());
+        assertEquals(0, tracker.reads.get());
+    }
+
+    @Test
+    @BMRule(name = "Simulate cas write failure",
+    targetClass = "StorageProxy",
+    targetMethod = "doPaxos",
+    targetLocation = "AT ENTRY",
+    action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
+    public void testCasWriteFailureCount()
+    {
+        String TABLE = KEYSPACE + ".cas_write_failure";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+
+        assertEquals(0, tracker.errorLwts.get());
+
+        try
+        {
+            session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+        }
+        catch (NoHostAvailableException ex)
+        { /* NOOP */ }
+
+        assertEquals(1, tracker.errorLwts.get());
+        assertEquals(0, tracker.lwts.get());
+        assertEquals(0, tracker.appliedLwts.get());
+        assertEquals(0, tracker.nonAppliedLwts.get());
+    }
+
+    @Test
+    @BMRule(name = "Simulate fetching rows failure",
+    targetClass = "StorageProxy",
+    targetMethod = "fetchRows",
+    targetLocation = "AT ENTRY",
+    action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
+    public void testReadFailureCount()
+    {
+        String TABLE = KEYSPACE + ".read_failure";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+
+        assertEquals(0, tracker.errorReads.get());
+
+        try
+        {
+            session.execute("SELECT * FROM " + TABLE + " WHERE k = ?", 0);
+        }
+        catch (NoHostAvailableException ex)
+        { /* NOOP */ }
+
+        assertEquals(1, tracker.errorReads.get());
+        assertEquals(0, tracker.reads.get());
+    }
+
+    @Test
+    @BMRule(name = "Simulate write failure",
+    targetClass = "StorageProxy",
+    targetMethod = "performWrite",
+    targetLocation = "AT ENTRY",
+    action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
+    public void testWriteFailureCount()
+    {
+        String TABLE = KEYSPACE + ".write_failure";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        assertEquals(0, tracker.errorWrites.get());
+
+        try
+        {
+            session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
+        }
+        catch (NoHostAvailableException ex)
+        { /* NOOP */ }
+
+        assertEquals(1, tracker.errorWrites.get());
+        assertEquals(0, tracker.writes.get());
+    }
+
+    @Test
+    @BMRule(name = "Simulate write batch failure",
+    targetClass = "StorageProxy",
+    targetMethod = "syncWriteBatchedMutations",
+    targetLocation = "AT ENTRY",
+    action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
+    public void testReadBatchFailureCount()
+    {
+        String TABLE = KEYSPACE + ".write_batch_failure";
+        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+
+        assertEquals(0, tracker.errorWrites.get());
+
+        try
+        {
+            session.execute("BEGIN BATCH "
+                            + "INSERT INTO " + TABLE + "(k, c, v) VALUES (0, 0, 0);"
+                            + "INSERT INTO " + TABLE + "(k, c, v) VALUES (1, 1, 1);"
+                            + "APPLY BATCH");
+        }
+        catch (NoHostAvailableException ex)
+        { /* NOOP */ }
+
+        assertEquals(1, tracker.errorWrites.get());
+        assertEquals(0, tracker.reads.get());
     }
 
     private static class TestQueryInfoTracker implements QueryInfoTracker
