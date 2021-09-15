@@ -41,9 +41,10 @@ public final class SchemaPushVerbHandler implements IVerbHandler<Collection<Muta
 
     public void doVerb(final Message<Collection<Mutation>> message)
     {
-        logger.trace("Received schema push request from {}", message.from());
-
+        String msg = "Received schema push request from " + message.from();
+        logger.trace(msg);
         SchemaAnnouncementDiagnostics.schemataMutationsReceived(message.from());
-        Stage.MIGRATION.submit(() -> SchemaManager.instance.mergeAndAnnounceVersion(message.payload));
+        SchemaUpdateHandler.GossipAware tracker = SchemaUpdateHandler.instance.asGossipAwareTrackerOrThrow(msg);
+        Stage.MIGRATION.submit(() -> tracker.applyReceivedSchemaMutations(message.from(), message.payload));
     }
 }

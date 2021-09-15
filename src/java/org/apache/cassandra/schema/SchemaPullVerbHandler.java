@@ -29,7 +29,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 
 /**
- * Sends it's current schema state in form of mutations in response to the remote node's request.
+ * Sends the current schema state in form of mutations in response to the remote node's request.
  * Such a request is made when one of the nodes, by means of Gossip, detects schema disagreement in the ring.
  */
 public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
@@ -40,8 +40,10 @@ public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
 
     public void doVerb(Message<NoPayload> message)
     {
-        logger.trace("Received schema pull request from {}", message.from());
-        Message<Collection<Mutation>> response = message.responseWith(SchemaKeyspace.convertSchemaToMutations());
+        String msg = "Received schema pull request from " + message.from();
+        logger.trace(msg);
+        SchemaUpdateHandler.GossipAware tracker = SchemaUpdateHandler.instance.asGossipAwareTrackerOrThrow(msg);
+        Message<Collection<Mutation>> response = message.responseWith(tracker.prepareRequestedSchemaMutations(message.from()));
         MessagingService.instance().send(response, message.from());
     }
 }

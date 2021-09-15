@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 @NotThreadSafe
-public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
+public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAware, IEndpointStateChangeSubscriber
 {
     private final static Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 
@@ -173,7 +173,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints,
                                                                     schemaEndpointsIgnored,
                                                                     result.transformation);
-
     }
 
     @VisibleForTesting
@@ -202,5 +201,17 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
                 migrationCoordinator.reportEndpointVersion(endpoint, UUID.fromString(value.value));
             }
         }
+    }
+
+    @Override
+    public void applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations)
+    {
+        SchemaManager.instance.mergeAndAnnounceVersion(schemaMutations);
+    }
+
+    @Override
+    public Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom)
+    {
+        return SchemaKeyspace.convertSchemaToMutations();
     }
 }

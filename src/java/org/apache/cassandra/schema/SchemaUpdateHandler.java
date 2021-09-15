@@ -19,7 +19,12 @@
 package org.apache.cassandra.schema;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.Optional;
 import java.util.UUID;
+
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.locator.InetAddressAndPort;
 
 /**
  * Schema update handler is responsible for maintaining the current schema and synchronizing it with other nodes in
@@ -68,5 +73,36 @@ public interface SchemaUpdateHandler
 
     // temporary, todo remove
     void pushSchema(SchemaManager.TransformationResult result);
+
+    /**
+     * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
+     * interface.
+     */
+    interface GossipAware extends SchemaUpdateHandler
+    {
+        /**
+         * Called when schema push message is received.
+         */
+        void applyReceivedSchemaMutations(InetAddressAndPort pushReqeustFrom, Collection<Mutation> schemaMutations);
+
+        /**
+         * Called when schema pull messsage is received.
+         */
+        Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom);
+    }
+
+    default Optional<GossipAware> asGossipAwareTracker()
+    {
+        return this instanceof SchemaUpdateHandler.GossipAware
+               ? Optional.of((SchemaUpdateHandler.GossipAware) this)
+               : Optional.empty();
+    }
+
+    default SchemaUpdateHandler.GossipAware asGossipAwareTrackerOrThrow(String msg)
+    {
+        String format = "%s but the current schema tracker (%s) does not support that. Your nodes are likely using different schema trackers. " +
+                        "Please adjust nodes configuration so that they consistently use the same schema tracker implementation.";
+        return asGossipAwareTracker().orElseThrow(() -> new UnsupportedOperationException(String.format(format, msg, this.getClass().getName())));
+    }
 
 }
