@@ -28,6 +28,8 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
@@ -81,7 +83,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public Schema schema()
+    public @Nonnull Schema schema()
     {
         return schema;
     }

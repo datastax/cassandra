@@ -115,6 +115,7 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
@@ -2043,7 +2044,7 @@ public class StorageProxy implements StorageProxyMBean
      */
     public static Map<String, List<String>> describeSchemaVersions(boolean withPort)
     {
-        final String myVersion = SchemaManager.instance.getVersion().toString();
+        final String myVersion = SchemaManager.instance.schema().getVersion().toString();
         final Map<InetAddressAndPort, UUID> versions = new ConcurrentHashMap<>();
         final Set<InetAddressAndPort> liveHosts = Gossiper.instance.getLiveMembers();
         final CountDownLatch latch = new CountDownLatch(liveHosts.size());

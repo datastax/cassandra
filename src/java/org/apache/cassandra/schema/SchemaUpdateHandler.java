@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
+import javax.annotation.Nonnull;
 
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -57,7 +58,7 @@ public interface SchemaUpdateHandler
      *
      * @return the current schema
      */
-    Schema schema();
+    @Nonnull Schema schema();
 
     // temporary, todo remove
     void addOrUpdate(KeyspaceMetadata ksm);

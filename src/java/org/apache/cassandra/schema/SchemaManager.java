@@ -114,6 +114,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * load keyspace (keyspace) definitions, but do not initialize the keyspace instances.
      * Schema version may be updated as the result.
      */
+    // todo move out
     public void loadFromDisk()
     {
         loadFromDisk(true);
@@ -124,13 +125,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @param updateVersion true if schema version needs to be updated
      */
+    // todo move out
     public void loadFromDisk(boolean updateVersion)
     {
-        SchemaDiagnostics.schemataLoading(this);
+        SchemaDiagnostics.schemataLoading(schema());
         SchemaKeyspace.fetchNonSystemKeyspaces().forEach(this::load);
         if (updateVersion)
             updateVersion();
-        SchemaDiagnostics.schemataLoaded(this);
+        SchemaDiagnostics.schemataLoaded(schema());
     }
 
     /**
@@ -159,7 +161,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
            .indexTables()
            .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
 
-        SchemaDiagnostics.metadataInitialized(this, ksm);
+        SchemaDiagnostics.metadataInitialized(schema(), ksm);
     }
 
     private void reload(KeyspaceMetadata previous, KeyspaceMetadata updated)
@@ -199,7 +201,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                    .map(MapDifference.ValueDifference::rightValue)
                    .forEach(indexTable -> indexMetadataRefs.get(Pair.create(indexTable.keyspace, indexTable.indexName().get())).set(indexTable));
 
-        SchemaDiagnostics.metadataReloaded(this, previous, updated, tablesDiff, viewsDiff, indexesDiff);
+        SchemaDiagnostics.metadataReloaded(schema(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
 
     public void registerListener(SchemaChangeListener listener)
@@ -249,6 +251,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * @throws IllegalArgumentException if Keyspace is already stored
      */
     @Override
+    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
     public void storeKeyspaceInstance(Keyspace keyspace)
     {
         if (keyspaceInstances.putIfAbsent(keyspace.getName(), keyspace) != null)
@@ -262,11 +265,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @return removed keyspace instance or null if it wasn't found
      */
+    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
     public Keyspace removeKeyspaceInstance(String keyspaceName)
     {
         return keyspaceInstances.remove(keyspaceName);
     }
 
+    // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
     public Keyspaces snapshot()
     {
         return Keyspaces.builder().add(localKeyspaces.getAll()).add(updateHandler.schema().getKeyspaces()).build();
@@ -277,6 +282,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @param ksm The keyspace definition to remove
      */
+    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
     synchronized void unload(KeyspaceMetadata ksm)
     {
         updateHandler.remove(ksm.name);
@@ -289,9 +295,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
            .keySet()
            .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
 
-        SchemaDiagnostics.metadataRemoved(this, ksm);
+        SchemaDiagnostics.metadataRemoved(schema(), ksm);
     }
 
+    // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
     public int getNumberOfTables()
     {
         return updateHandler.schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
@@ -418,11 +425,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return indexMetadataRefs.get(Pair.create(keyspace, index));
     }
 
-    Map<Pair<String, String>, TableMetadataRef> getIndexTableMetadataRefs()
-    {
-        return indexMetadataRefs;
-    }
-
     /**
      * Get Table metadata by its identifier
      *
@@ -440,11 +442,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public TableMetadataRef getTableMetadataRef(Descriptor descriptor)
     {
         return getTableMetadataRef(descriptor.ksname, descriptor.cfname);
-    }
-
-    Map<TableId, TableMetadataRef> getTableMetadataRefs()
-    {
-        return metadataRefs;
     }
 
     /**
@@ -538,29 +535,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     /* Version control */
 
-    /**
-     * @return current schema version
-     */
-    public UUID getVersion()
-    {
-        return updateHandler.schema().getVersion();
-    }
-
-    /**
-     * Checks whether the given schema version is the same as the current local schema.
-     */
-    public boolean isSameVersion(UUID schemaVersion)
-    {
-        return schemaVersion != null && schemaVersion.equals(getVersion());
-    }
-
-    /**
-     * Checks whether the current schema is empty.
-     */
-    public boolean isEmpty()
-    {
-        return updateHandler.schema().isEmpty();
-    }
 
     /**
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
@@ -571,7 +545,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         UUID version = SchemaKeyspace.calculateSchemaDigest();
         updateHandler.updateVersion(version);
         SystemKeyspace.updateSchemaVersion(version);
-        SchemaDiagnostics.versionUpdated(this);
+        SchemaDiagnostics.versionUpdated(schema());
     }
 
     /*
@@ -596,8 +570,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     private void passiveAnnounceVersion()
     {
-        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(getVersion()));
-        SchemaDiagnostics.versionAnnounced(this);
+        Schema schema = schema();
+        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
+        SchemaDiagnostics.versionAnnounced(schema());
     }
 
     /**
@@ -607,7 +582,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         getNonSystemKeyspaces().forEach(k -> unload(getKeyspaceMetadata(k)));
         updateVersionAndAnnounce();
-        SchemaDiagnostics.schemataCleared(this);
+        SchemaDiagnostics.schemataCleared(schema());
     }
 
     /*
@@ -674,6 +649,11 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.asGossipAwareTrackerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from);
     }
 
+    public Schema schema()
+    {
+        return updateHandler.schema();
+    }
+
     public static final class TransformationResult
     {
         public final boolean success;
@@ -728,7 +708,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void alterKeyspace(KeyspaceDiff delta)
     {
-        SchemaDiagnostics.keyspaceAltering(this, delta);
+        SchemaDiagnostics.keyspaceAltering(schema(), delta);
 
         // drop tables and views
         delta.views.dropped.forEach(this::dropView);
@@ -769,12 +749,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         delta.views.altered.forEach(diff -> notifyAlterView(diff.before, diff.after));
         delta.udfs.altered.forEach(diff -> notifyAlterFunction(diff.before, diff.after));
         delta.udas.altered.forEach(diff -> notifyAlterAggregate(diff.before, diff.after));
-        SchemaDiagnostics.keyspaceAltered(this, delta);
+        SchemaDiagnostics.keyspaceAltered(schema(), delta);
     }
 
     private void createKeyspace(KeyspaceMetadata keyspace)
     {
-        SchemaDiagnostics.keyspaceCreating(this, keyspace);
+        SchemaDiagnostics.keyspaceCreating(schema(), keyspace);
         load(keyspace);
         Keyspace.open(keyspace.name);
 
@@ -784,12 +764,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         keyspace.views.forEach(this::notifyCreateView);
         keyspace.functions.udfs().forEach(this::notifyCreateFunction);
         keyspace.functions.udas().forEach(this::notifyCreateAggregate);
-        SchemaDiagnostics.keyspaceCreated(this, keyspace);
+        SchemaDiagnostics.keyspaceCreated(schema(), keyspace);
     }
 
     private void dropKeyspace(KeyspaceMetadata keyspace)
     {
-        SchemaDiagnostics.keyspaceDroping(this, keyspace);
+        SchemaDiagnostics.keyspaceDroping(schema(), keyspace);
         keyspace.views.forEach(this::dropView);
         keyspace.tables.forEach(this::dropTable);
 
@@ -804,7 +784,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         keyspace.tables.forEach(this::notifyDropTable);
         keyspace.types.forEach(this::notifyDropType);
         notifyDropKeyspace(keyspace);
-        SchemaDiagnostics.keyspaceDroped(this, keyspace);
+        SchemaDiagnostics.keyspaceDroped(schema(), keyspace);
     }
 
     private void dropView(ViewMetadata metadata)
@@ -815,7 +795,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void dropTable(TableMetadata metadata)
     {
-        SchemaDiagnostics.tableDropping(this, metadata);
+        SchemaDiagnostics.tableDropping(schema(), metadata);
         ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
         assert cfs != null;
         // make sure all the indexes are dropped, or else.
@@ -825,14 +805,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             cfs.snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(cfs.name, ColumnFamilyStore.SNAPSHOT_DROP_PREFIX));
         CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
         Keyspace.open(metadata.keyspace).dropCf(metadata.id);
-        SchemaDiagnostics.tableDropped(this, metadata);
+        SchemaDiagnostics.tableDropped(schema(), metadata);
     }
 
     private void createTable(TableMetadata table)
     {
-        SchemaDiagnostics.tableCreating(this, table);
+        SchemaDiagnostics.tableCreating(schema(), table);
         Keyspace.open(table.keyspace).initCf(metadataRefs.get(table.id), true);
-        SchemaDiagnostics.tableCreated(this, table);
+        SchemaDiagnostics.tableCreated(schema(), table);
     }
 
     private void createView(ViewMetadata view)
@@ -842,9 +822,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void alterTable(TableMetadata updated)
     {
-        SchemaDiagnostics.tableAltering(this, updated);
+        SchemaDiagnostics.tableAltering(schema(), updated);
         Keyspace.open(updated.keyspace).getColumnFamilyStore(updated.name).reload();
-        SchemaDiagnostics.tableAltered(this, updated);
+        SchemaDiagnostics.tableAltered(schema(), updated);
     }
 
     private void alterView(ViewMetadata updated)
@@ -942,19 +922,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void notifyDropAggregate(UDAggregate udf)
     {
         changeListeners.forEach(l -> l.onDropAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
-    }
-
-    /**
-     * Converts the given schema version to a string. Returns {@code unknown}, if {@code version} is {@code null}
-     * or {@code "(empty)"}, if {@code version} refers to an {@link SchemaConstants#emptyVersion empty) schema.
-     */
-    public static String schemaVersionToString(UUID version)
-    {
-        return version == null
-               ? "unknown"
-               : SchemaConstants.emptyVersion.equals(version)
-                 ? "(empty)"
-                 : version.toString();
     }
 
     /**

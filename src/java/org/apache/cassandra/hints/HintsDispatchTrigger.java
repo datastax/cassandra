@@ -17,10 +17,12 @@
  */
 package org.apache.cassandra.hints;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.schema.SchemaManager;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 
 /**
  * A simple dispatch trigger that's being run every 10 seconds.
@@ -62,7 +64,7 @@ final class HintsDispatchTrigger implements Runnable
                .filter(store -> !isScheduled(store))
                .filter(HintsStore::isLive)
                .filter(store -> store.isWriting() || store.hasFiles())
-               .filter(store -> SchemaManager.instance.isSameVersion(Gossiper.instance.getSchemaVersion(store.address())))
+               .filter(store -> Objects.equals(SchemaManager.instance.schema().getVersion(), Gossiper.instance.getSchemaVersion(store.address())))
                .forEach(this::schedule);
     }
 

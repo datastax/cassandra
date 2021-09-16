@@ -98,6 +98,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.ReplicationParams;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ViewMetadata;
@@ -3381,7 +3382,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public String getSchemaVersion()
     {
-        return SchemaManager.instance.getVersion().toString();
+        return SchemaManager.instance.schema().getVersion().toString();
     }
 
     public String getKeyspaceReplicationInfo(String keyspaceName)

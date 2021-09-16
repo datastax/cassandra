@@ -103,6 +103,7 @@ import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
@@ -222,7 +223,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     {
         // we do not use method reference syntax here, because we need to sync on the node-local schema instance
         //noinspection Convert2MethodRef
-        return SchemaManager.instance.getVersion();
+        return SchemaManager.instance.schema().getVersion();
     }
 
     public void startup()

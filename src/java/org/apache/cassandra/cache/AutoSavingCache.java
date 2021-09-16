@@ -35,7 +35,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaManager;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -202,11 +204,12 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
                 //Check the schema has not changed since CFs are looked up by name which is ambiguous
                 UUID schemaVersion = new UUID(in.readLong(), in.readLong());
-                if (!schemaVersion.equals(SchemaManager.instance.getVersion()))
+                Schema schema = SchemaManager.instance.schema();
+                if (!schemaVersion.equals(schema.getVersion()))
                     throw new RuntimeException("Cache schema version "
                                                + schemaVersion
                                                + " does not match current schema version "
-                                               + SchemaManager.instance.getVersion());
+                                               + schema.getVersion());
 
                 ArrayDeque<Future<Pair<K, V>>> futures = new ArrayDeque<Future<Pair<K, V>>>();
                 while (in.available() > 0)
@@ -353,12 +356,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             {
 
                 //Need to be able to check schema version because CF names are ambiguous
-                UUID schemaVersion = SchemaManager.instance.getVersion();
-                if (schemaVersion == null)
-                {
-                    SchemaManager.instance.updateVersion();
-                    schemaVersion = SchemaManager.instance.getVersion();
-                }
+                UUID schemaVersion = SchemaManager.instance.schema().getVersion();
                 writer.writeLong(schemaVersion.getMostSignificantBits());
                 writer.writeLong(schemaVersion.getLeastSignificantBits());
 
