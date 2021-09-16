@@ -27,6 +27,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +45,6 @@ import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.api.TokenSupplier;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.metrics.ClientRequestsMetricsHolder;
 import org.apache.cassandra.streaming.StreamException;
 import org.apache.cassandra.streaming.StreamResultFuture;
 import org.assertj.core.api.Assertions;
@@ -96,8 +97,9 @@ public class FailedBootstrapTest extends TestBaseImpl
 
             // do we have any read metrics have unavailables?
             added.runOnInstance(() -> {
-                Assertions.assertThat(ClientRequestsMetricsHolder.readMetrics.unavailables.getCount()).describedAs("read unavailables").isEqualTo(0);
-                Assertions.assertThat(ClientRequestsMetricsHolder.casReadMetrics.unavailables.getCount()).describedAs("CAS read unavailables").isEqualTo(0);
+                ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+                Assertions.assertThat(metrics.readMetrics.unavailables.getCount()).describedAs("read unavailables").isEqualTo(0);
+                Assertions.assertThat(metrics.casReadMetrics.unavailables.getCount()).describedAs("CAS read unavailables").isEqualTo(0);
             });
         }
     }
