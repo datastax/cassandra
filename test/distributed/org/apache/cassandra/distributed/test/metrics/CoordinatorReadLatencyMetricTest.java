@@ -28,7 +28,8 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
-import org.apache.cassandra.metrics.ClientRequestsMetricsHolder;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.paxos.Paxos;
 
 import static org.junit.Assert.assertTrue;
@@ -97,13 +98,14 @@ public class CoordinatorReadLatencyMetricTest extends TestBaseImpl
                                                 String query,
                                                 ConsistencyLevel consistencyLevel)
     {
-        long countBefore = cluster.get(1).callOnInstance(() -> ClientRequestsMetricsHolder.readMetrics.latency.getCount());
-        long totalLatencyBefore = cluster.get(1).callOnInstance(() -> ClientRequestsMetricsHolder.readMetrics.totalLatency.getCount());
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+        long countBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.latency.getCount());
+        long totalLatencyBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.totalLatency.getCount());
         long startTime = System.nanoTime();
         cluster.coordinator(1).executeWithPaging(query, consistencyLevel, pagesize);
         long elapsedTime = System.nanoTime() - startTime;
-        long countAfter = cluster.get(1).callOnInstance(() -> ClientRequestsMetricsHolder.readMetrics.latency.getCount());
-        long totalLatencyAfter = cluster.get(1).callOnInstance(() -> ClientRequestsMetricsHolder.readMetrics.totalLatency.getCount());
+        long countAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.latency.getCount());
+        long totalLatencyAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.totalLatency.getCount());
 
         long latenciesRecorded = countAfter - countBefore;
         assertTrue("Expected to have recorded at least 1 latency measurement per-individual read", latenciesRecorded >= expectedQueries);
