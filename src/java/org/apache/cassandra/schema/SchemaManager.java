@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.schema;
 
-import java.io.IOException;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.*;
@@ -47,10 +46,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
@@ -668,6 +664,16 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return new TransformationResult(diff, mutations, transformation);
     }
 
+    public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
+    {
+        updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
+    }
+
+    public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
+    {
+        return updateHandler.asGossipAwareTrackerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from);
+    }
+
     public static final class TransformationResult
     {
         public final boolean success;
@@ -693,37 +699,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         TransformationResult(KeyspacesDiff diff, Collection<Mutation> mutations, SchemaTransformation transformation)
         {
             this(true, null, diff, mutations, transformation);
-        }
-
-        public static class Serializer implements IVersionedSerializer<Collection<Mutation>>
-        {
-            public static Serializer instance = new Serializer();
-
-            public void serialize(Collection<Mutation> schema, DataOutputPlus out, int version) throws IOException
-            {
-                out.writeInt(schema.size());
-                for (Mutation mutation : schema)
-                    Mutation.serializer.serialize(mutation, out, version);
-            }
-
-            public Collection<Mutation> deserialize(DataInputPlus in, int version) throws IOException
-            {
-                int count = in.readInt();
-                Collection<Mutation> schema = new ArrayList<>(count);
-
-                for (int i = 0; i < count; i++)
-                    schema.add(Mutation.serializer.deserialize(in, version));
-
-                return schema;
-            }
-
-            public long serializedSize(Collection<Mutation> schema, int version)
-            {
-                int size = TypeSizes.sizeof(schema.size());
-                for (Mutation mutation : schema)
-                    size += mutation.serializedSize(version);
-                return size;
-            }
         }
     }
 

@@ -22,6 +22,7 @@ import java.util.Collection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -40,10 +41,11 @@ public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
 
     public void doVerb(Message<NoPayload> message)
     {
-        String msg = "Received schema pull request from " + message.from();
-        logger.trace(msg);
-        SchemaUpdateHandler.GossipAware tracker = SchemaUpdateHandler.instance.asGossipAwareTrackerOrThrow(msg);
-        Message<Collection<Mutation>> response = message.responseWith(tracker.prepareRequestedSchemaMutations(message.from()));
-        MessagingService.instance().send(response, message.from());
+        logger.trace("Received schema pull request from {}", message.from());
+        Stage.MIGRATION.execute(() -> {
+            Collection<Mutation> payload = SchemaManager.instance.prepareRequestedSchemaMutationsOrThrow(message.from());
+            Message<Collection<Mutation>> response = message.responseWith(payload);
+            MessagingService.instance().send(response, message.from());
+        });
     }
 }
