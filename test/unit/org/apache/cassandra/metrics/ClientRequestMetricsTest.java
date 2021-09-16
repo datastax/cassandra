@@ -34,7 +34,6 @@ import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
-import org.apache.cassandra.service.reads.range.RangeCommandIterator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -54,8 +53,8 @@ public class ClientRequestMetricsTest
     private static PreparedStatement readPS;
     private static PreparedStatement readRangePS;
 
-    private static final ClientRequestMetrics readMetrics = ClientRequestsMetricsHolder.readMetrics;
-    private static final ClientWriteRequestMetrics writeMetrics = ClientRequestsMetricsHolder.writeMetrics;
+    private static ClientRequestMetrics readMetrics;
+    private static ClientWriteRequestMetrics writeMetrics;
 
     private static EmbeddedCassandraService cassandra;
 
@@ -75,6 +74,10 @@ public class ClientRequestMetricsTest
         paxosPS = session.prepare("INSERT INTO " + KEYSPACE + '.' + TABLE + " (id, ord, val) VALUES (?, ?, ?) IF NOT EXISTS;");
         readPS = session.prepare("SELECT * FROM " + KEYSPACE + '.' + TABLE + " WHERE id=?;");
         readRangePS = session.prepare("SELECT * FROM " + KEYSPACE + '.' + TABLE + " WHERE id=? AND ord>=? AND ord <= ?;");
+
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(KEYSPACE);
+        readMetrics = metrics.readMetrics;
+        writeMetrics = metrics.writeMetrics;
     }
 
     @AfterClass
@@ -168,14 +171,15 @@ public class ClientRequestMetricsTest
     @Test
     public void testRangeRead() throws Throwable
     {
-        clearHistogram(RangeCommandIterator.rangeMetrics.roundTrips);
-        long latencyCount = RangeCommandIterator.rangeMetrics.latency.getCount();
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics("system");
+        clearHistogram(metrics.rangeMetrics.roundTrips);
+        long latencyCount = metrics.rangeMetrics.latency.getCount();
 
         session.execute("SELECT * FROM system.peers");
 
-        assertThat(RangeCommandIterator.rangeMetrics.roundTrips.getCount()).isGreaterThan(0);
-        assertThat(RangeCommandIterator.rangeMetrics.roundTrips.getSnapshot().getMax()).isEqualTo(1);
-        assertThat(RangeCommandIterator.rangeMetrics.latency.getCount()).isEqualTo(latencyCount + 1);
+        assertThat(metrics.rangeMetrics.roundTrips.getCount()).isGreaterThan(0);
+        assertThat(metrics.rangeMetrics.roundTrips.getSnapshot().getMax()).isEqualTo(1);
+        assertThat(metrics.rangeMetrics.latency.getCount()).isEqualTo(latencyCount + 1);
     }
 
     private void clearHistogram(Histogram histogram)
