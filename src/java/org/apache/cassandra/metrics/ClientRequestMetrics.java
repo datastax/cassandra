@@ -40,18 +40,18 @@ public class ClientRequestMetrics extends LatencyMetrics
     public final Meter localRequests;
     public final Meter remoteRequests;
 
-    public ClientRequestMetrics(String scope)
+    public ClientRequestMetrics(String scope, String namePrefix)
     {
-        super("ClientRequest", scope);
+        super("ClientRequest", namePrefix, scope);
 
-        timeouts = Metrics.meter(factory.createMetricName("Timeouts"));
-        unavailables = Metrics.meter(factory.createMetricName("Unavailables"));
-        failures = Metrics.meter(factory.createMetricName("Failures"));
-        aborts = Metrics.meter(factory.createMetricName("Aborts"));
-        tombstoneAborts = Metrics.meter(factory.createMetricName("TombstoneAborts"));
-        readSizeAborts = Metrics.meter(factory.createMetricName("ReadSizeAborts"));
-        localRequests = Metrics.meter(factory.createMetricName("LocalRequests"));
-        remoteRequests = Metrics.meter(factory.createMetricName("RemoteRequests"));
+        timeouts = Metrics.meter(factory.createMetricName(namePrefix + "Timeouts"));
+        unavailables = Metrics.meter(factory.createMetricName(namePrefix + "Unavailables"));
+        failures = Metrics.meter(factory.createMetricName(namePrefix + "Failures"));
+        aborts = Metrics.meter(factory.createMetricName(namePrefix + "Aborts"));
+        tombstoneAborts = Metrics.meter(factory.createMetricName(namePrefix + "TombstoneAborts"));
+        readSizeAborts = Metrics.meter(factory.createMetricName(namePrefix + "ReadSizeAborts"));
+        localRequests = Metrics.meter(factory.createMetricName(namePrefix + "LocalRequests"));
+        remoteRequests = Metrics.meter(factory.createMetricName(namePrefix + "RemoteRequests"));
     }
 
     public void markAbort(Throwable cause)
@@ -72,13 +72,13 @@ public class ClientRequestMetrics extends LatencyMetrics
     public void release()
     {
         super.release();
-        Metrics.remove(factory.createMetricName("Timeouts"));
-        Metrics.remove(factory.createMetricName("Unavailables"));
-        Metrics.remove(factory.createMetricName("Failures"));
-        Metrics.remove(factory.createMetricName("Aborts"));
-        Metrics.remove(factory.createMetricName("TombstoneAborts"));
-        Metrics.remove(factory.createMetricName("ReadSizeAborts"));
-        Metrics.remove(factory.createMetricName("LocalRequests"));
-        Metrics.remove(factory.createMetricName("RemoteRequests"));
+        Metrics.remove(factory.createMetricName(namePrefix + "Timeouts"));
+        Metrics.remove(factory.createMetricName(namePrefix + "Unavailables"));
+        Metrics.remove(factory.createMetricName(namePrefix + "Failures"));
+        Metrics.remove(factory.createMetricName(namePrefix + "Aborts"));
+        Metrics.remove(factory.createMetricName(namePrefix + "TombstoneAborts"));
+        Metrics.remove(factory.createMetricName(namePrefix + "ReadSizeAborts"));
+        Metrics.remove(factory.createMetricName(namePrefix + "LocalRequests"));
+        Metrics.remove(factory.createMetricName(namePrefix + "RemoteRequests"));
     }
 }
