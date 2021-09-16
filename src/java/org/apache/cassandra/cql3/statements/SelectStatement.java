@@ -39,6 +39,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.slf4j.Logger;
@@ -1091,7 +1093,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // to work around this, treat the coordinator as the only response we care about and mark it failed
             ReadSizeAbortException exception = new ReadSizeAbortException(clientMsg, options.getConsistency(), 0, 1, true,
                                                                           ImmutableMap.of(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.READ_SIZE));
-            StorageProxy.recordReadRegularAbort(options.getConsistency(), exception);
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(options.getKeyspace());
+            StorageProxy.recordReadRegularAbort(options.getConsistency(), exception, metrics);
             throw exception;
         }
     }

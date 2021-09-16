@@ -32,6 +32,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.TimeUUID;
@@ -113,7 +115,8 @@ public class TraceStateImpl extends TraceState
     {
         try
         {
-            StorageProxy.mutate(singletonList(mutation), ANY, nanoTime());
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
+            StorageProxy.mutate(singletonList(mutation), ANY, nanoTime(), metrics);
         }
         catch (OverloadedException e)
         {
