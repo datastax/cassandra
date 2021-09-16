@@ -147,7 +147,7 @@ public class ChunkCache
     private ChunkCache(BufferPool pool)
     {
         bufferPool = pool;
-        metrics = new ChunkCacheMetrics(this);
+        metrics = ChunkCacheMetrics.create(this);
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(ImmediateExecutor.INSTANCE)
