@@ -26,6 +26,8 @@ import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -48,8 +50,6 @@ import static java.lang.Math.*;
 import static java.util.Arrays.stream;
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.config.DatabaseDescriptor.*;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casReadMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casWriteMetrics;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.Clock.waitUntil;
 
@@ -316,8 +316,9 @@ public class ContentionStrategy
             this.onFailure = onFailure;
             this.modifier = modifier;
             this.selector = selector;
-            this.reads = new TimeLimitedLatencySupplier(casReadMetrics.latency::getSnapshot, 10L, SECONDS);
-            this.writes = new TimeLimitedLatencySupplier(casWriteMetrics.latency::getSnapshot, 10L, SECONDS);
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+            this.reads = new TimeLimitedLatencySupplier(metrics.casReadMetrics.latency::getSnapshot, 10L, SECONDS);
+            this.writes = new TimeLimitedLatencySupplier(metrics.casWriteMetrics.latency::getSnapshot, 10L, SECONDS);
         }
 
         long get(int attempts)
