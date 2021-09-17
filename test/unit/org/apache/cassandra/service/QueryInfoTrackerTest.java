@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.service;
 
+import java.io.Serializable;
+import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -39,6 +41,7 @@ import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.TableMetadata;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -61,7 +64,7 @@ public class QueryInfoTrackerTest extends CQLTester
     @Before
     public void setupTest()
     {
-        tracker = new TestQueryInfoTracker();
+        tracker = new TestQueryInfoTracker(KEYSPACE);
         StorageProxy.instance.register(tracker);
         requireNetwork();
         session = sessionNet();
@@ -101,10 +104,14 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(0, tracker.reads.get());
         session.execute("SELECT * FROM " + TABLE + " WHERE k = ?", 0);
         assertEquals(1, tracker.reads.get());
+        assertEquals(CLUSTERING, tracker.readRows.get());
+        assertEquals(1, tracker.readPartitions.get());
 
         assertEquals(0, tracker.rangeReads.get());
         session.execute("SELECT * FROM " + TABLE);
         assertEquals(1, tracker.rangeReads.get());
+        assertEquals(CLUSTERING + KEYS * CLUSTERING, tracker.readRows.get());
+        assertEquals(1 + KEYS, tracker.readPartitions.get());
 
         session.execute("UPDATE " + TABLE + " SET v = ? WHERE k = ? AND c IN ?", 42, 0, Arrays.asList(0, 2, 3));
         expectedWrites += 1; // We only did one more write ...
@@ -159,6 +166,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(0, tracker.nonAppliedLwts.get());
         assertEquals(1, tracker.appliedLwts.get());
         assertEquals(3, tracker.writtenRows.get());
+        assertEquals(0, tracker.readRows.get());
         // The writes or reads shouldn't have changed though.
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
@@ -169,6 +177,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(1, tracker.nonAppliedLwts.get());
         assertEquals(1, tracker.appliedLwts.get());
         assertEquals(3, tracker.writtenRows.get());
+        assertEquals(1, tracker.readRows.get());
         // The writes or reads shouldn't have changed though.
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
@@ -186,12 +195,14 @@ public class QueryInfoTrackerTest extends CQLTester
         // Still no updates of writes or reads expected.
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
+        assertEquals(3, tracker.readRows.get());
 
 
         PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
-                                         .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
+                                             .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
         session.execute(statement.bind(0));
         assertEquals(1, tracker.reads.get());
+        assertEquals(6, tracker.readRows.get());
     }
 
     @Test
@@ -218,6 +229,7 @@ public class QueryInfoTrackerTest extends CQLTester
 
         assertEquals(1, tracker.errorReads.get());
         assertEquals(0, tracker.reads.get());
+        assertEquals(0, tracker.readRows.get());
     }
 
     @Test
@@ -320,7 +332,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(0, tracker.reads.get());
     }
 
-    private static class TestQueryInfoTracker implements QueryInfoTracker
+    public static class TestQueryInfoTracker implements QueryInfoTracker, Serializable
     {
         public final AtomicInteger writes = new AtomicInteger();
         public final AtomicInteger loggedWrites = new AtomicInteger();
@@ -330,17 +342,24 @@ public class QueryInfoTrackerTest extends CQLTester
         public final AtomicInteger reads = new AtomicInteger();
         public final AtomicInteger rangeReads = new AtomicInteger();
         public final AtomicInteger readRows = new AtomicInteger();
+        public final AtomicInteger readPartitions = new AtomicInteger();
         public final AtomicInteger errorReads = new AtomicInteger();
 
         public final AtomicInteger lwts = new AtomicInteger();
         public final AtomicInteger nonAppliedLwts = new AtomicInteger();
         public final AtomicInteger appliedLwts = new AtomicInteger();
         public final AtomicInteger errorLwts = new AtomicInteger();
+        private final String keyspace;
+
+        public TestQueryInfoTracker(String keyspace)
+        {
+            this.keyspace = keyspace;
+        }
 
         private boolean shouldIgnore(TableMetadata table)
         {
             // We exclude anything that isn't on our test keyspace to be sure no "system" query interferes.
-            return !table.keyspace.equals(KEYSPACE);
+            return !table.keyspace.equals(keyspace);
         }
 
         private TableMetadata extractTable(Collection<? extends IMutation> mutations)
@@ -428,6 +447,24 @@ public class QueryInfoTrackerTest extends CQLTester
             {
                 errorReads.incrementAndGet();
             }
+
+            @Override
+            public void queried(Collection<InetAddress> queried)
+            {
+                // TODO: test
+            }
+
+            @Override
+            public void onPartition(DecoratedKey partitionKey)
+            {
+                readPartitions.incrementAndGet();
+            }
+
+            @Override
+            public void onRow(Row row)
+            {
+                readRows.incrementAndGet();
+            }
         }
 
         private class TestRangeReadTracker implements ReadTracker
@@ -442,6 +479,24 @@ public class QueryInfoTrackerTest extends CQLTester
             public void onError(Throwable exception)
             {
                 errorReads.incrementAndGet();
+            }
+
+            @Override
+            public void queried(Collection<InetAddress> queried)
+            {
+                // TODO: test
+            }
+
+            @Override
+            public void onPartition(DecoratedKey partitionKey)
+            {
+                readPartitions.incrementAndGet();
+            }
+
+            @Override
+            public void onRow(Row row)
+            {
+                readRows.incrementAndGet();
             }
         }
 
@@ -470,6 +525,24 @@ public class QueryInfoTrackerTest extends CQLTester
             {
                 appliedLwts.incrementAndGet();
                 writtenRows.addAndGet(update.rowCount());
+            }
+
+            @Override
+            public void queried(Collection<InetAddress> queried)
+            {
+                // TODO: test
+            }
+
+            @Override
+            public void onPartition(DecoratedKey partitionKey)
+            {
+                readPartitions.incrementAndGet();
+            }
+
+            @Override
+            public void onRow(Row row)
+            {
+                readRows.incrementAndGet();
             }
         }
     }

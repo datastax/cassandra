@@ -50,6 +50,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.service.reads.repair.RepairedDataTracker;
 import org.apache.cassandra.service.reads.repair.RepairedDataVerifier;
@@ -60,18 +61,18 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 {
     private final boolean enforceStrictLiveness;
     private final ReadRepair<E, P> readRepair;
+    protected final QueryInfoTracker.ReadTracker readTracker;
 
-    public DataResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, ReadRepair<E, P> readRepair, long queryStartNanoTime)
+    public DataResolver(ReadCommand command,
+                        ReplicaPlan.Shared<E, P> replicaPlan,
+                        ReadRepair<E, P> readRepair,
+                        long queryStartNanoTime,
+                        QueryInfoTracker.ReadTracker readTracker)
     {
         super(command, replicaPlan, queryStartNanoTime);
         this.enforceStrictLiveness = command.metadata().enforceStrictLiveness();
         this.readRepair = readRepair;
-    }
-
-    public PartitionIterator getData()
-    {
-        ReadResponse response = responses.get(0).payload;
-        return UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
+        this.readTracker = readTracker;
     }
 
     public boolean isDataPresent()
@@ -297,8 +298,9 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
          */
 
         UnfilteredPartitionIterator merged = UnfilteredPartitionIterators.merge(results, mergeListener);
+        UnfilteredPartitionIterator trackedPartitionIterator = Transformation.apply(merged, new ReadTrackingTransformation(readTracker));
         Filter filter = new Filter(command.nowInSec(), command.metadata().enforceStrictLiveness());
-        FilteredPartitions filtered = FilteredPartitions.filter(merged, filter);
+        FilteredPartitions filtered = FilteredPartitions.filter(trackedPartitionIterator, filter);
         PartitionIterator counted = Transformation.apply(preCountFilter.apply(filtered), context.mergedResultCounter);
         return Transformation.apply(counted, new EmptyPartitionsDiscarder());
     }

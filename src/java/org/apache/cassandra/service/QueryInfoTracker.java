@@ -18,8 +18,11 @@
 
 package org.apache.cassandra.service;
 
+import java.net.InetAddress;
 import java.util.Collection;
 import java.util.List;
+
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -27,6 +30,7 @@ import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -49,8 +53,11 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public interface QueryInfoTracker
 {
-    /** A tracker that does nothing. */
-    QueryInfoTracker NOOP = new QueryInfoTracker() {
+    /**
+     * A tracker that does nothing.
+     */
+    QueryInfoTracker NOOP = new QueryInfoTracker()
+    {
         @Override
         public WriteTracker onWrite(ClientState state,
                                     boolean isLogged,
@@ -92,9 +99,9 @@ public interface QueryInfoTracker
     /**
      * Called before every (non-LWT) write coordinated on the local node.
      *
-     * @param state the state of the client that performed the write
-     * @param isLogged whether this is a logged batch write.
-     * @param mutations the mutations written by the write.
+     * @param state            the state of the client that performed the write
+     * @param isLogged         whether this is a logged batch write.
+     * @param mutations        the mutations written by the write.
      * @param consistencyLevel the consistency level of the write.
      * @return a tracker that should be notified when either the read error out or completes successfully.
      */
@@ -106,12 +113,11 @@ public interface QueryInfoTracker
     /**
      * Called before every non-range read coordinated on the local node.
      *
-     * @param state the state of the client that performed the read
-     * @param table the metadata for the table read.
-     * @param commands the commands for the read performed.
+     * @param state            the state of the client that performed the read
+     * @param table            the metadata for the table read.
+     * @param commands         the commands for the read performed.
      * @param consistencyLevel the consistency level of the read.
-     * @return a tracker from which a {@link ReadReconciliationObserver} should be otained for the read, and that should
-     * be notified when either the read error out or completes successfully.
+     * @return a tracker that should be notified when either the read error out or completes successfully.
      */
     ReadTracker onRead(ClientState state,
                        TableMetadata table,
@@ -121,12 +127,11 @@ public interface QueryInfoTracker
     /**
      * Called before every range read coordinated on the local node.
      *
-     * @param state the state of the client that performed the range read
-     * @param table the metadata for the table read.
-     * @param command the command for the read performed.
+     * @param state            the state of the client that performed the range read
+     * @param table            the metadata for the table read.
+     * @param command          the command for the read performed.
      * @param consistencyLevel the consistency level of the read.
-     * @return a tracker from which a {@link ReadReconciliationObserver} should be otained for the read, and that should
-     * be notified when either the read error out or completes successfully.
+     * @return a tracker that should  be notified when either the read error out or completes successfully.
      */
     ReadTracker onRangeRead(ClientState state,
                             TableMetadata table,
@@ -136,9 +141,9 @@ public interface QueryInfoTracker
     /**
      * Called before every LWT coordinated by the local node.
      *
-     * @param state the state of the client that performed the LWT
-     * @param table the metadata of the table on which the LWT applies.
-     * @param key the partition key on which the LWT operates.
+     * @param state             the state of the client that performed the LWT
+     * @param table             the metadata of the table on which the LWT applies.
+     * @param key               the partition key on which the LWT operates.
      * @param serialConsistency the serial consistency of the LWT.
      * @param commitConsistency the commit consistency of the LWT.
      * @return a {@link LWTWriteTracker} objects whose methods are called as part of the LWT execution.
@@ -156,10 +161,14 @@ public interface QueryInfoTracker
      */
     interface Tracker
     {
-        /** Called when the tracked query completes successfully. */
+        /**
+         * Called when the tracked query completes successfully.
+         */
         void onDone();
 
-        /** Called when the tracked query completes with an error. */
+        /**
+         * Called when the tracked query completes with an error.
+         */
         void onError(Throwable exception);
     }
 
@@ -168,7 +177,8 @@ public interface QueryInfoTracker
      */
     interface WriteTracker extends Tracker
     {
-        WriteTracker NOOP = new WriteTracker() {
+        WriteTracker NOOP = new WriteTracker()
+        {
             @Override
             public void onDone()
             {
@@ -186,7 +196,23 @@ public interface QueryInfoTracker
      */
     interface ReadTracker extends Tracker
     {
-        ReadTracker NOOP = new ReadTracker() {
+        ReadTracker NOOP = new ReadTracker()
+        {
+            @Override
+            public void queried(Collection<InetAddress> queried)
+            {
+            }
+
+            @Override
+            public void onPartition(DecoratedKey partitionKey)
+            {
+            }
+
+            @Override
+            public void onRow(Row row)
+            {
+            }
+
             @Override
             public void onDone()
             {
@@ -197,8 +223,28 @@ public interface QueryInfoTracker
             {
             }
         };
-    }
 
+        /**
+         * Calls just before queries are sent with the hosts to which the query is sent.
+         *
+         * @param queried the queried nodes.
+         */
+        void queried(Collection<InetAddress> queried);
+
+        /**
+         * Called on every new reconciled partition.
+         *
+         * @param partitionKey the partition key.
+         */
+        void onPartition(DecoratedKey partitionKey);
+
+        /**
+         * Called on every row read.
+         *
+         * @param row          the merged row.
+         */
+        void onRow(Row row);
+    }
 
     /**
      * Tracker for LWTs, used to get information on the actual work done by the LWT.
@@ -214,6 +260,21 @@ public interface QueryInfoTracker
          */
         LWTWriteTracker NOOP = new LWTWriteTracker()
         {
+            @Override
+            public void queried(Collection<InetAddress> queried)
+            {
+            }
+
+            @Override
+            public void onPartition(DecoratedKey partitionKey)
+            {
+            }
+
+            @Override
+            public void onRow(Row row)
+            {
+            }
+
             @Override
             public void onNotApplied()
             {

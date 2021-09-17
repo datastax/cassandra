@@ -232,7 +232,7 @@ public class StorageProxy implements StorageProxyMBean
         queryInfoTracker = tracker;
     }
 
-    private static QueryInfoTracker queryTracker() {
+    public static QueryInfoTracker queryTracker() {
         return queryInfoTracker;
     }
 
@@ -309,7 +309,8 @@ public class StorageProxy implements StorageProxyMBean
                 ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
 
                 FilteredPartition current;
-                try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime))
+
+                try (RowIterator rowIter = readOne(readCommand, readConsistency, queryStartNanoTime, lwtTracker))
                 {
                     current = FilteredPartition.create(rowIter);
                 }
@@ -1741,31 +1742,38 @@ public class StorageProxy implements StorageProxyMBean
         return true;
     }
 
-    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static RowIterator readOne(SinglePartitionReadCommand command,
+                                      ConsistencyLevel consistencyLevel,
+                                      long queryStartNanoTime,
+                                      QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return readOne(command, consistencyLevel, null, queryStartNanoTime);
+        return readOne(command, consistencyLevel, null, queryStartNanoTime, readTracker);
     }
 
-    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
+    public static RowIterator readOne(SinglePartitionReadCommand command,
+                                      ConsistencyLevel consistencyLevel,
+                                      QueryState queryState,
+                                      long queryStartNanoTime,
+                                      QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, queryState, queryStartNanoTime), command);
-    }
-
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
-    throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
-    {
-        // When using serial CL, the ClientState should be provided
-        assert !consistencyLevel.isSerialConsistency();
-        return read(group, consistencyLevel, null, queryStartNanoTime);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command),
+                                                      consistencyLevel,
+                                                      queryState,
+                                                      queryStartNanoTime,
+                                                      readTracker), command);
     }
 
     /**
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
+    public static PartitionIterator read(SinglePartitionReadCommand.Group group,
+                                         ConsistencyLevel consistencyLevel,
+                                         QueryState queryState,
+                                         long queryStartNanoTime,
+                                         QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
@@ -1777,11 +1785,18 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return consistencyLevel.isSerialConsistency()
-             ? readWithPaxos(group, consistencyLevel, queryState, queryStartNanoTime)
-             : readRegular(group, consistencyLevel, queryState, queryStartNanoTime);
+             ? readWithPaxos(group, consistencyLevel, queryState, queryStartNanoTime, readTracker)
+             : readRegular(group, consistencyLevel, queryStartNanoTime, readTracker);
     }
 
-    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
+    /**
+     * Performs a read for paxos reads and paxos writes (cas method)
+      */
+    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group,
+                                                   ConsistencyLevel consistencyLevel,
+                                                   QueryState queryState,
+                                                   long queryStartNanoTime,
+                                                   QueryInfoTracker.ReadTracker readTracker)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         assert queryState != null;
@@ -1790,11 +1805,6 @@ public class StorageProxy implements StorageProxyMBean
 
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
-        QueryInfoTracker.ReadTracker readTracker = queryTracker().onRead(queryState.getClientState(),
-                                                                         group.metadata(),
-                                                                         group.queries,
-                                                                         consistencyLevel);
-
         SinglePartitionReadCommand command = group.queries.get(0);
         TableMetadata metadata = command.metadata();
         DecoratedKey key = command.partitionKey();
@@ -1839,7 +1849,7 @@ public class StorageProxy implements StorageProxyMBean
                 throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
-            result = fetchRows(group.queries, consistencyForReplayCommitsOrFetch, queryStartNanoTime);
+            result = fetchRows(group.queries, consistencyForReplayCommitsOrFetch, queryStartNanoTime, readTracker);
         }
         catch (UnavailableException e)
         {
@@ -1873,29 +1883,21 @@ public class StorageProxy implements StorageProxyMBean
             metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
-        return PartitionIterators.doOnClose(result, readTracker::onDone);
+        return result;
     }
 
     @SuppressWarnings("resource")
     private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group,
                                                  ConsistencyLevel consistencyLevel,
-                                                 QueryState queryState,
-                                                 long queryStartNanoTime)
+                                                 long queryStartNanoTime,
+                                                 QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
-        // The read for paxos shouldn't go in the QueryInfoTracker#onRead method, as it has its own dedicated method
-        // which already has been called.
-        QueryInfoTracker.ReadTracker readTracker = queryState == null ? QueryInfoTracker.ReadTracker.NOOP :
-                                                   queryTracker().onRead(queryState.getClientState(),
-                                                                         group.metadata(),
-                                                                         group.queries,
-                                                                         consistencyLevel);
-
         try
         {
-            PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime);
+            PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime, readTracker);
             // Note that the only difference between the command in a group must be the partition key on which
             // they applied.
             boolean enforceStrictLiveness = group.queries.get(0).metadata().enforceStrictLiveness();
@@ -1903,7 +1905,7 @@ public class StorageProxy implements StorageProxyMBean
             // might not honor it and so we should enforce it
             if (group.queries.size() > 1)
                 result = group.limits().filter(result, group.nowInSec(), group.selectsFullPartition(), enforceStrictLiveness);
-            return PartitionIterators.doOnClose(result, readTracker::onDone);
+            return result;
         }
         catch (UnavailableException e)
         {
@@ -1976,7 +1978,10 @@ public class StorageProxy implements StorageProxyMBean
      * 4. If the digests (if any) match the data return the data
      * 5. else carry out read repair by getting data from all the nodes.
      */
-    private static PartitionIterator fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static PartitionIterator fetchRows(List<SinglePartitionReadCommand> commands,
+                                               ConsistencyLevel consistencyLevel,
+                                               long queryStartNanoTime,
+                                               QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         int cmdCount = commands.size();
@@ -1987,7 +1992,7 @@ public class StorageProxy implements StorageProxyMBean
         // for type of speculation we'll use in this read
         for (int i=0; i<cmdCount; i++)
         {
-            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime);
+            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime, readTracker);
         }
 
         // sends a data request to the closest replica, and a digest request to the others. If we have a speculating
@@ -2101,8 +2106,8 @@ public class StorageProxy implements StorageProxyMBean
                                                                               command,
                                                                               consistencyLevel);
 
-        PartitionIterator result = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime);
-        return PartitionIterators.doOnClose(result, readTracker::onDone);
+        PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
+        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
 
     public Map<String, List<String>> getSchemaVersions()

@@ -387,7 +387,14 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         if (clusteringIndexFilter.isEmpty(metadata().comparator))
             return EmptyIterators.partition();
 
-        return StorageProxy.read(Group.one(this), consistency, queryState, queryStartNanoTime);
+        Group group = Group.one(this);
+        QueryInfoTracker.ReadTracker readTracker = StorageProxy.queryTracker().onRead(queryState.getClientState(),
+                                                                                      group.metadata(),
+                                                                                      group.queries,
+                                                                                      consistency);
+
+        PartitionIterator partitions = StorageProxy.read(group, consistency, queryState, queryStartNanoTime, readTracker);
+        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
 
     protected void recordReadLatency(TableMetrics metric, long latencyNanos)
@@ -1137,7 +1144,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
         {
-            return StorageProxy.read(this, consistency, queryState, queryStartNanoTime);
+            QueryInfoTracker.ReadTracker readTracker = StorageProxy.queryTracker().onRead(queryState.getClientState(),
+                                                                                          this.metadata(),
+                                                                                          this.queries,
+                                                                                          consistency);
+            PartitionIterator partitions = StorageProxy.read(this, consistency, queryState, queryStartNanoTime, readTracker);
+            return PartitionIterators.doOnClose(partitions, readTracker::onDone);
         }
     }
 
