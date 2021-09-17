@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sasi;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -63,6 +64,7 @@ import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
 import org.apache.cassandra.index.sasi.plan.SASIIndexSearcher;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.INotification;
@@ -76,6 +78,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Comparables;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -93,9 +96,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                                        Collection<SSTableReader> sstablesToRebuild,
                                                        boolean isFullRebuild)
         {
-            NavigableMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>((a, b) -> {
-                return Integer.compare(a.descriptor.generation, b.descriptor.generation);
-            });
+            NavigableMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>(Comparator.comparing(t -> t.descriptor.generation));
 
             indexes.stream()
                    .filter((i) -> i instanceof SASIIndex)
@@ -134,8 +135,7 @@ public class SASIIndex implements Index, INotificationConsumer
         Tracker tracker = baseCfs.getTracker();
         tracker.subscribe(this);
 
-        SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> toRebuild = new TreeMap<>((a, b)
-                                                -> Integer.compare(a.descriptor.generation, b.descriptor.generation));
+        SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> toRebuild = new TreeMap<>(Comparator.comparing(t -> t.descriptor.generation));
 
         for (SSTableReader sstable : index.init(tracker.getLiveSSTables()))
         {

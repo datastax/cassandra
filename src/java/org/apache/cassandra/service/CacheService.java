@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -45,6 +46,9 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifierFactory;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -420,7 +424,7 @@ public class CacheService implements CacheServiceMBean
         // For column families with many SSTables the linear nature of getSSTables slowed down KeyCache loading
         // by orders of magnitude. So we cache the sstables once and rely on cleanupAfterDeserialize to cleanup any
         // cached state we may have accumulated during the load.
-        Map<Pair<String, String>, Map<Integer, SSTableReader>> cachedSSTableReaders = new ConcurrentHashMap<>();
+        Map<Pair<String, String>, Map<SSTableUniqueIdentifier, SSTableReader>> cachedSSTableReaders = new ConcurrentHashMap<>();
 
         public void serialize(KeyCacheKey key, DataOutputPlus out, ColumnFamilyStore cfs) throws IOException
         {
@@ -432,7 +436,8 @@ public class CacheService implements CacheServiceMBean
             tableMetadata.id.serialize(out);
             out.writeUTF(tableMetadata.indexName().orElse(""));
             ByteArrayUtil.writeWithLength(key.key, out);
-            out.writeInt(key.desc.generation);
+            out.writeInt(Integer.MIN_VALUE); // backwards compatibility for "int based generation only"
+            ByteBufferUtil.writeWithShortLength(key.desc.generation.asBytes(), out);
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
@@ -453,12 +458,16 @@ public class CacheService implements CacheServiceMBean
             }
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
+            SSTableUniqueIdentifier generationId = generation == Integer.MIN_VALUE
+                                  ? SSTableUniqueIdentifierFactory.instance.fromBytes(ByteBufferUtil.readWithShortLength(input))
+                                  : new SequenceBasedSSTableUniqueIdentifier(generation); // Backwards compatibility for "int based generation sstables"
+
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
             SSTableReader reader = null;
             if (!skipEntry)
             {
                 Pair<String, String> qualifiedName = Pair.create(cfs.metadata.keyspace, cfs.metadata.name);
-                Map<Integer, SSTableReader> generationToSSTableReader = cachedSSTableReaders.get(qualifiedName);
+                Map<SSTableUniqueIdentifier, SSTableReader> generationToSSTableReader = cachedSSTableReaders.get(qualifiedName);
                 if (generationToSSTableReader == null)
                 {
                     generationToSSTableReader = new HashMap<>(cfs.getLiveSSTables().size());
@@ -469,7 +478,7 @@ public class CacheService implements CacheServiceMBean
 
                     cachedSSTableReaders.putIfAbsent(qualifiedName, generationToSSTableReader);
                 }
-                reader = generationToSSTableReader.get(generation);
+                reader = generationToSSTableReader.get(generationId);
             }
 
             if (skipEntry || reader == null)
@@ -490,6 +499,16 @@ public class CacheService implements CacheServiceMBean
         public void cleanupAfterDeserialize()
         {
             cachedSSTableReaders.clear();
+        }
+
+        private SSTableReader findDesc(SSTableUniqueIdentifier generation, Iterable<SSTableReader> collection)
+        {
+            for (SSTableReader sstable : collection)
+            {
+                if (Objects.equals(sstable.descriptor.generation, generation))
+                    return sstable;
+            }
+            return null;
         }
     }
 }
