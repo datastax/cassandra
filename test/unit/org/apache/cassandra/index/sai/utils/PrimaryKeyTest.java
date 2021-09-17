@@ -43,39 +43,6 @@ public class PrimaryKeyTest
     }
 
     @Test
-    public void primaryKeyFromBytesTest() throws Exception
-    {
-        PrimaryKey.PrimaryKeyFactory keyFactory = PrimaryKey.factory(Murmur3Partitioner.instance,
-                                                                     new ClusteringComparator(),
-                                                                     Version.LATEST.onDiskFormat().indexFeatureSet());
-        DecoratedKey decoratedKey = Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.decompose("A"));
-        PrimaryKey expected = keyFactory.createKey(decoratedKey);
-        byte[] bytes = expected.asBytes();
-
-        PrimaryKey result = keyFactory.createKey(bytes);
-
-        assertTrue(expected.compareTo(result) == 0);
-    }
-
-    @Test
-    public void staticClusteringFromBytesTest() throws Exception
-    {
-        PrimaryKey.PrimaryKeyFactory keyFactory = PrimaryKey.factory(Murmur3Partitioner.instance,
-                                                                     new ClusteringComparator(UTF8Type.instance),
-                                                                     Version.LATEST.onDiskFormat().indexFeatureSet());
-
-        DecoratedKey decoratedKey = Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.decompose("A"));
-
-        PrimaryKey expected = keyFactory.createKey(decoratedKey, Clustering.STATIC_CLUSTERING);
-
-        byte[] bytes = expected.asBytes();
-
-        PrimaryKey result = keyFactory.createKey(bytes);
-
-        assertTrue(expected.compareTo(result) == 0);
-    }
-
-    @Test
     public void skinnyRowTest() throws Exception
     {
         PrimaryKey.PrimaryKeyFactory keyFactory = PrimaryKey.factory(Murmur3Partitioner.instance,

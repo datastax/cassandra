@@ -25,12 +25,12 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.lucene.store.IndexOutput;
 
 /**
  * Writes all SSTable-attached index token and offset structures.
@@ -41,7 +41,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
 
     private final IndexDescriptor indexDescriptor;
     private final MetadataWriter metadataWriter;
-    private final IndexOutput primaryKeys;
+    private final IndexOutputWriter primaryKeys;
     private final NumericValuesWriter primaryKeyOffsets;
 
     public SSTableComponentsWriter(IndexDescriptor indexDescriptor) throws IOException
@@ -59,8 +59,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     public void nextRow(PrimaryKey key) throws IOException
     {
         long offset = primaryKeys.getFilePointer();
-        byte[] rawKey = key.asBytes();
-        primaryKeys.writeBytes(rawKey, rawKey.length);
+        PrimaryKey.serializer.serialize(primaryKeys.asSequentialWriter(), 0, key);
         primaryKeyOffsets.add(offset);
     }
 

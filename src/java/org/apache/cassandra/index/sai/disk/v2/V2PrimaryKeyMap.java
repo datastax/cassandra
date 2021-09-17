@@ -104,22 +104,8 @@ public class V2PrimaryKeyMap implements PrimaryKeyMap
     public PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException
     {
         long startOffset = primaryKeyOffsets.get(sstableRowId);
-        long endOffset = (sstableRowId + 1) < size() ? primaryKeyOffsets.get(sstableRowId + 1)
-                                                     : primaryKeys.length();
-
-        if (endOffset - startOffset <= 0)
-            throw new IOException(
-                    "Primary key length <= 0 for row " + sstableRowId + " of " + offsetsPath);
-        if (endOffset - startOffset > Integer.MAX_VALUE)
-            throw new IOException(
-                    "Primary key length too large for row " + sstableRowId + " of " + offsetsPath);
-
-        int length = (int) (endOffset - startOffset);
-        byte[] serializedKeyBuf = new byte[length];
-
         primaryKeys.seek(startOffset);
-        primaryKeys.readFully(serializedKeyBuf);
-        return keyFactory.createKey(serializedKeyBuf, sstableRowId);
+        return keyFactory.createKey(primaryKeys, sstableRowId);
     }
 
     @Override

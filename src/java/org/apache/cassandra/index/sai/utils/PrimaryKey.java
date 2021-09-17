@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.utils;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
@@ -28,13 +29,17 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -47,6 +52,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 public class PrimaryKey implements Comparable<PrimaryKey>
 {
     private static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
+
+    public static final Serializer serializer = new Serializer();
 
     public enum Kind
     {
@@ -104,6 +111,12 @@ public class PrimaryKey implements Comparable<PrimaryKey>
                                   indexFeatureSet.isRowAware() ? clustering : Clustering.EMPTY,
                                   indexFeatureSet.isRowAware() ? comparator : EMPTY_COMPARATOR,
                                   -1);
+        }
+
+        public PrimaryKey createKey(DataInputPlus input, long sstableRowId) throws IOException
+        {
+            return serializer.deserialize(input, 0, partitioner, comparator, sstableRowId);
+
         }
 
         public PrimaryKey createKey(ByteComparable comparable, long sstableRowId)
@@ -232,13 +245,6 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         return partitionKey.getKey().remaining() + clustering.dataSize();
     }
 
-    public byte[] asBytes()
-    {
-        ByteSource source = asComparableBytes(ByteComparable.Version.OSS41);
-
-        return ByteSourceInverse.readBytes(source);
-    }
-
     public ByteSource asComparableBytes(ByteComparable.Version version)
     {
         ByteSource[] sources = new ByteSource[clustering.size() + 2];
@@ -328,5 +334,32 @@ public class PrimaryKey implements Comparable<PrimaryKey>
         if (obj instanceof PrimaryKey)
             return compareTo((PrimaryKey)obj) == 0;
         return false;
+    }
+
+    public static class Serializer
+    {
+        public void serialize(DataOutputPlus output, int version, PrimaryKey primaryKey) throws IOException
+        {
+            PartitionPosition.serializer.serialize(primaryKey.partitionKey, output, version);
+            output.writeByte(primaryKey.clustering.kind().ordinal());
+            if (primaryKey.clustering.kind() != ClusteringPrefix.Kind.STATIC_CLUSTERING)
+                Clustering.serializer.serialize(primaryKey.clustering, output, version, primaryKey.clusteringComparator.subtypes());
+        }
+
+        public PrimaryKey deserialize(DataInputPlus input,
+                                      int version,
+                                      IPartitioner partitioner,
+                                      ClusteringComparator clusteringComparator,
+                                      long sstableRowId) throws IOException
+        {
+            DecoratedKey partitionKey = (DecoratedKey)PartitionPosition.serializer.deserialize(input, partitioner, version);
+            int ordinal = input.readByte();
+            ClusteringPrefix.Kind kind = ClusteringPrefix.Kind.values()[ordinal];
+            Clustering clustering = kind == ClusteringPrefix.Kind.STATIC_CLUSTERING ? Clustering.STATIC_CLUSTERING
+                                                                                    : Clustering.serializer.deserialize(input,
+                                                                                                                        version,
+                                                                                                                        clusteringComparator.subtypes());
+            return new PrimaryKey(partitionKey, clustering, clusteringComparator, sstableRowId);
+        }
     }
 }
