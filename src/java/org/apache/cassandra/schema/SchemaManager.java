@@ -20,7 +20,6 @@ package org.apache.cassandra.schema;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
@@ -39,7 +38,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -86,7 +84,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
 
-    private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();
+    private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
     SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactory.instance.getSchemaUpdateHandler();
 
@@ -97,7 +95,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         boolean init = DatabaseDescriptor.isDaemonInitialized() || DatabaseDescriptor.isToolInitialized();
         localKeyspaces = new LocalKeyspaces(init);
-        localKeyspaces.getAll().forEach(this::loadNew);
+        localKeyspaces.getAll().forEach(this::addNewRefs);
     }
 
     public void startSync()
@@ -145,26 +143,38 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         KeyspaceMetadata previous = updateHandler.schema().getKeyspaces().getNullable(ksm.name);
 
         if (previous == null)
-            loadNew(ksm);
+            addNewRefs(ksm);
         else
-            reload(previous, ksm);
+            updateRefs(previous, ksm);
 
         updateHandler.addOrUpdate(ksm);
     }
 
-    private void loadNew(KeyspaceMetadata ksm)
+    /**
+     * Adds the {@link TableMetadataRef} corresponding to the provided keyspace to {@link #metadataRefs} and
+     * {@link #indexMetadataRefs}, assuming the keyspace is new (in the sense of not being tracked by the manager yet).
+     *
+     * todo removeme: same implementation
+     */
+    void addNewRefs(KeyspaceMetadata ksm)
     {
         ksm.tablesAndViews()
            .forEach(metadata -> metadataRefs.put(metadata.id, new TableMetadataRef(metadata)));
 
         ksm.tables
-           .indexTables()
-           .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
+        .indexTables()
+        .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
 
         SchemaDiagnostics.metadataInitialized(schema(), ksm);
     }
 
-    private void reload(KeyspaceMetadata previous, KeyspaceMetadata updated)
+    /**
+     * Updates the {@link TableMetadataRef} in {@link #metadataRefs} and {@link #indexMetadataRefs}, for an
+     * existing updated keyspace given it's previous and new definition.
+     *
+     * todo removeme: same implementation
+     */
+    void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
     {
         Keyspace keyspace = getKeyspaceInstance(updated.name);
         if (null != keyspace)
@@ -204,15 +214,37 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.metadataReloaded(schema(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
 
+    /**
+     * Removes the {@link TableMetadataRef} from {@link #metadataRefs} and {@link #indexMetadataRefs} for the provided
+     * (dropped) keyspace.
+     *
+     * todo removeme: same implementation
+     */
+    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
+    synchronized void removeRefs(KeyspaceMetadata ksm)
+    {
+        SchemaUpdateHandler.instance.remove(ksm.name);
+
+        ksm.tablesAndViews()
+           .forEach(t -> metadataRefs.remove(t.id));
+
+        ksm.tables
+        .indexTables()
+        .keySet()
+        .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
+
+        SchemaDiagnostics.metadataRemoved(SchemaUpdateHandler.instance.schema(), ksm);
+    }
+
     public void registerListener(SchemaChangeListener listener)
     {
-        changeListeners.add(listener);
+        schemaChangeNotifier.registerListener(listener);
     }
 
     @SuppressWarnings("unused")
     public void unregisterListener(SchemaChangeListener listener)
     {
-        changeListeners.remove(listener);
+        schemaChangeNotifier.unregisterListener(listener);
     }
 
     /**
@@ -239,8 +271,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             return null;
 
         return instance.hasColumnFamilyStore(metadata.id)
-             ? instance.getColumnFamilyStore(metadata.id)
-             : null;
+               ? instance.getColumnFamilyStore(metadata.id)
+               : null;
     }
 
     /**
@@ -277,26 +309,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return Keyspaces.builder().add(localKeyspaces.getAll()).add(updateHandler.schema().getKeyspaces()).build();
     }
 
-    /**
-     * Remove keyspace definition from system
-     *
-     * @param ksm The keyspace definition to remove
-     */
-    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
-    synchronized void unload(KeyspaceMetadata ksm)
-    {
-        updateHandler.remove(ksm.name);
-
-        ksm.tablesAndViews()
-           .forEach(t -> metadataRefs.remove(t.id));
-
-        ksm.tables
-           .indexTables()
-           .keySet()
-           .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
-
-        SchemaDiagnostics.metadataRemoved(schema(), ksm);
-    }
 
     // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
     public int getNumberOfTables()
@@ -344,9 +356,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public List<String> getNonLocalStrategyKeyspaces()
     {
         return updateHandler.schema().getKeyspaces().stream()
-                            .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
-                            .map(keyspace -> keyspace.name)
-                            .collect(Collectors.toList());
+                                           .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
+                                           .map(keyspace -> keyspace.name)
+                                           .collect(Collectors.toList());
     }
 
     /**
@@ -355,9 +367,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public List<String> getPartitionedKeyspaces()
     {
         return updateHandler.schema().getKeyspaces().stream()
-                            .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
-                            .map(keyspace -> keyspace.name)
-                            .collect(Collectors.toList());
+                                           .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
+                                           .map(keyspace -> keyspace.name)
+                                           .collect(Collectors.toList());
     }
 
     /**
@@ -416,8 +428,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         TableMetadata tm = getTableMetadata(keyspace, table);
         return tm == null
-             ? null
-             : metadataRefs.get(tm.id);
+               ? null
+               : metadataRefs.get(tm.id);
     }
 
     public TableMetadataRef getIndexTableMetadataRef(String keyspace, String index)
@@ -461,8 +473,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         KeyspaceMetadata ksm = getKeyspaceMetadata(keyspace);
         return ksm == null
-             ? null
-             : ksm.getTableOrViewNullable(table);
+               ? null
+               : ksm.getTableOrViewNullable(table);
     }
 
     @Override
@@ -510,8 +522,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         KeyspaceMetadata ksm = getKeyspaceMetadata(name.keyspace);
         return ksm == null
-             ? Collections.emptyList()
-             : ksm.functions.get(name);
+               ? Collections.emptyList()
+               : ksm.functions.get(name);
     }
 
     /**
@@ -529,8 +541,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         KeyspaceMetadata ksm = getKeyspaceMetadata(name.keyspace);
         return ksm == null
-             ? Optional.empty()
-             : ksm.functions.find(name, argTypes);
+               ? Optional.empty()
+               : ksm.functions.find(name, argTypes);
     }
 
     /* Version control */
@@ -580,7 +592,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public synchronized void clear()
     {
-        getNonSystemKeyspaces().forEach(k -> unload(getKeyspaceMetadata(k)));
+        getNonSystemKeyspaces().forEach(k -> removeRefs(getKeyspaceMetadata(k)));
         updateVersionAndAnnounce();
         SchemaDiagnostics.schemataCleared(schema());
     }
@@ -727,29 +739,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         // deal with all added, and altered views
         Keyspace.open(delta.after.name).viewManager.reload(true);
 
-        // notify on everything dropped
-        delta.udas.dropped.forEach(uda -> notifyDropAggregate((UDAggregate) uda));
-        delta.udfs.dropped.forEach(udf -> notifyDropFunction((UDFunction) udf));
-        delta.views.dropped.forEach(this::notifyDropView);
-        delta.tables.dropped.forEach(this::notifyDropTable);
-        delta.types.dropped.forEach(this::notifyDropType);
-
-        // notify on everything created
-        delta.types.created.forEach(this::notifyCreateType);
-        delta.tables.created.forEach(this::notifyCreateTable);
-        delta.views.created.forEach(this::notifyCreateView);
-        delta.udfs.created.forEach(udf -> notifyCreateFunction((UDFunction) udf));
-        delta.udas.created.forEach(uda -> notifyCreateAggregate((UDAggregate) uda));
-
-        // notify on everything altered
-        if (!delta.before.params.equals(delta.after.params))
-            notifyAlterKeyspace(delta.before, delta.after);
-        delta.types.altered.forEach(diff -> notifyAlterType(diff.before, diff.after));
-        delta.tables.altered.forEach(diff -> notifyAlterTable(diff.before, diff.after));
-        delta.views.altered.forEach(diff -> notifyAlterView(diff.before, diff.after));
-        delta.udfs.altered.forEach(diff -> notifyAlterFunction(diff.before, diff.after));
-        delta.udas.altered.forEach(diff -> notifyAlterAggregate(diff.before, diff.after));
-        SchemaDiagnostics.keyspaceAltered(schema(), delta);
+        schemaChangeNotifier.notifyKeyspaceAltered(delta);
     }
 
     private void createKeyspace(KeyspaceMetadata keyspace)
@@ -757,14 +747,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.keyspaceCreating(schema(), keyspace);
         load(keyspace);
         Keyspace.open(keyspace.name);
-
-        notifyCreateKeyspace(keyspace);
-        keyspace.types.forEach(this::notifyCreateType);
-        keyspace.tables.forEach(this::notifyCreateTable);
-        keyspace.views.forEach(this::notifyCreateView);
-        keyspace.functions.udfs().forEach(this::notifyCreateFunction);
-        keyspace.functions.udas().forEach(this::notifyCreateAggregate);
-        SchemaDiagnostics.keyspaceCreated(schema(), keyspace);
+        schemaChangeNotifier.notifyKeyspaceCreated(keyspace);
     }
 
     private void dropKeyspace(KeyspaceMetadata keyspace)
@@ -775,16 +758,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         // remove the keyspace from the static instances.
         Keyspace.clear(keyspace.name);
-        unload(keyspace);
+        removeRefs(keyspace);
         Keyspace.writeOrder.awaitNewBarrier();
-
-        keyspace.functions.udas().forEach(this::notifyDropAggregate);
-        keyspace.functions.udfs().forEach(this::notifyDropFunction);
-        keyspace.views.forEach(this::notifyDropView);
-        keyspace.tables.forEach(this::notifyDropTable);
-        keyspace.types.forEach(this::notifyDropType);
-        notifyDropKeyspace(keyspace);
-        SchemaDiagnostics.keyspaceDroped(schema(), keyspace);
+        schemaChangeNotifier.notifyKeyspaceDropped(keyspace);
     }
 
     private void dropView(ViewMetadata metadata)
@@ -830,98 +806,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void alterView(ViewMetadata updated)
     {
         Keyspace.open(updated.keyspace()).getColumnFamilyStore(updated.name()).reload();
-    }
-
-    private void notifyCreateKeyspace(KeyspaceMetadata ksm)
-    {
-        changeListeners.forEach(l -> l.onCreateKeyspace(ksm.name));
-    }
-
-    private void notifyCreateTable(TableMetadata metadata)
-    {
-        changeListeners.forEach(l -> l.onCreateTable(metadata.keyspace, metadata.name));
-    }
-
-    private void notifyCreateView(ViewMetadata view)
-    {
-        changeListeners.forEach(l -> l.onCreateView(view.keyspace(), view.name()));
-    }
-
-    private void notifyCreateType(UserType ut)
-    {
-        changeListeners.forEach(l -> l.onCreateType(ut.keyspace, ut.getNameAsString()));
-    }
-
-    private void notifyCreateFunction(UDFunction udf)
-    {
-        changeListeners.forEach(l -> l.onCreateFunction(udf.name().keyspace, udf.name().name, udf.argTypes()));
-    }
-
-    private void notifyCreateAggregate(UDAggregate udf)
-    {
-        changeListeners.forEach(l -> l.onCreateAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
-    }
-
-    private void notifyAlterKeyspace(KeyspaceMetadata before, KeyspaceMetadata after)
-    {
-        changeListeners.forEach(l -> l.onAlterKeyspace(after.name));
-    }
-
-    private void notifyAlterTable(TableMetadata before, TableMetadata after)
-    {
-        boolean changeAffectedPreparedStatements = before.changeAffectsPreparedStatements(after);
-        changeListeners.forEach(l -> l.onAlterTable(after.keyspace, after.name, changeAffectedPreparedStatements));
-    }
-
-    private void notifyAlterView(ViewMetadata before, ViewMetadata after)
-    {
-        boolean changeAffectedPreparedStatements = before.metadata.changeAffectsPreparedStatements(after.metadata);
-        changeListeners.forEach(l ->l.onAlterView(after.keyspace(), after.name(), changeAffectedPreparedStatements));
-    }
-
-    private void notifyAlterType(UserType before, UserType after)
-    {
-        changeListeners.forEach(l -> l.onAlterType(after.keyspace, after.getNameAsString()));
-    }
-
-    private void notifyAlterFunction(UDFunction before, UDFunction after)
-    {
-        changeListeners.forEach(l -> l.onAlterFunction(after.name().keyspace, after.name().name, after.argTypes()));
-    }
-
-    private void notifyAlterAggregate(UDAggregate before, UDAggregate after)
-    {
-        changeListeners.forEach(l -> l.onAlterAggregate(after.name().keyspace, after.name().name, after.argTypes()));
-    }
-
-    private void notifyDropKeyspace(KeyspaceMetadata ksm)
-    {
-        changeListeners.forEach(l -> l.onDropKeyspace(ksm.name));
-    }
-
-    private void notifyDropTable(TableMetadata metadata)
-    {
-        changeListeners.forEach(l -> l.onDropTable(metadata.keyspace, metadata.name));
-    }
-
-    private void notifyDropView(ViewMetadata view)
-    {
-        changeListeners.forEach(l -> l.onDropView(view.keyspace(), view.name()));
-    }
-
-    private void notifyDropType(UserType ut)
-    {
-        changeListeners.forEach(l -> l.onDropType(ut.keyspace, ut.getNameAsString()));
-    }
-
-    private void notifyDropFunction(UDFunction udf)
-    {
-        changeListeners.forEach(l -> l.onDropFunction(udf.name().keyspace, udf.name().name, udf.argTypes()));
-    }
-
-    private void notifyDropAggregate(UDAggregate udf)
-    {
-        changeListeners.forEach(l -> l.onDropAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
     }
 
     /**

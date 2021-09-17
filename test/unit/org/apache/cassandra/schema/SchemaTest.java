@@ -61,8 +61,8 @@ public class SchemaTest
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            SchemaManager.instance.unload(SchemaManager.instance.getKeyspaceMetadata("ks0"));
-            SchemaManager.instance.unload(SchemaManager.instance.getKeyspaceMetadata("ks1"));
+            SchemaManager.instance.removeRefs(SchemaManager.instance.getKeyspaceMetadata("ks0"));
+            SchemaManager.instance.removeRefs(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
