@@ -32,6 +32,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import org.apache.cassandra.cql3.CQLTester;
@@ -57,7 +58,6 @@ import static org.junit.Assert.assertEquals;
 @RunWith(BMUnitRunner.class)
 public class QueryInfoTrackerTest extends CQLTester
 {
-    private static final String KEYSPACE = "test_ks";
     private volatile TestQueryInfoTracker tracker;
     private volatile Session session;
 
@@ -65,7 +65,7 @@ public class QueryInfoTrackerTest extends CQLTester
     public void setupTest()
     {
         tracker = new TestQueryInfoTracker(KEYSPACE);
-        StorageProxy.instance.register(tracker);
+        StorageProxy.instance.registerQueryTracker(tracker);
         requireNetwork();
         session = sessionNet();
         // Just in case the teardown didn't run for some reason.
@@ -330,6 +330,25 @@ public class QueryInfoTrackerTest extends CQLTester
 
         assertEquals(1, tracker.errorWrites.get());
         assertEquals(0, tracker.reads.get());
+    }
+
+    @Test
+    public void testReplicaFilteringProtection() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT)");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        StorageProxy.instance.registerQueryTracker(new QueryInfoTrackerTest.TestQueryInfoTracker(KEYSPACE));
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0 ALLOW FILTERING");
+        assertEquals(2, rows.all().size());
+
+        QueryInfoTrackerTest.TestQueryInfoTracker queryInfoTracker = (QueryInfoTrackerTest.TestQueryInfoTracker)
+                                                                     StorageProxy.queryTracker();
+
+        assertEquals(1, queryInfoTracker.rangeReads.get());
+        assertEquals(2, queryInfoTracker.readRows.get());
     }
 
     public static class TestQueryInfoTracker implements QueryInfoTracker, Serializable

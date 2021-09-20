@@ -41,8 +41,6 @@ import org.apache.cassandra.utils.CloseableIterator;
  */
 public class EndpointGroupingRangeCommandIterator extends RangeCommandIterator
 {
-    private QueryInfoTracker.ReadTracker readTracker;
-
     EndpointGroupingRangeCommandIterator(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
                                          PartitionRangeReadCommand command,
                                          int concurrencyFactor,

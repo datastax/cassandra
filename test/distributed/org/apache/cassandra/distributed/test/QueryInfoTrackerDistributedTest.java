@@ -74,7 +74,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
         tester.mutate(2, "INSERT INTO %s (pk, ck, v) VALUES (1, 1, 2)");
 
         cluster.get(tester.coordinator).runOnInstance(() -> {
-            StorageProxy.instance.register(new QueryInfoTrackerTest.TestQueryInfoTracker(keyspace));
+            StorageProxy.instance.registerQueryTracker(new QueryInfoTrackerTest.TestQueryInfoTracker(keyspace));
         });
 
         tester.assertRowsDistributed("SELECT * FROM %s WHERE pk=1 AND ck=1",
@@ -97,7 +97,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
         cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
 
         cluster.get(1).runOnInstance(() -> {
-            StorageProxy.instance.register(new QueryInfoTrackerTest.TestQueryInfoTracker(KEYSPACE));
+            StorageProxy.instance.registerQueryTracker(new QueryInfoTrackerTest.TestQueryInfoTracker(KEYSPACE));
         });
 
         cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + ".tbl (pk, ck, v) VALUES (1, 1, 1) IF NOT EXISTS",

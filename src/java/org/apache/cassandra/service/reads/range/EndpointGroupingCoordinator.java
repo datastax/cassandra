@@ -99,7 +99,8 @@ public class EndpointGroupingCoordinator
                                        DataLimits.Counter counter,
                                        Iterator<ReplicaPlan.ForRangeRead> replicaPlans,
                                        int concurrencyFactor,
-                                       long queryStartNanoTime, QueryInfoTracker.ReadTracker readTracker)
+                                       long queryStartNanoTime,
+                                       QueryInfoTracker.ReadTracker readTracker)
     {
         this.command = command;
         this.counter = counter;

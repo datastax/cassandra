@@ -227,7 +227,7 @@ public class StorageProxy implements StorageProxyMBean
      *
      * @param tracker the tracker to register.
      */
-    public void register(QueryInfoTracker tracker) {
+    public void registerQueryTracker(QueryInfoTracker tracker) {
         Objects.requireNonNull(tracker);
         queryInfoTracker = tracker;
     }

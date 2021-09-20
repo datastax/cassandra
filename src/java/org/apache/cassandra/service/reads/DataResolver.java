@@ -213,7 +213,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
             listener = wrapMergeListener(readRepair.getMergeListener(sources), sources, repairedDataTracker);
         }
 
-        return resolveInternal(context, listener, responseProvider, preCountFilter);
+        return resolveInternal(context, listener, responseProvider, preCountFilter, readTracker);
     }
 
     @SuppressWarnings("resource")
@@ -250,7 +250,8 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         PartitionIterator firstPhasePartitions = resolveInternal(firstPhaseContext,
                                                                  rfp.mergeController(),
                                                                  i -> shortReadProtectedResponse(i, firstPhaseContext),
-                                                                 UnaryOperator.identity());
+                                                                 UnaryOperator.identity(),
+                                                                 QueryInfoTracker.ReadTracker.NOOP);
 
         PartitionIterator completedPartitions = resolveWithReadRepair(secondPhaseContext,
                                                                       i -> rfp.queryProtectedPartitions(firstPhasePartitions, i),
@@ -276,7 +277,8 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private PartitionIterator resolveInternal(ResolveContext context,
                                               UnfilteredPartitionIterators.MergeListener mergeListener,
                                               ResponseProvider responseProvider,
-                                              UnaryOperator<PartitionIterator> preCountFilter)
+                                              UnaryOperator<PartitionIterator> preCountFilter,
+                                              QueryInfoTracker.ReadTracker resolveReadTracker)
     {
         int count = context.replicas.size();
         List<UnfilteredPartitionIterator> results = new ArrayList<>(count);
@@ -298,7 +300,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
          */
 
         UnfilteredPartitionIterator merged = UnfilteredPartitionIterators.merge(results, mergeListener);
-        UnfilteredPartitionIterator trackedPartitionIterator = Transformation.apply(merged, new ReadTrackingTransformation(readTracker));
+        UnfilteredPartitionIterator trackedPartitionIterator = Transformation.apply(merged, new ReadTrackingTransformation(resolveReadTracker));
         Filter filter = new Filter(command.nowInSec(), command.metadata().enforceStrictLiveness());
         FilteredPartitions filtered = FilteredPartitions.filter(trackedPartitionIterator, filter);
         PartitionIterator counted = Transformation.apply(preCountFilter.apply(filtered), context.mergedResultCounter);

@@ -46,7 +46,8 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
                                     int concurrencyFactor,
                                     int maxConcurrencyFactor,
                                     int totalRangeCount,
-                                    long queryStartNanoTime, QueryInfoTracker.ReadTracker readTracker)
+                                    long queryStartNanoTime,
+                                    QueryInfoTracker.ReadTracker readTracker)
     {
         super(replicaPlans, command, concurrencyFactor, maxConcurrencyFactor, totalRangeCount, queryStartNanoTime, readTracker);
     }
