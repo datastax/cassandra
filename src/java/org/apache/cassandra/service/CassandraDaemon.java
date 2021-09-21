@@ -79,6 +79,7 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 import org.apache.cassandra.tracing.Tracing;
@@ -284,7 +285,7 @@ public class CassandraDaemon
         try
         {
             // load schema from disk
-            SchemaManager.instance.loadFromDisk();
+            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
         }
         catch (Exception e)
         {

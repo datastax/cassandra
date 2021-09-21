@@ -46,7 +46,7 @@ public class SchemaTest
     {
         CommitLog.instance.start();
         SchemaLoader.cleanupAndLeaveDirs();
-        SchemaManager.instance.loadFromDisk();
+        SchemaUpdateHandler.instance.initializeSchemaFromDisk();
         assertEquals(0, SchemaManager.instance.getNonSystemKeyspaces().size());
 
         Gossiper.instance.start((int)(System.currentTimeMillis() / 1000));
@@ -67,7 +67,7 @@ public class SchemaTest
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            SchemaManager.instance.loadFromDisk();
+            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
 
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));

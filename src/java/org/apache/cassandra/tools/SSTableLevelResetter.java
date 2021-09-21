@@ -30,6 +30,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -65,7 +66,7 @@ public class SSTableLevelResetter
         try
         {
             // load keyspace descriptions.
-            SchemaManager.instance.loadFromDisk(false);
+            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
 
             String keyspaceName = args[1];
             String columnfamily = args[2];

@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
@@ -216,4 +217,28 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     {
         return SchemaKeyspace.convertSchemaToMutations();
     }
+
+    /**
+     * Load schema definitions from disk.
+     */
+    @Override
+    public void initializeSchemaFromDisk()
+    {
+        SchemaDiagnostics.schemataLoading(schema());
+
+        Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
+        UUID version = SchemaKeyspace.calculateSchemaDigest();
+        schema = new Schema(keyspaces, version);
+        SchemaDiagnostics.versionUpdated(SchemaUpdateHandler.instance.schema());
+        SchemaManager.instance.updateRefs(Keyspaces.diff(Keyspaces.none(), keyspaces));
+        if (!keyspaces.isEmpty())
+        {
+            SystemKeyspace.updateSchemaVersion(version);
+            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
+            SchemaDiagnostics.versionAnnounced(schema);
+        }
+
+        SchemaDiagnostics.schemataLoaded(SchemaUpdateHandler.instance.schema());
+    }
+
 }

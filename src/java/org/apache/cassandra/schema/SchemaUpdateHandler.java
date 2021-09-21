@@ -75,6 +75,8 @@ public interface SchemaUpdateHandler
     // temporary, todo remove
     void pushSchema(SchemaManager.TransformationResult result);
 
+    void initializeSchemaFromDisk();
+
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
      * interface.

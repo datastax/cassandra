@@ -107,31 +107,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * load keyspace (keyspace) definitions, but do not initialize the keyspace instances.
-     * Schema version may be updated as the result.
-     */
-    // todo move out
-    public void loadFromDisk()
-    {
-        loadFromDisk(true);
-    }
-
-    /**
-     * Load schema definitions from disk.
-     *
-     * @param updateVersion true if schema version needs to be updated
-     */
-    // todo move out
-    public void loadFromDisk(boolean updateVersion)
-    {
-        SchemaDiagnostics.schemataLoading(schema());
-        SchemaKeyspace.fetchNonSystemKeyspaces().forEach(this::load);
-        if (updateVersion)
-            updateVersion();
-        SchemaDiagnostics.schemataLoaded(schema());
-    }
-
-    /**
      * Update (or insert) new keyspace definition
      *
      * @param ksm The metadata about keyspace
@@ -179,6 +154,16 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         updateHandler.remove(ksm.name);
         schemaRefCache.removeRefs(ksm);
         SchemaDiagnostics.metadataRemoved(schema(), ksm);
+    }
+
+    /**
+     * Update/create/drop the {@link TableMetadataRef} in {@link SchemaManager}.
+     */
+    void updateRefs(KeyspacesDiff diff)
+    {
+        diff.dropped.forEach(this::removeRefs);
+        diff.created.forEach(this::addNewRefs);
+        diff.altered.forEach(delta -> this.updateRefs(delta.before, delta.after));
     }
 
     public void registerListener(SchemaChangeListener listener)
