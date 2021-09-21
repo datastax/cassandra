@@ -102,6 +102,8 @@ public abstract class AbstractReadExecutor
         for (Replica replica : replicaPlan.contacts())
             digestVersion = Math.min(digestVersion, MessagingService.instance().versions.get(replica.endpoint()));
         command.setDigestVersion(digestVersion);
+
+        readTracker.onReplicaPlan(replicaPlan);
     }
 
     public DecoratedKey getKey()

@@ -117,6 +117,7 @@ public class EndpointGroupingCoordinator
         while (replicaPlans.hasNext() && vnodeRanges < concurrencyFactor)
         {
             ReplicaPlan.ForRangeRead replicaPlan = replicaPlans.next();
+            readTracker.onReplicaPlan(replicaPlan);
 
             boolean isFirst = vnodeRanges == 0;
             vnodeRanges += replicaPlan.vnodeCount();

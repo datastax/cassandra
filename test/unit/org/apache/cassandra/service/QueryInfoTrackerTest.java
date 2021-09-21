@@ -19,7 +19,6 @@
 package org.apache.cassandra.service;
 
 import java.io.Serializable;
-import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -43,6 +42,7 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.schema.TableMetadata;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -106,12 +106,14 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(1, tracker.reads.get());
         assertEquals(CLUSTERING, tracker.readRows.get());
         assertEquals(1, tracker.readPartitions.get());
+        assertEquals(1, tracker.replicaPlans.get());
 
         assertEquals(0, tracker.rangeReads.get());
         session.execute("SELECT * FROM " + TABLE);
         assertEquals(1, tracker.rangeReads.get());
         assertEquals(CLUSTERING + KEYS * CLUSTERING, tracker.readRows.get());
         assertEquals(1 + KEYS, tracker.readPartitions.get());
+        assertEquals(1 + 1, tracker.replicaPlans.get());
 
         session.execute("UPDATE " + TABLE + " SET v = ? WHERE k = ? AND c IN ?", 42, 0, Arrays.asList(0, 2, 3));
         expectedWrites += 1; // We only did one more write ...
@@ -170,6 +172,7 @@ public class QueryInfoTrackerTest extends CQLTester
         // The writes or reads shouldn't have changed though.
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
+        assertEquals(1, tracker.replicaPlans.get());
 
         session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
         // This should not apply now and on top of the lwt specific increases, we should have read 1 additional row.
@@ -181,6 +184,7 @@ public class QueryInfoTrackerTest extends CQLTester
         // The writes or reads shouldn't have changed though.
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
+        assertEquals(2, tracker.replicaPlans.get());
 
         // More complex LWT batch.
         session.execute("BEGIN BATCH "
@@ -196,6 +200,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(2, tracker.writes.get());
         assertEquals(0, tracker.reads.get());
         assertEquals(3, tracker.readRows.get());
+        assertEquals(3, tracker.replicaPlans.get());
 
 
         PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
@@ -203,6 +208,7 @@ public class QueryInfoTrackerTest extends CQLTester
         session.execute(statement.bind(0));
         assertEquals(1, tracker.reads.get());
         assertEquals(6, tracker.readRows.get());
+        assertEquals(4, tracker.replicaPlans.get());
     }
 
     @Test
@@ -349,6 +355,7 @@ public class QueryInfoTrackerTest extends CQLTester
 
         assertEquals(1, queryInfoTracker.rangeReads.get());
         assertEquals(2, queryInfoTracker.readRows.get());
+        assertEquals(1, queryInfoTracker.replicaPlans.get());
     }
 
     public static class TestQueryInfoTracker implements QueryInfoTracker, Serializable
@@ -363,6 +370,7 @@ public class QueryInfoTrackerTest extends CQLTester
         public final AtomicInteger readRows = new AtomicInteger();
         public final AtomicInteger readPartitions = new AtomicInteger();
         public final AtomicInteger errorReads = new AtomicInteger();
+        public final AtomicInteger replicaPlans = new AtomicInteger();
 
         public final AtomicInteger lwts = new AtomicInteger();
         public final AtomicInteger nonAppliedLwts = new AtomicInteger();
@@ -468,9 +476,9 @@ public class QueryInfoTrackerTest extends CQLTester
             }
 
             @Override
-            public void queried(Collection<InetAddress> queried)
+            public void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan)
             {
-                // TODO: test
+                replicaPlans.incrementAndGet();
             }
 
             @Override
@@ -501,9 +509,9 @@ public class QueryInfoTrackerTest extends CQLTester
             }
 
             @Override
-            public void queried(Collection<InetAddress> queried)
+            public void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan)
             {
-                // TODO: test
+                replicaPlans.incrementAndGet();
             }
 
             @Override
@@ -547,9 +555,9 @@ public class QueryInfoTrackerTest extends CQLTester
             }
 
             @Override
-            public void queried(Collection<InetAddress> queried)
+            public void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan)
             {
-                // TODO: test
+                replicaPlans.incrementAndGet();
             }
 
             @Override

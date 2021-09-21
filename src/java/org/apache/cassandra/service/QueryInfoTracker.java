@@ -31,6 +31,7 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -199,7 +200,7 @@ public interface QueryInfoTracker
         ReadTracker NOOP = new ReadTracker()
         {
             @Override
-            public void queried(Collection<InetAddress> queried)
+            public void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan)
             {
             }
 
@@ -225,11 +226,15 @@ public interface QueryInfoTracker
         };
 
         /**
-         * Calls just before queries are sent with the hosts to which the query is sent.
+         * Calls just before queries are sent with the contacts from the replica plan.
+         * Note that this callback method may be invoked more than once for a given read,
+         * e.g. range quries spanning multiple partitions are internally issued as a
+         * number of subranges requests to different replicas (with different
+         * ReplicaPlans). This callback is called at least once for a given read.
          *
-         * @param queried the queried nodes.
+         * @param replicaPlan the queried nodes.
          */
-        void queried(Collection<InetAddress> queried);
+        void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan);
 
         /**
          * Called on every new reconciled partition.
@@ -249,8 +254,8 @@ public interface QueryInfoTracker
     /**
      * Tracker for LWTs, used to get information on the actual work done by the LWT.
      *
-     * <p>For a given LWT, the tracker created by {@link #onLWTWrite} will first have its {@link #readObserver()}
-     * method called. Then, based on that read result and the LWT conditions, either the {@link #onNotApplied()} or
+     * <p>For a given LWT, the tracker created by {@link #onLWTWrite} will first have its read
+     * methods called. Then, based on that read result and the LWT conditions, either the {@link #onNotApplied()} or
      * the {@link #onApplied} method will be called.
      */
     interface LWTWriteTracker extends ReadTracker
@@ -261,7 +266,7 @@ public interface QueryInfoTracker
         LWTWriteTracker NOOP = new LWTWriteTracker()
         {
             @Override
-            public void queried(Collection<InetAddress> queried)
+            public void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan)
             {
             }
 

@@ -88,6 +88,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
             Assert.assertEquals(1, tracker.reads.get());
             Assert.assertEquals(1, tracker.readPartitions.get());
             Assert.assertEquals(1, tracker.readRows.get());
+            Assert.assertEquals(1, tracker.replicaPlans.get());
         });
     }
 
@@ -100,7 +101,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
             StorageProxy.instance.registerQueryTracker(new QueryInfoTrackerTest.TestQueryInfoTracker(KEYSPACE));
         });
 
-        cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + ".tbl (pk, ck, v) VALUES (1, 1, 1) IF NOT EXISTS",
+        cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + ".tbl (pk, ck, v) VALUES (1, 1, 1)",
                                        ConsistencyLevel.QUORUM);
         assertRows(cluster.coordinator(1).execute("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1",
                                                   ConsistencyLevel.QUORUM),
@@ -114,6 +115,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
             Assert.assertEquals(1, tracker.reads.get());
             Assert.assertEquals(1, tracker.readPartitions.get());
             Assert.assertEquals(1, tracker.readRows.get());
+            Assert.assertEquals(1, tracker.replicaPlans.get());
         });
     }
 
@@ -150,6 +152,7 @@ public class QueryInfoTrackerDistributedTest extends TestBaseImpl
             Assert.assertEquals(1, tracker.rangeReads.get());
             Assert.assertEquals(rowsCount, tracker.readPartitions.get());
             Assert.assertEquals(rowsCount, tracker.readRows.get());
+            Assert.assertEquals(4, tracker.replicaPlans.get());
         });
     }
 }

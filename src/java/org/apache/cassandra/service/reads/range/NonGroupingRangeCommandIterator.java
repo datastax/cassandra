@@ -62,6 +62,7 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
             for (int i = 0; i < concurrencyFactor() && replicaPlans.hasNext(); )
             {
                 ReplicaPlan.ForRangeRead replicaPlan = replicaPlans.next();
+                readTracker.onReplicaPlan(replicaPlan);
 
                 @SuppressWarnings("resource") // response will be closed by concatAndBlockOnRepair, or in the catch block below
                 SingleRangeResponse response = query(replicaPlan, i == 0);
