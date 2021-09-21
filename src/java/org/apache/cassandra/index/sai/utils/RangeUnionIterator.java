@@ -19,11 +19,8 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -35,7 +32,7 @@ public class RangeUnionIterator extends RangeIterator
     private final List<RangeIterator> ranges;
 
     private final List<RangeIterator> toRelease;
-    private final List<RangeIterator> candidates = new ArrayList<>();
+    private final List<RangeIterator> rangesToAdvance = new ArrayList<>();
 
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
@@ -44,42 +41,31 @@ public class RangeUnionIterator extends RangeIterator
         this.toRelease = new ArrayList<>(ranges);
     }
 
-    public PrimaryKey computeNext()
-    {
-        candidates.clear();
-        PrimaryKey candidate = null;
+    public PrimaryKey computeNext() {
+        rangesToAdvance.clear();
+        PrimaryKey minKey = null;
+
+        // Linear search for the minimum key accross all iterators.
+        // Remember the iterators which returned the final minimum key in the rangesToAdvance collection.
         for (RangeIterator range : ranges)
         {
             if (range.hasNext())
             {
-                // Avoid repeated values but only if we have read at least one value
-                while (next != null && range.hasNext() && range.peek().compareTo(getCurrent()) == 0)
-                    range.next();
-                if (!range.hasNext())
-                    continue;
-                if (candidate == null)
+                PrimaryKey key = range.peek();
+                int cmp = (minKey == null) ? -1 : key.compareTo(minKey);
+                if (cmp < 0)
                 {
-                    candidate = range.peek();
-                    candidates.add(range);
+                    minKey = key;
+                    rangesToAdvance.clear();
                 }
-                else
-                {
-                    int cmp = candidate.compareTo(range.peek());
-                    if (cmp == 0)
-                        candidates.add(range);
-                    else if (cmp > 0)
-                    {
-                        candidates.clear();
-                        candidate = range.peek();
-                        candidates.add(range);
-                    }
-                }
+                if (cmp <= 0)
+                    rangesToAdvance.add(range);
             }
         }
-        if (candidates.isEmpty())
-            return endOfData();
-        candidates.forEach(RangeIterator::next);
-        return candidate;
+
+        // Consume the minimum items on all iterators that supplied them, so minKey is never returned again:
+        rangesToAdvance.forEach(RangeIterator::next);
+        return minKey != null ? minKey : endOfData();
     }
 
     protected void performSkipTo(PrimaryKey nextKey)

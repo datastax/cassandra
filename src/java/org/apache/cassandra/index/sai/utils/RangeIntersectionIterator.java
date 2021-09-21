@@ -22,13 +22,11 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -63,54 +61,58 @@ public class RangeIntersectionIterator extends RangeIterator
         this.processedRanges = new ArrayList<>(ranges.size());
     }
 
+    /**
+     * Fetches the next available item from the iterator, such that the item is not lower than the given key.
+     * If no such items are available, returns null.
+     */
+    private PrimaryKey nextOrNull(RangeIterator iterator, PrimaryKey minKey) {
+        iterator.skipTo(minKey);
+        return iterator.hasNext() ? iterator.next() : null;
+    }
+
     protected PrimaryKey computeNext()
     {
-        processedRanges.clear();
-        RangeIterator head = null;
-        PrimaryKey candidate = null;
-        while (!ranges.isEmpty())
+        // Range iterator that has been advanced in the previous cycle of the outer loop.
+        // Initially there hasn't been the previous cycle, so set to null.
+        RangeIterator alreadyAvanced = null;
+
+        // The highest primary key seen on any range iterator so far.
+        // It can become null when we reach the end of the iterator.
+        PrimaryKey highestKey = getCurrent();
+
+        outer:
+        while (highestKey != null && highestKey.compareTo(getMaximum()) <= 0)
         {
-            RangeIterator range = ranges.remove(0);
-            if (!range.hasNext())
-                return endOfData();
-            if (range.getCurrent().compareTo(getMinimum()) < 0)
+            // Try advance all iterators to the highest key seen so far.
+            // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
+            for (RangeIterator range: ranges)
             {
-                range.skipTo(getMinimum());
-            }
-            if (candidate == null)
-            {
-                candidate = range.hasNext() ? range.next() : null;
-                if (candidate == null || candidate.compareTo(getMaximum()) > 0)
-                    return endOfData();
-                head = range;
-            }
-            else
-            {
-                if (!isOverlapping(head, range) || (range.skipTo(candidate) == null))
+                if (range != alreadyAvanced)
                 {
-                    return endOfData();
+                    PrimaryKey nextKey = nextOrNull(range, highestKey);
+                    if (nextKey == null || nextKey.compareTo(highestKey) > 0)
+                    {
+                        // We jumped over the highest key seen so far, so make it the new highest key.
+                        highestKey = nextKey;
+                        // Remember this iterator to avoid advancing it again, because it is already at the highest key
+                        alreadyAvanced = range;
+                        // This iterator jumped over, so the other iterators are lagging behind now,
+                        // including the ones already advanced in the earlier cycles of the inner loop.
+                        // Therefore, restart the inner loop in order to advance
+                        // the other iterators except this one to match the new highest key.
+                        continue outer;
+                    }
+                    assert nextKey.compareTo(highestKey) == 0:
+                            String.format("skipTo skipped to an item smaller than the target; " +
+                                    "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
                 }
-                int cmp = candidate.compareTo(range.getCurrent());
-                if (cmp == 0)
-                {
-                    range.hasNext();
-                    processedRanges.add(range);
-                }
-                else if (cmp < 0)
-                {
-                    candidate = range.next();
-                    ranges.add(head);
-                    ranges.addAll(processedRanges);
-                    processedRanges.clear();
-                    head = range;
-                }
-                else
-                    return endOfData();
             }
+            // If we reached here, next() has been called at least once on each range iterator and
+            // the last call to next() on each iterator returned a value equal to the highestKey.
+            return highestKey;
         }
-        ranges.add(head);
-        ranges.addAll(processedRanges);
-        return candidate;
+
+        return endOfData();
     }
 
     protected void performSkipTo(PrimaryKey nextToken)

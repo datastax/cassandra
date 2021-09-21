@@ -80,6 +80,19 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     }
 
     @Test
+    public void testSameValues()
+    {
+        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+
+        builder.add(new LongIterator(new long[] { 1L, 2L, 3L, 4L }));
+        builder.add(new LongIterator(new long[] { 1L, 2L, 3L, 4L }));
+
+        Assert.assertEquals(convert(1L, 2L, 3L, 4L), convert(builder.build()));
+    }
+
+
+
+    @Test
     public void testSingleIterator()
     {
         RangeIntersectionIterator.Builder builder = RangeIntersectionIterator.builder();
