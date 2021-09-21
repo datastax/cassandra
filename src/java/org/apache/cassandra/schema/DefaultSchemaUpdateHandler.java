@@ -22,15 +22,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import javax.annotation.Nonnull;
-
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,12 +42,8 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 @NotThreadSafe
 public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAware, IEndpointStateChangeSubscriber
@@ -80,11 +74,12 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     @Override
     public void start()
     {
-        migrationCoordinator.start();
+        migrationCoordinator.start(this);
     }
 
     @Override
-    public @Nonnull Schema schema()
+    public @Nonnull
+    Schema schema()
     {
         return schema;
     }
@@ -155,39 +150,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public void pushSchema(SchemaManager.TransformationResult result)
-    {
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints,
-                                                                    schemaEndpointsIgnored,
-                                                                    result.transformation);
-    }
-
-    @VisibleForTesting
-    public boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
-    {
-        // only push schema to nodes with known and equal versions
-        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
-               && MessagingService.instance().versions.knows(endpoint)
-               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
-    }
-
-    @Override
     public void onRemove(InetAddressAndPort endpoint)
     {
         migrationCoordinator.removeAndIgnoreEndpoint(endpoint);
@@ -209,7 +171,51 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     @Override
     public void applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations)
     {
-        SchemaManager.instance.mergeAndAnnounceVersion(schemaMutations);
+        Schema before = schema();
+
+        // apply the schema mutations
+        SchemaKeyspace.applyChanges(schemaMutations);
+
+        // only compare the keyspaces affected by this set of schema mutations
+        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(schemaMutations);
+
+        // apply the schema mutations and fetch the new versions of the altered keyspaces
+        Keyspaces updatedKeyspaces = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
+        Set<String> removedKeyspaces = affectedKeyspaces.stream().filter(ks -> !updatedKeyspaces.containsKeyspace(ks)).collect(Collectors.toSet());
+        Keyspaces afterKeyspaces = before.getKeyspaces().withAddedOrReplaced(updatedKeyspaces).without(removedKeyspaces);
+
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
+        UUID version = SchemaKeyspace.calculateSchemaDigest();
+        Schema after = new Schema(afterKeyspaces, version);
+        SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
+
+        updateSchema(update);
+        announceVersionUpdate(after.getVersion());
+    }
+
+    @Override
+    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingSettings)
+    {
+        Schema before = schema();
+        Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
+
+        if (diff.isEmpty())
+            return new SchemaTransformation.SchemaTransformationResult(before, before, diff);
+
+        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, preserveExistingSettings ? 0 : FBUtilities.timestampMicros());
+        SchemaKeyspace.applyChanges(mutations);
+        Schema after = new Schema(afterKeyspaces, SchemaKeyspace.calculateSchemaDigest());
+        SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
+
+        updateSchema(update);
+        if (!locally)
+        {
+            migrationCoordinator.pushSchemaMutations(mutations); // this was not there in OSS, but it is there in DSE
+            announceVersionUpdate(after.getVersion());
+        }
+
+        return update;
     }
 
     @Override
@@ -229,16 +235,44 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
         UUID version = SchemaKeyspace.calculateSchemaDigest();
         schema = new Schema(keyspaces, version);
-        SchemaDiagnostics.versionUpdated(SchemaUpdateHandler.instance.schema());
+        SchemaDiagnostics.versionUpdated(SchemaManager.instance.schema());
         SchemaManager.instance.updateRefs(Keyspaces.diff(Keyspaces.none(), keyspaces));
         if (!keyspaces.isEmpty())
-        {
-            SystemKeyspace.updateSchemaVersion(version);
-            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
-            SchemaDiagnostics.versionAnnounced(schema);
-        }
+            announceVersionUpdate(schema.getVersion());
 
-        SchemaDiagnostics.schemataLoaded(SchemaUpdateHandler.instance.schema());
+        SchemaDiagnostics.schemataLoaded(SchemaManager.instance.schema());
     }
 
+    public void announceVersionUpdate(UUID version)
+    {
+        SystemKeyspace.updateSchemaVersion(version);
+        if (Gossiper.instance.isEnabled())
+            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
+        SchemaDiagnostics.versionAnnounced(schema);
+    }
+
+    /*
+     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
+     * in-memory representation got out of sync somehow with what's on disk.
+     */
+    @Override
+    public void reloadSchemaFromDisk()
+    {
+        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
+        apply(existing -> after, false, false);
+    }
+
+
+    public void updateSchema(SchemaTransformation.SchemaTransformationResult update)
+    {
+        assert schema == update.before;
+
+        if (update.diff.isEmpty())
+            return;
+
+        // TODO notifyPreChanges(diff)
+        schema = update.after;
+        SchemaManager.instance.updateRefs(update.diff);
+        SchemaManager.instance.applyChangesLocally(update.diff);
+    }
 }

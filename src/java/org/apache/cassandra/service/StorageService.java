@@ -1160,7 +1160,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (setUpSchema)
             {
                 Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
-                mutation.ifPresent(value -> FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(Collections.singleton(value))));
+                mutation.ifPresent(value -> SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, Collections.singleton(value)));
             }
 
             DatabaseDescriptor.getRoleManager().setup();
@@ -1187,7 +1187,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         SchemaManager.instance.evolveSystemKeyspace(             AuthKeyspace.metadata(),              AuthKeyspace.GENERATION).ifPresent(changes::add);
 
         if (!changes.isEmpty())
-            FBUtilities.waitOnFuture(SchemaManager.instance.applyWithoutPush(changes));
+            SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, changes);
     }
 
     public boolean isJoined()
@@ -5561,7 +5561,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void reloadLocalSchema()
     {
-        SchemaManager.instance.reloadSchemaAndAnnounceVersion();
+        SchemaManager.instance.reloadSchemaFromDisk();
     }
 
     public void setTraceProbability(double probability)

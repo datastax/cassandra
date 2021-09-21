@@ -54,7 +54,7 @@ public class StandaloneVerifier
     private static final String QUICK = "quick";
     private static final String TOKEN_RANGE = "token_range";
 
-    public static void main(String args[])
+    public static void main(String[] args)
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
@@ -63,7 +63,7 @@ public class StandaloneVerifier
         try
         {
             // load keyspace descriptions.
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
 
             boolean hasFailed = false;
 
@@ -156,7 +156,7 @@ public class StandaloneVerifier
             this.cfName = cfName;
         }
 
-        public static Options parseArgs(String cmdArgs[])
+        public static Options parseArgs(String[] cmdArgs)
         {
             CommandLineParser parser = new GnuParser();
             CmdLineOptions options = getCmdLineOptions();

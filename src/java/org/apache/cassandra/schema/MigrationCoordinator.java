@@ -36,7 +36,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
+
+import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -52,8 +55,8 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -62,6 +65,8 @@ import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
+
+import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 public class MigrationCoordinator
 {
@@ -166,9 +171,20 @@ public class MigrationCoordinator
     private final AtomicInteger inflightTasks = new AtomicInteger();
     private final Set<InetAddressAndPort> ignoredEndpoints = getIgnoredEndpoints();
 
-    public void start()
+    private final AtomicReference<SchemaUpdateHandler.GossipAware> schemaUpdateHandlerRef = new AtomicReference<>();
+
+    public void start(@Nonnull SchemaUpdateHandler.GossipAware schemaUpdateHandler)
     {
-        ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES);
+        Preconditions.checkNotNull(schemaUpdateHandler);
+        if (schemaUpdateHandlerRef.compareAndSet(null, schemaUpdateHandler))
+        {
+            ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES);
+        }
+        else
+        {
+            if (schemaUpdateHandler != schemaUpdateHandlerRef.get())
+                throw new IllegalStateException("Migration coordinator has been already started");
+        }
     }
 
     @VisibleForTesting
@@ -447,7 +463,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected void mergeSchemaFrom(InetAddressAndPort endpoint, Collection<Mutation> mutations)
     {
-        SchemaManager.instance.mergeAndAnnounceVersion(mutations);
+        schemaUpdateHandlerRef.get().applyReceivedSchemaMutations(endpoint, mutations);
     }
 
     @VisibleForTesting
@@ -598,4 +614,37 @@ public class MigrationCoordinator
                 signal.cancel();
         }
     }
+
+    public void pushSchemaMutations(Collection<Mutation> schemaMutations)
+    {
+        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
+        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
+        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schemaMutations);
+        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
+        {
+            if (shouldPushSchemaTo(endpoint))
+            {
+                MessagingService.instance().send(message, endpoint);
+                schemaDestinationEndpoints.add(endpoint);
+            }
+            else
+            {
+                schemaEndpointsIgnored.add(endpoint);
+            }
+        }
+
+        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints,
+                                                                    schemaEndpointsIgnored,
+                                                                    null);
+    }
+
+    @VisibleForTesting
+    public boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
+    {
+        // only push schema to nodes with known and equal versions
+        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
+               && MessagingService.instance().versions.knows(endpoint)
+               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
+    }
+
 }

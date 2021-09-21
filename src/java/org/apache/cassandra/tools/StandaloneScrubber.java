@@ -74,7 +74,7 @@ public class StandaloneScrubber
     private static final String REINSERT_OVERFLOWED_TTL_OPTION = "reinsert-overflowed-ttl";
     private static final String HEADERFIX_OPTION = "header-fix";
 
-    public static void main(String args[])
+    public static void main(String[] args)
     {
         Options options = Options.parseArgs(args);
 
@@ -86,7 +86,7 @@ public class StandaloneScrubber
         try
         {
             // load keyspace descriptions.
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
 
             if (SchemaManager.instance.getKeyspaceMetadata(options.keyspaceName) == null)
                 throw new IllegalArgumentException(String.format("Unknown keyspace %s", options.keyspaceName));
@@ -314,7 +314,7 @@ public class StandaloneScrubber
             this.cfName = cfName;
         }
 
-        public static Options parseArgs(String cmdArgs[])
+        public static Options parseArgs(String[] cmdArgs)
         {
             CommandLineParser parser = new GnuParser();
             CmdLineOptions options = getCmdLineOptions();

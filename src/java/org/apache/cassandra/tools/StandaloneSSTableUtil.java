@@ -42,14 +42,14 @@ public class StandaloneSSTableUtil
     private static final String HELP_OPTION  = "help";
     private static final String CLEANUP_OPTION = "cleanup";
 
-    public static void main(String args[])
+    public static void main(String[] args)
     {
         Options options = Options.parseArgs(args);
         try
         {
             // load keyspace descriptions.
             Util.initDatabaseDescriptor();
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
 
             TableMetadata metadata = SchemaManager.instance.getTableMetadata(options.keyspaceName, options.cfName);
             if (metadata == null)
@@ -166,7 +166,7 @@ public class StandaloneSSTableUtil
             this.cfName = cfName;
         }
 
-        public static Options parseArgs(String cmdArgs[])
+        public static Options parseArgs(String[] cmdArgs)
         {
             CommandLineParser parser = new GnuParser();
             CmdLineOptions options = getCmdLineOptions();

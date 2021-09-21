@@ -47,7 +47,7 @@ public class StandaloneUpgrader
     private static final String HELP_OPTION  = "help";
     private static final String KEEP_SOURCE = "keep-source";
 
-    public static void main(String args[])
+    public static void main(String[] args)
     {
         Options options = Options.parseArgs(args);
         if (Boolean.getBoolean(Util.ALLOW_TOOL_REINIT_FOR_TEST))
@@ -58,7 +58,7 @@ public class StandaloneUpgrader
         try
         {
             // load keyspace descriptions.
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
 
             if (SchemaManager.instance.getTableMetadataRef(options.keyspace, options.cf) == null)
                 throw new IllegalArgumentException(String.format("Unknown keyspace/table %s.%s",
@@ -155,7 +155,7 @@ public class StandaloneUpgrader
             this.snapshot = snapshot;
         }
 
-        public static Options parseArgs(String cmdArgs[])
+        public static Options parseArgs(String[] cmdArgs)
         {
             CommandLineParser parser = new GnuParser();
             CmdLineOptions options = getCmdLineOptions();

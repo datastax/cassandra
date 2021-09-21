@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.schema;
 
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.Set;
@@ -124,10 +125,46 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         return filter(k -> k != keyspace);
     }
 
+    public Keyspaces without(Collection<String> names)
+    {
+        return filter(k -> !names.contains(k.name));
+    }
+
     public Keyspaces withAddedOrUpdated(KeyspaceMetadata keyspace)
     {
         return builder().add(Iterables.filter(this, k -> !k.name.equals(keyspace.name)))
                         .add(keyspace)
+                        .build();
+    }
+
+    /**
+     * Returns a new {@link Keyspaces} equivalent to this one, but with the provided keyspace metadata either added (if
+     * this {@link Keyspaces} does not have that keyspace), or replaced by the provided definition.
+     *
+     * <p>Note that if this contains the provided keyspace, its pre-existing definition is discarded and completely
+     * replaced with the newly provided one. See {@link #withAddedOrUpdated(KeyspaceMetadata)} if you wish the provided
+     * definition to be "merged" with the existing one instead.
+     *
+     * @param keyspace the keyspace metadata to add, or replace the existing definition with.
+     * @return the newly created object.
+     */
+    public Keyspaces withAddedOrReplaced(KeyspaceMetadata keyspace)
+    {
+        return builder().add(Iterables.filter(this, k -> !k.name.equals(keyspace.name)))
+                        .add(keyspace)
+                        .build();
+    }
+
+    /**
+     * Calls {@link #withAddedOrReplaced(KeyspaceMetadata)} on all the keyspaces of the provided {@link Keyspaces}.
+     *
+     * @param keyspaces the keyspaces to add, or replace if existing.
+     * @return the newly created object.
+     */
+    public Keyspaces withAddedOrReplaced(Keyspaces keyspaces)
+    {
+        return builder().add(Iterables.filter(this, k -> !keyspaces.containsKeyspace(k.name)))
+                        .add(keyspaces)
                         .build();
     }
 

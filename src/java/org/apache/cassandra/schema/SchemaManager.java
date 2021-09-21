@@ -23,7 +23,6 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -33,7 +32,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Futures;
 import org.apache.commons.lang3.ObjectUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
@@ -46,7 +44,6 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
@@ -57,12 +54,10 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.collect.Iterables.size;
 import static java.lang.String.format;
-import static org.apache.cassandra.concurrent.Stage.MIGRATION;
 
 /**
  * Manages keyspace instances. It provides methods to query schema, but it does not provide any methods to modify the
@@ -104,6 +99,21 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public boolean waitUntilReady(Duration timeout)
     {
         return updateHandler.waitUntilReady(timeout);
+    }
+
+    public void initializeSchemaFromDisk()
+    {
+        updateHandler.initializeSchemaFromDisk();
+    }
+
+    public void reloadSchemaFromDisk()
+    {
+        updateHandler.reloadSchemaFromDisk();
+    }
+
+    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingUserSettings)
+    {
+        return updateHandler.apply(transformation, locally, preserveExistingUserSettings);
     }
 
     /**
@@ -151,7 +161,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     synchronized void removeRefs(KeyspaceMetadata ksm)
     {
-        updateHandler.remove(ksm.name);
         schemaRefCache.removeRefs(ksm);
         SchemaDiagnostics.metadataRemoved(schema(), ksm);
     }
@@ -587,60 +596,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.schemataCleared(schema());
     }
 
-    /*
-     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
-     * in-memory representation got out of sync somehow with what's on disk.
-     */
-    public synchronized void reloadSchemaAndAnnounceVersion()
-    {
-        Keyspaces before = updateHandler.schema().getKeyspaces();
-        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        merge(Keyspaces.diff(before, after));
-        updateVersionAndAnnounce();
-    }
-
-    /**
-     * Merge remote schema in form of mutations with local and mutate ks/cf metadata objects
-     * (which also involves fs operations on add/drop ks/cf)
-     *
-     * @param mutations the schema changes to apply
-     *
-     * @throws ConfigurationException If one of metadata attributes has invalid value
-     */
-    public synchronized void mergeAndAnnounceVersion(Collection<Mutation> mutations)
-    {
-        merge(mutations);
-        updateVersionAndAnnounce();
-    }
-
-    public synchronized TransformationResult transform(SchemaTransformation transformation, boolean locally, long now) throws UnknownHostException
-    {
-        KeyspacesDiff diff;
-        try
-        {
-            Keyspaces before = updateHandler.schema().getKeyspaces();
-            Keyspaces after = transformation.apply(before);
-            diff = Keyspaces.diff(before, after);
-        }
-        catch (RuntimeException e)
-        {
-            return new TransformationResult(e, transformation);
-        }
-
-        if (diff.isEmpty())
-            return new TransformationResult(diff, Collections.emptyList(), transformation);
-
-        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, now);
-        SchemaKeyspace.applyChanges(mutations);
-
-        merge(diff);
-        updateVersion();
-        if (!locally)
-            passiveAnnounceVersion();
-
-        return new TransformationResult(diff, mutations, transformation);
-    }
-
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
@@ -656,52 +611,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.schema();
     }
 
-    public static final class TransformationResult
-    {
-        public final boolean success;
-        public final RuntimeException exception;
-        public final KeyspacesDiff diff;
-        public final Collection<Mutation> mutations;
-        public final SchemaTransformation transformation;
-
-        private TransformationResult(boolean success, RuntimeException exception, KeyspacesDiff diff, Collection<Mutation> mutations, SchemaTransformation transformation)
-        {
-            this.success = success;
-            this.exception = exception;
-            this.diff = diff;
-            this.mutations = mutations;
-            this.transformation = transformation;
-        }
-
-        TransformationResult(RuntimeException exception, SchemaTransformation transformation)
-        {
-            this(false, exception, null, null, transformation);
-        }
-
-        TransformationResult(KeyspacesDiff diff, Collection<Mutation> mutations, SchemaTransformation transformation)
-        {
-            this(true, null, diff, mutations, transformation);
-        }
-    }
-
-    synchronized void merge(Collection<Mutation> mutations)
-    {
-        // only compare the keyspaces affected by this set of schema mutations
-        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(mutations);
-
-        // fetch the current state of schema for the affected keyspaces only
-        Keyspaces before = updateHandler.schema().getKeyspaces().filter(k -> affectedKeyspaces.contains(k.name));
-
-        // apply the schema mutations
-        SchemaKeyspace.applyChanges(mutations);
-
-        // apply the schema mutations and fetch the new versions of the altered keyspaces
-        Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
-
-        merge(Keyspaces.diff(before, after));
-    }
-
-    private void merge(KeyspacesDiff diff)
+    public void applyChangesLocally(KeyspacesDiff diff)
     {
         diff.dropped.forEach(this::dropKeyspace);
         diff.created.forEach(this::createKeyspace);
@@ -715,8 +625,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         // drop tables and views
         delta.views.dropped.forEach(this::dropView);
         delta.tables.dropped.forEach(this::dropTable);
-
-        load(delta.after);
 
         // add tables and views
         delta.tables.created.forEach(this::createTable);
@@ -735,7 +643,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void createKeyspace(KeyspaceMetadata keyspace)
     {
         SchemaDiagnostics.keyspaceCreating(schema(), keyspace);
-        load(keyspace);
         Keyspace.open(keyspace.name);
         schemaChangeNotifier.notifyKeyspaceCreated(keyspace);
     }
@@ -748,7 +655,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         // remove the keyspace from the static instances.
         removeKeyspaceInstance(keyspace.name, Keyspace::unload);
-        removeRefs(keyspace);
         Keyspace.writeOrder.awaitNewBarrier();
         schemaChangeNotifier.notifyKeyspaceDropped(keyspace);
     }
@@ -812,36 +718,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         updateHandler.reset();
 
         logger.info("Local schema reset is complete.");
-    }
-
-    public Future<?> applyWithoutPush(Collection<Mutation> schema)
-    {
-        return MIGRATION.submit(() -> mergeAndAnnounceVersion(schema));
-    }
-
-    // used from AlterSchemaStatement
-    public KeyspacesDiff apply(SchemaTransformation transformation, boolean locally)
-    {
-        long now = FBUtilities.timestampMicros();
-
-        Future<SchemaManager.TransformationResult> future =
-        MIGRATION.submit(() -> transform(transformation, locally, now));
-
-        SchemaManager.TransformationResult result = Futures.getUnchecked(future);
-        if (!result.success)
-            throw result.exception;
-
-        if (locally || result.diff.isEmpty())
-            return result.diff;
-
-        updateHandler.pushSchema(result);
-
-        return result.diff;
-    }
-
-    public void pushSchema(TransformationResult transformationResult)
-    {
-        updateHandler.pushSchema(transformationResult);
     }
 
     /**

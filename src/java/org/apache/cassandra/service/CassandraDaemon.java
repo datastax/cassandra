@@ -285,7 +285,7 @@ public class CassandraDaemon
         try
         {
             // load schema from disk
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
         }
         catch (Exception e)
         {
@@ -783,7 +783,7 @@ public class CassandraDaemon
         catch (Throwable e)
         {
             boolean logStackTrace =
-                    e instanceof ConfigurationException ? ((ConfigurationException)e).logStackTrace : true;
+            !(e instanceof ConfigurationException) || ((ConfigurationException) e).logStackTrace;
 
             System.out.println("Exception (" + e.getClass().getName() + ") encountered during startup: " + e.getMessage());
 

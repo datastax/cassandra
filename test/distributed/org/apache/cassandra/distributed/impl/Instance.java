@@ -102,6 +102,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -488,7 +489,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 try
                 {
                     // load schema from disk
-                    SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+                    SchemaManager.instance.initializeSchemaFromDisk();
                 }
                 catch (Exception e)
                 {

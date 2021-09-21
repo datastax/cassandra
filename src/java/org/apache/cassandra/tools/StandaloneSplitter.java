@@ -34,7 +34,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.SSTableSplitter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.schema.SchemaUpdateHandler;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
@@ -49,7 +49,7 @@ public class StandaloneSplitter
     private static final String NO_SNAPSHOT_OPTION = "no-snapshot";
     private static final String SIZE_OPTION = "size";
 
-    public static void main(String args[])
+    public static void main(String[] args)
     {
         Options options = Options.parseArgs(args);
         if (Boolean.getBoolean(Util.ALLOW_TOOL_REINIT_FOR_TEST))
@@ -60,7 +60,7 @@ public class StandaloneSplitter
         try
         {
             // load keyspace descriptions.
-            SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+            SchemaManager.instance.initializeSchemaFromDisk();
 
             String ksName = null;
             String cfName = null;
@@ -193,7 +193,7 @@ public class StandaloneSplitter
             this.filenames = filenames;
         }
 
-        public static Options parseArgs(String cmdArgs[])
+        public static Options parseArgs(String[] cmdArgs)
         {
             CommandLineParser parser = new GnuParser();
             CmdLineOptions options = getCmdLineOptions();

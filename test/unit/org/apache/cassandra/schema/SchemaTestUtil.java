@@ -21,7 +21,6 @@ package org.apache.cassandra.schema;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Future;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,15 +141,14 @@ public class SchemaTestUtil
         List<Mutation> mutations = Collections.singletonList(schema.build());
 
         if (announceLocally)
-            SchemaManager.instance.merge(mutations);
+            SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, mutations);
         else
             announce(mutations);
     }
 
     public static void announce(Collection<Mutation> schema)
     {
-        Future<?> f = SchemaManager.instance.applyWithoutPush(schema);
-        SchemaManager.instance.pushSchema(new SchemaManager.TransformationResult(null, schema, null));
-        FBUtilities.waitOnFuture(f);
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, schema);
+        MigrationCoordinator.instance.pushSchemaMutations(schema);
     }
 }

@@ -24,10 +24,34 @@ public interface SchemaTransformation
     /**
      * Apply a statement transformation to a schema snapshot.
      *
-     * Implementing methods should be side-effect free.
+     * Implementing methods should be side-effect free (outside of throwing exceptions if the transformation cannot
+     * be successfully applied to the provided schema).
      *
      * @param schema Keyspaces to base the transformation on
      * @return Keyspaces transformed by the statement
      */
-    Keyspaces apply(Keyspaces schema) throws UnknownHostException;
+    Keyspaces apply(Keyspaces schema);
+
+    /**
+     * The result of applying (on this node) a given schema transformation.
+     */
+    class SchemaTransformationResult
+    {
+        public final Schema before;
+        public final Schema after;
+        public final Keyspaces.KeyspacesDiff diff;
+
+        public SchemaTransformationResult(Schema before, Schema after, Keyspaces.KeyspacesDiff diff)
+        {
+            this.before = before;
+            this.after = after;
+            this.diff = diff;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("SchemaTransformationResult{before=%s, after=%s, diff=%s}", before, after, diff);
+        }
+    }
 }

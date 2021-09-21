@@ -24,8 +24,11 @@ import java.util.Optional;
 import java.util.UUID;
 import javax.annotation.Nonnull;
 
+import org.apache.commons.lang3.StringUtils;
+
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 /**
  * Schema update handler is responsible for maintaining the current schema and synchronizing it with other nodes in
@@ -38,6 +41,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
  */
 public interface SchemaUpdateHandler
 {
+    void initializeSchemaFromDisk();
+
     /**
      * Starts actively synchronizing schema with other nodes
      */
@@ -58,7 +63,24 @@ public interface SchemaUpdateHandler
      *
      * @return the current schema
      */
-    @Nonnull Schema schema();
+    @Nonnull
+    Schema schema();
+
+    /**
+     * Apply the provided transformation to the current schema.
+     *
+     * @param transformation           the transformation to apply to the current schema.
+     * @param locally                  whether the updated version should be announced and changes pushed to other nodes
+     * @param preserveExistingSettings if true, any update made by the transformation to an existing entity will not
+     *                                 modify any prior settings set by users (such as replication configuration).
+     */
+    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingSettings);
+
+    /*
+     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
+     * in-memory representation got out of sync somehow with what's on disk.
+     */
+    void reloadSchemaFromDisk();
 
     // temporary, todo remove
     void addOrUpdate(KeyspaceMetadata ksm);
@@ -71,11 +93,6 @@ public interface SchemaUpdateHandler
 
     // temporary, todo remove
     void reset();
-
-    // temporary, todo remove
-    void pushSchema(SchemaManager.TransformationResult result);
-
-    void initializeSchemaFromDisk();
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
@@ -103,9 +120,7 @@ public interface SchemaUpdateHandler
 
     default SchemaUpdateHandler.GossipAware asGossipAwareTrackerOrThrow(String msg)
     {
-        String format = "%s but the current schema tracker (%s) does not support that. Your nodes are likely using different schema trackers. " +
-                        "Please adjust nodes configuration so that they consistently use the same schema tracker implementation.";
-        return asGossipAwareTracker().orElseThrow(() -> new UnsupportedOperationException(String.format(format, msg, this.getClass().getName())));
+        String format = "The current schema tracker (%s) does not implement GossipAware. %s";
+        return asGossipAwareTracker().orElseThrow(() -> new UnsupportedOperationException(String.format(format, this.getClass().getName(), StringUtils.trimToEmpty(msg))));
     }
-
 }

@@ -99,11 +99,11 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
 
         validateKeyspaceName();
 
-        KeyspacesDiff diff = SchemaManager.instance.apply(this, locally);
+        SchemaTransformationResult update = SchemaManager.instance.apply(this, locally, false);
 
-        clientWarnings(diff).forEach(ClientWarn.instance::warn);
+        clientWarnings(update.diff).forEach(ClientWarn.instance::warn);
 
-        if (diff.isEmpty())
+        if (update.diff.isEmpty())
             return new ResultMessage.Void();
 
         /*
@@ -115,9 +115,9 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
          */
         AuthenticatedUser user = state.getClientState().getUser();
         if (null != user && !user.isAnonymous())
-            createdResources(diff).forEach(r -> grantPermissionsOnResource(r, user));
+            createdResources(update.diff).forEach(r -> grantPermissionsOnResource(r, user));
 
-        return new ResultMessage.SchemaChange(schemaChangeEvent(diff));
+        return new ResultMessage.SchemaChange(schemaChangeEvent(update.diff));
     }
 
     private void validateKeyspaceName()

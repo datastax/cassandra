@@ -576,7 +576,7 @@ public class MigrationManagerTest
         Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace, 0);
         assertTrue(mutation.isPresent());
 
-        SchemaManager.instance.merge(singleton(mutation.get()));
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, singleton(mutation.get()));
         assertEquals(keyspace, SchemaManager.instance.getKeyspaceMetadata("ks0"));
     }
 
@@ -587,7 +587,7 @@ public class MigrationManagerTest
         KeyspaceMetadata keyspace = KeyspaceMetadata.create("ks1", KeyspaceParams.simple(1), Tables.of(table));
 
         // create the keyspace, verify it's there
-        SchemaManager.instance.merge(singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace, 0).build()));
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace, 0).build()));
         assertEquals(keyspace, SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
         Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace, 0);
@@ -601,7 +601,7 @@ public class MigrationManagerTest
         KeyspaceMetadata keyspace0 = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0));
 
         // create the keyspace, verify it's there
-        SchemaManager.instance.merge(singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace0, 0).build()));
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace0, 0).build()));
         assertEquals(keyspace0, SchemaManager.instance.getKeyspaceMetadata("ks2"));
 
         TableMetadata table1 = table0.unbuild().comment("comment").build();
@@ -610,7 +610,7 @@ public class MigrationManagerTest
         Optional<Mutation> mutation = SchemaManager.instance.evolveSystemKeyspace(keyspace1, 1);
         assertTrue(mutation.isPresent());
 
-        SchemaManager.instance.merge(singleton(mutation.get()));
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, singleton(mutation.get()));
         assertEquals(keyspace1, SchemaManager.instance.getKeyspaceMetadata("ks2"));
     }
 

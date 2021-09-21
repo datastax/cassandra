@@ -92,7 +92,7 @@ public class SSTableOfflineRelevel
         boolean dryRun = args[0].equals("--dry-run");
         String keyspace = args[args.length - 2];
         String columnfamily = args[args.length - 1];
-        SchemaUpdateHandler.instance.initializeSchemaFromDisk();
+        SchemaManager.instance.initializeSchemaFromDisk();
 
         if (SchemaManager.instance.getTableMetadataRef(keyspace, columnfamily) == null)
             throw new IllegalArgumentException(String.format("Unknown keyspace/table %s.%s",
