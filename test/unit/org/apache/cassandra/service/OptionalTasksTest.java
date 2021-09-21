@@ -58,7 +58,7 @@ public class OptionalTasksTest
         Objects.requireNonNull(cfs).metric.coordinatorReadLatency.update(100, TimeUnit.NANOSECONDS);
         
         // Remove the Keyspace name to make it invisible to the updater...
-        Keyspace removed = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE);
+        Keyspace removed = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE, ignored -> {});
 
         try
         {

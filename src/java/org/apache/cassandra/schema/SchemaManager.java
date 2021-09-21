@@ -20,9 +20,15 @@ package org.apache.cassandra.schema;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -52,6 +58,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.collect.Iterables.size;
 import static java.lang.String.format;
@@ -73,7 +80,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private final SchemaRefCache schemaRefCache = new SchemaRefCache();
 
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
-    private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
+    private final ConcurrentMap<String, CompletableFuture<Keyspace>> keyspaceInstances = new NonBlockingHashMap<>();
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
@@ -169,9 +176,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     synchronized void removeRefs(KeyspaceMetadata ksm)
     {
-        SchemaUpdateHandler.instance.remove(ksm.name);
+        updateHandler.remove(ksm.name);
         schemaRefCache.removeRefs(ksm);
-        SchemaDiagnostics.metadataRemoved(SchemaUpdateHandler.instance.schema(), ksm);
+        SchemaDiagnostics.metadataRemoved(schema(), ksm);
     }
 
     public void registerListener(SchemaChangeListener listener)
@@ -190,12 +197,16 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @param keyspaceName The name of the keyspace
      *
-     * @return Keyspace object or null if keyspace was not found
+     * @return Keyspace object or null if keyspace was not found, or if the keyspace has not completed construction yet
      */
     @Override
     public Keyspace getKeyspaceInstance(String keyspaceName)
     {
-        return keyspaceInstances.get(keyspaceName);
+        CompletableFuture<Keyspace> future = keyspaceInstances.get(keyspaceName);
+        if (future != null && future.isDone())
+            return future.join();
+        else
+            return null;
     }
 
     public ColumnFamilyStore getColumnFamilyStoreInstance(TableId id)
@@ -220,25 +231,80 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @throws IllegalArgumentException if Keyspace is already stored
      */
-    @Override
     // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
+    @VisibleForTesting
     public void storeKeyspaceInstance(Keyspace keyspace)
     {
-        if (keyspaceInstances.putIfAbsent(keyspace.getName(), keyspace) != null)
+        CompletableFuture<Keyspace> future = CompletableFuture.completedFuture(keyspace);
+        CompletableFuture<Keyspace> existing = keyspaceInstances.putIfAbsent(keyspace.getName(), future);
+        if (existing != null)
             throw new IllegalArgumentException(String.format("Keyspace %s was already initialized.", keyspace.getName()));
     }
 
     /**
-     * Remove keyspace from schema
+     * Remove keyspace from schema. This puts a temporary entry in the map that throws an exception when queried.
+     * When the metadata is also deleted, that temporary entry must also be deleted using clearKeyspaceInstance below.
      *
      * @param keyspaceName The name of the keyspace to remove
      *
      * @return removed keyspace instance or null if it wasn't found
      */
     // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
-    public Keyspace removeKeyspaceInstance(String keyspaceName)
+    public Keyspace removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
     {
-        return keyspaceInstances.remove(keyspaceName);
+        CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
+        droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
+
+        CompletableFuture<Keyspace> existingFuture = keyspaceInstances.put(keyspaceName, droppedFuture);
+        if (existingFuture == null || existingFuture.isCompletedExceptionally())
+            return null;
+
+        Keyspace instance = existingFuture.join();
+        unloadFunction.accept(instance);
+
+        CompletableFuture<Keyspace> future = keyspaceInstances.remove(keyspaceName);
+        assert future == droppedFuture;
+
+        return instance;
+    }
+
+    @Override
+    public Keyspace getOrCreateKeyspaceInstance(String keyspaceName, Supplier<Keyspace> loadFunction)
+    {
+        CompletableFuture<Keyspace> future = keyspaceInstances.get(keyspaceName);
+        if (future == null)
+        {
+            CompletableFuture<Keyspace> empty = new CompletableFuture<>();
+            future = keyspaceInstances.putIfAbsent(keyspaceName, empty);
+            if (future == null)
+            {
+                // We managed to create an entry for the keyspace. Now initialize it.
+                future = empty;
+                try
+                {
+                    empty.complete(loadFunction.get());
+                }
+                catch (Throwable t)
+                {
+                    empty.completeExceptionally(t);
+                    // Remove future so that construction can be retried later
+                    keyspaceInstances.remove(keyspaceName, future);
+                }
+            }
+            // Else some other thread beat us to it, but we now have the reference to the future which we can wait for.
+        }
+
+        // Most of the time the keyspace will be ready and this will complete immediately. If it is being created
+        // concurrently, wait for that process to complete.
+        try
+        {
+            return future.join();
+        }
+        catch (CompletionException e)
+        {
+            // Unwrap exception so that caller can process it correctly.
+            throw Throwables.cleaned(e);
+        }
     }
 
     // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
@@ -696,7 +762,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         keyspace.tables.forEach(this::dropTable);
 
         // remove the keyspace from the static instances.
-        Keyspace.clear(keyspace.name);
+        removeKeyspaceInstance(keyspace.name, Keyspace::unload);
         removeRefs(keyspace);
         Keyspace.writeOrder.awaitNewBarrier();
         schemaChangeNotifier.notifyKeyspaceDropped(keyspace);

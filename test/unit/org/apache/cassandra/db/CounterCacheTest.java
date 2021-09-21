@@ -191,7 +191,7 @@ public class CounterCacheTest
         CacheService.instance.invalidateCounterCache();
         assertEquals(0, CacheService.instance.counterCache.size());
 
-        Keyspace ks = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE1);
+        Keyspace ks = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE1, ignored -> {});
 
         try
         {

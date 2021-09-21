@@ -367,7 +367,7 @@ public class RowCacheTest
         CacheService.instance.setRowCacheCapacityInMB(1);
         rowCacheLoad(100, 50, 0);
         CacheService.instance.rowCache.submitWrite(Integer.MAX_VALUE).get();
-        Keyspace instance = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE_CACHED);
+        Keyspace instance = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE_CACHED, ignored -> {});
         try
         {
             CacheService.instance.rowCache.size();

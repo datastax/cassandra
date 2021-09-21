@@ -48,7 +48,7 @@ public class SchemaChangeNotifier
         keyspace.views.forEach(this::notifyCreateView);
         keyspace.functions.udfs().forEach(this::notifyCreateFunction);
         keyspace.functions.udas().forEach(this::notifyCreateAggregate);
-        SchemaDiagnostics.keyspaceCreated(SchemaUpdateHandler.instance.schema(), keyspace);
+        SchemaDiagnostics.keyspaceCreated(SchemaManager.instance.schema(), keyspace);
     }
 
     public void notifyKeyspaceAltered(KeyspaceMetadata.KeyspaceDiff delta)
@@ -75,7 +75,7 @@ public class SchemaChangeNotifier
         delta.views.altered.forEach(diff -> notifyAlterView(diff.before, diff.after));
         delta.udfs.altered.forEach(diff -> notifyAlterFunction(diff.before, diff.after));
         delta.udas.altered.forEach(diff -> notifyAlterAggregate(diff.before, diff.after));
-        SchemaDiagnostics.keyspaceAltered(SchemaUpdateHandler.instance.schema(), delta);
+        SchemaDiagnostics.keyspaceAltered(SchemaManager.instance.schema(), delta);
     }
 
     public void notifyKeyspaceDropped(KeyspaceMetadata keyspace)
@@ -86,7 +86,7 @@ public class SchemaChangeNotifier
         keyspace.tables.forEach(this::notifyDropTable);
         keyspace.types.forEach(this::notifyDropType);
         notifyDropKeyspace(keyspace);
-        SchemaDiagnostics.keyspaceDroped(SchemaUpdateHandler.instance.schema(), keyspace);
+        SchemaDiagnostics.keyspaceDroped(SchemaManager.instance.schema(), keyspace);
     }
 
     private void notifyCreateKeyspace(KeyspaceMetadata ksm)

@@ -211,7 +211,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -251,7 +251,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -294,7 +294,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -331,7 +331,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -370,7 +370,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -422,7 +422,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -489,7 +489,7 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
         SchemaManager.instance.load(meta);
 
@@ -548,7 +548,7 @@ public class StorageServiceServerTest
         metadata.updateNormalToken(new StringToken("B"), InetAddressAndPort.getByName("127.0.0.2"));
         metadata.updateNormalToken(new StringToken("C"), InetAddressAndPort.getByName("127.0.0.3"));
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
         SchemaManager.instance.load(meta);
 
@@ -579,7 +579,7 @@ public class StorageServiceServerTest
         Map<String, String> configOptions = new HashMap<>();
         configOptions.put("replication_factor", "2");
 
-        Keyspace.clear("Keyspace1");
+        Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
         SchemaManager.instance.load(meta);
 

@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.schema;
 
+import java.util.function.Supplier;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.Keyspace;
@@ -28,8 +30,6 @@ public interface SchemaProvider
 {
     @Nullable
     Keyspace getKeyspaceInstance(String keyspaceName);
-
-    void storeKeyspaceInstance(Keyspace keyspace);
 
     @Nullable
     KeyspaceMetadata getKeyspaceMetadata(String keyspaceName);
@@ -64,4 +64,7 @@ public interface SchemaProvider
     {
         return getTableMetadataRef(descriptor.ksname, descriptor.cfname);
     }
+
+    @Nonnull
+    Keyspace getOrCreateKeyspaceInstance(String keyspaceName, Supplier<Keyspace> newKeyspaceSupplier);
 }

@@ -131,44 +131,13 @@ public class Keyspace
     @VisibleForTesting
     static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables)
     {
-        Keyspace keyspaceInstance = schema.getKeyspaceInstance(keyspaceName);
-
-        if (keyspaceInstance == null)
-        {
-            // Instantiate the Keyspace while holding the Schema lock. This both ensures we only do it once per
-            // keyspace, and also ensures that Keyspace construction sees a consistent view of the schema.
-            synchronized (schema)
-            {
-                keyspaceInstance = schema.getKeyspaceInstance(keyspaceName);
-                if (keyspaceInstance == null)
-                {
-                    // open and store the keyspace
-                    keyspaceInstance = new Keyspace(keyspaceName, schema, loadSSTables);
-                    schema.storeKeyspaceInstance(keyspaceInstance);
-                }
-            }
-        }
-        return keyspaceInstance;
+        return schema.getOrCreateKeyspaceInstance(keyspaceName, () -> new Keyspace(keyspaceName, schema, loadSSTables));
     }
 
-    public static Keyspace clear(String keyspaceName)
+    @VisibleForTesting
+    public static Keyspace clearUnsafe(String keyspaceName)
     {
-        return clear(keyspaceName, SchemaManager.instance);
-    }
-
-    public static Keyspace clear(String keyspaceName, SchemaManager schema)
-    {
-        synchronized (schema)
-        {
-            Keyspace t = schema.removeKeyspaceInstance(keyspaceName);
-            if (t != null)
-            {
-                for (ColumnFamilyStore cfs : t.getColumnFamilyStores())
-                    t.unloadCf(cfs);
-                t.metric.release();
-            }
-            return t;
-        }
+        return SchemaManager.instance.removeKeyspaceInstance(keyspaceName, Keyspace::unload);
     }
 
     public static ColumnFamilyStore openAndGetStore(TableMetadataRef tableRef)
@@ -412,6 +381,16 @@ public class Keyspace
     {
         cfs.unloadCf();
         cfs.invalidate();
+    }
+
+    /**
+     * Unloads all column family stores and releases metrics.
+     */
+    public void unload()
+    {
+        for (ColumnFamilyStore cfs : getColumnFamilyStores())
+            unloadCf(cfs);
+        metric.release();
     }
 
     /**
