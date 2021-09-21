@@ -26,11 +26,12 @@ import java.util.stream.Collectors;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.MapDifference;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Futures;
-
 import org.apache.commons.lang3.ObjectUtils;
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.*;
@@ -51,15 +52,9 @@ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import static java.lang.String.format;
 
 import static com.google.common.collect.Iterables.size;
+import static java.lang.String.format;
 import static org.apache.cassandra.concurrent.Stage.MIGRATION;
 
 /**
@@ -75,11 +70,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final LocalKeyspaces localKeyspaces;
 
-    // UUID -> mutable metadata ref map. We have to update these in place every time a table changes.
-    private final Map<TableId, TableMetadataRef> metadataRefs = new NonBlockingHashMap<>();
-
-    // (keyspace name, index name) -> mutable metadata ref map. We have to update these in place every time an index changes.
-    private final Map<Pair<String, String>, TableMetadataRef> indexMetadataRefs = new NonBlockingHashMap<>();
+    private final SchemaRefCache schemaRefCache = new SchemaRefCache();
 
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
@@ -151,28 +142,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * Adds the {@link TableMetadataRef} corresponding to the provided keyspace to {@link #metadataRefs} and
-     * {@link #indexMetadataRefs}, assuming the keyspace is new (in the sense of not being tracked by the manager yet).
-     *
-     * todo removeme: same implementation
+     * Should be called after a keyspace is added to the local schema. It updates the table and index references cache.
      */
     void addNewRefs(KeyspaceMetadata ksm)
     {
-        ksm.tablesAndViews()
-           .forEach(metadata -> metadataRefs.put(metadata.id, new TableMetadataRef(metadata)));
-
-        ksm.tables
-        .indexTables()
-        .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
-
+        schemaRefCache.addNewRefs(ksm);
         SchemaDiagnostics.metadataInitialized(schema(), ksm);
     }
 
     /**
-     * Updates the {@link TableMetadataRef} in {@link #metadataRefs} and {@link #indexMetadataRefs}, for an
-     * existing updated keyspace given it's previous and new definition.
-     *
-     * todo removeme: same implementation
+     * Should be called once a keyspace metadata is changed (tables, views, indexes). It updates the table and index
+     * references cache.
      */
     void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
     {
@@ -180,59 +160,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         if (null != keyspace)
             keyspace.setMetadata(updated);
 
-        Tables.TablesDiff tablesDiff = Tables.diff(previous.tables, updated.tables);
-        Views.ViewsDiff viewsDiff = Views.diff(previous.views, updated.views);
-
-        MapDifference<String, TableMetadata> indexesDiff = previous.tables.indexesDiff(updated.tables);
-
-        // clean up after removed entries
-        tablesDiff.dropped.forEach(table -> metadataRefs.remove(table.id));
-        viewsDiff.dropped.forEach(view -> metadataRefs.remove(view.metadata.id));
-
-        indexesDiff.entriesOnlyOnLeft()
-                   .values()
-                   .forEach(indexTable -> indexMetadataRefs.remove(Pair.create(indexTable.keyspace, indexTable.indexName().get())));
-
-        // load up new entries
-        tablesDiff.created.forEach(table -> metadataRefs.put(table.id, new TableMetadataRef(table)));
-        viewsDiff.created.forEach(view -> metadataRefs.put(view.metadata.id, new TableMetadataRef(view.metadata)));
-
-        indexesDiff.entriesOnlyOnRight()
-                   .values()
-                   .forEach(indexTable -> indexMetadataRefs.put(Pair.create(indexTable.keyspace, indexTable.indexName().get()), new TableMetadataRef(indexTable)));
-
-        // refresh refs to updated ones
-        tablesDiff.altered.forEach(diff -> metadataRefs.get(diff.after.id).set(diff.after));
-        viewsDiff.altered.forEach(diff -> metadataRefs.get(diff.after.metadata.id).set(diff.after.metadata));
-
-        indexesDiff.entriesDiffering()
-                   .values()
-                   .stream()
-                   .map(MapDifference.ValueDifference::rightValue)
-                   .forEach(indexTable -> indexMetadataRefs.get(Pair.create(indexTable.keyspace, indexTable.indexName().get())).set(indexTable));
-
-        SchemaDiagnostics.metadataReloaded(schema(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
+        schemaRefCache.updateRefs(previous, updated);
+//      TODO  SchemaDiagnostics.metadataReloaded(schema.get(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
 
     /**
-     * Removes the {@link TableMetadataRef} from {@link #metadataRefs} and {@link #indexMetadataRefs} for the provided
-     * (dropped) keyspace.
-     *
-     * todo removeme: same implementation
+     * Should be called once a keyspace is removed from local schema. It updates the table and index reference cache.
      */
-    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
     synchronized void removeRefs(KeyspaceMetadata ksm)
     {
         SchemaUpdateHandler.instance.remove(ksm.name);
-
-        ksm.tablesAndViews()
-           .forEach(t -> metadataRefs.remove(t.id));
-
-        ksm.tables
-        .indexTables()
-        .keySet()
-        .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
-
+        schemaRefCache.removeRefs(ksm);
         SchemaDiagnostics.metadataRemoved(SchemaUpdateHandler.instance.schema(), ksm);
     }
 
@@ -429,12 +367,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         TableMetadata tm = getTableMetadata(keyspace, table);
         return tm == null
                ? null
-               : metadataRefs.get(tm.id);
+               : schemaRefCache.getTableMetadataRef(tm.id);
     }
 
     public TableMetadataRef getIndexTableMetadataRef(String keyspace, String index)
     {
-        return indexMetadataRefs.get(Pair.create(keyspace, index));
+        return schemaRefCache.getIndexTableMetadataRef(keyspace, index);
     }
 
     /**
@@ -447,7 +385,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadataRef getTableMetadataRef(TableId id)
     {
-        return metadataRefs.get(id);
+        TableMetadataRef ref = schemaRefCache.getTableMetadataRef(id);
+        return getTableMetadata(ref.keyspace, ref.name) == null ? null : ref;
     }
 
     @Override
@@ -787,13 +726,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void createTable(TableMetadata table)
     {
         SchemaDiagnostics.tableCreating(schema(), table);
-        Keyspace.open(table.keyspace).initCf(metadataRefs.get(table.id), true);
+        Keyspace.open(table.keyspace).initCf(schemaRefCache.getTableMetadataRef(table.id), true);
         SchemaDiagnostics.tableCreated(schema(), table);
     }
 
     private void createView(ViewMetadata view)
     {
-        Keyspace.open(view.keyspace()).initCf(metadataRefs.get(view.metadata.id), true);
+        Keyspace.open(view.keyspace()).initCf(schemaRefCache.getTableMetadataRef(view.metadata.id), true);
     }
 
     private void alterTable(TableMetadata updated)
