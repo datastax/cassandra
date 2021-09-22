@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Iterables;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -68,54 +67,44 @@ public class QueryInfoTrackerTest extends CQLTester
         StorageProxy.instance.registerQueryTracker(tracker);
         requireNetwork();
         session = sessionNet();
-        // Just in case the teardown didn't run for some reason.
-        session.execute("DROP KEYSPACE IF EXISTS " + KEYSPACE);
-        session.execute("CREATE KEYSPACE IF NOT EXISTS " + KEYSPACE +
-                        " WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };");
-    }
-
-    @After
-    public void teardownTest()
-    {
-        session.execute("DROP KEYSPACE IF EXISTS " + KEYSPACE);
     }
 
     @Test
     public void testSimpleQueryTracing()
     {
-        int KEYS = 4;
-        int CLUSTERING = 4;
-        String TABLE = KEYSPACE + ".simple";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
-        for (int k = 0; k < KEYS; k++)
+        int keys = 4;
+        int clustering = 4;
+        String table = KEYSPACE + ".qit_simple";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        for (int k = 0; k < keys; k++)
         {
-            for (int v = 0; v < CLUSTERING; v++)
+            for (int v = 0; v < clustering; v++)
             {
-                session.execute("INSERT INTO " + TABLE + "(k, c) values (?, ?)", k, v);
+                session.execute("INSERT INTO " + table + "(k, c) values (?, ?)", k, v);
             }
         }
 
-        int expectedWrites = KEYS * CLUSTERING;
-        int expectedRows = KEYS * CLUSTERING;
+        int expectedWrites = keys * clustering;
+        int expectedRows = keys * clustering;
         assertEquals(expectedWrites, tracker.writes.get());
         assertEquals(expectedRows, tracker.writtenRows.get());
         assertEquals(0, tracker.loggedWrites.get());
 
         assertEquals(0, tracker.reads.get());
-        session.execute("SELECT * FROM " + TABLE + " WHERE k = ?", 0);
+        session.execute("SELECT * FROM " + table + " WHERE k = ?", 0);
         assertEquals(1, tracker.reads.get());
-        assertEquals(CLUSTERING, tracker.readRows.get());
+        assertEquals(clustering, tracker.readRows.get());
         assertEquals(1, tracker.readPartitions.get());
         assertEquals(1, tracker.replicaPlans.get());
 
         assertEquals(0, tracker.rangeReads.get());
-        session.execute("SELECT * FROM " + TABLE);
+        session.execute("SELECT * FROM " + table);
         assertEquals(1, tracker.rangeReads.get());
-        assertEquals(CLUSTERING + KEYS * CLUSTERING, tracker.readRows.get());
-        assertEquals(1 + KEYS, tracker.readPartitions.get());
+        assertEquals(clustering + keys * clustering, tracker.readRows.get());
+        assertEquals(1 + keys, tracker.readPartitions.get());
         assertEquals(1 + 1, tracker.replicaPlans.get());
 
-        session.execute("UPDATE " + TABLE + " SET v = ? WHERE k = ? AND c IN ?", 42, 0, Arrays.asList(0, 2, 3));
+        session.execute("UPDATE " + table + " SET v = ? WHERE k = ? AND c IN ?", 42, 0, Arrays.asList(0, 2, 3));
         expectedWrites += 1; // We only did one more write ...
         expectedRows += 3;   // ... but it updates 3 rows.
         assertEquals(expectedWrites, tracker.writes.get());
@@ -126,14 +115,14 @@ public class QueryInfoTrackerTest extends CQLTester
     @Test
     public void testLoggedBatchQueryTracing()
     {
-        String TABLE = KEYSPACE + ".logged_batch";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_logged_batch";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
 
         session.execute("BEGIN BATCH "
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (0, 0, 0);"
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (1, 1, 1);"
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (2, 2, 2);"
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (3, 3, 3);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (0, 0, 0);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (1, 1, 1);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (2, 2, 2);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (3, 3, 3);"
                         + "APPLY BATCH");
 
         assertEquals(1, tracker.writes.get());
@@ -141,8 +130,8 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(4, tracker.writtenRows.get());
 
         session.execute("BEGIN BATCH "
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (4, 4, 4);"
-                        + "INSERT INTO " + TABLE + "(k, c, v) VALUES (5, 5, 5);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (4, 4, 4);"
+                        + "INSERT INTO " + table + "(k, c, v) VALUES (5, 5, 5);"
                         + "APPLY BATCH");
 
         assertEquals(2, tracker.writes.get());
@@ -153,15 +142,15 @@ public class QueryInfoTrackerTest extends CQLTester
     @Test
     public void testLWTQueryTracing()
     {
-        String TABLE = KEYSPACE + ".lwt";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_lwt";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
 
-        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
-        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 1, 1);
+        session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
+        session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?)", 0, 1, 1);
         assertEquals(2, tracker.writes.get());
         assertEquals(2, tracker.writtenRows.get());
 
-        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+        session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
         // This should apply, so on top of the lwt specific increases, we'll have a new written row (but no read
         // row since while we will do a read, it will come up empty).
         assertEquals(1, tracker.lwts.get());
@@ -174,7 +163,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(0, tracker.reads.get());
         assertEquals(1, tracker.replicaPlans.get());
 
-        session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+        session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
         // This should not apply now and on top of the lwt specific increases, we should have read 1 additional row.
         assertEquals(2, tracker.lwts.get());
         assertEquals(1, tracker.nonAppliedLwts.get());
@@ -188,8 +177,8 @@ public class QueryInfoTrackerTest extends CQLTester
 
         // More complex LWT batch.
         session.execute("BEGIN BATCH "
-                        + "UPDATE " + TABLE + " SET v = 42 WHERE k = 0 AND c = 0 IF v = 0; "
-                        + "UPDATE " + TABLE + " SET v = 42 WHERE k = 0 AND c = 1 IF v = 1; "
+                        + "UPDATE " + table + " SET v = 42 WHERE k = 0 AND c = 0 IF v = 0; "
+                        + "UPDATE " + table + " SET v = 42 WHERE k = 0 AND c = 1 IF v = 1; "
                         + "APPLY BATCH");
         // This should apply. Further this will have read 2 rows and written 2.
         assertEquals(3, tracker.lwts.get());
@@ -203,7 +192,7 @@ public class QueryInfoTrackerTest extends CQLTester
         assertEquals(3, tracker.replicaPlans.get());
 
 
-        PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
+        PreparedStatement statement = session.prepare("SELECT * FROM " + table + " WHERE k = ?")
                                              .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
         session.execute(statement.bind(0));
         assertEquals(1, tracker.reads.get());
@@ -219,11 +208,11 @@ public class QueryInfoTrackerTest extends CQLTester
     action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
     public void testCasReadFailureCount()
     {
-        String TABLE = KEYSPACE + ".cas_read_failure";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_cas_read_failure";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
         assertEquals(0, tracker.errorReads.get());
 
-        PreparedStatement statement = session.prepare("SELECT * FROM " + TABLE + " WHERE k = ?")
+        PreparedStatement statement = session.prepare("SELECT * FROM " + table + " WHERE k = ?")
                                              .setConsistencyLevel(com.datastax.driver.core.ConsistencyLevel.SERIAL);
 
         try
@@ -246,14 +235,14 @@ public class QueryInfoTrackerTest extends CQLTester
     action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
     public void testCasWriteFailureCount()
     {
-        String TABLE = KEYSPACE + ".cas_write_failure";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_cas_write_failure";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
 
         assertEquals(0, tracker.errorLwts.get());
 
         try
         {
-            session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
+            session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?) IF NOT EXISTS", 0, 2, 2);
         }
         catch (NoHostAvailableException ex)
         { /* NOOP */ }
@@ -272,14 +261,14 @@ public class QueryInfoTrackerTest extends CQLTester
     action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
     public void testReadFailureCount()
     {
-        String TABLE = KEYSPACE + ".read_failure";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_read_failure";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
 
         assertEquals(0, tracker.errorReads.get());
 
         try
         {
-            session.execute("SELECT * FROM " + TABLE + " WHERE k = ?", 0);
+            session.execute("SELECT * FROM " + table + " WHERE k = ?", 0);
         }
         catch (NoHostAvailableException ex)
         { /* NOOP */ }
@@ -296,13 +285,13 @@ public class QueryInfoTrackerTest extends CQLTester
     action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
     public void testWriteFailureCount()
     {
-        String TABLE = KEYSPACE + ".write_failure";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_write_failure";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
         assertEquals(0, tracker.errorWrites.get());
 
         try
         {
-            session.execute("INSERT INTO " + TABLE + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
+            session.execute("INSERT INTO " + table + "(k, c, v) values (?, ?, ?)", 0, 0, 0);
         }
         catch (NoHostAvailableException ex)
         { /* NOOP */ }
@@ -319,16 +308,16 @@ public class QueryInfoTrackerTest extends CQLTester
     action = "throw new org.apache.cassandra.exceptions.UnavailableException(\"msg\", org.apache.cassandra.db.ConsistencyLevel.SERIAL, 3, 1)")
     public void testReadBatchFailureCount()
     {
-        String TABLE = KEYSPACE + ".write_batch_failure";
-        session.execute("CREATE TABLE " + TABLE + "(k int, c int, v int, PRIMARY KEY (k, c))");
+        String table = KEYSPACE + ".qit_write_batch_failure";
+        session.execute("CREATE TABLE " + table + "(k int, c int, v int, PRIMARY KEY (k, c))");
 
         assertEquals(0, tracker.errorWrites.get());
 
         try
         {
             session.execute("BEGIN BATCH "
-                            + "INSERT INTO " + TABLE + "(k, c, v) VALUES (0, 0, 0);"
-                            + "INSERT INTO " + TABLE + "(k, c, v) VALUES (1, 1, 1);"
+                            + "INSERT INTO " + table + "(k, c, v) VALUES (0, 0, 0);"
+                            + "INSERT INTO " + table + "(k, c, v) VALUES (1, 1, 1);"
                             + "APPLY BATCH");
         }
         catch (NoHostAvailableException ex)
