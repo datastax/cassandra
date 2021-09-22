@@ -359,40 +359,35 @@ public class StorageProxy implements StorageProxyMBean
         catch (CasWriteUnknownResultException e)
         {
             metrics.casWriteMetrics.unknownResult.mark();
-            if (lwtTracker != null)
-                lwtTracker.onError(e);
+            lwtTracker.onError(e);
             throw e;
         }
         catch (CasWriteTimeoutException wte)
         {
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
-            if (lwtTracker != null)
-                lwtTracker.onError(wte);
+            lwtTracker.onError(wte);
             throw new CasWriteTimeoutException(wte.writeType, wte.consistency, wte.received, wte.blockFor, wte.contentions);
         }
         catch (ReadTimeoutException e)
         {
             metrics.casWriteMetrics.timeouts.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
-            if (lwtTracker != null)
-                lwtTracker.onError(e);
+            lwtTracker.onError(e);
             throw e;
         }
         catch (WriteFailureException | ReadFailureException e)
         {
             metrics.casWriteMetrics.failures.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).failures.mark();
-            if (lwtTracker != null)
-                lwtTracker.onError(e);
+            lwtTracker.onError(e);
             throw e;
         }
         catch (UnavailableException e)
         {
             metrics.casWriteMetrics.unavailables.mark();
             metrics.writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
-            if (lwtTracker != null)
-                lwtTracker.onError(e);
+            lwtTracker.onError(e);
             throw e;
         }
         finally
