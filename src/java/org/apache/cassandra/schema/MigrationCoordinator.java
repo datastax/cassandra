@@ -32,13 +32,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
-
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -84,10 +83,12 @@ public class MigrationCoordinator
     private static final int MIGRATION_DELAY_IN_MS = 60000;
     private static final int MAX_OUTSTANDING_VERSION_REQUESTS = 3;
 
-    public static final MigrationCoordinator instance = new MigrationCoordinator();
+    public static final MigrationCoordinator instance = new MigrationCoordinator(MessagingService.instance());
 
     public static final String IGNORED_VERSIONS_PROP = "cassandra.skip_schema_check_for_versions";
     public static final String IGNORED_ENDPOINTS_PROP = "cassandra.skip_schema_check_for_endpoints";
+
+    private final MessagingService messagingService;
 
     private static ImmutableSet<UUID> getIgnoredVersions()
     {
@@ -133,9 +134,9 @@ public class MigrationCoordinator
     {
         final UUID version;
 
-        final Set<InetAddressAndPort> endpoints           = Sets.newConcurrentHashSet();
+        final Set<InetAddressAndPort> endpoints = Sets.newConcurrentHashSet();
         final Set<InetAddressAndPort> outstandingRequests = Sets.newConcurrentHashSet();
-        final Deque<InetAddressAndPort> requestQueue      = new ArrayDeque<>();
+        final Deque<InetAddressAndPort> requestQueue = new ArrayDeque<>();
 
         private final WaitQueue waitQueue = new WaitQueue();
 
@@ -168,10 +169,13 @@ public class MigrationCoordinator
 
     private final Map<UUID, VersionInfo> versionInfo = new HashMap<>();
     private final Map<InetAddressAndPort, UUID> endpointVersions = new HashMap<>();
-    private final AtomicInteger inflightTasks = new AtomicInteger();
     private final Set<InetAddressAndPort> ignoredEndpoints = getIgnoredEndpoints();
-
     private final AtomicReference<SchemaUpdateHandler.GossipAware> schemaUpdateHandlerRef = new AtomicReference<>();
+
+    public MigrationCoordinator(MessagingService messagingService)
+    {
+        this.messagingService = messagingService;
+    }
 
     public void start(@Nonnull SchemaUpdateHandler.GossipAware schemaUpdateHandler)
     {
@@ -298,13 +302,13 @@ public class MigrationCoordinator
             return false;
         }
 
-        if (!MessagingService.instance().versions.knows(endpoint))
+        if (!messagingService.versions.knows(endpoint))
         {
             logger.debug("Not pulling schema from {} because their messaging version is unknown", endpoint);
             return false;
         }
 
-        if (MessagingService.instance().versions.getRaw(endpoint) != MessagingService.current_version)
+        if (messagingService.versions.getRaw(endpoint) != MessagingService.current_version)
         {
             logger.debug("Not pulling schema from {} because their schema format is incompatible", endpoint);
             return false;
@@ -395,7 +399,8 @@ public class MigrationCoordinator
 
     public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state, boolean waitForPull)
     {
-        if (state != null) {
+        if (state != null)
+        {
             UUID version = state.getSchemaVersion();
             if (version != null)
             {
@@ -437,27 +442,56 @@ public class MigrationCoordinator
 
     private Future<Void> scheduleSchemaPull(InetAddressAndPort endpoint, VersionInfo info)
     {
-        FutureTask<Void> task = new FutureTask<>(() -> pullSchema(new Callback(endpoint, info)), null);
+        FutureTask<Void> task = new FutureTask<>(() -> pullSchema(endpoint, new Callback(endpoint, info)), null);
         if (shouldPullImmediately(endpoint, info.version))
         {
             submitToMigrationIfNotShutdown(task);
         }
         else
         {
-            ScheduledExecutors.nonPeriodicTasks.schedule(()->submitToMigrationIfNotShutdown(task), MIGRATION_DELAY_IN_MS, TimeUnit.MILLISECONDS);
+            ScheduledExecutors.nonPeriodicTasks.schedule(() -> submitToMigrationIfNotShutdown(task), MIGRATION_DELAY_IN_MS, TimeUnit.MILLISECONDS);
         }
         return task;
     }
 
-    private static Future<?> submitToMigrationIfNotShutdown(Runnable task)
+    public CompletableFuture<Collection<Mutation>> pullSchemaFrom(InetAddressAndPort endpoint)
+    {
+        CompletableFuture<Collection<Mutation>> result = new CompletableFuture<>();
+        FutureTask<Void> task = new FutureTask<>(() -> pullSchema(endpoint, new RequestCallback<Collection<Mutation>>()
+        {
+            @Override
+            public void onResponse(Message<Collection<Mutation>> msg)
+            {
+                result.complete(msg.payload);
+            }
+
+            @Override
+            public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+            {
+                result.completeExceptionally(new RuntimeException("Failed to get schema from " + from + ". The failure reason was: " + failureReason));
+            }
+
+            @Override
+            public boolean invokeOnFailure()
+            {
+                return true;
+            }
+        }), null);
+
+        return submitToMigrationIfNotShutdown(task).thenCompose(ignored -> result);
+    }
+
+    private static CompletableFuture<Void> submitToMigrationIfNotShutdown(Runnable task)
     {
         if (Stage.MIGRATION.executor().isShutdown() || Stage.MIGRATION.executor().isTerminated())
         {
             logger.info("Skipped scheduled pulling schema from other nodes: the MIGRATION executor service has been shutdown.");
-            return null;
+            return CompletableFuture.completedFuture(null);
         }
         else
+        {
             return Stage.MIGRATION.submit(task);
+        }
     }
 
     @VisibleForTesting
@@ -519,41 +553,38 @@ public class MigrationCoordinator
         }
     }
 
-    private void pullSchema(Callback callback)
+    private void pullSchema(InetAddressAndPort endpoint, RequestCallback<?> callback)
     {
-        if (!isAlive(callback.endpoint))
+        if (!isAlive(endpoint))
         {
-            logger.warn("Can't send schema pull request: node {} is down.", callback.endpoint);
-            callback.fail();
+            logger.warn("Can't send schema pull request: node {} is down.", endpoint);
+            callback.onFailure(endpoint, RequestFailureReason.UNKNOWN);
             return;
         }
 
         // There is a chance that quite some time could have passed between now and the MM#maybeScheduleSchemaPull(),
         // potentially enough for the endpoint node to restart - which is an issue if it does restart upgraded, with
         // a higher major.
-        if (!shouldPullFromEndpoint(callback.endpoint))
+        if (!shouldPullFromEndpoint(endpoint))
         {
-            logger.info("Skipped sending a migration request: node {} has a higher major version now.", callback.endpoint);
-            callback.fail();
+            logger.info("Skipped sending a migration request: node {} has a higher major version now.", endpoint);
+            callback.onFailure(endpoint, RequestFailureReason.UNKNOWN);
             return;
         }
 
-        logger.debug("Requesting schema from {}", callback.endpoint);
-        sendMigrationMessage(callback);
+        logger.debug("Requesting schema from {}", endpoint);
+        sendMigrationMessage(endpoint, callback);
     }
 
-    @VisibleForTesting
-    protected void sendMigrationMessage(Callback callback)
+    private void sendMigrationMessage(InetAddressAndPort endpoint, RequestCallback<?> callback)
     {
-        inflightTasks.getAndIncrement();
-        Message message = Message.out(Verb.SCHEMA_PULL_REQ, NoPayload.noPayload);
-        logger.info("Sending schema pull request to {}", callback.endpoint);
-        MessagingService.instance().sendWithCallback(message, callback.endpoint, callback);
+        Message<?> message = Message.out(Verb.SCHEMA_PULL_REQ, NoPayload.noPayload);
+        logger.info("Sending schema pull request to {}", endpoint);
+        messagingService.sendWithCallback(message, endpoint, callback);
     }
 
     private synchronized Future<Void> pullComplete(InetAddressAndPort endpoint, VersionInfo info, boolean wasSuccessful)
     {
-        inflightTasks.decrementAndGet();
         if (wasSuccessful)
             info.markReceived();
 
@@ -562,13 +593,9 @@ public class MigrationCoordinator
         return maybePullSchema(info);
     }
 
-    public int getInflightTasks()
-    {
-        return inflightTasks.get();
-    }
-
     /**
      * Wait until we've received schema responses for all versions we're aware of
+     *
      * @param waitMillis
      * @return true if response for all schemas were received, false if we timed out waiting
      */

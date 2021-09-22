@@ -86,13 +86,7 @@ public interface SchemaUpdateHandler
     void addOrUpdate(KeyspaceMetadata ksm);
 
     // temporary, todo remove
-    void remove(String ksName);
-
-    // temporary, todo remove
     void updateVersion(UUID version);
-
-    // temporary, todo remove
-    void reset();
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
@@ -109,6 +103,23 @@ public interface SchemaUpdateHandler
          * Called when schema pull messsage is received.
          */
         Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom);
+
+        /**
+         * Clears the local schema and pull schema from other nodes.
+         *
+         * This method is kind of broken/dangerous because clearing the local schema is not safe at all. First,
+         * this method is presumably meant to be called when a node is online (otherwise, just hard-removing the system
+         * schema tables is probably easier/safer) but, even if we try to pull from another node right away, there will
+         * be a window during which the node has no schema and queries will likely fail while that is.
+         * But more importantly, this drops all the TableMetadataRef from SchemaManager, but existing instances of
+         * ColumnFamilyStore (and other consumers) will still refer to them. So even after the schema is restored from
+         * the schema PULL, those ColumnFamilyStore instance will refer to the old refs that will not get updated and
+         * that could lead to silent unexpected behavior while the node is not restarted.
+         *
+         * TODO remove or refactor this method as it is dangerous
+         */
+        @Deprecated
+        void clearUnsafe();
     }
 
     default Optional<GossipAware> asGossipAwareTracker()

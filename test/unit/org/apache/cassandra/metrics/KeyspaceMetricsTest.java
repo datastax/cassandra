@@ -46,7 +46,7 @@ public class KeyspaceMetricsTest extends SchemaLoader
     @BeforeClass
     public static void setup() throws ConfigurationException, IOException
     {
-        SchemaManager.instance.clear();
+        SchemaManager.instance.clearUnsafeOrThrow();
 
         EmbeddedCassandraService cassandra = new EmbeddedCassandraService();
         cassandra.start();

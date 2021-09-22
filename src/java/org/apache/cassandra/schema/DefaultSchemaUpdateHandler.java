@@ -22,6 +22,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -124,29 +125,9 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public void remove(String ksName)
-    {
-        schema = new Schema(schema.getKeyspaces().without(ksName), schema.getVersion());
-    }
-
-    @Override
     public void updateVersion(UUID version)
     {
         schema = new Schema(schema.getKeyspaces(), version);
-    }
-
-    @Override
-    public void reset()
-    {
-        Set<InetAddressAndPort> liveEndpoints = Gossiper.instance.getLiveMembers();
-        liveEndpoints.remove(FBUtilities.getBroadcastAddressAndPort());
-
-        // force migration if there are nodes around
-        for (InetAddressAndPort node : liveEndpoints)
-        {
-            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(node);
-            migrationCoordinator.reportEndpointVersion(node, state, true);
-        }
     }
 
     @Override
@@ -274,5 +255,34 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         schema = update.after;
         SchemaManager.instance.updateRefs(update.diff);
         SchemaManager.instance.applyChangesLocally(update.diff);
+    }
+
+    @Override
+    public void clearUnsafe()
+    {
+        logger.info("Starting local schema reset...");
+
+        logger.debug("Truncating schema tables...");
+        SchemaKeyspace.truncate();
+
+        logger.debug("Clearing local schema keyspace definitions...");
+        SchemaManager.instance.updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
+
+        schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
+
+        Optional<InetAddressAndPort> endpoint = Gossiper.instance.getLiveMembers()
+                                                                 .stream()
+                                                                 .filter(migrationCoordinator::shouldPullFromEndpoint)
+                                                                 .findFirst();
+
+        if (!endpoint.isPresent())
+            return;
+
+        logger.debug("Pulling schema from another node...");
+        migrationCoordinator.pullSchemaFrom(endpoint.get())
+                            .thenAccept(schemaMutations -> applyReceivedSchemaMutations(endpoint.get(), schemaMutations));
+
+        logger.info("Local schema reset is complete.");
+        SchemaDiagnostics.schemataCleared(SchemaManager.instance.schema());
     }
 }

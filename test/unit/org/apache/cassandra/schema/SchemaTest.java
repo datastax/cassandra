@@ -19,6 +19,7 @@
 package org.apache.cassandra.schema;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -61,8 +62,8 @@ public class SchemaTest
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            SchemaManager.instance.removeRefs(SchemaManager.instance.getKeyspaceMetadata("ks0"));
-            SchemaManager.instance.removeRefs(SchemaManager.instance.getKeyspaceMetadata("ks1"));
+            Schema schema = SchemaManager.instance.schema();
+            SchemaManager.instance.updateRefs(Keyspaces.diff(schema.getKeyspaces(), schema.getKeyspaces().without(Arrays.asList("ks0", "ks1"))));
 
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));

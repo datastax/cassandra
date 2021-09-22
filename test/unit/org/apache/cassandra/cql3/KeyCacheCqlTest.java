@@ -316,7 +316,7 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         dropTable("DROP TABLE %s");
-        SchemaManager.instance.updateVersion();
+        // SchemaManager.instance.updateVersion(); version should be updated automatically, I don't really know why it is called explicitly
 
         //Test loading for a dropped 2i/table
         CacheService.instance.keyCache.clear();

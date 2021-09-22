@@ -80,7 +80,7 @@ public class TrieMemtableMetricsTest extends SchemaLoader
 
         SchemaLoader.loadSchema();
 
-        SchemaManager.instance.clear();
+        SchemaManager.instance.clearUnsafeOrThrow();
 
         EmbeddedCassandraService cassandra = new EmbeddedCassandraService();
         cassandra.start();

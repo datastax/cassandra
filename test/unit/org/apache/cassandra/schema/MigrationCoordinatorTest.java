@@ -41,7 +41,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 import static com.google.common.util.concurrent.Futures.getUnchecked;
 
@@ -75,12 +78,22 @@ public class MigrationCoordinatorTest
 
     private static class InstrumentedCoordinator extends MigrationCoordinator
     {
+        private final MessagingService messagingService;
 
         Queue<Callback> requests = new LinkedList<>();
-        @Override
-        protected void sendMigrationMessage(MigrationCoordinator.Callback callback)
+
+        private InstrumentedCoordinator(MessagingService messagingService)
         {
-            requests.add(callback);
+            super(messagingService);
+            this.messagingService = messagingService;
+            Mockito.doAnswer(a -> requests.add(a.getArgument(2, Callback.class)))
+                   .when(messagingService)
+                   .sendWithCallback(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
+        }
+
+        private InstrumentedCoordinator()
+        {
+            this(Mockito.mock(MessagingService.class));
         }
 
         boolean shouldPullSchema = true;

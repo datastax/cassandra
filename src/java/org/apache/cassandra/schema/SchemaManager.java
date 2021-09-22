@@ -17,9 +17,12 @@
  */
 package org.apache.cassandra.schema;
 
-import java.net.UnknownHostException;
 import java.time.Duration;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
@@ -38,22 +41,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.functions.*;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.KeyspaceNotDefinedException;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.collect.Iterables.size;
@@ -116,11 +120,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.apply(transformation, locally, preserveExistingUserSettings);
     }
 
+    public void clearUnsafeOrThrow()
+    {
+        updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe();
+    }
+
     /**
      * Update (or insert) new keyspace definition
      *
      * @param ksm The metadata about keyspace
      */
+    // TODO refactor / remove
     synchronized public void load(KeyspaceMetadata ksm)
     {
         KeyspaceMetadata previous = updateHandler.schema().getKeyspaces().getNullable(ksm.name);
@@ -136,7 +146,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     /**
      * Should be called after a keyspace is added to the local schema. It updates the table and index references cache.
      */
-    void addNewRefs(KeyspaceMetadata ksm)
+    private void addNewRefs(KeyspaceMetadata ksm)
     {
         schemaRefCache.addNewRefs(ksm);
         SchemaDiagnostics.metadataInitialized(schema(), ksm);
@@ -146,7 +156,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * Should be called once a keyspace metadata is changed (tables, views, indexes). It updates the table and index
      * references cache.
      */
-    void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
+    private void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
     {
         Keyspace keyspace = getKeyspaceInstance(updated.name);
         if (null != keyspace)
@@ -159,7 +169,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     /**
      * Should be called once a keyspace is removed from local schema. It updates the table and index reference cache.
      */
-    synchronized void removeRefs(KeyspaceMetadata ksm)
+    private void removeRefs(KeyspaceMetadata ksm)
     {
         schemaRefCache.removeRefs(ksm);
         SchemaDiagnostics.metadataRemoved(schema(), ksm);
@@ -300,13 +310,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             throw Throwables.cleaned(e);
         }
     }
-
-    // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
-    public Keyspaces snapshot()
-    {
-        return Keyspaces.builder().add(localKeyspaces.getAll()).add(updateHandler.schema().getKeyspaces()).build();
-    }
-
 
     // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
     public int getNumberOfTables()
@@ -544,58 +547,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                : ksm.functions.find(name, argTypes);
     }
 
-    /* Version control */
-
-
-    /**
-     * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
-     * will be converted into UUID which would act as content-based version of the schema.
-     */
-    public void updateVersion()
-    {
-        UUID version = SchemaKeyspace.calculateSchemaDigest();
-        updateHandler.updateVersion(version);
-        SystemKeyspace.updateSchemaVersion(version);
-        SchemaDiagnostics.versionUpdated(schema());
-    }
-
-    /*
-     * Like updateVersion, but also announces via gossip
-     */
-    public void updateVersionAndAnnounce()
-    {
-        updateVersion();
-        passiveAnnounceVersion();
-    }
-
-    @Override
-    public void onRemove(InetAddressAndPort endpoint)
-    {
-        if (updateHandler instanceof IEndpointStateChangeSubscriber)
-            ((IEndpointStateChangeSubscriber) updateHandler).onRemove(endpoint);
-    }
-
-    /**
-     * Announce my version passively over gossip.
-     * Used to notify nodes as they arrive in the cluster.
-     */
-    private void passiveAnnounceVersion()
-    {
-        Schema schema = schema();
-        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
-        SchemaDiagnostics.versionAnnounced(schema());
-    }
-
-    /**
-     * Clear all KS/CF metadata and reset version.
-     */
-    public synchronized void clear()
-    {
-        getNonSystemKeyspaces().forEach(k -> removeRefs(getKeyspaceMetadata(k)));
-        updateVersionAndAnnounce();
-        SchemaDiagnostics.schemataCleared(schema());
-    }
-
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
@@ -702,22 +653,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void alterView(ViewMetadata updated)
     {
         Keyspace.open(updated.keyspace()).getColumnFamilyStore(updated.name()).reload();
-    }
-
-    /**
-     * Clear all locally stored schema information and reset schema to initial state.
-     * Called by user (via JMX) who wants to get rid of schema disagreement.
-     */
-    public void resetLocalSchema()
-    {
-        logger.info("Starting local schema reset...");
-
-        SchemaMigrationDiagnostics.resetLocalSchema();
-        SchemaKeyspace.truncate();
-        clear();
-        updateHandler.reset();
-
-        logger.info("Local schema reset is complete.");
     }
 
     /**
