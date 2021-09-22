@@ -32,6 +32,14 @@ public class TracingClientState extends ClientState
         this.tracedKeyspace = tracedKeyspace;
     }
 
+    @Override
+    public ClientState cloneWithKeyspaceIfSet(String keyspace)
+    {
+        if (keyspace == null)
+            return this;
+        return new TracingClientState(tracedKeyspace, super.cloneWithKeyspaceIfSet(keyspace));
+    }
+
     /**
      * @return the keyspace being traced
      */

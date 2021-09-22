@@ -157,7 +157,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     public String getKeyspace()
     {
         assert isTracing();
-        return state.get().clientState.getKeyspace();
+
+        if (state.get().clientState instanceof TracingClientState)
+            return ((TracingClientState) state.get().clientState).tracedKeyspace();
+
+        return null;
     }
 
     /**
@@ -327,7 +331,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
         addToMutable.put(ParamType.TRACE_SESSION, Tracing.instance.getSessionId());
         addToMutable.put(ParamType.TRACE_TYPE, Tracing.instance.getTraceType());
-        addToMutable.put(ParamType.TRACE_KEYSPACE, Tracing.instance.getKeyspace());
+        String keyspace = Tracing.instance.getKeyspace();
+        if (keyspace != null)
+        {
+            addToMutable.put(ParamType.TRACE_KEYSPACE, keyspace);
+        }
         return addToMutable;
     }
 

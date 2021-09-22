@@ -177,14 +177,27 @@ public final class TracingTest
     {
         Tracing tracing = Tracing.instance;
         String keyspace = "someKeyspace";
-        UUID sessionId = tracing.newSession(ClientState.forInternalCalls(keyspace), Tracing.TraceType.QUERY);
+        UUID sessionId = tracing.newSession(TracingClientState.withTracedKeyspace(keyspace), Tracing.TraceType.QUERY);
 
-        assert keyspace.equals(tracing.get().clientState.getKeyspace());
-        assert keyspace.equals(tracing.get(sessionId).clientState.getKeyspace());
+        assert keyspace.equals(((TracingClientState)tracing.get().clientState).tracedKeyspace());
+        assert keyspace.equals(((TracingClientState)tracing.get(sessionId).clientState).tracedKeyspace());
+        assert keyspace.equals(tracing.getKeyspace());
 
         Map<ParamType, Object> headers = tracing.addTraceHeaders(new HashMap<>());
         assert keyspace.equals(headers.get(ParamType.TRACE_KEYSPACE));
         tracing.stopSession();
+    }
+
+    @Test
+    public void test_cloning_tracing_state()
+    {
+        String keyspace = "someKeyspace";
+        String otherKeyspace = "otherKeyspace";
+        TracingClientState state = TracingClientState.withTracedKeyspace(keyspace);
+
+        ClientState clientState = state.cloneWithKeyspaceIfSet(otherKeyspace);
+        assert clientState instanceof TracingClientState;
+        assert keyspace.equals(((TracingClientState)clientState).tracedKeyspace());
     }
 
     @Test
