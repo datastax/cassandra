@@ -21,6 +21,7 @@ package org.apache.cassandra.service.reads.range;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -46,9 +47,10 @@ public class EndpointGroupingRangeCommandIterator extends RangeCommandIterator
                                          int concurrencyFactor,
                                          int maxConcurrencyFactor,
                                          int totalRangeCount,
-                                         Dispatcher.RequestTime requestTime)
+                                         Dispatcher.RequestTime requestTime,
+                                         QueryInfoTracker.ReadTracker readTracker)
     {
-        super(replicaPlans, command, concurrencyFactor, maxConcurrencyFactor, totalRangeCount, requestTime);
+        super(replicaPlans, command, concurrencyFactor, maxConcurrencyFactor, totalRangeCount, requestTime, readTracker);
     }
 
     @Override
@@ -60,7 +62,8 @@ public class EndpointGroupingRangeCommandIterator extends RangeCommandIterator
                                                                                   counter,
                                                                                   replicaPlans,
                                                                                   concurrencyFactor(),
-                                                                                  requestTime);
+                                                                                  requestTime,
+                                                                                  readTracker);
         PartitionIterator partitions = coordinator.execute();
 
         rangesQueried += coordinator.vnodeRanges();
