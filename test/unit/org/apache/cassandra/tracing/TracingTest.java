@@ -23,8 +23,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -32,8 +34,15 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.TracingClientState;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.commons.lang3.StringUtils;
+
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 public final class TracingTest
 {
@@ -48,7 +57,7 @@ public final class TracingTest
     {
         List<String> traces = new ArrayList<>();
         Tracing tracing = new TracingImpl(traces);
-        tracing.newSession(Tracing.TraceType.NONE);
+        tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         TraceState state = tracing.begin("test-request", Collections.<String,String>emptyMap());
         state.trace("test-1");
         state.trace("test-2");
@@ -68,7 +77,7 @@ public final class TracingTest
     {
         List<String> traces = new ArrayList<>();
         Tracing tracing = new TracingImpl(traces);
-        tracing.newSession(Tracing.TraceType.NONE);
+        tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().trace("test-1");
         tracing.get().trace("test-2");
@@ -88,7 +97,7 @@ public final class TracingTest
     {
         List<String> traces = new ArrayList<>();
         Tracing tracing = new TracingImpl(traces);
-        TimeUUID uuid = tracing.newSession(Tracing.TraceType.NONE);
+        TimeUUID uuid = tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get(uuid).trace("test-1");
         tracing.get(uuid).trace("test-2");
@@ -112,7 +121,7 @@ public final class TracingTest
         Map<String,ByteBuffer> customPayload = Collections.singletonMap("test-key", customPayloadValue);
 
         TracingImpl tracing = new TracingImpl(traces);
-        tracing.newSession(customPayload);
+        tracing.newSession(ClientState.forInternalCalls(), customPayload);
         TraceState state = tracing.begin("test-custom_payload", Collections.<String,String>emptyMap());
         state.trace("test-1");
         state.trace("test-2");
@@ -134,7 +143,7 @@ public final class TracingTest
     {
         List<String> traces = new ArrayList<>();
         Tracing tracing = new TracingImpl(traces);
-        tracing.newSession(Tracing.TraceType.REPAIR);
+        tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().enableActivityNotification("test-tag");
         assert TraceState.Status.IDLE == tracing.get().waitActivity(1);
@@ -151,7 +160,7 @@ public final class TracingTest
     {
         List<String> traces = new ArrayList<>();
         Tracing tracing = new TracingImpl(traces);
-        tracing.newSession(Tracing.TraceType.REPAIR);
+        tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().enableActivityNotification("test-tag");
 
@@ -163,6 +172,125 @@ public final class TracingTest
         tracing.get().trace("test-trace");
         tracing.stopSession();
         assert null == tracing.get();
+    }
+
+    @Test
+    public void test_adding_keyspace_to_trace_state()
+    {
+        Tracing tracing = Tracing.instance;
+        String keyspace = "someKeyspace";
+        TimeUUID sessionId = tracing.newSession(TracingClientState.withTracedKeyspace(keyspace), Tracing.TraceType.QUERY);
+
+        assert keyspace.equals(((TracingClientState)tracing.get().clientState).tracedKeyspace());
+        assert keyspace.equals(((TracingClientState)tracing.get(sessionId).clientState).tracedKeyspace());
+        assert keyspace.equals(tracing.getKeyspace());
+
+        Map<ParamType, Object> headers = tracing.addTraceHeaders(new HashMap<>());
+        assert keyspace.equals(headers.get(ParamType.TRACE_KEYSPACE));
+        tracing.stopSession();
+    }
+
+    @Test
+    public void test_cloning_tracing_state()
+    {
+        String keyspace = "someKeyspace";
+        String otherKeyspace = "otherKeyspace";
+        TracingClientState state = TracingClientState.withTracedKeyspace(keyspace);
+
+        ClientState clientState = state.cloneWithKeyspaceIfSet(otherKeyspace);
+        assert clientState instanceof TracingClientState;
+        assert keyspace.equals(((TracingClientState)clientState).tracedKeyspace());
+    }
+
+    @Test
+    public void test_initializing_from_message_with_keyspace()
+    {
+        ClientStateAccumulatingTracing tracing = new ClientStateAccumulatingTracing();
+
+        Message<Object> message = Message.builder(Verb._TEST_1, new Object())
+                                         .withParam(ParamType.TRACE_KEYSPACE, "testKeyspace")
+                                         .withParam(ParamType.TRACE_SESSION, nextTimeUUID())
+                                         .build();
+
+        TraceState traceState = tracing.initializeFromMessage(message.header);
+
+        assert traceState.clientState instanceof TracingClientState;
+        assert "testKeyspace".equals(((TracingClientState) traceState.clientState).tracedKeyspace());
+    }
+
+    @Test
+    public void test_initializing_from_message_without_keyspace()
+    {
+        ClientStateAccumulatingTracing tracing = new ClientStateAccumulatingTracing();
+
+        Message<Object> message = Message.builder(Verb._TEST_1, new Object())
+                                         .withParam(ParamType.TRACE_SESSION, nextTimeUUID())
+                                         .build();
+
+        TraceState traceState = tracing.initializeFromMessage(message.header);
+
+        assert traceState.clientState instanceof TracingClientState;
+        assert ((TracingClientState) traceState.clientState).tracedKeyspace() == null;
+    }
+
+    @Test
+    public void test_tracing_outgoing_message_with_keyspace()
+    {
+        ClientStateAccumulatingTracing tracing = new ClientStateAccumulatingTracing();
+
+        Message<Object> message = Message.builder(Verb._TEST_1, new Object())
+                                         .withParam(ParamType.TRACE_KEYSPACE, "testKeyspace")
+                                         .withParam(ParamType.TRACE_SESSION, nextTimeUUID())
+                                         .build();
+
+        tracing.traceOutgoingMessage(message, 999, InetAddressAndPort.getLocalHost());
+
+        assert tracing.states.size() == 1;
+        assert tracing.states.peek() instanceof TracingClientState;
+        assert "testKeyspace".equals(((TracingClientState) tracing.states.peek()).tracedKeyspace());
+    }
+
+    @Test
+    public void test_tracing_outgoing_message_without_keyspace()
+    {
+        ClientStateAccumulatingTracing tracing = new ClientStateAccumulatingTracing();
+
+        Message<Object> message = Message.builder(Verb._TEST_1, new Object())
+                                         .withParam(ParamType.TRACE_SESSION, nextTimeUUID())
+                                         .build();
+
+        tracing.traceOutgoingMessage(message, 999, InetAddressAndPort.getLocalHost());
+
+        assert tracing.states.size() == 1;
+        assert tracing.states.peek() instanceof TracingClientState;
+        assert ((TracingClientState) tracing.states.peek()).tracedKeyspace() == null;
+    }
+
+    private static final class ClientStateAccumulatingTracing extends Tracing
+    {
+        Queue<ClientState> states = new LinkedList<>();
+
+        @Override
+        protected void stopSessionImpl()
+        {}
+
+        @Override
+        public TraceState begin(String request, InetAddress client, Map<String, String> parameters)
+        {
+            return null;
+        }
+
+        @Override
+        protected TraceState newTraceState(ClientState state, InetAddressAndPort coordinator, TimeUUID sessionId, TraceType traceType)
+        {
+            return new TraceStateImpl(state, coordinator, sessionId, traceType);
+        }
+
+        @Override
+        public void trace(ClientState clientState, ByteBuffer sessionId, String message, int ttl)
+        {
+            states.add(clientState);
+        }
     }
 
     private static final class TracingImpl extends Tracing
@@ -189,18 +317,20 @@ public final class TracingTest
             return get();
         }
 
-        protected TimeUUID newSession(TimeUUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
+        @Override
+        protected TimeUUID newSession(ClientState state, TimeUUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
         {
             if (!customPayload.isEmpty())
                 logger.info("adding custom payload items {}", StringUtils.join(customPayload.keySet(), ','));
 
             payloads.putAll(customPayload);
-            return super.newSession(sessionId, traceType, customPayload);
+            return super.newSession(state, sessionId, traceType, customPayload);
         }
 
-        protected TraceState newTraceState(InetAddressAndPort ia, TimeUUID uuid, Tracing.TraceType tt)
+        @Override
+        protected TraceState newTraceState(ClientState state, InetAddressAndPort ia, TimeUUID uuid, Tracing.TraceType tt)
         {
-            return new TraceState(ia, uuid, tt)
+            return new TraceState(state, ia, uuid, tt)
             {
                 protected void traceImpl(String string)
                 {
@@ -213,7 +343,8 @@ public final class TracingTest
             };
         }
 
-        public void trace(ByteBuffer bb, String string, int i)
+        @Override
+        public void trace(ClientState state, ByteBuffer bb, String string, int i)
         {
             throw new UnsupportedOperationException("Not supported yet.");
         }
