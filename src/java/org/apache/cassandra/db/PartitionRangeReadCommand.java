@@ -323,7 +323,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
 
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException
     {
-        return StorageProxy.getRangeSlice(this, consistency, requestTime);
+        return StorageProxy.getRangeSlice(this, consistency, requestTime, state);
     }
 
     protected void recordReadLatency(TableMetrics metric, long latencyNanos)

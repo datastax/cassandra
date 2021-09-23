@@ -40,6 +40,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -63,6 +64,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
 
     protected DataLimits.Counter counter;
     private PartitionIterator sentQueryIterator;
+    protected QueryInfoTracker.ReadTracker readTracker;
 
     private final int maxConcurrencyFactor;
     protected int concurrencyFactor;
@@ -78,20 +80,23 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                                               int concurrencyFactor,
                                               int maxConcurrencyFactor,
                                               int totalRangeCount,
-                                              Dispatcher.RequestTime requestTime)
+                                              Dispatcher.RequestTime requestTime,
+                                              QueryInfoTracker.ReadTracker readTracker)
     {
         return supportsEndpointGrouping(command) ? new EndpointGroupingRangeCommandIterator(replicaPlans,
                                                                                             command,
                                                                                             concurrencyFactor,
                                                                                             maxConcurrencyFactor,
                                                                                             totalRangeCount,
-                                                                                            requestTime)
+                                                                                            requestTime,
+                                                                                            readTracker)
                                                  : new NonGroupingRangeCommandIterator(replicaPlans,
                                                                                        command,
                                                                                        concurrencyFactor,
                                                                                        maxConcurrencyFactor,
                                                                                        totalRangeCount,
-                                                                                       requestTime);
+                                                                                       requestTime,
+                                                                                       readTracker);
     }
 
     RangeCommandIterator(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
@@ -99,7 +104,8 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                          int concurrencyFactor,
                          int maxConcurrencyFactor,
                          int totalRangeCount,
-                         Dispatcher.RequestTime requestTime)
+                         Dispatcher.RequestTime requestTime,
+                         QueryInfoTracker.ReadTracker readTracker)
     {
         this.rangeMetrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace).rangeMetrics;
         this.replicaPlans = replicaPlans;
@@ -108,6 +114,8 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         this.maxConcurrencyFactor = maxConcurrencyFactor;
         this.totalRangeCount = totalRangeCount;
         this.requestTime = requestTime;
+        this.readTracker = readTracker;
+
         enforceStrictLiveness = command.metadata().enforceStrictLiveness();
     }
 

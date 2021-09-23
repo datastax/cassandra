@@ -36,6 +36,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.Tracing.TraceType;
 import org.apache.cassandra.utils.FBUtilities;
@@ -247,7 +248,7 @@ public class MessageTest
     {
         try
         {
-            TimeUUID sessionId = Tracing.instance.newSession(traceType);
+            TimeUUID sessionId = Tracing.instance.newSession(ClientState.forInternalCalls(), traceType);
             Message<NoPayload> msg = Message.builder(Verb._TEST_1, noPayload).withTracingParams().build();
             assertEquals(sessionId, msg.header.traceSession());
             assertEquals(traceType, msg.header.traceType());
