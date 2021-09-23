@@ -764,19 +764,19 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
                                                        Views.none(),
                                                        Types.none(),
                                                        Functions.none());
-        SchemaManager.instance.apply(SchemaTransformations.addKeyspace(ksm, true), true, false);
+        SchemaManager.instance.apply(SchemaTransformations.addKeyspace(ksm, true), true);
 
         for (String typeCQL : typesCQL)
         {
             Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
             SchemaTransformation t = SchemaTransformations.addOrUpdateType(CreateTypeStatement.parse(typeCQL,
                                                                                                      keyspace, types));
-            SchemaManager.instance.apply(t, true, false);
+            SchemaManager.instance.apply(t, true);
         }
 
         Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
         TableMetadata metadata = CreateTableStatement.parse(schemaCQL, keyspace, types).build();
-        SchemaManager.instance.apply(SchemaTransformations.addTable(metadata, true), true, false);
+        SchemaManager.instance.apply(SchemaTransformations.addTable(metadata, true), true);
     }
 
     private static CompressionParams compressionParams(int chunkLength)

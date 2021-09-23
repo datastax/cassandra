@@ -68,13 +68,10 @@ public interface SchemaUpdateHandler
 
     /**
      * Apply the provided transformation to the current schema.
-     *
      * @param transformation           the transformation to apply to the current schema.
      * @param locally                  whether the updated version should be announced and changes pushed to other nodes
-     * @param preserveExistingSettings if true, any update made by the transformation to an existing entity will not
-     *                                 modify any prior settings set by users (such as replication configuration).
      */
-    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingSettings);
+    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally);
 
     /*
      * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that

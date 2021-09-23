@@ -99,7 +99,7 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
 
         validateKeyspaceName();
 
-        SchemaTransformationResult update = SchemaManager.instance.apply(this, locally, false);
+        SchemaTransformationResult update = SchemaManager.instance.apply(this, locally);
 
         clientWarnings(update.diff).forEach(ClientWarn.instance::warn);
 

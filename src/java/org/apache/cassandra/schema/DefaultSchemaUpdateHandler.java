@@ -175,7 +175,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingSettings)
+    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -184,7 +184,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         if (diff.isEmpty())
             return new SchemaTransformation.SchemaTransformationResult(before, before, diff);
 
-        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, preserveExistingSettings ? 0 : FBUtilities.timestampMicros());
+        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, transformation.fixedTimestampMicros().orElse(FBUtilities.timestampMicros()));
         SchemaKeyspace.applyChanges(mutations);
         Schema after = new Schema(afterKeyspaces, SchemaKeyspace.calculateSchemaDigest());
         SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
@@ -240,7 +240,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     public void reloadSchemaFromDisk()
     {
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        apply(existing -> after, false, false);
+        apply(existing -> after, false);
     }
 
 

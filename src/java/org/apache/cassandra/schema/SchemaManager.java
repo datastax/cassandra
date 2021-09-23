@@ -115,9 +115,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         updateHandler.reloadSchemaFromDisk();
     }
 
-    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, boolean preserveExistingUserSettings)
+    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
-        return updateHandler.apply(transformation, locally, preserveExistingUserSettings);
+        return updateHandler.apply(transformation, locally);
     }
 
     public void clearUnsafeOrThrow()
@@ -653,51 +653,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void alterView(ViewMetadata updated)
     {
         Keyspace.open(updated.keyspace()).getColumnFamilyStore(updated.name()).reload();
-    }
-
-    /**
-     * We have a set of non-local, distributed system keyspaces, e.g. system_traces, system_auth, etc.
-     * (see {@link SchemaConstants#REPLICATED_SYSTEM_KEYSPACE_NAMES}), that need to be created on cluster initialisation,
-     * and later evolved on major upgrades (sometimes minor too). This method compares the current known definitions
-     * of the tables (if the keyspace exists) to the expected, most modern ones expected by the running version of C*;
-     * if any changes have been detected, a schema Mutation will be created which, when applied, should make
-     * cluster's view of that keyspace aligned with the expected modern definition.
-     *
-     * @param keyspace   the expected modern definition of the keyspace
-     * @param generation timestamp to use for the table changes in the schema mutation
-     *
-     * @return empty Optional if the current definition is up to date, or an Optional with the Mutation that would
-     *         bring the schema in line with the expected definition.
-     */
-    public Optional<Mutation> evolveSystemKeyspace(KeyspaceMetadata keyspace, long generation)
-    {
-        Mutation.SimpleBuilder builder = null;
-
-        KeyspaceMetadata definedKeyspace = instance.getKeyspaceMetadata(keyspace.name);
-        Tables definedTables = null == definedKeyspace ? Tables.none() : definedKeyspace.tables;
-
-        for (TableMetadata table : keyspace.tables)
-        {
-            if (table.equals(definedTables.getNullable(table.name)))
-                continue;
-
-            if (null == builder)
-            {
-                // for the keyspace definition itself (name, replication, durability) always use generation 0;
-                // this ensures that any changes made to replication by the user will never be overwritten.
-                builder = SchemaKeyspace.makeCreateKeyspaceMutation(keyspace.name, keyspace.params, 0);
-
-                // now set the timestamp to generation, so the tables have the expected timestamp
-                builder.timestamp(generation);
-            }
-
-            // for table definitions always use the provided generation; these tables, unlike their containing
-            // keyspaces, are *NOT* meant to be altered by the user; if their definitions need to change,
-            // the schema must be updated in code, and the appropriate generation must be bumped.
-            SchemaKeyspace.addTableToSchemaMutation(table, true, builder);
-        }
-
-        return builder == null ? Optional.empty() : Optional.of(builder.build());
     }
 
 }
