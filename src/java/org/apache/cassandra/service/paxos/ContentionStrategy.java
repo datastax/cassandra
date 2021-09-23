@@ -29,6 +29,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -378,7 +379,7 @@ public class ContentionStrategy
     {
         if (attempts >= traceAfterAttempts && !Tracing.isTracing())
         {
-            Tracing.instance.newSession(Tracing.TraceType.QUERY);
+            Tracing.instance.newSession(ClientState.forInternalCalls(), Tracing.TraceType.QUERY);
             Tracing.instance.begin(type.traceTitle,
                                    ImmutableMap.of(
                                        "keyspace", table.keyspace,
