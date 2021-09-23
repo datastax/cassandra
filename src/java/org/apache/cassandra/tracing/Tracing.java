@@ -27,6 +27,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +40,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.TracingClientState;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.TimeUUID;
@@ -147,6 +151,17 @@ public abstract class Tracing extends ExecutorLocals.Impl
         return get().ttl;
     }
 
+    @Nullable
+    public String getKeyspace()
+    {
+        assert isTracing();
+
+        if (get().clientState instanceof TracingClientState)
+            return ((TracingClientState) get().clientState).tracedKeyspace();
+
+        return null;
+    }
+
     /**
      * Indicates if the current thread's execution is being traced.
      */
@@ -155,33 +170,35 @@ public abstract class Tracing extends ExecutorLocals.Impl
         return instance.get() != null;
     }
 
-    public TimeUUID newSession(Map<String,ByteBuffer> customPayload)
+    public TimeUUID newSession(ClientState state, Map<String,ByteBuffer> customPayload)
     {
         return newSession(
+                state,
                 nextTimeUUID(),
                 TraceType.QUERY,
                 customPayload);
     }
 
-    public TimeUUID newSession(TraceType traceType)
+    public TimeUUID newSession(ClientState state, TraceType traceType)
     {
         return newSession(
+                state,
                 nextTimeUUID(),
                 traceType,
                 Collections.EMPTY_MAP);
     }
 
-    public TimeUUID newSession(TimeUUID sessionId, Map<String,ByteBuffer> customPayload)
+    public TimeUUID newSession(ClientState state, TimeUUID sessionId, Map<String,ByteBuffer> customPayload)
     {
-        return newSession(sessionId, TraceType.QUERY, customPayload);
+        return newSession(state, sessionId, TraceType.QUERY, customPayload);
     }
 
     /** This method is intended to be overridden in tracing implementations that need access to the customPayload */
-    protected TimeUUID newSession(TimeUUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
+    protected TimeUUID newSession(ClientState state, TimeUUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
     {
         assert get() == null;
 
-        TraceState ts = newTraceState(localAddress, sessionId, traceType);
+        TraceState ts = newTraceState(state, localAddress, sessionId, traceType);
         set(ts);
         sessions.put(sessionId, ts);
 
@@ -258,14 +275,16 @@ public abstract class Tracing extends ExecutorLocals.Impl
 
         TraceType traceType = header.traceType();
 
+        ClientState clientState = TracingClientState.withTracedKeyspace(header.traceKeyspace());
+        ts = newTraceState(clientState, header.from, sessionId, traceType);
+
         if (header.verb.isResponse())
         {
             // received a message for a session we've already closed out.  see CASSANDRA-5668
-            return new ExpiredTraceState(newTraceState(header.from, sessionId, traceType));
+            return new ExpiredTraceState(ts);
         }
         else
         {
-            ts = newTraceState(header.from, sessionId, traceType);
             sessions.put(sessionId, ts);
             return ts;
         }
@@ -289,7 +308,9 @@ public abstract class Tracing extends ExecutorLocals.Impl
             if (state == null) // session may have already finished; see CASSANDRA-5668
             {
                 TraceType traceType = message.traceType();
-                trace(sessionId.toBytes(), logMessage, traceType.getTTL());
+                String traceKeyspace = message.header.traceKeyspace();
+                ClientState clientState = TracingClientState.withTracedKeyspace(traceKeyspace);
+                trace(clientState, sessionId.toBytes(), logMessage, traceType.getTTL());
             }
             else
             {
@@ -310,10 +331,19 @@ public abstract class Tracing extends ExecutorLocals.Impl
 
         addToMutable.put(ParamType.TRACE_SESSION, Tracing.instance.getSessionId());
         addToMutable.put(ParamType.TRACE_TYPE, Tracing.instance.getTraceType());
+        String keyspace = Tracing.instance.getKeyspace();
+        if (keyspace != null)
+        {
+            addToMutable.put(ParamType.TRACE_KEYSPACE, keyspace);
+        }
         return addToMutable;
     }
 
-    protected abstract TraceState newTraceState(InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType);
+    protected abstract TraceState newTraceState(
+        ClientState state,
+        InetAddressAndPort coordinator,
+        TimeUUID sessionId,
+        Tracing.TraceType traceType);
 
     // repair just gets a varargs method since it's so heavyweight anyway
     public static void traceRepair(String format, Object... args)
@@ -365,5 +395,5 @@ public abstract class Tracing extends ExecutorLocals.Impl
     /**
      * Called for non-local traces (traces that are not initiated by local node == coordinator).
      */
-    public abstract void trace(ByteBuffer sessionId, String message, int ttl);
+    public abstract void trace(ClientState clientState, ByteBuffer sessionId, String message, int ttl);
 }
