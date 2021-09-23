@@ -29,6 +29,7 @@ import org.slf4j.helpers.MessageFormatter;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventNotifier;
 import org.apache.cassandra.utils.progress.ProgressListener;
@@ -45,6 +46,7 @@ public abstract class TraceState implements ProgressEventNotifier
     public final ByteBuffer sessionIdBytes;
     public final Tracing.TraceType traceType;
     public final int ttl;
+    public final ClientState clientState;
 
     private boolean notify;
     private final List<ProgressListener> listeners = new CopyOnWriteArrayList<>();
@@ -63,11 +65,12 @@ public abstract class TraceState implements ProgressEventNotifier
     // See CASSANDRA-7626 for more details.
     private final AtomicInteger references = new AtomicInteger(1);
 
-    protected TraceState(InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
+    protected TraceState(ClientState clientState, InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
     {
         assert coordinator != null;
         assert sessionId != null;
 
+        this.clientState = clientState;
         this.coordinator = coordinator;
         this.sessionId = sessionId;
         sessionIdBytes = sessionId.toBytes();

@@ -32,6 +32,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.StorageProxy;
@@ -57,9 +58,9 @@ public class TraceStateImpl extends TraceState
 
     private final Set<Future<?>> pendingFutures = ConcurrentHashMap.newKeySet();
 
-    public TraceStateImpl(InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
+    public TraceStateImpl(ClientState state, InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
     {
-        super(coordinator, sessionId, traceType);
+        super(state, coordinator, sessionId, traceType);
     }
 
     protected void traceImpl(String message)
@@ -105,18 +106,18 @@ public class TraceStateImpl extends TraceState
 
     void executeMutation(final Mutation mutation)
     {
-        Future<Void> fut = Stage.TRACING.executor().submit(() -> mutateWithCatch(mutation), null);
+        Future<Void> fut = Stage.TRACING.executor().submit(() -> mutateWithCatch(clientState, mutation), null);
         boolean ret = pendingFutures.add(fut);
         if (!ret)
             logger.warn("Failed to insert pending future, tracing synchronization may not work");
     }
 
-    static void mutateWithCatch(Mutation mutation)
+    static void mutateWithCatch(ClientState state, Mutation mutation)
     {
         try
         {
             ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
-            StorageProxy.mutate(singletonList(mutation), ANY, nanoTime(), metrics);
+            StorageProxy.mutate(singletonList(mutation), ANY, nanoTime(), metrics, state);
         }
         catch (OverloadedException e)
         {

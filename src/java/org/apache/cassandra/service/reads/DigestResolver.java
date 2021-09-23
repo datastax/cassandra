@@ -28,12 +28,15 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.locator.Endpoints;
-import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -43,12 +46,17 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>> extends ResponseResolver<E, P>
 {
     private volatile Message<ReadResponse> dataResponse;
+    private final QueryInfoTracker.ReadTracker readTracker;
 
-    public DigestResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
+    public DigestResolver(ReadCommand command,
+                          ReplicaPlan.Shared<E, P> replicaPlan,
+                          long queryStartNanoTime,
+                          QueryInfoTracker.ReadTracker readTracker)
     {
         super(command, replicaPlan, queryStartNanoTime);
         Preconditions.checkArgument(command instanceof SinglePartitionReadCommand,
                                     "DigestResolver can only be used with SinglePartitionReadCommand commands");
+        this.readTracker = readTracker;
     }
 
     @Override
@@ -79,14 +87,20 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
 
         if (!hasTransientResponse(responses))
         {
-            return UnfilteredPartitionIterators.filter(dataResponse.payload.makeIterator(command), command.nowInSec());
+            UnfilteredPartitionIterator unfilteredPartitionIterator = dataResponse.payload.makeIterator(command);
+            if (!QueryInfoTracker.ReadTracker.NOOP.equals(readTracker) && !QueryInfoTracker.LWTWriteTracker.NOOP.equals(readTracker))
+            {
+                unfilteredPartitionIterator = Transformation.apply(unfilteredPartitionIterator,
+                                                                  new ReadTrackingTransformation(readTracker));
+            }
+            return UnfilteredPartitionIterators.filter(unfilteredPartitionIterator, command.nowInSec());
         }
         else
         {
             // This path can be triggered only if we've got responses from full replicas and they match, but
             // transient replica response still contains data, which needs to be reconciled.
             DataResolver<E, P> dataResolver
-                    = new DataResolver<>(command, replicaPlan, NoopReadRepair.instance, queryStartNanoTime);
+                    = new DataResolver<>(command, replicaPlan, NoopReadRepair.instance, queryStartNanoTime, readTracker);
 
             dataResolver.preprocess(dataResponse);
             // Reconcile with transient replicas
@@ -148,6 +162,11 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
             ret[i] = new DigestResolverDebugResult(message.from(), digestHex, message.payload.isDigestResponse());
         }
         return ret;
+    }
+
+    public QueryInfoTracker.ReadTracker getReadTracker()
+    {
+        return readTracker;
     }
 
     public static class DigestResolverDebugResult

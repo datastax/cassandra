@@ -330,7 +330,7 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         for (ColumnFamilyStore cfs : columnFamilyStores)
             cfsb.append(", ").append(cfs.getKeyspaceName()).append(".").append(cfs.name);
 
-        TimeUUID sessionId = Tracing.instance.newSession(Tracing.TraceType.REPAIR);
+        TimeUUID sessionId = Tracing.instance.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         TraceState traceState = Tracing.instance.begin("repair", ImmutableMap.of("keyspace", state.keyspace, "columnFamilies",
                                                                                  cfsb.substring(2)));
         traceState.enableActivityNotification(tag);
