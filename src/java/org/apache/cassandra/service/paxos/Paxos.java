@@ -37,6 +37,7 @@ import com.google.common.collect.Maps;
 
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1048,7 +1049,7 @@ public class Paxos
                     // round's proposal (if any).
                     PaxosPrepare.Success success = prepare.success();
 
-                    DataResolver<?, ?> resolver = new DataResolver(query, success.participants, NoopReadRepair.instance, new Dispatcher.RequestTime(query.creationTimeNanos()));
+                    DataResolver<?, ?> resolver = new DataResolver(query, success.participants, NoopReadRepair.instance, new Dispatcher.RequestTime(query.creationTimeNanos()), QueryInfoTracker.ReadTracker.NOOP);
                     for (int i = 0 ; i < success.responses.size() ; ++i)
                         resolver.preprocess(success.responses.get(i));
 
