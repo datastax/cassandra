@@ -34,6 +34,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.TraceStateImpl;
@@ -146,11 +147,12 @@ public class DebuggableThreadPoolExecutorTest
     }
 
     public static void checkTracingIsPropagated(ExecutorPlus executor, Runnable schedulingTask) {
+        ClientState clientState = ClientState.forInternalCalls();
         ClientWarn.instance.captureWarnings();
         assertThat(ClientWarn.instance.getWarnings()).isNullOrEmpty();
 
         ConcurrentLinkedQueue<String> q = new ConcurrentLinkedQueue<>();
-        Tracing.instance.set(new TraceState(FBUtilities.getLocalAddressAndPort(), nextTimeUUID(), Tracing.TraceType.NONE)
+        Tracing.instance.set(new TraceState(clientState, FBUtilities.getLocalAddressAndPort(), nextTimeUUID(), Tracing.TraceType.NONE)
         {
             @Override
             protected void traceImpl(String message)
@@ -248,7 +250,7 @@ public class DebuggableThreadPoolExecutorTest
     {
         TraceState state = Tracing.instance.get();
         try {
-            Tracing.instance.set(new TraceStateImpl(InetAddressAndPort.getByAddress(InetAddresses.forString("127.0.0.1")), nextTimeUUID(), Tracing.TraceType.NONE));
+            Tracing.instance.set(new TraceStateImpl(ClientState.forInternalCalls(), InetAddressAndPort.getByAddress(InetAddresses.forString("127.0.0.1")), nextTimeUUID(), Tracing.TraceType.NONE));
             fn.run();
         }
         finally
