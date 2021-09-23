@@ -70,6 +70,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.service.reads.repair.PartitionIteratorMergeListener;
@@ -163,7 +164,11 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
     {
         @SuppressWarnings("unchecked")
         DataResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver =
-            new DataResolver<>(cmd, replicaPlan, (NoopReadRepair<EndpointsForToken, ReplicaPlan.ForTokenRead>) NoopReadRepair.instance, requestTime);
+            new DataResolver<>(cmd,
+                               replicaPlan,
+                               (NoopReadRepair<EndpointsForToken, ReplicaPlan.ForTokenRead>) NoopReadRepair.instance,
+                               requestTime,
+                               QueryInfoTracker.ReadTracker.NOOP);
 
         ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> handler = new ReadCallback<>(resolver, cmd, replicaPlan, requestTime);
 
