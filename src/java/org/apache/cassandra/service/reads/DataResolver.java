@@ -274,6 +274,10 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     }
 
     @SuppressWarnings("resource")
+    /**
+     * Uses the provided {@link org.apache.cassandra.service.QueryInfoTracker.ReadTracker} as internal calls
+     * may be not tracked, e.g. the first phase of RFP.
+     */
     private PartitionIterator resolveInternal(ResolveContext context,
                                               UnfilteredPartitionIterators.MergeListener mergeListener,
                                               ResponseProvider responseProvider,
@@ -300,9 +304,12 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
          */
 
         UnfilteredPartitionIterator merged = UnfilteredPartitionIterators.merge(results, mergeListener);
-        UnfilteredPartitionIterator trackedPartitionIterator = Transformation.apply(merged, new ReadTrackingTransformation(resolveReadTracker));
+        if (!QueryInfoTracker.ReadTracker.NOOP.equals(resolveReadTracker) && !QueryInfoTracker.LWTWriteTracker.NOOP.equals(resolveReadTracker))
+        {
+            merged = Transformation.apply(merged, new ReadTrackingTransformation(resolveReadTracker));
+        }
         Filter filter = new Filter(command.nowInSec(), command.metadata().enforceStrictLiveness());
-        FilteredPartitions filtered = FilteredPartitions.filter(trackedPartitionIterator, filter);
+        FilteredPartitions filtered = FilteredPartitions.filter(merged, filter);
         PartitionIterator counted = Transformation.apply(preCountFilter.apply(filtered), context.mergedResultCounter);
         return Transformation.apply(counted, new EmptyPartitionsDiscarder());
     }

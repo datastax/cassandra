@@ -87,9 +87,12 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
         if (!hasTransientResponse(responses))
         {
             UnfilteredPartitionIterator unfilteredPartitionIterator = dataResponse.payload.makeIterator(command);
-            UnfilteredPartitionIterator trackedPartitionIterator = Transformation.apply(unfilteredPartitionIterator,
-                                                                                        new ReadTrackingTransformation(readTracker));
-            return UnfilteredPartitionIterators.filter(trackedPartitionIterator, command.nowInSec());
+            if (!QueryInfoTracker.ReadTracker.NOOP.equals(readTracker) && !QueryInfoTracker.LWTWriteTracker.NOOP.equals(readTracker))
+            {
+                unfilteredPartitionIterator = Transformation.apply(unfilteredPartitionIterator,
+                                                                  new ReadTrackingTransformation(readTracker));
+            }
+            return UnfilteredPartitionIterators.filter(unfilteredPartitionIterator, command.nowInSec());
         }
         else
         {

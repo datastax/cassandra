@@ -1757,7 +1757,21 @@ public class StorageProxy implements StorageProxyMBean
                                                       consistencyLevel,
                                                       queryState,
                                                       queryStartNanoTime,
-                                                      readTracker), command);
+                                                      readTracker),
+                                                 command);
+    }
+
+    public static PartitionIterator read(SinglePartitionReadCommand.Group group,
+                                         ConsistencyLevel consistencyLevel,
+                                         QueryState queryState,
+                                         long queryStartNanoTime)
+    {
+        QueryInfoTracker.ReadTracker readTracker = StorageProxy.queryTracker().onRead(queryState.getClientState(),
+                                                                                      group.metadata(),
+                                                                                      group.queries,
+                                                                                      consistencyLevel);
+        PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
+        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }
 
     /**

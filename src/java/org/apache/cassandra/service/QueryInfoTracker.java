@@ -49,54 +49,10 @@ import org.apache.cassandra.schema.TableMetadata;
  * <p>For writes, the {@link #onWrite} method is only called for the "user write", but if that write trigger either
  * secondary index or materialized views updates, those additional update do not trigger additional calls.
  *
- * <p>The methods of this tracker are called on hot path, so none of them should be blocking, and they should be as
- * lightweight as possible.
+ * <p>The methods of this tracker are called on hot path, so  they should be as lightweight as possible.
  */
 public interface QueryInfoTracker
 {
-    /**
-     * A tracker that does nothing.
-     */
-    QueryInfoTracker NOOP = new QueryInfoTracker()
-    {
-        @Override
-        public WriteTracker onWrite(ClientState state,
-                                    boolean isLogged,
-                                    Collection<? extends IMutation> mutations,
-                                    ConsistencyLevel consistencyLevel)
-        {
-            return WriteTracker.NOOP;
-        }
-
-        @Override
-        public ReadTracker onRead(ClientState state,
-                                  TableMetadata table,
-                                  List<SinglePartitionReadCommand> commands,
-                                  ConsistencyLevel consistencyLevel)
-        {
-            return ReadTracker.NOOP;
-        }
-
-        @Override
-        public ReadTracker onRangeRead(ClientState state,
-                                       TableMetadata table,
-                                       PartitionRangeReadCommand command,
-                                       ConsistencyLevel consistencyLevel)
-        {
-            return ReadTracker.NOOP;
-        }
-
-        @Override
-        public LWTWriteTracker onLWTWrite(ClientState state,
-                                          TableMetadata table,
-                                          DecoratedKey key,
-                                          ConsistencyLevel serialConsistency,
-                                          ConsistencyLevel commitConsistency)
-        {
-            return LWTWriteTracker.NOOP;
-        }
-    };
-
     /**
      * Called before every (non-LWT) write coordinated on the local node.
      *
@@ -156,6 +112,49 @@ public interface QueryInfoTracker
                                ConsistencyLevel commitConsistency);
 
     /**
+     * A tracker that does nothing.
+     */
+    QueryInfoTracker NOOP = new QueryInfoTracker()
+    {
+        @Override
+        public WriteTracker onWrite(ClientState state,
+                                    boolean isLogged,
+                                    Collection<? extends IMutation> mutations,
+                                    ConsistencyLevel consistencyLevel)
+        {
+            return WriteTracker.NOOP;
+        }
+
+        @Override
+        public ReadTracker onRead(ClientState state,
+                                  TableMetadata table,
+                                  List<SinglePartitionReadCommand> commands,
+                                  ConsistencyLevel consistencyLevel)
+        {
+            return ReadTracker.NOOP;
+        }
+
+        @Override
+        public ReadTracker onRangeRead(ClientState state,
+                                       TableMetadata table,
+                                       PartitionRangeReadCommand command,
+                                       ConsistencyLevel consistencyLevel)
+        {
+            return ReadTracker.NOOP;
+        }
+
+        @Override
+        public LWTWriteTracker onLWTWrite(ClientState state,
+                                          TableMetadata table,
+                                          DecoratedKey key,
+                                          ConsistencyLevel serialConsistency,
+                                          ConsistencyLevel commitConsistency)
+        {
+            return LWTWriteTracker.NOOP;
+        }
+    };
+
+    /**
      * A tracker for a specific query.
      *
      * <p>For the tracked query, exactly one of its method should be called.
@@ -197,6 +196,31 @@ public interface QueryInfoTracker
      */
     interface ReadTracker extends Tracker
     {
+        /**
+         * Calls just before queries are sent with the contacts from the replica plan.
+         * Note that this callback method may be invoked more than once for a given read,
+         * e.g. range quries spanning multiple partitions are internally issued as a
+         * number of subranges requests to different replicas (with different
+         * ReplicaPlans). This callback is called at least once for a given read.
+         *
+         * @param replicaPlan the queried nodes.
+         */
+        void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan);
+
+        /**
+         * Called on every new reconciled partition.
+         *
+         * @param partitionKey the partition key.
+         */
+        void onPartition(DecoratedKey partitionKey);
+
+        /**
+         * Called on every row read.
+         *
+         * @param row          the merged row.
+         */
+        void onRow(Row row);
+
         ReadTracker NOOP = new ReadTracker()
         {
             @Override
@@ -224,31 +248,6 @@ public interface QueryInfoTracker
             {
             }
         };
-
-        /**
-         * Calls just before queries are sent with the contacts from the replica plan.
-         * Note that this callback method may be invoked more than once for a given read,
-         * e.g. range quries spanning multiple partitions are internally issued as a
-         * number of subranges requests to different replicas (with different
-         * ReplicaPlans). This callback is called at least once for a given read.
-         *
-         * @param replicaPlan the queried nodes.
-         */
-        void onReplicaPlan(ReplicaPlan.ForRead<?> replicaPlan);
-
-        /**
-         * Called on every new reconciled partition.
-         *
-         * @param partitionKey the partition key.
-         */
-        void onPartition(DecoratedKey partitionKey);
-
-        /**
-         * Called on every row read.
-         *
-         * @param row          the merged row.
-         */
-        void onRow(Row row);
     }
 
     /**
@@ -260,6 +259,18 @@ public interface QueryInfoTracker
      */
     interface LWTWriteTracker extends ReadTracker
     {
+        /**
+         * Called if the LWT this is tracking does not applies (it's condition evaluates to {@code false}).
+         */
+        void onNotApplied();
+
+        /**
+         * Called if the LWT this is tracking does applies.
+         *
+         * @param update the update that is committed by the LWT.
+         */
+        void onApplied(PartitionUpdate update);
+
         /**
          * A tracker that does nothing.
          */
@@ -301,16 +312,5 @@ public interface QueryInfoTracker
             }
         };
 
-        /**
-         * Called if the LWT this is tracking does not applies (it's condition evaluates to {@code false}).
-         */
-        void onNotApplied();
-
-        /**
-         * Called if the LWT this is tracking does applies.
-         *
-         * @param update the update that is committed by the LWT.
-         */
-        void onApplied(PartitionUpdate update);
     }
 }
