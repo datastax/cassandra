@@ -25,6 +25,7 @@ import org.apache.cassandra.utils.Int32Serializer;
 import org.apache.cassandra.utils.Int64Serializer;
 import org.apache.cassandra.utils.RangesSerializer;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.StringSerializer;
 
 import static java.lang.Math.max;
 
@@ -55,7 +56,11 @@ public enum ParamType
     ROW_INDEX_READ_SIZE_FAIL    (12, Int64Serializer.serializer),
     ROW_INDEX_READ_SIZE_WARN    (13, Int64Serializer.serializer),
     CUSTOM_MAP                  (14, CustomParamsSerializer.serializer),
-    SNAPSHOT_RANGES             (15, RangesSerializer.serializer);
+    SNAPSHOT_RANGES             (15, RangesSerializer.serializer),
+    /**
+     * Messages with tracing sessions are decorated with the traced keyspace.
+     */
+    TRACE_KEYSPACE      (16, StringSerializer.serializer);
 
     final int id;
     final IVersionedSerializer serializer;

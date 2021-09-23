@@ -241,12 +241,12 @@ public abstract class Message
                 {
                     shouldTrace = true;
                     tracingSessionId = nextTimeUUID();
-                    Tracing.instance.newSession(tracingSessionId, getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), tracingSessionId, getCustomPayload());
                 }
                 else if (StorageService.instance.shouldTraceProbablistically())
                 {
                     shouldTrace = true;
-                    Tracing.instance.newSession(getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), getCustomPayload());
                 }
             }
 
