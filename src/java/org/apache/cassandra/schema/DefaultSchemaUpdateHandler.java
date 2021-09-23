@@ -119,18 +119,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public void addOrUpdate(KeyspaceMetadata ksm)
-    {
-        schema = new Schema(schema.getKeyspaces().withAddedOrUpdated(ksm), schema.getVersion());
-    }
-
-    @Override
-    public void updateVersion(UUID version)
-    {
-        schema = new Schema(schema.getKeyspaces(), version);
-    }
-
-    @Override
     public void onRemove(InetAddressAndPort endpoint)
     {
         migrationCoordinator.removeAndIgnoreEndpoint(endpoint);

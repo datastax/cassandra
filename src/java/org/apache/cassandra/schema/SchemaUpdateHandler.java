@@ -21,7 +21,6 @@ package org.apache.cassandra.schema;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
-import java.util.UUID;
 import javax.annotation.Nonnull;
 
 import org.apache.commons.lang3.StringUtils;
@@ -78,12 +77,6 @@ public interface SchemaUpdateHandler
      * in-memory representation got out of sync somehow with what's on disk.
      */
     void reloadSchemaFromDisk();
-
-    // temporary, todo remove
-    void addOrUpdate(KeyspaceMetadata ksm);
-
-    // temporary, todo remove
-    void updateVersion(UUID version);
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this

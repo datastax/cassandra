@@ -126,24 +126,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * Update (or insert) new keyspace definition
-     *
-     * @param ksm The metadata about keyspace
-     */
-    // TODO refactor / remove
-    synchronized public void load(KeyspaceMetadata ksm)
-    {
-        KeyspaceMetadata previous = updateHandler.schema().getKeyspaces().getNullable(ksm.name);
-
-        if (previous == null)
-            addNewRefs(ksm);
-        else
-            updateRefs(previous, ksm);
-
-        updateHandler.addOrUpdate(ksm);
-    }
-
-    /**
      * Should be called after a keyspace is added to the local schema. It updates the table and index references cache.
      */
     private void addNewRefs(KeyspaceMetadata ksm)

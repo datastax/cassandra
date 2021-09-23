@@ -29,7 +29,6 @@ import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.OrderPreservingPartitioner.StringToken;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -40,6 +39,7 @@ import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.ReplicationParams;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.service.StorageService;
 
 public class ViewUtilsTest
@@ -75,7 +75,7 @@ public class ViewUtilsTest
 
         Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
-        SchemaManager.instance.load(meta);
+        SchemaTestUtil.addOrUpdate(meta);
 
         Optional<Replica> naturalEndpoint = ViewUtils.getViewNaturalEndpoint(Keyspace.open("Keyspace1").getReplicationStrategy(),
                                                                              new StringToken("CA"),
@@ -108,7 +108,7 @@ public class ViewUtilsTest
 
         Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
-        SchemaManager.instance.load(meta);
+        SchemaTestUtil.addOrUpdate(meta);
 
         Optional<Replica> naturalEndpoint = ViewUtils.getViewNaturalEndpoint(Keyspace.open("Keyspace1").getReplicationStrategy(),
                                                                              new StringToken("CA"),
@@ -140,7 +140,7 @@ public class ViewUtilsTest
 
         Keyspace.clearUnsafe("Keyspace1");
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, replicationMap));
-        SchemaManager.instance.load(meta);
+        SchemaTestUtil.addOrUpdate(meta);
 
         Optional<Replica> naturalEndpoint = ViewUtils.getViewNaturalEndpoint(Keyspace.open("Keyspace1").getReplicationStrategy(),
                                                                              new StringToken("AB"),

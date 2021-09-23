@@ -503,22 +503,17 @@ public class CQLSSTableWriter implements Closeable
 
             synchronized (CQLSSTableWriter.class)
             {
-                if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME) == null)
-                    SchemaManager.instance.load(SchemaKeyspace.metadata());
-                if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME) == null)
-                    SchemaManager.instance.load(SystemKeyspace.metadata());
+                SchemaManager.instance.apply(SchemaTransformations.addKeyspace(SchemaKeyspace.metadata(), true), false);
+                SchemaManager.instance.apply(SchemaTransformations.addKeyspace(SystemKeyspace.metadata(), true), false);
 
                 String keyspaceName = schemaStatement.keyspace();
 
-                if (SchemaManager.instance.getKeyspaceMetadata(keyspaceName) == null)
-                {
-                    SchemaManager.instance.load(KeyspaceMetadata.create(keyspaceName,
-                                                                        KeyspaceParams.simple(1),
-                                                                        Tables.none(),
-                                                                        Views.none(),
-                                                                        Types.none(),
-                                                                        Functions.none()));
-                }
+                SchemaManager.instance.apply(SchemaTransformations.addKeyspace(KeyspaceMetadata.create(keyspaceName,
+                                                                                                             KeyspaceParams.simple(1),
+                                                                                                             Tables.none(),
+                                                                                                             Views.none(),
+                                                                                                             Types.none(),
+                                                                                                             Functions.none()), true), false);
 
                 KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
 
@@ -526,8 +521,9 @@ public class CQLSSTableWriter implements Closeable
                 if (tableMetadata == null)
                 {
                     Types types = createTypes(keyspaceName);
+                    SchemaManager.instance.apply(SchemaTransformations.addTypes(types, true), false);
                     tableMetadata = createTable(types);
-                    SchemaManager.instance.load(ksm.withSwapped(ksm.tables.with(tableMetadata)).withSwapped(types));
+                    SchemaManager.instance.apply(SchemaTransformations.addTable(tableMetadata, true), false);
                 }
 
                 UpdateStatement preparedInsert = prepareInsert();

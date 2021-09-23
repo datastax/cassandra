@@ -151,4 +151,9 @@ public class SchemaTestUtil
         SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, schema);
         MigrationCoordinator.instance.pushSchemaMutations(schema);
     }
+
+    public static void addOrUpdate(KeyspaceMetadata ksm)
+    {
+        SchemaManager.instance.apply(current -> current.withAddedOrUpdated(ksm), false);
+    }
 }
