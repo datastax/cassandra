@@ -18,16 +18,16 @@
 package org.apache.cassandra.repair.messages;
 
 import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.*;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +64,7 @@ public abstract class RepairMessage
     static final CassandraVersion SUPPORTS_RETRY = new CassandraVersion("5.0.0-alpha2.SNAPSHOT");
     private static final Map<Verb, CassandraVersion> VERB_TIMEOUT_VERSIONS;
     public static final Set<Verb> ALLOWS_RETRY;
-    private static final Set<Verb> SUPPORTS_RETRY_WITHOUT_VERSION_CHECK = Collections.unmodifiableSet(EnumSet.of(Verb.CLEANUP_MSG));
+    private static final Set<Verb> SUPPORTS_RETRY_WITHOUT_VERSION_CHECK = Collections.unmodifiableSet(ImmutableSet.of(Verb.CLEANUP_MSG));
     public static final RequestCallback<Object> NOOP_CALLBACK = new RequestCallback<>()
     {
         @Override
@@ -81,7 +81,7 @@ public abstract class RepairMessage
     static
     {
         CassandraVersion timeoutVersion = new CassandraVersion("4.0.7-SNAPSHOT");
-        EnumMap<Verb, CassandraVersion> map = new EnumMap<>(Verb.class);
+        HashMap<Verb, CassandraVersion> map = new HashMap<>();
         map.put(Verb.VALIDATION_REQ, timeoutVersion);
         map.put(Verb.SYNC_REQ, timeoutVersion);
         map.put(Verb.VALIDATION_RSP, SUPPORTS_RETRY);
@@ -95,7 +95,7 @@ public abstract class RepairMessage
         map.put(Verb.FAILED_SESSION_MSG, SUPPORTS_RETRY);
         VERB_TIMEOUT_VERSIONS = Collections.unmodifiableMap(map);
 
-        EnumSet<Verb> allowsRetry = EnumSet.noneOf(Verb.class);
+        Set<Verb> allowsRetry = new HashSet<>();
         allowsRetry.add(Verb.PREPARE_MSG);
         allowsRetry.add(Verb.VALIDATION_REQ);
         allowsRetry.add(Verb.VALIDATION_RSP);
