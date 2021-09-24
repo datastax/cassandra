@@ -124,6 +124,8 @@ import static org.apache.cassandra.config.DatabaseDescriptor.*;
 import static org.apache.cassandra.net.Verb.PREPARE_MSG;
 import static org.apache.cassandra.repair.messages.RepairMessage.notDone;
 import static org.apache.cassandra.utils.Simulate.With.MONITORS;
+import static org.apache.cassandra.net.Verb.SYNC_RSP;
+import static org.apache.cassandra.net.Verb.VALIDATION_RSP;
 
 /**
  * ActiveRepairService is the starting point for manual "active" repairs.
@@ -885,12 +887,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         if (session == null)
         {
-            switch (message.verb())
+            if (message.verb() == VALIDATION_RSP || message.verb() == SYNC_RSP)
             {
-                case VALIDATION_RSP:
-                case SYNC_RSP:
                     ctx.messaging().send(message.emptyResponse(), message.from());
-                    break;
             }
             if (payload instanceof ValidationResponse)
             {
@@ -906,16 +905,13 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return;
         }
 
-        switch (message.verb())
+        if (message.verb() == VALIDATION_RSP)
         {
-            case VALIDATION_RSP:
-                session.validationComplete(desc, (Message<ValidationResponse>) message);
-                break;
-            case SYNC_RSP:
-                session.syncComplete(desc, (Message<SyncResponse>) message);
-                break;
-            default:
-                break;
+            session.validationComplete(desc, (Message<ValidationResponse>) message);
+        }
+        else if (message.verb() == SYNC_RSP)
+        {
+            session.syncComplete(desc, (Message<SyncResponse>) message);
         }
     }
 
