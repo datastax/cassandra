@@ -41,6 +41,20 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.TimeUUID;
 
+import static org.apache.cassandra.net.Verb.CLEANUP_MSG;
+import static org.apache.cassandra.net.Verb.FAILED_SESSION_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_COMMIT_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_PROMISE_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_PROPOSE_MSG;
+import static org.apache.cassandra.net.Verb.PREPARE_CONSISTENT_REQ;
+import static org.apache.cassandra.net.Verb.PREPARE_CONSISTENT_RSP;
+import static org.apache.cassandra.net.Verb.PREPARE_MSG;
+import static org.apache.cassandra.net.Verb.SNAPSHOT_MSG;
+import static org.apache.cassandra.net.Verb.STATUS_REQ;
+import static org.apache.cassandra.net.Verb.STATUS_RSP;
+import static org.apache.cassandra.net.Verb.SYNC_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
+
 /**
  * Handles all repair related message.
  *
@@ -89,239 +103,227 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
         RepairJobDesc desc = message.payload.desc;
         try
         {
-            switch (message.verb())
+            if (message.verb() == PREPARE_MSG)
             {
-                case PREPARE_MSG:
+                PrepareMessage prepareMessage = (PrepareMessage) message.payload;
+                logger.debug("Preparing, {}", prepareMessage);
+                ParticipateState state = new ParticipateState(ctx.clock(), message.from(), prepareMessage);
+                if (!ctx.repair().register(state))
                 {
-                    PrepareMessage prepareMessage = (PrepareMessage) message.payload;
-                    logger.debug("Preparing, {}", prepareMessage);
-                    ParticipateState state = new ParticipateState(ctx.clock(), message.from(), prepareMessage);
-                    if (!ctx.repair().register(state))
-                    {
-                        replyDedup(ctx.repair().participate(state.id), message);
-                        return;
-                    }
-                    if (!ctx.repair().verifyCompactionsPendingThreshold(prepareMessage.parentRepairSession, prepareMessage.previewKind))
-                    {
-                        // error is logged in verifyCompactionsPendingThreshold
-                        state.phase.fail("Too many pending compactions");
-
-                        sendFailureResponse(message);
-                        return;
-                    }
-
-                    List<ColumnFamilyStore> columnFamilyStores = new ArrayList<>(prepareMessage.tableIds.size());
-                    for (TableId tableId : prepareMessage.tableIds)
-                    {
-                        ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists(tableId);
-                        if (columnFamilyStore == null)
-                        {
-                            String reason = String.format("Table with id %s was dropped during prepare phase of repair",
-                                                          tableId);
-                            state.phase.fail(reason);
-                            logErrorAndSendFailureResponse(reason, message);
-                            return;
-                        }
-                        columnFamilyStores.add(columnFamilyStore);
-                    }
-                    state.phase.accept();
-                    ctx.repair().registerParentRepairSession(prepareMessage.parentRepairSession,
-                                                                    message.from(),
-                                                                    columnFamilyStores,
-                                                                    prepareMessage.ranges,
-                                                                    prepareMessage.isIncremental,
-                                                                    prepareMessage.repairedAt,
-                                                                    prepareMessage.isGlobal,
-                                                                    prepareMessage.previewKind);
-                    sendAck(message);
+                    replyDedup(ctx.repair().participate(state.id), message);
+                    return;
                 }
-                    break;
-
-                case SNAPSHOT_MSG:
+                if (!ctx.repair().verifyCompactionsPendingThreshold(prepareMessage.parentRepairSession, prepareMessage.previewKind))
                 {
-                    logger.debug("Snapshotting {}", desc);
-                    ParticipateState state = ctx.repair().participate(desc.parentSessionId);
-                    if (state == null)
+                    // error is logged in verifyCompactionsPendingThreshold
+                    state.phase.fail("Too many pending compactions");
+
+                    sendFailureResponse(message);
+                    return;
+                }
+
+                List<ColumnFamilyStore> columnFamilyStores = new ArrayList<>(prepareMessage.tableIds.size());
+                for (TableId tableId : prepareMessage.tableIds)
+                {
+                    ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists(tableId);
+                    if (columnFamilyStore == null)
                     {
-                        logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
-                        return;
-                    }
-                    final ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
-                    if (cfs == null)
-                    {
-                        String reason = String.format("Table %s.%s was dropped during snapshot phase of repair %s",
-                                                      desc.keyspace, desc.columnFamily, desc.parentSessionId);
+                        String reason = String.format("Table with id %s was dropped during prepare phase of repair",
+                                                      tableId);
                         state.phase.fail(reason);
                         logErrorAndSendFailureResponse(reason, message);
                         return;
                     }
-
-                    ActiveRepairService.ParentRepairSession prs = ctx.repair().getParentRepairSession(desc.parentSessionId);
-                    if (prs.setHasSnapshots())
-                    {
-                        state.getOrCreateJob(desc).snapshot();
-                        TableRepairManager repairManager = cfs.getRepairManager();
-                        if (prs.isGlobal)
-                        {
-                            repairManager.snapshot(desc.parentSessionId.toString(), prs.getRanges(), false);
-                        }
-                        else
-                        {
-                            repairManager.snapshot(desc.parentSessionId.toString(), desc.ranges, true);
-                        }
-                        logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from());
-                    }
-                    sendAck(message);
+                    columnFamilyStores.add(columnFamilyStore);
                 }
-                    break;
-
-                case VALIDATION_REQ:
+                state.phase.accept();
+                ctx.repair().registerParentRepairSession(prepareMessage.parentRepairSession,
+                                                                message.from(),
+                                                                columnFamilyStores,
+                                                                prepareMessage.ranges,
+                                                                prepareMessage.isIncremental,
+                                                                prepareMessage.repairedAt,
+                                                                prepareMessage.isGlobal,
+                                                                prepareMessage.previewKind);
+                sendAck(message);
+            }
+            else if (message.verb() == SNAPSHOT_MSG)
+            {
+                logger.debug("Snapshotting {}", desc);
+                ParticipateState state = ctx.repair().participate(desc.parentSessionId);
+                if (state == null)
                 {
-                    ValidationRequest validationRequest = (ValidationRequest) message.payload;
-                    logger.debug("Validating {}", validationRequest);
+                    logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
+                    return;
+                }
+                final ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
+                if (cfs == null)
+                {
+                    String reason = String.format("Table %s.%s was dropped during snapshot phase of repair %s",
+                                                  desc.keyspace, desc.columnFamily, desc.parentSessionId);
+                    state.phase.fail(reason);
+                    logErrorAndSendFailureResponse(reason, message);
+                    return;
+                }
 
-                    ParticipateState participate = ctx.repair().participate(desc.parentSessionId);
-                    if (participate == null)
+                ActiveRepairService.ParentRepairSession prs = ctx.repair().getParentRepairSession(desc.parentSessionId);
+                if (prs.setHasSnapshots())
+                {
+                    state.getOrCreateJob(desc).snapshot();
+                    TableRepairManager repairManager = cfs.getRepairManager();
+                    if (prs.isGlobal)
                     {
-                        logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
+                        repairManager.snapshot(desc.parentSessionId.toString(), prs.getRanges(), false);
+                    }
+                    else
+                    {
+                        repairManager.snapshot(desc.parentSessionId.toString(), desc.ranges, true);
+                    }
+                    logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from());
+                }
+                sendAck(message);
+            }
+            else if (message.verb() == VALIDATION_REQ)
+            {
+                ValidationRequest validationRequest = (ValidationRequest) message.payload;
+                logger.debug("Validating {}", validationRequest);
+
+                ParticipateState participate = ctx.repair().participate(desc.parentSessionId);
+                if (participate == null)
+                {
+                    logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
+                    return;
+                }
+
+                ValidationState vState = new ValidationState(ctx.clock(), desc, message.from());
+                if (!register(message, participate, vState,
+                              participate::register,
+                              (d, i) -> participate.validation(d)))
+                    return;
+                try
+                {
+                    // trigger read-only compaction
+                    ColumnFamilyStore store = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
+                    if (store == null)
+                    {
+                        String msg = String.format("Table %s.%s was dropped during validation phase of repair %s", desc.keyspace, desc.columnFamily, desc.parentSessionId);
+                        vState.phase.fail(msg);
+                        logErrorAndSendFailureResponse(msg, message);
                         return;
                     }
 
-                    ValidationState vState = new ValidationState(ctx.clock(), desc, message.from());
-                    if (!register(message, participate, vState,
-                                  participate::register,
-                                  (d, i) -> participate.validation(d)))
-                        return;
                     try
                     {
-                        // trigger read-only compaction
-                        ColumnFamilyStore store = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
-                        if (store == null)
-                        {
-                            String msg = String.format("Table %s.%s was dropped during validation phase of repair %s", desc.keyspace, desc.columnFamily, desc.parentSessionId);
-                            vState.phase.fail(msg);
-                            logErrorAndSendFailureResponse(msg, message);
-                            return;
-                        }
-
-                        try
-                        {
-                            ctx.repair().consistent.local.maybeSetRepairing(desc.parentSessionId);
-                        }
-                        catch (Throwable t)
-                        {
-                            JVMStabilityInspector.inspectThrowable(t);
-                            vState.phase.fail(t.toString());
-                            logErrorAndSendFailureResponse(t.toString(), message);
-                            return;
-                        }
-                        PreviewKind previewKind;
-                        try
-                        {
-                            previewKind = previewKind(desc.parentSessionId);
-                        }
-                        catch (NoSuchRepairSessionException e)
-                        {
-                            logger.warn("Parent repair session {} has been removed, failing repair", desc.parentSessionId);
-                            vState.phase.fail(e);
-                            sendFailureResponse(message);
-                            return;
-                        }
-                        vState.phase.accept();
-                        sendAck(message);
-
-                        Validator validator = new Validator(ctx, vState, validationRequest.nowInSec,
-                                                            isIncremental(desc.parentSessionId), previewKind);
-                        ctx.validationManager().submitValidation(store, validator);
+                        ctx.repair().consistent.local.maybeSetRepairing(desc.parentSessionId);
                     }
                     catch (Throwable t)
                     {
-                        vState.phase.fail(t);
-                        throw t;
+                        JVMStabilityInspector.inspectThrowable(t);
+                        vState.phase.fail(t.toString());
+                        logErrorAndSendFailureResponse(t.toString(), message);
+                        return;
                     }
-                }
-                    break;
-
-                case SYNC_REQ:
-                {
-                    // forwarded sync request
-                    SyncRequest request = (SyncRequest) message.payload;
-                    logger.debug("Syncing {}", request);
-
-                    ParticipateState participate = ctx.repair().participate(desc.parentSessionId);
-                    if (participate == null)
+                    PreviewKind previewKind;
+                    try
                     {
-                        logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
+                        previewKind = previewKind(desc.parentSessionId);
+                    }
+                    catch (NoSuchRepairSessionException e)
+                    {
+                        logger.warn("Parent repair session {} has been removed, failing repair", desc.parentSessionId);
+                        vState.phase.fail(e);
+                        sendFailureResponse(message);
                         return;
                     }
-                    SyncState state = new SyncState(ctx.clock(), desc, request.initiator, request.src, request.dst);
-                    if (!register(message, participate, state,
-                                  participate::register,
-                                  participate::sync))
-                        return;
-                    state.phase.accept();
-                    StreamingRepairTask task = new StreamingRepairTask(ctx, state, desc,
-                                                                       request.initiator,
-                                                                       request.src,
-                                                                       request.dst,
-                                                                       request.ranges,
-                                                                       isIncremental(desc.parentSessionId) ? desc.parentSessionId : null,
-                                                                       request.previewKind,
-                                                                       request.asymmetric);
-                    task.run();
+                    vState.phase.accept();
                     sendAck(message);
-                }
-                    break;
 
-                case CLEANUP_MSG:
+                    Validator validator = new Validator(ctx, vState, validationRequest.nowInSec,
+                                                        isIncremental(desc.parentSessionId), previewKind);
+                    ctx.validationManager().submitValidation(store, validator);
+                }
+                catch (Throwable t)
                 {
-                    logger.debug("cleaning up repair");
-                    CleanupMessage cleanup = (CleanupMessage) message.payload;
-                    ParticipateState state = ctx.repair().participate(cleanup.parentRepairSession);
-                    if (state != null)
-                        state.phase.success("Cleanup message recieved");
-                    ctx.repair().removeParentRepairSession(cleanup.parentRepairSession);
-                    sendAck(message);
+                    vState.phase.fail(t);
+                    throw t;
                 }
-                    break;
+            }
+            else if (message.verb() == SYNC_REQ)
+            {
+                // forwarded sync request
+                SyncRequest request = (SyncRequest) message.payload;
+                logger.debug("Syncing {}", request);
 
-                case PREPARE_CONSISTENT_REQ:
-                    ctx.repair().consistent.local.handlePrepareMessage(message.from(), (PrepareConsistentRequest) message.payload);
-                    break;
-
-                case PREPARE_CONSISTENT_RSP:
-                    ctx.repair().consistent.coordinated.handlePrepareResponse((PrepareConsistentResponse) message.payload);
-                    break;
-
-                case FINALIZE_PROPOSE_MSG:
-                    ctx.repair().consistent.local.handleFinalizeProposeMessage(message.from(), (FinalizePropose) message.payload);
-                    break;
-
-                case FINALIZE_PROMISE_MSG:
-                    ctx.repair().consistent.coordinated.handleFinalizePromiseMessage((FinalizePromise) message.payload);
-                    break;
-
-                case FINALIZE_COMMIT_MSG:
-                    ctx.repair().consistent.local.handleFinalizeCommitMessage(message.from(), (FinalizeCommit) message.payload);
-                    break;
-
-                case FAILED_SESSION_MSG:
-                    FailSession failure = (FailSession) message.payload;
-                    ctx.repair().consistent.coordinated.handleFailSessionMessage(failure);
-                    ctx.repair().consistent.local.handleFailSessionMessage(message.from(), failure);
-                    break;
-
-                case STATUS_REQ:
-                    ctx.repair().consistent.local.handleStatusRequest(message.from(), (StatusRequest) message.payload);
-                    break;
-
-                case STATUS_RSP:
-                    ctx.repair().consistent.local.handleStatusResponse(message.from(), (StatusResponse) message.payload);
-                    break;
-
-                default:
+                ParticipateState participate = ctx.repair().participate(desc.parentSessionId);
+                if (participate == null)
+                {
+                    logErrorAndSendFailureResponse("Unknown repair " + desc.parentSessionId, message);
+                    return;
+                }
+                SyncState state = new SyncState(ctx.clock(), desc, request.initiator, request.src, request.dst);
+                if (!register(message, participate, state,
+                              participate::register,
+                              participate::sync))
+                    return;
+                state.phase.accept();
+                StreamingRepairTask task = new StreamingRepairTask(ctx, state, desc,
+                                                                   request.initiator,
+                                                                   request.src,
+                                                                   request.dst,
+                                                                   request.ranges,
+                                                                   isIncremental(desc.parentSessionId) ? desc.parentSessionId : null,
+                                                                   request.previewKind,
+                                                                   request.asymmetric);
+                task.run();
+                sendAck(message);
+            }
+            else if (message.verb() == CLEANUP_MSG)
+            {
+                logger.debug("cleaning up repair");
+                CleanupMessage cleanup = (CleanupMessage) message.payload;
+                ParticipateState state = ctx.repair().participate(cleanup.parentRepairSession);
+                if (state != null)
+                    state.phase.success("Cleanup message recieved");
+                ctx.repair().removeParentRepairSession(cleanup.parentRepairSession);
+                sendAck(message);
+            }
+            else if (message.verb() == PREPARE_CONSISTENT_REQ)
+            {
+                ctx.repair().consistent.local.handlePrepareMessage(message.from(), (PrepareConsistentRequest) message.payload);
+            }
+                else if (message.verb() == PREPARE_CONSISTENT_RSP)
+            {
+                ctx.repair().consistent.coordinated.handlePrepareResponse((PrepareConsistentResponse) message.payload);
+            }
+            else if (message.verb() == FINALIZE_PROPOSE_MSG)
+            {
+                ctx.repair().consistent.local.handleFinalizeProposeMessage(message.from(), (FinalizePropose) message.payload);
+            }
+            else if (message.verb() == FINALIZE_PROMISE_MSG)
+            {
+                ctx.repair().consistent.coordinated.handleFinalizePromiseMessage((FinalizePromise) message.payload);
+            }
+            else if (message.verb() == FINALIZE_COMMIT_MSG)
+            {
+                ctx.repair().consistent.local.handleFinalizeCommitMessage(message.from(), (FinalizeCommit) message.payload);
+            }
+            else if (message.verb() == FAILED_SESSION_MSG)
+            {
+                FailSession failure = (FailSession) message.payload;
+                ctx.repair().consistent.coordinated.handleFailSessionMessage(failure);
+                ctx.repair().consistent.local.handleFailSessionMessage(message.from(), failure);
+            }
+            else if (message.verb() == STATUS_REQ)
+            {
+                ctx.repair().consistent.local.handleStatusRequest(message.from(), (StatusRequest) message.payload);
+            }
+            else if (message.verb() == STATUS_RSP)
+            {
+                ctx.repair().consistent.local.handleStatusResponse(message.from(), (StatusResponse) message.payload);
+            }
+            else
+            {
                     ctx.repair().handleMessage(message);
-                    break;
             }
         }
         catch (Exception e)

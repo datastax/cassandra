@@ -17,15 +17,12 @@
  */
 package org.apache.cassandra.repair.messages;
 
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,14 +59,14 @@ public abstract class RepairMessage
     static
     {
         CassandraVersion timeoutVersion = new CassandraVersion("4.0.7-SNAPSHOT");
-        EnumMap<Verb, CassandraVersion> map = new EnumMap<>(Verb.class);
+        HashMap<Verb, CassandraVersion> map = new HashMap<>();
         map.put(Verb.VALIDATION_REQ, timeoutVersion);
         map.put(Verb.SYNC_REQ, timeoutVersion);
         map.put(Verb.VALIDATION_RSP, SUPPORTS_RETRY);
         map.put(Verb.SYNC_RSP, SUPPORTS_RETRY);
         VERB_TIMEOUT_VERSIONS = Collections.unmodifiableMap(map);
     }
-    private static final Set<Verb> SUPPORTS_RETRY_WITHOUT_VERSION_CHECK = Collections.unmodifiableSet(EnumSet.of(Verb.CLEANUP_MSG));
+    private static final Set<Verb> SUPPORTS_RETRY_WITHOUT_VERSION_CHECK = Collections.unmodifiableSet(ImmutableSet.of(Verb.CLEANUP_MSG));
 
     private static final Logger logger = LoggerFactory.getLogger(RepairMessage.class);
     @Nullable
