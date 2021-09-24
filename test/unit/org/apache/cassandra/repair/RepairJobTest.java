@@ -82,6 +82,9 @@ import static java.util.Collections.emptySet;
 import static org.apache.cassandra.repair.RepairParallelism.SEQUENTIAL;
 import static org.apache.cassandra.streaming.PreviewKind.NONE;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+import static org.apache.cassandra.net.Verb.SNAPSHOT_MSG;
+import static org.apache.cassandra.net.Verb.SYNC_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
 import static org.apache.cassandra.utils.asserts.SyncTaskAssert.assertThat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -234,9 +237,9 @@ public class RepairJobTest
         // RepairJob should send out SNAPSHOTS -> VALIDATIONS -> done
         List<Verb> expectedTypes = new ArrayList<>();
         for (int i = 0; i < 3; i++)
-            expectedTypes.add(Verb.SNAPSHOT_MSG);
+            expectedTypes.add(SNAPSHOT_MSG);
         for (int i = 0; i < 3; i++)
-            expectedTypes.add(Verb.VALIDATION_REQ);
+            expectedTypes.add(VALIDATION_REQ);
 
         assertThat(observedMessages).extracting(Message::verb).containsExactlyElementsOf(expectedTypes);
     }
@@ -312,7 +315,7 @@ public class RepairJobTest
         assertThat(messages)
             .hasSize(2)
             .extracting(Message::verb)
-            .containsOnly(Verb.SYNC_REQ);
+            .containsOnly(SYNC_REQ);
     }
 
     @Test
@@ -887,21 +890,19 @@ public class RepairJobTest
                     messageCapture.add(message);
                 }
 
-                switch (message.verb())
+                if (message.verb() == SNAPSHOT_MSG)
                 {
-                    case SNAPSHOT_MSG:
-                        MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
-                        break;
-                    case VALIDATION_REQ:
-                        MerkleTrees tree = mockTrees.get(to);
-                        session.validationComplete(sessionJobDesc, Message.builder(Verb.VALIDATION_RSP, tree != null ? new ValidationResponse(sessionJobDesc, tree) : new ValidationResponse(sessionJobDesc)).from(to).build());
-                        break;
-                    case SYNC_REQ:
-                        SyncRequest syncRequest = (SyncRequest) message.payload;
-                        session.syncComplete(sessionJobDesc, Message.builder(Verb.SYNC_RSP, new SyncResponse(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst), true, Collections.emptyList())).from(to).build());
-                        break;
-                    default:
-                        break;
+                    MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
+                }
+                else if (message.verb() == VALIDATION_REQ)
+                {
+                    MerkleTrees tree = mockTrees.get(to);
+                    session.validationComplete(sessionJobDesc, Message.builder(Verb.VALIDATION_RSP, tree != null ? new ValidationResponse(sessionJobDesc, tree) : new ValidationResponse(sessionJobDesc)).from(to).build());
+                }
+                else if (message.verb() == SYNC_REQ)
+                {
+                    SyncRequest syncRequest = (SyncRequest) message.payload;
+                    session.syncComplete(sessionJobDesc, Message.builder(Verb.SYNC_RSP, new SyncResponse(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst), true, Collections.emptyList())).from(to).build());
                 }
                 return false;
         });

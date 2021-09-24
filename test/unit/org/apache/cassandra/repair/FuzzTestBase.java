@@ -101,6 +101,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageDelivery;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.repair.state.Completable;
@@ -143,6 +144,7 @@ import org.quicktheories.impl.JavaRandom;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_GLOBAL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
+import static org.apache.cassandra.net.Verb.*;
 
 public abstract class FuzzTestBase extends CQLTester.InMemory
 {
@@ -319,35 +321,35 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
             @Override
             public Set<Faults> apply(Cluster.Node node, Message<?> message)
             {
-                switch (message.verb())
+                Verb verb = message.verb();
+                if (verb.equals(PREPARE_MSG) 
+                        || verb.equals(VALIDATION_REQ) 
+                        || verb.equals(VALIDATION_RSP) 
+                        || verb.equals(SYNC_REQ) 
+                        || verb.equals(SYNC_RSP) 
+                        || verb.equals(SNAPSHOT_MSG) 
+                        || verb.equals(CLEANUP_MSG)) 
                 {
-                    case PREPARE_MSG:
-                    case VALIDATION_REQ:
-                    case VALIDATION_RSP:
-                    case SYNC_REQ:
-                    case SYNC_RSP:
-                    case SNAPSHOT_MSG:
-                    case CLEANUP_MSG:
-                        allowDrop.add(message.id());
-                        return Faults.DROPPED;
-                    // these messages are not resilent to ephemeral issues
-                    case PREPARE_CONSISTENT_REQ:
-                    case PREPARE_CONSISTENT_RSP:
-                    case FINALIZE_PROPOSE_MSG:
-                    case FINALIZE_PROMISE_MSG:
-                    case FINALIZE_COMMIT_MSG:
-                    case FAILED_SESSION_MSG:
-
-                        noFaults.add(message.id());
-                        return Faults.NONE;
-                    default:
-                        if (noFaults.contains(message.id())) return Faults.NONE;
-                        if (allowDrop.contains(message.id())) return Faults.DROPPED;
-                        // was a new message added and the test not updated?
-                        IllegalStateException e = new IllegalStateException("Verb: " + message.verb());
-                        cluster.failures.add(e);
-                        throw e;
+                    allowDrop.add(message.id());
+                    return Faults.DROPPED;
                 }
+                // these messages are not resilent to ephemeral issues
+                else if (verb.equals(PREPARE_CONSISTENT_REQ) 
+                        || verb.equals(PREPARE_CONSISTENT_RSP) 
+                        || verb.equals(FINALIZE_PROPOSE_MSG) 
+                        || verb.equals(FINALIZE_PROMISE_MSG) 
+                        || verb.equals(FINALIZE_COMMIT_MSG) 
+                        || verb.equals(FAILED_SESSION_MSG)) 
+                {
+                    noFaults.add(message.id());
+                    return Faults.NONE;
+                }
+                if (noFaults.contains(message.id())) return Faults.NONE;
+                if (allowDrop.contains(message.id())) return Faults.DROPPED;
+                // was a new message added and the test not updated?
+                IllegalStateException e = new IllegalStateException("Verb: " + message.verb());
+                cluster.failures.add(e);
+                throw e;
             }
         });
     }
