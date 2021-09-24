@@ -65,6 +65,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 
 public class MessagingServiceTest
 {
@@ -517,4 +518,53 @@ public class MessagingServiceTest
 //
 //        Assert.assertEquals(privateIp, ms.getPreferredRemoteAddr(remote));
 //    }
+
+    private static class PostSinkFilter
+    {
+        private Verb verb;
+        public int count;
+
+        PostSinkFilter(Verb verb)
+        {
+            this.verb = verb;
+        }
+
+        public void accept(Message<?> message, InetAddressAndPort to)
+        {
+            // Count all the messages seen for our verb
+            if (message.verb() == verb)
+            {
+                count++;
+            }
+        }
+    }
+
+    @Test
+    public void runPostSinkHookVerbFilter() throws UnknownHostException
+    {
+        PostSinkFilter echoSink = new PostSinkFilter(Verb.ECHO_REQ);
+        MessagingService.instance().outboundSink.addPost((message, to) -> echoSink.accept(message, to));
+
+        int numOfMessages = 3;
+        // echoRecorder should see all ECHO_REQ messages
+        sendMessages(numOfMessages, Verb.ECHO_REQ);
+        assertEquals(numOfMessages, echoSink.count);
+
+        PostSinkFilter hintSink = new PostSinkFilter(Verb.HINT_REQ);
+        MessagingService.instance().outboundSink.addPost((message, to) -> hintSink.accept(message, to));
+
+        // hintRecorder should not see any ECHO_REQ messages
+        sendMessages(numOfMessages, Verb.ECHO_REQ);
+        assertEquals(0, hintSink.count);
+    }
+
+    private static void sendMessages(int numOfMessages, Verb verb) throws UnknownHostException
+    {
+        InetAddressAndPort address = InetAddressAndPort.getByName("127.0.0.253");
+
+        for (int i = 0; i < numOfMessages; i++)
+        {
+            MessagingService.instance().send(Message.out(verb, noPayload), address);
+        }
+    }
 }
