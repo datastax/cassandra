@@ -41,6 +41,21 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.TimeUUID;
 
+import static org.apache.cassandra.net.Verb.CLEANUP_MSG;
+import static org.apache.cassandra.net.Verb.FAILED_SESSION_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_COMMIT_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_PROMISE_MSG;
+import static org.apache.cassandra.net.Verb.FINALIZE_PROPOSE_MSG;
+import static org.apache.cassandra.net.Verb.PREPARE_CONSISTENT_REQ;
+import static org.apache.cassandra.net.Verb.PREPARE_CONSISTENT_RSP;
+import static org.apache.cassandra.net.Verb.PREPARE_MSG;
+import static org.apache.cassandra.net.Verb.SNAPSHOT_MSG;
+import static org.apache.cassandra.net.Verb.STATUS_REQ;
+import static org.apache.cassandra.net.Verb.STATUS_RSP;
+import static org.apache.cassandra.net.Verb.SYNC_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_RSP;
+
 /**
  * Handles all repair related message.
  *
@@ -89,7 +104,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
         RepairJobDesc desc = message.payload.desc;
         try
         {
-            switch (message.verb())
+            if (message.verb() == PREPARE_MSG)
             {
                 case PREPARE_MSG:
                 {
