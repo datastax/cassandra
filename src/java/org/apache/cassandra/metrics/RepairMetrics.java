@@ -19,7 +19,7 @@
 package org.apache.cassandra.metrics;
 
 import java.util.Collections;
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -44,9 +44,9 @@ public class RepairMetrics
 
     static
     {
-        Map<Verb, Histogram> retries = new EnumMap<>(Verb.class);
-        Map<Verb, Counter> timeout = new EnumMap<>(Verb.class);
-        Map<Verb, Counter> failure = new EnumMap<>(Verb.class);
+        Map<Verb, Histogram> retries = new HashMap<>();
+        Map<Verb, Counter> timeout = new HashMap<>();
+        Map<Verb, Counter> failure = new HashMap<>();
         for (Verb verb : RepairMessage.ALLOWS_RETRY)
         {
             retries.put(verb, Metrics.histogram(DefaultNameFactory.createMetricName(TYPE_NAME, "Retries-" + verb.name(), null), false));

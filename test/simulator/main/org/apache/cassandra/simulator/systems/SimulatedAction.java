@@ -19,11 +19,7 @@
 package org.apache.cassandra.simulator.systems;
 
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Executor;
 
 import javax.annotation.Nullable;
@@ -452,7 +448,7 @@ public abstract class SimulatedAction extends Action implements InterceptorOfCon
     protected SimulatedAction setMessageModifiers(Verb verb, Modifiers self, Modifiers responses)
     {
         if (verbModifiers.isEmpty())
-            verbModifiers = new EnumMap<>(Verb.class);
+            verbModifiers = new HashMap<>();
         verbModifiers.put(verb, self);
         if (verb.responseVerb != null)
             verbModifiers.put(verb.responseVerb, responses);
