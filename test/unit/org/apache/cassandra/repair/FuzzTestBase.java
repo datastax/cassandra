@@ -106,6 +106,7 @@ import org.apache.cassandra.net.MessageDelivery;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.repair.messages.RepairMessage;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.repair.state.Completable;
@@ -159,6 +160,7 @@ import org.quicktheories.impl.JavaRandom;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_GLOBAL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
+import static org.apache.cassandra.net.Verb.*;
 
 public abstract class FuzzTestBase extends CQLTester.InMemory
 {
@@ -357,27 +359,26 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
                     allowDrop.add(message.id());
                     return Faults.DROPPED;
                 }
-                switch (message.verb())
-                {
-                    // these messages are not resilent to ephemeral issues
-                    case STATUS_REQ:
-                    case STATUS_RSP:
+                Verb verb = message.verb();
+                // these messages are not resilent to ephemeral issues
+                if (verb.equals(STATUS_REQ)
+                    || verb.equals(STATUS_RSP)
                     // paxos repair does not support faults and will cause a TIMEOUT error, failing the repair
-                    case PAXOS2_CLEANUP_COMPLETE_REQ:
-                    case PAXOS2_CLEANUP_REQ:
-                    case PAXOS2_CLEANUP_RSP2:
-                    case PAXOS2_CLEANUP_START_PREPARE_REQ:
-                    case PAXOS2_CLEANUP_FINISH_PREPARE_REQ:
-                        noFaults.add(message.id());
-                        return Faults.NONE;
-                    default:
-                        if (noFaults.contains(message.id())) return Faults.NONE;
-                        if (allowDrop.contains(message.id())) return Faults.DROPPED;
-                        // was a new message added and the test not updated?
-                        IllegalStateException e = new IllegalStateException("Verb: " + message.verb());
-                        cluster.failures.add(e);
-                        throw e;
+                    || verb.equals(PAXOS2_CLEANUP_COMPLETE_REQ)
+                    || verb.equals(PAXOS2_CLEANUP_REQ)
+                    || verb.equals(PAXOS2_CLEANUP_RSP2)
+                    || verb.equals(PAXOS2_CLEANUP_START_PREPARE_REQ)
+                    || verb.equals(PAXOS2_CLEANUP_FINISH_PREPARE_REQ))
+                {
+                    noFaults.add(message.id());
+                    return Faults.NONE;
                 }
+                if (noFaults.contains(message.id())) return Faults.NONE;
+                if (allowDrop.contains(message.id())) return Faults.DROPPED;
+                // was a new message added and the test not updated?
+                IllegalStateException e = new IllegalStateException("Verb: " + message.verb());
+                cluster.failures.add(e);
+                throw e;
             }
         });
     }
@@ -1108,25 +1109,30 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
                     @Override
                     public void doVerb(Message message) throws IOException
                     {
-                        switch (message.verb())
+                        Verb verb = message.verb();
+                        if (verb.equals(PAXOS2_CLEANUP_START_PREPARE_REQ))
                         {
-                            case PAXOS2_CLEANUP_START_PREPARE_REQ:
-                                paxosStartPrepareCleanup.doVerb(message);
-                                break;
-                            case PAXOS2_CLEANUP_REQ:
-                                paxosCleanupRequestIVerbHandler.doVerb(message);
-                                break;
-                            case PAXOS2_CLEANUP_FINISH_PREPARE_REQ:
-                                paxosFinishPrepareCleanup.doVerb(message);
-                                break;
-                            case PAXOS2_CLEANUP_RSP2:
-                                paxosCleanupResponse.doVerb(message);
-                                break;
-                            case PAXOS2_CLEANUP_COMPLETE_REQ:
-                                paxosCleanupComplete.doVerb(message);
-                                break;
-                            default:
-                                repairVerbHandler.doVerb(message);
+                            paxosStartPrepareCleanup.doVerb(message);
+                        }
+                        else if (verb.equals(PAXOS2_CLEANUP_REQ))
+                        {
+                            paxosCleanupRequestIVerbHandler.doVerb(message);
+                        }
+                        else if (verb.equals(PAXOS2_CLEANUP_FINISH_PREPARE_REQ))
+                        {
+                            paxosFinishPrepareCleanup.doVerb(message);
+                        }
+                        else if (verb.equals(PAXOS2_CLEANUP_RSP2))
+                        {
+                            paxosCleanupResponse.doVerb(message);
+                        }
+                        else if (verb.equals(PAXOS2_CLEANUP_COMPLETE_REQ))
+                        {
+                            paxosCleanupComplete.doVerb(message);
+                        }
+                        else
+                        {
+                            repairVerbHandler.doVerb(message);
                         }
                     }
                 };
