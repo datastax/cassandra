@@ -368,9 +368,10 @@ public class Keyspace
         if (cfs == null)
             return;
 
-        CompactionManager.instance.interruptCompactionForCFs(cfs.concatWithIndexes(), (sstable) -> true, true);
+        cfs.onTableDropped();
+
         // wait for any outstanding reads/writes that might affect the CFS
-        cfs.keyspace.writeOrder.awaitNewBarrier();
+        writeOrder.awaitNewBarrier();
         cfs.readOrdering.awaitNewBarrier();
 
         unloadCf(cfs);
