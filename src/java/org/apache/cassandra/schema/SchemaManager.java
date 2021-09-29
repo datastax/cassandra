@@ -30,7 +30,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -140,10 +139,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     private void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
     {
-        Keyspace keyspace = getKeyspaceInstance(updated.name);
-        if (null != keyspace)
-            keyspace.setMetadata(updated);
-
         schemaRefCache.updateRefs(previous, updated);
 //      TODO  SchemaDiagnostics.metadataReloaded(schema.get(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
@@ -211,47 +206,25 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * Store given Keyspace instance to the schema
-     *
-     * @param keyspace The Keyspace instance to store
-     *
-     * @throws IllegalArgumentException if Keyspace is already stored
-     */
-    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
-    @VisibleForTesting
-    public void storeKeyspaceInstance(Keyspace keyspace)
-    {
-        CompletableFuture<Keyspace> future = CompletableFuture.completedFuture(keyspace);
-        CompletableFuture<Keyspace> existing = keyspaceInstances.putIfAbsent(keyspace.getName(), future);
-        if (existing != null)
-            throw new IllegalArgumentException(String.format("Keyspace %s was already initialized.", keyspace.getName()));
-    }
-
-    /**
      * Remove keyspace from schema. This puts a temporary entry in the map that throws an exception when queried.
      * When the metadata is also deleted, that temporary entry must also be deleted using clearKeyspaceInstance below.
      *
      * @param keyspaceName The name of the keyspace to remove
-     *
-     * @return removed keyspace instance or null if it wasn't found
      */
-    // todo perhaps there should be two interfaces implemented by SchemaManager - one for querying and one for updating
-    public Keyspace removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
+    void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
     {
         CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
         droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
 
         CompletableFuture<Keyspace> existingFuture = keyspaceInstances.put(keyspaceName, droppedFuture);
         if (existingFuture == null || existingFuture.isCompletedExceptionally())
-            return null;
+            return;
 
         Keyspace instance = existingFuture.join();
         unloadFunction.accept(instance);
 
         CompletableFuture<Keyspace> future = keyspaceInstances.remove(keyspaceName);
         assert future == droppedFuture;
-
-        return instance;
     }
 
     @Override
@@ -293,7 +266,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         }
     }
 
-    // todo maybe there should be a universal method which accepts flags determining which sets of keyspaces (user, system, local, virtual) should be returned
     public int getNumberOfTables()
     {
         return updateHandler.schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
@@ -544,7 +516,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.schema();
     }
 
-    public void applyChangesLocally(KeyspacesDiff diff)
+    void applyChangesLocally(KeyspacesDiff diff)
     {
         diff.dropped.forEach(this::dropKeyspace);
         diff.created.forEach(this::createKeyspace);
@@ -555,20 +527,30 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         SchemaDiagnostics.keyspaceAltering(schema(), delta);
 
+        // update keyspace metadata
+        Keyspace keyspace = getKeyspaceInstance(delta.before.name);
+        assert keyspace != null;
+
+        assert delta.before.name.equals(delta.after.name);
+
         // drop tables and views
-        delta.views.dropped.forEach(this::dropView);
-        delta.tables.dropped.forEach(this::dropTable);
+        delta.tables.dropped.forEach(t -> dropTable(keyspace, t));
+        delta.views.dropped.forEach(v -> dropView(keyspace, v));
 
         // add tables and views
-        delta.tables.created.forEach(this::createTable);
-        delta.views.created.forEach(this::createView);
+        delta.tables.created.forEach(t -> createTable(keyspace, t));
+        delta.views.created.forEach(v -> createView(keyspace, v));
 
         // update tables and views
-        delta.tables.altered.forEach(diff -> alterTable(diff.after));
-        delta.views.altered.forEach(diff -> alterView(diff.after));
+        delta.tables.altered.forEach(diff -> alterTable(keyspace, diff.after));
+        delta.views.altered.forEach(diff -> alterView(keyspace, diff.after));
+
+        // update keyspace metadata in keyspace instance
+        keyspace.setMetadata(delta.after);
 
         // deal with all added, and altered views
-        Keyspace.open(delta.after.name).viewManager.reload(true);
+        keyspace.viewManager.reload(true);
+
 
         schemaChangeNotifier.notifyKeyspaceAltered(delta);
     }
@@ -583,50 +565,53 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void dropKeyspace(KeyspaceMetadata keyspace)
     {
         SchemaDiagnostics.keyspaceDroping(schema(), keyspace);
-        keyspace.views.forEach(this::dropView);
-        keyspace.tables.forEach(this::dropTable);
 
         // remove the keyspace from the static instances.
-        removeKeyspaceInstance(keyspace.name, Keyspace::unload);
+        removeKeyspaceInstance(keyspace.name, ks -> {
+            keyspace.views.forEach(v -> dropView(ks, v));
+            keyspace.tables.forEach(t -> dropTable(ks, t));
+            ks.unload();
+        });
+
         Keyspace.writeOrder.awaitNewBarrier();
         schemaChangeNotifier.notifyKeyspaceDropped(keyspace);
     }
 
-    private void dropView(ViewMetadata metadata)
+    private void dropView(Keyspace keyspace, ViewMetadata metadata)
     {
         Keyspace.open(metadata.keyspace()).viewManager.dropView(metadata.name());
-        dropTable(metadata.metadata);
+        dropTable(keyspace, metadata.metadata);
     }
 
-    private void dropTable(TableMetadata metadata)
+    private void dropTable(Keyspace keyspace, TableMetadata metadata)
     {
         SchemaDiagnostics.tableDropping(schema(), metadata);
-        Keyspace.open(metadata.keyspace).dropCf(metadata.id);
+        keyspace.dropCf(metadata.id);
         SchemaDiagnostics.tableDropped(schema(), metadata);
     }
 
-    private void createTable(TableMetadata table)
+    private void createTable(Keyspace keyspace, TableMetadata table)
     {
         SchemaDiagnostics.tableCreating(schema(), table);
-        Keyspace.open(table.keyspace).initCf(schemaRefCache.getTableMetadataRef(table.id), true);
+        keyspace.initCf(schemaRefCache.getTableMetadataRef(table.id), true);
         SchemaDiagnostics.tableCreated(schema(), table);
     }
 
-    private void createView(ViewMetadata view)
+    private void createView(Keyspace keyspace, ViewMetadata view)
     {
-        Keyspace.open(view.keyspace()).initCf(schemaRefCache.getTableMetadataRef(view.metadata.id), true);
+        keyspace.initCf(schemaRefCache.getTableMetadataRef(view.metadata.id), true);
     }
 
-    private void alterTable(TableMetadata updated)
+    private void alterTable(Keyspace keyspace, TableMetadata updated)
     {
         SchemaDiagnostics.tableAltering(schema(), updated);
-        Keyspace.open(updated.keyspace).getColumnFamilyStore(updated.name).reload();
+        keyspace.getColumnFamilyStore(updated.name).reload();
         SchemaDiagnostics.tableAltered(schema(), updated);
     }
 
-    private void alterView(ViewMetadata updated)
+    private void alterView(Keyspace keyspace, ViewMetadata updated)
     {
-        Keyspace.open(updated.keyspace()).getColumnFamilyStore(updated.name()).reload();
+        keyspace.getColumnFamilyStore(updated.name()).reload();
     }
 
 }

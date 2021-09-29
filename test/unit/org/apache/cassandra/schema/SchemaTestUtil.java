@@ -152,8 +152,13 @@ public class SchemaTestUtil
         MigrationCoordinator.instance.pushSchemaMutations(schema);
     }
 
-    public static void addOrUpdate(KeyspaceMetadata ksm)
+    public static void addOrUpdateKeyspace(KeyspaceMetadata ksm, boolean locally)
     {
-        SchemaManager.instance.apply(current -> current.withAddedOrUpdated(ksm), false);
+        SchemaManager.instance.apply(current -> current.withAddedOrUpdated(ksm), locally);
+    }
+
+    public static void dropKeyspaceIfExist(String ksName, boolean locally)
+    {
+        SchemaManager.instance.apply(current -> current.without(Collections.singletonList(ksName)), locally);
     }
 }

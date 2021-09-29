@@ -126,7 +126,10 @@ public class CommitLogUpgradeTest
         {
             TableId tableId = TableId.fromString(cfidString);
             if (SchemaManager.instance.getTableMetadata(tableId) == null)
-                SchemaTestUtil.addOrUpdate(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1), Tables.of(metadata.unbuild().id(tableId).build())));
+                SchemaTestUtil.addOrUpdateKeyspace(KeyspaceMetadata.create(KEYSPACE,
+                                                                           KeyspaceParams.simple(1),
+                                                                           Tables.of(metadata.unbuild().id(tableId).build())),
+                                                   true);
         }
 
         Hasher hasher = new Hasher();

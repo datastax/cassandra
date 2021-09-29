@@ -211,9 +211,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getLocalPrimaryRangeForEndpoint(InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -251,9 +251,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name,
                                                                                                             InetAddressAndPort.getByName("127.0.0.1"));
@@ -294,9 +294,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -331,9 +331,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -370,9 +370,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -422,9 +422,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -489,9 +489,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should have primary ranges which also cover DC2
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -548,9 +548,9 @@ public class StorageServiceServerTest
         metadata.updateNormalToken(new StringToken("B"), InetAddressAndPort.getByName("127.0.0.2"));
         metadata.updateNormalToken(new StringToken("C"), InetAddressAndPort.getByName("127.0.0.3"));
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -579,9 +579,9 @@ public class StorageServiceServerTest
         Map<String, String> configOptions = new HashMap<>();
         configOptions.put("replication_factor", "2");
 
-        Keyspace.clearUnsafe("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
-        SchemaTestUtil.addOrUpdate(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);

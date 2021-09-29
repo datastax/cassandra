@@ -88,7 +88,7 @@ public class MutationBench
     @Setup
     public void setup() throws IOException
     {
-        SchemaTestUtil.addOrUpdate(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)));
+        SchemaTestUtil.addOrUpdateKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), false);
         KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(keyspace);
         TableMetadata metadata =
             CreateTableStatement.parse("CREATE TABLE userpics " +
@@ -98,7 +98,7 @@ public class MutationBench
                                        "PRIMARY KEY(userid, picid))", keyspace)
                                 .build();
 
-        SchemaTestUtil.addOrUpdate(ksm.withSwapped(ksm.tables.with(metadata)));
+        SchemaTestUtil.addOrUpdateKeyspace(ksm.withSwapped(ksm.tables.with(metadata)), false);
 
         mutation = (Mutation)UpdateBuilder.create(metadata, 1L).newRow(1L).add("commentid", 32L).makeMutation();
         buffer = ByteBuffer.allocate(mutation.serializedSize(MessagingService.current_version));

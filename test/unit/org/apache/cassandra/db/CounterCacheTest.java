@@ -20,6 +20,8 @@ package org.apache.cassandra.db;
 import java.util.Collections;
 import java.util.concurrent.ExecutionException;
 
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.dht.Bounds;
@@ -191,7 +193,8 @@ public class CounterCacheTest
         CacheService.instance.invalidateCounterCache();
         assertEquals(0, CacheService.instance.counterCache.size());
 
-        Keyspace ks = SchemaManager.instance.removeKeyspaceInstance(KEYSPACE1, ignored -> {});
+        KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(KEYSPACE1);
+        SchemaTestUtil.dropKeyspaceIfExist(KEYSPACE1, true);
 
         try
         {
@@ -201,7 +204,7 @@ public class CounterCacheTest
         }
         finally
         {
-            SchemaManager.instance.storeKeyspaceInstance(ks);
+            SchemaTestUtil.addOrUpdateKeyspace(ksm, true);
         }
     }
 

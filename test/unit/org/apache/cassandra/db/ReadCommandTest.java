@@ -901,7 +901,7 @@ public class ReadCommandTest
     {
         TableParams newParams = cfs.metadata().params.unbuild().gcGraceSeconds(gcGrace).build();
         KeyspaceMetadata keyspaceMetadata = SchemaManager.instance.getKeyspaceMetadata(cfs.metadata().keyspace);
-        SchemaTestUtil.addOrUpdate(keyspaceMetadata.withSwapped(keyspaceMetadata.tables.withSwapped(cfs.metadata().withSwapped(newParams))));
+        SchemaTestUtil.addOrUpdateKeyspace(keyspaceMetadata.withSwapped(keyspaceMetadata.tables.withSwapped(cfs.metadata().withSwapped(newParams))), false);
     }
 
     private long getAndResetOverreadCount(ColumnFamilyStore cfs)

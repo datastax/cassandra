@@ -101,11 +101,11 @@ public class BatchStatementBench
     @Setup
     public void setup() throws Throwable
     {
-        SchemaTestUtil.addOrUpdate(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)));
+        SchemaTestUtil.addOrUpdateKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), false);
         KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(keyspace);
         TableMetadata metadata = CreateTableStatement.parse(String.format("CREATE TABLE %s (id int, ck int, v int, primary key (id, ck))", table), keyspace).build();
 
-        SchemaTestUtil.addOrUpdate(ksm.withSwapped(ksm.tables.with(metadata)));
+        SchemaTestUtil.addOrUpdateKeyspace(ksm.withSwapped(ksm.tables.with(metadata)), false);
 
         List<ModificationStatement> modifications = new ArrayList<>(batchSize);
         List<List<ByteBuffer>> parameters = new ArrayList<>(batchSize);

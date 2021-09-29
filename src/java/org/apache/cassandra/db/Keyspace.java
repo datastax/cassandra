@@ -36,6 +36,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
@@ -43,7 +44,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
@@ -107,7 +107,6 @@ public class Keyspace
     private final KeyspaceWriteHandler writeHandler;
     private volatile ReplicationParams replicationParams;
     private final KeyspaceRepairManager repairManager;
-    private final SchemaProvider schema;
 
     private static volatile boolean initialized = false;
 
@@ -132,12 +131,6 @@ public class Keyspace
     static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables)
     {
         return schema.getOrCreateKeyspaceInstance(keyspaceName, () -> new Keyspace(keyspaceName, schema, loadSSTables));
-    }
-
-    @VisibleForTesting
-    public static Keyspace clearUnsafe(String keyspaceName)
-    {
-        return SchemaManager.instance.removeKeyspaceInstance(keyspaceName, Keyspace::unload);
     }
 
     public static ColumnFamilyStore openAndGetStore(TableMetadataRef tableRef)
@@ -166,8 +159,20 @@ public class Keyspace
         }
     }
 
+    /**
+     * Sets the new metadata for this keyspace. Note that if the new metadata contains differ3ent tables or views,
+     * the keyspace must be updated first - that is, first add or remove tables/views
+     * ({@link #initCf(TableMetadataRef, boolean)} / {@link #dropCf(TableId)}) then updaate the mdetadata
+     *
+     * @param metadata the new keyspace metadata
+     */
     public void setMetadata(KeyspaceMetadata metadata)
     {
+        Preconditions.checkArgument(metadata.name.equals(this.metadata.name));
+        Preconditions.checkArgument(columnFamilyStores.size() == (metadata.tables.size() + metadata.views.size()));
+        metadata.tables.forEach(t -> Preconditions.checkArgument(columnFamilyStores.containsKey(t.id)));
+        metadata.views.forEach(v -> Preconditions.checkArgument(columnFamilyStores.containsKey(v.metadata.id)));
+
         this.metadata = metadata;
         createReplicationStrategy(metadata);
     }
@@ -184,7 +189,7 @@ public class Keyspace
 
     public ColumnFamilyStore getColumnFamilyStore(String cfName)
     {
-        TableMetadata table = schema.getTableMetadata(getName(), cfName);
+        TableMetadata table = metadata.getTableOrViewNullable(cfName);
         if (table == null)
             throw new IllegalArgumentException(String.format("Unknown keyspace/cf pair (%s.%s)", getName(), cfName));
         return getColumnFamilyStore(table.id);
@@ -306,7 +311,6 @@ public class Keyspace
 
     private Keyspace(String keyspaceName, SchemaProvider schema, boolean loadSSTables)
     {
-        this.schema = schema;
         metadata = schema.getKeyspaceMetadata(keyspaceName);
         assert metadata != null : "Unknown keyspace " + keyspaceName;
         
@@ -329,7 +333,6 @@ public class Keyspace
 
     private Keyspace(KeyspaceMetadata metadata)
     {
-        this.schema = SchemaManager.instance;
         this.metadata = metadata;
         createReplicationStrategy(metadata);
         this.metric = new KeyspaceMetrics(this);
