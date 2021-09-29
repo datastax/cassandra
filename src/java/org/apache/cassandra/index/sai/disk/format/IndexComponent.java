@@ -37,6 +37,7 @@ public enum IndexComponent
      */
     KD_TREE("KDTree"),
     KD_TREE_POSTING_LISTS("KDTreePostingLists"),
+    ROW_ID_POINT_ID_MAP("RowIDPointIDMap"),
     /**
      * Term dictionary written by {@code TrieTermsDictionaryWriter} stores mappings of term and
      * file pointer to posting block on posting file.
@@ -44,6 +45,9 @@ public enum IndexComponent
      * V1 V2
      */
     TERMS_DATA("TermsData"),
+    COMPRESSED_TERMS_DATA("CompressedTermsData"),
+    TERMS_INDEX("TermsIndex"),
+    ORDER_MAP("OrderMap"),
     /**
      * Stores postings written by {@code PostingsWriter}
      *
@@ -71,6 +75,7 @@ public enum IndexComponent
      * V2
      */
     PRIMARY_KEY_OFFSETS("PrimaryKeyOffsets"),
+    PRIMARY_KEY_MAP("PrimaryKeyMap"),
     /**
      * Partition key token value for rows including row tombstone and static row. (access key is rowId)
      *

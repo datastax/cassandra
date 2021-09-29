@@ -23,7 +23,6 @@ import java.util.Comparator;
 import java.util.PriorityQueue;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -87,7 +86,7 @@ public class TermsIteratorMerger implements TermsIterator
 
             postingLists.add(postings.peekable());
         }
-        return new MonitoringPostingList(MergePostingList.merge(postingLists, PrimaryKeyMap.IDENTITY, () -> postingLists.forEach(postingList -> FileUtils.closeQuietly(postingList))));
+        return new MonitoringPostingList(MergePostingList.merge(postingLists, () -> postingLists.forEach(postingList -> FileUtils.closeQuietly(postingList))));
     }
 
     @Override
@@ -128,21 +127,9 @@ public class TermsIteratorMerger implements TermsIterator
         }
 
         @Override
-        public long advance(PrimaryKey primaryKey) throws IOException
-        {
-            return monitored.advance(primaryKey);
-        }
-
-        @Override
         public long advance(long targetRowId) throws IOException
         {
             return monitored.advance(targetRowId);
-        }
-
-        @Override
-        public PrimaryKey mapRowId(long rowId) throws IOException
-        {
-            return monitored.mapRowId(rowId);
         }
 
         @Override

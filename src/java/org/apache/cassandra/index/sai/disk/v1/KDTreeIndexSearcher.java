@@ -66,8 +66,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
                                   indexFiles.get(IndexComponent.KD_TREE).sharedCopy(),
                                   bkdPosition,
                                   indexFiles.get(IndexComponent.KD_TREE_POSTING_LISTS).sharedCopy(),
-                                  postingsPosition,
-                                  primaryKeyMapFactory);
+                                  postingsPosition);
         perColumnEventListener = (QueryEventListener.BKDIndexEventListener)indexContext.getColumnQueryMetrics();
 
     }

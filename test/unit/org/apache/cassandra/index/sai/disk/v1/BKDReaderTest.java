@@ -184,7 +184,7 @@ public class BKDReaderTest extends NdiRandomizedTest
         PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
         queue.addAll(postings);
 
-        return MergePostingList.merge(queue, PrimaryKeyMap.IDENTITY, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
+        return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     private BKDReader createReader(int numRows) throws IOException
@@ -293,17 +293,17 @@ public class BKDReaderTest extends NdiRandomizedTest
 
         intersection = reader.intersect(ALL_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, SSTableQueryContext.forTest());
         assertEquals(numRows, intersection.size());
-        assertEquals(100, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(100)));
-        assertEquals(200, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(200)));
-        assertEquals(300, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(300)));
-        assertEquals(400, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(400)));
-        assertEquals(401, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(401)));
+        assertEquals(100, intersection.advance(100));
+        assertEquals(200, intersection.advance(200));
+        assertEquals(300, intersection.advance(300));
+        assertEquals(400, intersection.advance(400));
+        assertEquals(401, intersection.advance(401));
         long expectedRowID = 402;
         for (long id = intersection.nextPosting(); expectedRowID < 500; id = intersection.nextPosting())
         {
             assertEquals(expectedRowID++, id);
         }
-        assertEquals(PostingList.END_OF_STREAM, intersection.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(numRows + 1)));
+        assertEquals(PostingList.END_OF_STREAM, intersection.advance(numRows + 1));
 
         intersection.close();
     }
@@ -390,8 +390,7 @@ public class BKDReaderTest extends NdiRandomizedTest
                              kdtreeHandle,
                              bkdPosition,
                              kdtreePostingsHandle,
-                             postingsPosition,
-                             PrimaryKeyMap.Factory.IDENTITY);
+                             postingsPosition);
     }
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows) throws IOException
@@ -417,7 +416,6 @@ public class BKDReaderTest extends NdiRandomizedTest
                              kdtreeHandle,
                              bkdPosition,
                              kdtreePostingsHandle,
-                             postingsPosition,
-                             PrimaryKeyMap.Factory.IDENTITY);
+                             postingsPosition);
     }
 }

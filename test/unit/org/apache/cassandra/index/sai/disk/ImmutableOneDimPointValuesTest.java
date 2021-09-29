@@ -28,6 +28,7 @@ import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.v1.ImmutableOneDimPointValues;
+import org.apache.cassandra.index.sai.disk.v1.Lucene75MutablePointsReaderUtils;
 import org.apache.cassandra.index.sai.disk.v1.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
@@ -71,7 +72,7 @@ public class ImmutableOneDimPointValuesTest
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, Int32Type.instance);
 
-        MutablePointsReaderUtils.sort(2, Int32Type.instance.valueLengthIfFixed(), pointValues, 0, Math.toIntExact(pointValues.size()));
+        Lucene75MutablePointsReaderUtils.sort(2, Int32Type.instance.valueLengthIfFixed(), pointValues, 0, Math.toIntExact(pointValues.size()));
 
         pointValues.intersect(assertingVisitor(minTerm));
     }

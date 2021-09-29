@@ -172,9 +172,7 @@ public abstract class AbstractOnDiskBenchmark
         IndexInput summaryInput = IndexFileUtils.instance.openInput(postings);
 
         PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(summaryInput, summaryPosition);
-        //TODO This currently won't work because the PostingsReader needs a SSTableReader to get the keys.
-        // we probably need to abstract the key provider.
-        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP, indexDescriptor.newPrimaryKeyMapFactory(null).newPerSSTablePrimaryKeyMap(null));
+        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
     }
 
     private void writeSSTableComponents(int rows) throws IOException

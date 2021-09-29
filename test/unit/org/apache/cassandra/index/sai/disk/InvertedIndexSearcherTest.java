@@ -104,7 +104,7 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
-                    results.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(tokenToSkip)));
+                    results.skipTo(PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(tokenToSkip), tokenToSkip));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {

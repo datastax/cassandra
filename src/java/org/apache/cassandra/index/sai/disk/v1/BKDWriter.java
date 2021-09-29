@@ -253,7 +253,7 @@ public class BKDWriter implements Closeable
     {
         // TODO: cast to int
         if (reader.size() > 1)
-            MutablePointsReaderUtils.sort(Math.toIntExact(maxDoc), packedBytesLength, reader, 0, Math.toIntExact(reader.size()));
+            Lucene75MutablePointsReaderUtils.sort(Math.toIntExact(maxDoc), packedBytesLength, reader, 0, Math.toIntExact(reader.size()));
 
         final OneDimensionBKDWriter oneDimWriter = new OneDimensionBKDWriter(out, callback);
 

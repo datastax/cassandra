@@ -30,10 +30,12 @@ import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class V2PrimaryKeyMap implements PrimaryKeyMap
 {
@@ -41,6 +43,8 @@ public class V2PrimaryKeyMap implements PrimaryKeyMap
     {
         private final FileHandle primaryKeysFile;
         private final FileHandle primaryKeyOffsetsFile;
+        private final FileHandle primaryKeyMapFile;
+        private final long primaryKeyMapRoot;
         private final LongArray.Factory primaryKeyOffsetsFactory;
         private final MetadataSource metadata;
         private final PrimaryKey.PrimaryKeyFactory keyFactory;
@@ -58,15 +62,21 @@ public class V2PrimaryKeyMap implements PrimaryKeyMap
 
             this.primaryKeysFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEYS);
 
+            String primaryKeyMapComponentName = indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_MAP, null);
+
+            this.primaryKeyMapRoot = metadata.get(primaryKeyMapComponentName).readLong();
+
+            this.primaryKeyMapFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_MAP);
+
             this.keyFactory = indexDescriptor.primaryKeyFactory;
         }
 
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap(SSTableQueryContext context)
         {
-            return new V2PrimaryKeyMap(primaryKeyOffsetsFile.path(),
-                                       new LongArray.DeferredLongArray(() -> primaryKeyOffsetsFactory.open()),
+            return new V2PrimaryKeyMap(new LongArray.DeferredLongArray(() -> primaryKeyOffsetsFactory.open()),
                                        primaryKeysFile.createReader(),
+                                       new TrieTermsDictionaryReader(primaryKeyMapFile.instantiateRebufferer(), primaryKeyMapRoot),
                                        keyFactory,
                                        size);
         }
@@ -78,24 +88,21 @@ public class V2PrimaryKeyMap implements PrimaryKeyMap
         }
     }
 
-    private final String offsetsPath;
     private final LongArray primaryKeyOffsets;
     private final RandomAccessReader primaryKeys;
+    private final TrieTermsDictionaryReader primaryKeyToRowIdMap;
     private final PrimaryKey.PrimaryKeyFactory keyFactory;
     private final long size;
-//    private LoadingCache<Long, PrimaryKey> keyCache = Caffeine.newBuilder()
-//                                                              .maximumSize(100)
-//                                                              .build(rowId -> fetchKey(rowId));
 
-    private V2PrimaryKeyMap(String offsetsPath,
-                            LongArray primaryKeyOffsets,
+    private V2PrimaryKeyMap(LongArray primaryKeyOffsets,
                             RandomAccessReader primaryKeys,
+                            TrieTermsDictionaryReader primaryKeyToRowIdMap,
                             PrimaryKey.PrimaryKeyFactory keyFactory,
                             long size)
     {
-        this.offsetsPath = offsetsPath;
         this.primaryKeyOffsets = primaryKeyOffsets;
         this.primaryKeys = primaryKeys;
+        this.primaryKeyToRowIdMap = primaryKeyToRowIdMap;
         this.keyFactory = keyFactory;
         this.size = size;
     }
@@ -109,23 +116,20 @@ public class V2PrimaryKeyMap implements PrimaryKeyMap
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException
     {
-        return fetchKey(sstableRowId);
-//        return keyCache.get(sstableRowId);
-//        long startOffset = primaryKeyOffsets.get(sstableRowId);
-//        primaryKeys.seek(startOffset);
-//        return keyFactory.createKey(primaryKeys, sstableRowId);
+        long startOffset = primaryKeyOffsets.get(sstableRowId);
+        primaryKeys.seek(startOffset);
+        return keyFactory.createKey(primaryKeys, sstableRowId);
+    }
+
+    @Override
+    public long rowIdFromPrimaryKey(PrimaryKey key) throws IOException
+    {
+        return primaryKeyToRowIdMap.exactMatch(v -> key.asComparableBytes(v));
     }
 
     @Override
     public void close() throws IOException
     {
         FileUtils.close(primaryKeyOffsets, primaryKeys);
-    }
-
-    private PrimaryKey fetchKey(long sstableRowId) throws IOException
-    {
-        long startOffset = primaryKeyOffsets.get(sstableRowId);
-        primaryKeys.seek(startOffset);
-        return keyFactory.createKey(primaryKeys, sstableRowId);
     }
 }

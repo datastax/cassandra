@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 /**
@@ -57,19 +56,7 @@ public class PackedLongsPostingList implements PostingList
     }
 
     @Override
-    public long advance(PrimaryKey primaryKey) throws IOException
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public long advance(long targetRowId) throws IOException
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public PrimaryKey mapRowId(long rowId)
     {
         throw new UnsupportedOperationException();
     }

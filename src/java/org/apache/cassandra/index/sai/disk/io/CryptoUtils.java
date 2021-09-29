@@ -20,11 +20,11 @@ package org.apache.cassandra.index.sai.disk.io;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.index.sai.disk.v1.ByteArrayIndexInput;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompressionParams;
-import org.apache.lucene.store.ByteArrayIndexInput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;

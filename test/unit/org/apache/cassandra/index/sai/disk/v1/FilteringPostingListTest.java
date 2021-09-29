@@ -135,7 +135,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
 
         try
         {
-            long id = filteringPostings.advance(V2PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
+            long id = filteringPostings.advance(target);
 
             assertEquals(expectedAdvanceTo, id);
 
@@ -146,7 +146,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
         }
         catch (Exception e)
         {
-            long id = filteringPostings.advance(V2PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
+            long id = filteringPostings.advance(target);
 
             assertEquals(expectedAdvanceTo, id);
 
@@ -157,7 +157,7 @@ public class FilteringPostingListTest extends NdiRandomizedTest
         }
 
         ArrayPostingList expected = new ArrayPostingList(postingsArray);
-        expected.advance(V2PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
+        expected.advance(target);
 
         // Advance to the first actual match...
         while (expected.getOrdinal() <= from)

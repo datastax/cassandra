@@ -29,15 +29,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
@@ -67,20 +64,17 @@ public class TermsReader implements Closeable
     private final FileHandle termDictionaryFile;
     private final FileHandle postingsFile;
     private final long termDictionaryRoot;
-    private final PrimaryKeyMap.Factory primaryKeyMapFactory;
 
     public TermsReader(IndexContext indexContext,
                        FileHandle termsData,
                        FileHandle postingLists,
                        long root,
-                       long termsFooterPointer,
-                       PrimaryKeyMap.Factory primaryKeyMapFactory) throws IOException
+                       long termsFooterPointer) throws IOException
     {
         this.indexContext = indexContext;
         this.termDictionaryFile = termsData;
         this.postingsFile = postingLists;
         this.termDictionaryRoot = root;
-        this.primaryKeyMapFactory = primaryKeyMapFactory;
 
         try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {
@@ -195,7 +189,7 @@ public class TermsReader implements Closeable
         {
             PostingsReader.BlocksSummary header = new PostingsReader.BlocksSummary(postingsSummaryInput, offset);
 
-            return new PostingsReader(postingsInput, header, listener.postingListEventListener(), primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(context));
+            return new PostingsReader(postingsInput, header, listener.postingListEventListener());
         }
     }
 
@@ -290,27 +284,12 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        public long advance(PrimaryKey primaryKey) throws IOException
-        {
-            long next = wrapped.advance(primaryKey);
-            if (next == PostingList.END_OF_STREAM)
-                return next;
-            return next + offset;
-        }
-
-        @Override
         public long advance(long targetRowId) throws IOException
         {
             long next = wrapped.advance(targetRowId);
             if (next == PostingList.END_OF_STREAM)
                 return next;
             return next + offset;
-        }
-
-        @Override
-        public PrimaryKey mapRowId(long rowId) throws IOException
-        {
-            return wrapped.mapRowId(rowId);
         }
 
         @Override

@@ -219,7 +219,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
             FileHandle kdtree = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
             FileHandle kdtreePostings = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
-            BKDReader reader = new BKDReader(indexContext, kdtree, bkdPosition, kdtreePostings, postingsPosition, PrimaryKeyMap.Factory.IDENTITY);
+            BKDReader reader = new BKDReader(indexContext, kdtree, bkdPosition, kdtreePostings, postingsPosition);
 
             for (int term : expected.keySet())
             {
@@ -252,7 +252,7 @@ public class KDTreeSegmentMergerTest extends SAITester
         PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
         queue.addAll(postings);
 
-        return MergePostingList.merge(queue, PrimaryKeyMap.IDENTITY, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
+        return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int generation) throws Throwable
@@ -274,7 +274,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         FileHandle kdtree = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
         FileHandle kdtreePostings = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
-        return new BKDReader(indexContext, kdtree, bkdPosition, kdtreePostings, postingsPosition, PrimaryKeyMap.Factory.IDENTITY);
+        return new BKDReader(indexContext, kdtree, bkdPosition, kdtreePostings, postingsPosition);
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)

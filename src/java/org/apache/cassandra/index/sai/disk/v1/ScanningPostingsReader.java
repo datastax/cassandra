@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.lucene.store.IndexInput;
 
 /**
@@ -34,18 +33,12 @@ public class ScanningPostingsReader extends PostingsReader
 {
     public ScanningPostingsReader(IndexInput input, BlocksSummary summary) throws IOException
     {
-        super(input, summary, QueryEventListener.PostingListEventListener.NO_OP, null);
+        super(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
     }
 
     @Override
-    public long advance(PrimaryKey nextPrimaryKey)
+    public long advance(long targetRowId)
     {
         throw new UnsupportedOperationException("Cannot advance a scanning postings reader");
-    }
-
-    @Override
-    public PrimaryKey mapRowId(long rowId)
-    {
-        throw new UnsupportedOperationException("The scanning postings reader is not able to map row ids to primary keys");
     }
 }

@@ -22,7 +22,6 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
-import org.apache.lucene.store.ByteArrayIndexInput;
 import org.apache.lucene.util.packed.DirectWriter;
 
 public class LeafOrderMapTest extends NdiRandomizedTest

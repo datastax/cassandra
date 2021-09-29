@@ -21,9 +21,6 @@ import java.io.IOException;
 
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.index.sai.disk.OrdinalPostingList;
-import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.lucene.util.FixedBitSet;
 
 
@@ -84,29 +81,6 @@ public class FilteringPostingList implements PostingList
     }
 
     @Override
-    public  long advance(PrimaryKey primaryKey) throws IOException
-    {
-        long segmentRowId = delegate.advance(primaryKey);
-
-        if (segmentRowId == PostingList.END_OF_STREAM)
-        {
-            return PostingList.END_OF_STREAM;
-        }
-
-        // these are always for leaf kdtree postings so the max is 1024
-        position = (int)delegate.getOrdinal();
-
-        // If the ordinal of the ID we just read satisfies the filter, just return it...
-        if (filter.get(position - 1))
-        {
-            return segmentRowId;
-        }
-
-        // ...but if the ID doesn't satisfy the filter, get the next match.
-        return nextPosting();
-    }
-
-    @Override
     public  long advance(long targetRowId) throws IOException
     {
         long segmentRowId = delegate.advance(targetRowId);
@@ -127,11 +101,5 @@ public class FilteringPostingList implements PostingList
 
         // ...but if the ID doesn't satisfy the filter, get the next match.
         return nextPosting();
-    }
-
-    @Override
-    public PrimaryKey mapRowId(long rowId) throws IOException
-    {
-        return delegate.mapRowId(rowId);
     }
 }

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
@@ -25,7 +24,6 @@ import com.google.common.base.Preconditions;
 
 import com.carrotsearch.hppc.LongArrayList;
 import com.carrotsearch.hppc.cursors.LongCursor;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -103,19 +101,7 @@ public class MemtableTermsIterator implements TermsIterator
             }
 
             @Override
-            public long advance(PrimaryKey primaryKey)
-            {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public long advance(long targetRowId)
-            {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public PrimaryKey mapRowId(long rowId)
             {
                 throw new UnsupportedOperationException();
             }

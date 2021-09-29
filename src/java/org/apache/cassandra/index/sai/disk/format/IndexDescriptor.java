@@ -87,8 +87,9 @@ public class IndexDescriptor
     public final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
     public final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     public final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
+    public final Map<IndexComponent, File> onDiskPerSSTableTemporaryFileMap = Maps.newHashMap();
     public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
-    public final Map<Pair<IndexComponent, String>, File> onDiskTemporaryFileMap = Maps.newHashMap();
+    public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexTemporaryFileMap = Maps.newHashMap();
 
     private IndexDescriptor(Version version, Descriptor descriptor, TableMetadata tableMetadata)
     {
@@ -342,9 +343,15 @@ public class IndexDescriptor
 
     public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
     {
-        final File file = fileFor(indexComponent, indexContext);
+        return openPerIndexInput(indexComponent, indexContext, false);
+    }
+
+    public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext, boolean temporary)
+    {
+        final File file = temporary ? tmpFileFor(indexComponent, indexContext) : fileFor(indexComponent, indexContext);
         if (logger.isTraceEnabled())
-            logger.trace(logMessage("Opening blocking index input for file {} ({})"),
+            logger.trace(logMessage("Opening {} blocking index input for file {} ({})"),
+                         temporary ? "temporary" : "",
                          file,
                          FBUtilities.prettyPrintMemory(file.length()));
 
@@ -353,12 +360,12 @@ public class IndexDescriptor
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException
     {
-        return openPerSSTableOutput(component, false);
+        return openPerSSTableOutput(component, false, false);
     }
 
-    public IndexOutputWriter openPerSSTableOutput(IndexComponent component, boolean append) throws IOException
+    public IndexOutputWriter openPerSSTableOutput(IndexComponent component, boolean append, boolean temporary) throws IOException
     {
-        final File file = fileFor(component);
+        final File file = temporary ? tmpFileFor(component) : fileFor(component);
 
         if (logger.isTraceEnabled())
             logger.trace(logMessage("Creating SSTable attached index output for component {} on file {}..."),
@@ -407,7 +414,12 @@ public class IndexDescriptor
 
     public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent)
     {
-        final File file = fileFor(indexComponent);
+        return createPerSSTableFileHandle(indexComponent, false);
+    }
+
+    public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent, boolean temporary)
+    {
+        final File file = temporary ? tmpFileFor(indexComponent) : fileFor(indexComponent);
 
         if (logger.isTraceEnabled())
         {
@@ -501,9 +513,15 @@ public class IndexDescriptor
         return perIndexComponents.containsKey(indexContext.getIndexName()) ? perIndexComponents.get(indexContext.getIndexName()).size() : 0;
     }
 
+    private File tmpFileFor(IndexComponent component)
+    {
+        return onDiskPerSSTableTemporaryFileMap.computeIfAbsent(component,
+                                                                c -> new File(tmpFilenameFor(component, null)));
+    }
+
     private File tmpFileFor(IndexComponent component, IndexContext indexContext)
     {
-        return onDiskTemporaryFileMap.computeIfAbsent(Pair.create(component, indexContext.getIndexName()),
+        return onDiskPerIndexTemporaryFileMap.computeIfAbsent(Pair.create(component, indexContext.getIndexName()),
                                                       c -> new File(tmpFilenameFor(component, indexContext)));
     }
 

@@ -44,6 +44,8 @@ public interface PrimaryKeyMap extends Closeable
 
     PrimaryKey primaryKeyFromRowId(long sstableRowId) throws IOException;
 
+    long rowIdFromPrimaryKey(PrimaryKey key) throws IOException;
+
     @VisibleForTesting
     default long size()
     {
@@ -54,5 +56,18 @@ public interface PrimaryKeyMap extends Closeable
     {
     }
 
-    PrimaryKeyMap IDENTITY = sstableRowId -> PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(sstableRowId), sstableRowId);
+    PrimaryKeyMap IDENTITY = new PrimaryKeyMap()
+    {
+        @Override
+        public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+        {
+            return PrimaryKey.factory().createKey(new Murmur3Partitioner.LongToken(sstableRowId), sstableRowId);
+        }
+
+        @Override
+        public long rowIdFromPrimaryKey(PrimaryKey key)
+        {
+            return key.sstableRowId();
+        }
+    };
 }

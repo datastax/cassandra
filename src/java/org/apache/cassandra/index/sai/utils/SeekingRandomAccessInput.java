@@ -17,15 +17,17 @@
  */
 package org.apache.cassandra.index.sai.utils;
 
+import java.io.Closeable;
 import java.io.IOException;
 
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
 
 /**
  * {@link IndexInput} adapter that exposes it as a {@link RandomAccessInput} type.
  */
-public class SeekingRandomAccessInput implements RandomAccessInput
+public class SeekingRandomAccessInput implements RandomAccessInput, Closeable
 {
     private final IndexInput in;
 
@@ -60,6 +62,12 @@ public class SeekingRandomAccessInput implements RandomAccessInput
     {
         in.seek(pos);
         return in.readLong();
+    }
+
+    @Override
+    public void close() throws IOException
+    {
+        in.close();
     }
 
     @Override

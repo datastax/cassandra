@@ -170,7 +170,7 @@ public abstract class AbstractOnDiskBenchmark
         IndexInput input = IndexFileUtils.instance.openInput(postings);
         IndexInput summaryInput = IndexFileUtils.instance.openInput(postings);
         PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(summaryInput, summaryPosition);
-        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP, primaryKeyMap);
+        return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
     }
 
     /**

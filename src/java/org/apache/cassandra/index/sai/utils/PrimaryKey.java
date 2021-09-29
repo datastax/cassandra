@@ -206,6 +206,8 @@ public class PrimaryKey implements Comparable<PrimaryKey>
 
     public ByteSource asComparableBytes(ByteComparable.Version version)
     {
+        if (kind.token)
+            return token.asComparableBytes(version);
         ByteSource[] sources = new ByteSource[clustering.size() + 2];
         sources[0] = partitionKey.getToken().asComparableBytes(version);
         sources[1] = ByteSource.of(partitionKey.getKey(), version);

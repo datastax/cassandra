@@ -100,8 +100,8 @@ public class PostingsTest extends NdiRandomizedTest
         listener = new CountingPostingListEventListener();
         reader = new PostingsReader(new SharedIndexInput(input), postingPointer, listener);
 
-        assertEquals(50, reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(45)));
-        assertEquals(60, reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(60)));
+        assertEquals(50, reader.advance(45));
+        assertEquals(60, reader.advance(60));
         assertEquals(PostingList.END_OF_STREAM, reader.nextPosting());
         assertEquals(2, listener.advances);
         reader.close();
@@ -166,8 +166,8 @@ public class PostingsTest extends NdiRandomizedTest
                 }
 
                 expectedPostingList.reset();
-                assertEquals(expectedPostingList.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(tokenToAdvance)),
-                             reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(tokenToAdvance)));
+                assertEquals(expectedPostingList.advance(tokenToAdvance),
+                             reader.advance(tokenToAdvance));
 
                 assertPostingListEquals(expectedPostingList, reader);
                 assertEquals(1, listener.advances);
@@ -292,8 +292,8 @@ public class PostingsTest extends NdiRandomizedTest
 
         for (int target : targetIDs)
         {
-            final long actualRowId = reader.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
-            final long expectedRowId = expected.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(target));
+            final long actualRowId = reader.advance(target);
+            final long expectedRowId = expected.advance(target);
 
             assertEquals(expectedRowId, actualRowId);
 

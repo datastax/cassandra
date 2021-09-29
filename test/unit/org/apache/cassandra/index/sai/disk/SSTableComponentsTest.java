@@ -135,6 +135,12 @@ public class SSTableComponentsTest extends SAITester
             assertTrue(primaryKeyMap.primaryKeyFromRowId(randomRowId).compareTo(expected.get(randomRowId)) == 0);
         }
 
+        for (int rowId = 0; rowId < numRows; rowId++)
+        {
+            int randomRowId = CQLTester.getRandom().nextIntBetween(0, numRows - 1);
+            assertEquals(randomRowId, primaryKeyMap.rowIdFromPrimaryKey(expected.get(randomRowId)));
+        }
+
         primaryKeyMap.close();
     }
 

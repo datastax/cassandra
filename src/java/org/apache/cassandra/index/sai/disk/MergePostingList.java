@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.PriorityQueue;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -37,16 +35,14 @@ import static com.google.common.base.Preconditions.checkArgument;
 @NotThreadSafe
 public class MergePostingList implements PostingList
 {
-    final PrimaryKeyMap primaryKeyMap;
     final PriorityQueue<PeekablePostingList> postingLists;
     final List<PeekablePostingList> temp;
     final Closeable onClose;
     final long size;
     private long lastRowId = -1;
 
-    private MergePostingList(PriorityQueue<PeekablePostingList> postingLists, PrimaryKeyMap primaryKeyMap, Closeable onClose)
+    private MergePostingList(PriorityQueue<PeekablePostingList> postingLists, Closeable onClose)
     {
-        this.primaryKeyMap = primaryKeyMap;
         this.temp = new ArrayList<>(postingLists.size());
         this.onClose = onClose;
         this.postingLists = postingLists;
@@ -58,15 +54,15 @@ public class MergePostingList implements PostingList
         this.size = size;
     }
 
-    public static PostingList merge(PriorityQueue<PeekablePostingList> postings, PrimaryKeyMap primaryKeyMap, Closeable onClose)
+    public static PostingList merge(PriorityQueue<PeekablePostingList> postings, Closeable onClose)
     {
         checkArgument(!postings.isEmpty());
-        return postings.size() > 1 ? new MergePostingList(postings, primaryKeyMap, onClose) : postings.poll();
+        return postings.size() > 1 ? new MergePostingList(postings, onClose) : postings.poll();
     }
 
     public static PostingList merge(PriorityQueue<PeekablePostingList> postings)
     {
-        return merge(postings, PrimaryKeyMap.IDENTITY, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
+        return merge(postings, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     @SuppressWarnings("resource")
@@ -97,24 +93,6 @@ public class MergePostingList implements PostingList
         return PostingList.END_OF_STREAM;
     }
 
-    @SuppressWarnings("resource")
-    @Override
-    public long advance(PrimaryKey key) throws IOException
-    {
-        temp.clear();
-
-        while (!postingLists.isEmpty())
-        {
-            PeekablePostingList peekable = postingLists.poll();
-            peekable.advanceWithoutConsuming(key);
-            if (peekable.peek() != PostingList.END_OF_STREAM)
-                temp.add(peekable);
-        }
-        postingLists.addAll(temp);
-
-        return nextPosting();
-    }
-
     @Override
     public long advance(long targetRowId) throws IOException
     {
@@ -130,12 +108,6 @@ public class MergePostingList implements PostingList
         postingLists.addAll(temp);
 
         return nextPosting();
-    }
-
-    @Override
-    public PrimaryKey mapRowId(long rowId) throws IOException
-    {
-        return primaryKeyMap.primaryKeyFromRowId(rowId);
     }
 
     @Override

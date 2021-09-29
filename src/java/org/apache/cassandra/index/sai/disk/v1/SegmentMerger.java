@@ -115,8 +115,7 @@ public interface SegmentMerger extends Closeable
                                                             indexFiles.get(IndexComponent.TERMS_DATA).sharedCopy(),
                                                             indexFiles.get(IndexComponent.POSTING_LISTS).sharedCopy(),
                                                             root,
-                                                            footerPointer,
-                                                            null);
+                                                            footerPointer);
             readers.add(termsReader);
             return termsReader.allTerms(segment.segmentRowIdOffset);
         }
@@ -190,8 +189,7 @@ public interface SegmentMerger extends Closeable
                                                       indexFiles.get(IndexComponent.KD_TREE).sharedCopy(),
                                                       bkdPosition,
                                                       indexFiles.get(IndexComponent.KD_TREE_POSTING_LISTS).sharedCopy(),
-                                                      postingsPosition,
-                                                      null);
+                                                      postingsPosition);
             readers.add(bkdReader);
             return bkdReader.iteratorState(rowid -> rowid + segment.segmentRowIdOffset);
         }

@@ -89,8 +89,7 @@ public class TermsReaderTest extends NdiRandomizedTest
                                                   termsData,
                                                   postingLists,
                                                   indexMetas.get(IndexComponent.TERMS_DATA).root,
-                                                  termsFooterPointer,
-                                                  PrimaryKeyMap.Factory.IDENTITY))
+                                                  termsFooterPointer))
         {
             try (TermsIterator actualTermsEnum = reader.allTerms(0))
             {
@@ -126,8 +125,7 @@ public class TermsReaderTest extends NdiRandomizedTest
                                                   termsData,
                                                   postingLists,
                                                   indexMetas.get(IndexComponent.TERMS_DATA).root,
-                                                  termsFooterPointer,
-                                                  PrimaryKeyMap.Factory.IDENTITY))
+                                                  termsFooterPointer))
         {
             for (Pair<ByteComparable, LongArrayList> pair : termsEnum)
             {
@@ -163,7 +161,7 @@ public class TermsReaderTest extends NdiRandomizedTest
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = expectedPostingList.get(idxToSkip);
 
-                    long advanceResult = actualPostingList.advance(PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(tokenToSkip));
+                    long advanceResult = actualPostingList.advance(tokenToSkip);
                     assertEquals(tokenToSkip, advanceResult);
 
                     for (int i = idxToSkip + 1; i < expectedPostingList.size(); ++i)

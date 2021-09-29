@@ -40,7 +40,7 @@ public class BKDTreeRamBufferTest
             buffer.addPackedValue(i, new BytesRef(scratch));
         }
 
-        final MutablePointValues pointValues = buffer.asPointValues();
+        final Lucene75MutablePointValues pointValues = buffer.asPointValues();
 
         for (int i = 0; i < 100; ++i)
         {
@@ -64,9 +64,9 @@ public class BKDTreeRamBufferTest
             buffer.addPackedValue(i, new BytesRef(scratch));
         }
 
-        final MutablePointValues pointValues = buffer.asPointValues();
+        final Lucene75MutablePointValues pointValues = buffer.asPointValues();
 
-        MutablePointsReaderUtils.sort(100, Integer.BYTES, pointValues, 0, Math.toIntExact(pointValues.size()));
+        Lucene75MutablePointsReaderUtils.sort(100, Integer.BYTES, pointValues, 0, Math.toIntExact(pointValues.size()));
 
         for (int i = 0; i < 100; ++i)
         {

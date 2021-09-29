@@ -107,8 +107,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                                               kdtreeHandle,
                                               indexMetas.get(IndexComponent.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root,
-                                              PrimaryKeyMap.Factory.IDENTITY
+                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();
@@ -160,8 +159,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                                               kdtreeHandle,
                                               indexMetas.get(IndexComponent.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root,
-                                              PrimaryKeyMap.Factory.IDENTITY
+                                              indexMetas.get(IndexComponent.KD_TREE_POSTING_LISTS).root
         ))
         {
             final Counter visited = Counter.newCounter();

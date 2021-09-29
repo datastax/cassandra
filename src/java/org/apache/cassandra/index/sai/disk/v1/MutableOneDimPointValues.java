@@ -23,7 +23,7 @@ import org.apache.lucene.codecs.MutablePointValues;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 
-public abstract class MutableOneDimPointValues extends MutablePointValues
+public abstract class MutableOneDimPointValues extends Lucene75MutablePointValues
 {
     private static final byte[] EMPTY = new byte[0];
 
@@ -67,27 +67,9 @@ public abstract class MutableOneDimPointValues extends MutablePointValues
     }
 
     @Override
-    public void intersect(PointValues.IntersectVisitor visitor) throws IOException
+    public void intersect(Lucene75PointValues.IntersectVisitor visitor) throws IOException
     {
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public long estimatePointCount(PointValues.IntersectVisitor visitor)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public byte[] getMinPackedValue()
-    {
-        return EMPTY;
-    }
-
-    @Override
-    public byte[] getMaxPackedValue()
-    {
-        return EMPTY;
     }
 
     @Override

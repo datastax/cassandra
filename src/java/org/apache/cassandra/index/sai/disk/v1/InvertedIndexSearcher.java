@@ -73,8 +73,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                  indexFiles.get(IndexComponent.TERMS_DATA).sharedCopy(),
                                  indexFiles.get(IndexComponent.POSTING_LISTS).sharedCopy(),
                                  root,
-                                 footerPointer,
-                                 primaryKeyMapFactory);
+                                 footerPointer);
     }
 
     @Override

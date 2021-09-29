@@ -35,8 +35,8 @@ public class ArrayPostingListTest extends NdiRandomizedTest
         assertEquals(PostingList.END_OF_STREAM, postingList.nextPosting());
 
         postingList = new ArrayPostingList(new int[]{ 10, 20, 30, 40, 50, 60 });
-        assertEquals(50, postingList.advance(V2PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(45)));
-        assertEquals(60, postingList.advance(V2PrimaryKeyMap.IDENTITY.primaryKeyFromRowId(60)));
+        assertEquals(50, postingList.advance(45));
+        assertEquals(60, postingList.advance(60));
         assertEquals(PostingList.END_OF_STREAM, postingList.nextPosting());
     }
 }

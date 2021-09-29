@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.io;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -60,6 +61,12 @@ public class BKDTempFilesDirectory extends Directory
         // If tests were running concurrently, it's possible that we could get a tmp file name collision,
         // hence each directory has to have a separate seed.
         this.nextTempFileCounter = new AtomicLong(seed);
+    }
+
+    @Override
+    public Set<String> getPendingDeletions() throws IOException
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

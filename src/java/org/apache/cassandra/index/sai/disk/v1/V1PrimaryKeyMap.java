@@ -118,6 +118,12 @@ public class V1PrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
+    public long rowIdFromPrimaryKey(PrimaryKey key) throws IOException
+    {
+        return rowIdToToken.findTokenRowID(key.token().getLongValue());
+    }
+
+    @Override
     public long size()
     {
         return size;

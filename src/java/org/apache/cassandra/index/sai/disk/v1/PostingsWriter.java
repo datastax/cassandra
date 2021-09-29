@@ -38,7 +38,7 @@ import org.apache.lucene.util.packed.DirectWriter;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.max;
-import static org.apache.lucene.codecs.lucene50.Lucene50PostingsFormat.BLOCK_SIZE;
+import static org.apache.lucene.codecs.lucene84.Lucene84PostingsFormat.BLOCK_SIZE;
 
 /**
  * Encodes, compresses and writes postings lists to disk.

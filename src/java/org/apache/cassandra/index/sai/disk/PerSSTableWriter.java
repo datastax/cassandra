@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
@@ -28,7 +30,7 @@ public interface PerSSTableWriter
 {
     public static final PerSSTableWriter NONE = (key) -> {};
 
-    default void startPartition(long position)
+    default void startPartition(PrimaryKey key, long position) throws IOException
     {}
 
     void nextRow(PrimaryKey key) throws IOException;

@@ -54,6 +54,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.v1.BKDQueries.bkdQueryFrom;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 /**
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
@@ -148,13 +149,12 @@ public class LegacyOnDiskFormatTest
                                             indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext, false),
                                             metadata.segments.get(0).getIndexRoot(IndexComponent.KD_TREE),
                                             indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, false),
-                                            metadata.segments.get(0).getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS),
-                                            indexDescriptor.newPrimaryKeyMapFactory(sstable));
+                                            metadata.segments.get(0).getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(indexContext).add(Operator.LT, Int32Type.instance.decompose(10));
         BKDReader.IntersectVisitor query = bkdQueryFrom(expression, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
         PostingList postingList = bkdReader.intersect(query, QueryEventListeners.NO_OP_BKD_LISTENER, SSTableQueryContext.forTest());
-//        assertEquals(1, postingLists.size());
+        assertNotNull(postingList);
     }
 
     @Test
@@ -173,8 +173,7 @@ public class LegacyOnDiskFormatTest
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext, false),
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext, false),
                                                   root,
-                                                  footerPointer,
-                                                  indexDescriptor.newPrimaryKeyMapFactory(sstable));
+                                                  footerPointer);
         Expression expression = new Expression(indexContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
 

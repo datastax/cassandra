@@ -32,15 +32,17 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public abstract class PerIndexFiles implements Closeable
 {
-    private final IndexDescriptor indexDescriptor;
-    private final IndexContext indexContext;
-    private final Map<IndexComponent, FileHandle> files;
+    protected final IndexDescriptor indexDescriptor;
+    protected final IndexContext indexContext;
+    protected final Map<IndexComponent, FileHandle> files;
+    protected final boolean temporary;
 
     public PerIndexFiles(IndexDescriptor indexDescriptor, IndexContext indexContext, boolean temporary)
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
         files = populate(indexDescriptor, indexContext, temporary);
+        this.temporary = temporary;
     }
 
     public FileHandle get(IndexComponent indexComponent)

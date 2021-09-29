@@ -24,6 +24,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -56,7 +57,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     }
 
     @Override
-    public void startPartition(long position)
+    public void startPartition(PrimaryKey primaryKey, long position)
     {
         currentKeyPartitionOffset = position;
     }

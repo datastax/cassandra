@@ -23,13 +23,9 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.commons.collections.map.LRUMap;
-
 import org.apache.cassandra.index.sai.disk.OrdinalPostingList;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.cassandra.index.sai.utils.SharedIndexInput;
 import org.apache.cassandra.io.util.FileUtils;
@@ -54,7 +50,6 @@ public class PostingsReader implements OrdinalPostingList
     private final LongArray blockMaxValues;
     private final SeekingRandomAccessInput seekingInput;
     private final QueryEventListener.PostingListEventListener listener;
-    private final PrimaryKeyMap primaryKeyMap;
 
     // TODO: Expose more things through the summary, now that it's an actual field?
     private final BlocksSummary summary;
@@ -68,22 +63,16 @@ public class PostingsReader implements OrdinalPostingList
     private DirectReaders.Reader currentFORValues;
     private long postingsDecoded = 0;
 
-    // We cache the last loaded PrimaryKey because it is likely to be used again
-    // in mapRowId following an advance
-    private long cachedRowId = Long.MAX_VALUE;
-    private PrimaryKey cachedPrimaryKey;
-
     @VisibleForTesting
     PostingsReader(SharedIndexInput sharedInput, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        this(sharedInput, new BlocksSummary(sharedInput.sharedCopy(), summaryOffset), listener, PrimaryKeyMap.IDENTITY);
+        this(sharedInput, new BlocksSummary(sharedInput.sharedCopy(), summaryOffset), listener);
     }
 
     @VisibleForTesting
     public PostingsReader(IndexInput input,
                           BlocksSummary summary,
-                          QueryEventListener.PostingListEventListener listener,
-                          PrimaryKeyMap primaryKeyMap) throws IOException
+                          QueryEventListener.PostingListEventListener listener) throws IOException
     {
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);
@@ -92,7 +81,6 @@ public class PostingsReader implements OrdinalPostingList
         this.numPostings = summary.numPostings;
         this.blockMaxValues = summary.maxValues;
         this.listener = listener;
-        this.primaryKeyMap = primaryKeyMap;
 
         this.summary = summary;
 
@@ -197,7 +185,6 @@ public class PostingsReader implements OrdinalPostingList
     {
         listener.postingDecoded(postingsDecoded);
         FileUtils.closeQuietly(input);
-        FileUtils.closeQuietly(primaryKeyMap);
         summary.close();
     }
 
@@ -217,33 +204,10 @@ public class PostingsReader implements OrdinalPostingList
      * Note: Callers must use the return value of this method before calling {@link #nextPosting()}, as calling
      * that method will return the next posting, not the one to which we have just advanced.
      *
-     * @param nextPrimaryKey target primary key to advance to
+     * @param targetRowId target rowId to advance to
      *
      * @return first segment row ID which is >= the target row ID or {@link PostingList#END_OF_STREAM} if one does not exist
      */
-    @Override
-    public long advance(PrimaryKey nextPrimaryKey) throws IOException
-    {
-        listener.onAdvance();
-        int block = binarySearchBlock(nextPrimaryKey);
-
-        if (block < 0)
-        {
-            block = -block - 1;
-        }
-
-        if (postingsBlockIdx == block + 1)
-        {
-            // we're in the same block, just iterate through
-            return slowAdvance(nextPrimaryKey);
-        }
-        assert block > 0;
-        // Even if there was an exact match, block might contain duplicates.
-        // We iterate to the target token from the beginning.
-        lastPosInBlock(block - 1);
-        return slowAdvance(nextPrimaryKey);
-    }
-
     @Override
     public long advance(long targetRowId) throws IOException
     {
@@ -267,22 +231,6 @@ public class PostingsReader implements OrdinalPostingList
         return slowAdvance(targetRowId);
     }
 
-    private long slowAdvance(PrimaryKey nextPrimaryKey) throws IOException
-    {
-        while (totalPostingsRead < numPostings)
-        {
-            final long segmentRowId = peekNext();
-
-            advanceOnePosition(segmentRowId);
-
-            cachedRowId = segmentRowId;
-            cachedPrimaryKey = primaryKeyMap.primaryKeyFromRowId(segmentRowId);
-            if (cachedPrimaryKey.compareTo(nextPrimaryKey) >= 0)
-                return segmentRowId;
-        }
-        return END_OF_STREAM;
-    }
-
     private long slowAdvance(long targetRowId) throws IOException
     {
         while (totalPostingsRead < numPostings)
@@ -295,46 +243,6 @@ public class PostingsReader implements OrdinalPostingList
                 return segmentRowId;
         }
         return END_OF_STREAM;
-    }
-
-    private int binarySearchBlock(PrimaryKey primaryKey) throws IOException
-    {
-        int low = postingsBlockIdx - 1;
-        int high = Math.toIntExact(blockMaxValues.length()) - 1;
-
-        // in current block
-        if (low <= high && primaryKey.compareTo(primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(low))) <= 0)
-            return low;
-
-        while (low <= high)
-        {
-            int mid = low + ((high - low) >> 1) ;
-
-            int cmp = primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid)).compareTo(primaryKey);
-            if (cmp < 0)
-            {
-                low = mid + 1;
-            }
-            else if (cmp > 0)
-            {
-                high = mid - 1;
-            }
-            else
-            {
-                // target found, but we need to check for duplicates
-                if (mid > 0 && primaryKeyMap.primaryKeyFromRowId(blockMaxValues.get(mid - 1)).compareTo(primaryKey) == 0)
-                {
-                    // there are duplicates, pivot left
-                    high = mid - 1;
-                }
-                else
-                {
-                    // no duplicates
-                    return mid;
-                }
-            }
-        }
-        return -(low + 1);  // target not found
     }
 
     private int binarySearchBlock(long targetRowId) throws IOException
@@ -387,16 +295,6 @@ public class PostingsReader implements OrdinalPostingList
 
         postingsBlockIdx = block + 1;
         blockIdx = blockSize;
-    }
-
-    @Override
-    public PrimaryKey mapRowId(long rowId) throws IOException
-    {
-        if (rowId == cachedRowId)
-            return cachedPrimaryKey;
-        cachedRowId = rowId;
-        cachedPrimaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
-        return cachedPrimaryKey;
     }
 
     @Override

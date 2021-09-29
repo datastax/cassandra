@@ -49,6 +49,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
     private final IndexContext indexContext;
+    private final PrimaryKeyMap primaryKeyMap;
     private final SSTableQueryContext queryContext;
 
     private final PostingList postingList;
@@ -62,12 +63,14 @@ public class PostingListRangeIterator extends RangeIterator
      * immediately so the posting list size can be used.
      */
     public PostingListRangeIterator(IndexContext indexContext,
+                                    PrimaryKeyMap primaryKeyMap,
                                     IndexSearcherContext context)
     {
         super(context.minimumKey, context.maximumKey, context.count());
 
         this.postingList = context.postingList;
         this.indexContext = indexContext;
+        this.primaryKeyMap = primaryKeyMap;
         this.queryContext = context.context;
     }
 
@@ -96,7 +99,7 @@ public class PostingListRangeIterator extends RangeIterator
             if (segmentRowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return postingList.mapRowId(segmentRowId);
+            return primaryKeyMap.primaryKeyFromRowId(segmentRowId);
         }
         catch (Throwable t)
         {
@@ -132,7 +135,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         if (needsSkipping)
         {
-            long segmentRowId = postingList.advance(skipToToken);
+            long segmentRowId = postingList.advance(primaryKeyMap.rowIdFromPrimaryKey(skipToToken));
 
             needsSkipping = false;
 

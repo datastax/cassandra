@@ -48,7 +48,7 @@ public class PostingsReaderBenchmark extends AbstractOnDiskBenchmark
     public int skippingDistance;
 
     protected PostingsReader reader;
-    protected PrimaryKey[] primaryKeys;
+    protected long rowIds[];
 
     @Override
     public int numRows()
@@ -67,11 +67,11 @@ public class PostingsReaderBenchmark extends AbstractOnDiskBenchmark
     {
         reader = openPostingsReader();
 
-        primaryKeys = new PrimaryKey[NUM_INVOCATIONS];
-        for (int i = 0; i < primaryKeys.length; i++)
+        rowIds = new long[NUM_INVOCATIONS];
+        for (int i = 0; i < rowIds.length; i++)
         {
             int rowId = toPosting(i * skippingDistance);
-            primaryKeys[i] = primaryKeyMap.primaryKeyFromRowId(rowId);
+            rowIds[i] = rowId;
         }
     }
 
@@ -86,10 +86,9 @@ public class PostingsReaderBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode(Mode.AverageTime)
     public void advance(Blackhole bh) throws Throwable
     {
-        for (int i = 0; i < primaryKeys.length;)
+        for (int i = 0; i < rowIds.length;)
         {
-            PrimaryKey key = primaryKeys[i];
-            bh.consume(reader.advance(key));
+            bh.consume(reader.advance(rowIds[i]));
             i++;
         }
     }
