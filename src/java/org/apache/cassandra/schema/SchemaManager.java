@@ -106,22 +106,34 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void initializeSchemaFromDisk()
     {
-        updateHandler.initializeSchemaFromDisk();
+        SchemaDiagnostics.schemataLoading(schema());
+        KeyspacesDiff diff = updateHandler.initializeSchemaFromDisk();
+        updateRefs(diff);
+        SchemaDiagnostics.schemataLoaded(schema());
     }
 
     public void reloadSchemaFromDisk()
     {
-        updateHandler.reloadSchemaFromDisk();
+        SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
+        updateRefs(update.diff);
+        applyChangesLocally(update.diff);
     }
 
     public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
-        return updateHandler.apply(transformation, locally);
+        SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally);
+        updateRefs(update.diff);
+        applyChangesLocally(update.diff);
+        return update;
     }
 
     public void clearUnsafeOrThrow()
     {
-        updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe();
+        updateRefs(Keyspaces.diff(updateHandler.schema().getKeyspaces(), Keyspaces.none()));
+        updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe().thenAccept(update -> {
+            updateRefs(update.diff);
+            applyChangesLocally(update.diff);
+        });
     }
 
     /**
@@ -503,7 +515,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
-        updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
+        SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
+        updateRefs(update.diff);
+        applyChangesLocally(update.diff);
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)

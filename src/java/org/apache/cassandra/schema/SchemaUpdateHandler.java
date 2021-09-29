@@ -21,6 +21,7 @@ package org.apache.cassandra.schema;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import javax.annotation.Nonnull;
 
 import org.apache.commons.lang3.StringUtils;
@@ -40,7 +41,7 @@ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResu
  */
 public interface SchemaUpdateHandler
 {
-    void initializeSchemaFromDisk();
+    Keyspaces.KeyspacesDiff initializeSchemaFromDisk();
 
     /**
      * Starts actively synchronizing schema with other nodes
@@ -76,7 +77,7 @@ public interface SchemaUpdateHandler
      * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
      * in-memory representation got out of sync somehow with what's on disk.
      */
-    void reloadSchemaFromDisk();
+    SchemaTransformationResult reloadSchemaFromDisk();
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
@@ -86,8 +87,9 @@ public interface SchemaUpdateHandler
     {
         /**
          * Called when schema push message is received.
+         * @return
          */
-        void applyReceivedSchemaMutations(InetAddressAndPort pushReqeustFrom, Collection<Mutation> schemaMutations);
+        SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushReqeustFrom, Collection<Mutation> schemaMutations);
 
         /**
          * Called when schema pull messsage is received.
@@ -107,9 +109,10 @@ public interface SchemaUpdateHandler
          * that could lead to silent unexpected behavior while the node is not restarted.
          *
          * TODO remove or refactor this method as it is dangerous
+         * @return
          */
         @Deprecated
-        void clearUnsafe();
+        CompletableFuture<SchemaTransformationResult> clearUnsafe();
     }
 
     default Optional<GossipAware> asGossipAwareTracker()

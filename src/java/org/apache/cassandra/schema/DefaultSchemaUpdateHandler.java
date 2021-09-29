@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
@@ -138,7 +139,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public void applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations)
+    public SchemaTransformation.SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations)
     {
         Schema before = schema();
 
@@ -159,7 +160,10 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
 
         updateSchema(update);
+
         announceVersionUpdate(after.getVersion());
+
+        return update;
     }
 
     @Override
@@ -195,21 +199,20 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
     /**
      * Load schema definitions from disk.
+     *
+     * @return
      */
     @Override
-    public void initializeSchemaFromDisk()
+    public Keyspaces.KeyspacesDiff initializeSchemaFromDisk()
     {
-        SchemaDiagnostics.schemataLoading(schema());
-
         Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
         UUID version = SchemaKeyspace.calculateSchemaDigest();
         schema = new Schema(keyspaces, version);
-        SchemaDiagnostics.versionUpdated(SchemaManager.instance.schema());
-        SchemaManager.instance.updateRefs(Keyspaces.diff(Keyspaces.none(), keyspaces));
+        SchemaDiagnostics.versionUpdated(schema);
         if (!keyspaces.isEmpty())
             announceVersionUpdate(schema.getVersion());
 
-        SchemaDiagnostics.schemataLoaded(SchemaManager.instance.schema());
+        return Keyspaces.diff(Keyspaces.none(), keyspaces);
     }
 
     public void announceVersionUpdate(UUID version)
@@ -225,14 +228,14 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public void reloadSchemaFromDisk()
+    public SchemaTransformation.SchemaTransformationResult reloadSchemaFromDisk()
     {
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        apply(existing -> after, false);
+        return apply(existing -> after, false);
     }
 
 
-    public void updateSchema(SchemaTransformation.SchemaTransformationResult update)
+    private void updateSchema(SchemaTransformation.SchemaTransformationResult update)
     {
         assert schema == update.before;
 
@@ -241,20 +244,14 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
         // TODO notifyPreChanges(diff)
         schema = update.after;
-        SchemaManager.instance.updateRefs(update.diff);
-        SchemaManager.instance.applyChangesLocally(update.diff);
     }
 
     @Override
-    public void clearUnsafe()
+    public CompletableFuture<SchemaTransformation.SchemaTransformationResult> clearUnsafe()
     {
         logger.info("Starting local schema reset...");
 
-        logger.debug("Truncating schema tables...");
         SchemaKeyspace.truncate();
-
-        logger.debug("Clearing local schema keyspace definitions...");
-        SchemaManager.instance.updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
 
         schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
 
@@ -263,14 +260,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
                                                                  .filter(migrationCoordinator::shouldPullFromEndpoint)
                                                                  .findFirst();
 
-        if (!endpoint.isPresent())
-            return;
-
-        logger.debug("Pulling schema from another node...");
-        migrationCoordinator.pullSchemaFrom(endpoint.get())
-                            .thenAccept(schemaMutations -> applyReceivedSchemaMutations(endpoint.get(), schemaMutations));
-
-        logger.info("Local schema reset is complete.");
-        SchemaDiagnostics.schemataCleared(SchemaManager.instance.schema());
+        return endpoint.map(inetAddressAndPort -> migrationCoordinator.pullSchemaFrom(inetAddressAndPort)
+                                                                      .thenApply(schemaMutations -> applyReceivedSchemaMutations(inetAddressAndPort, schemaMutations))).orElse(null);
     }
 }

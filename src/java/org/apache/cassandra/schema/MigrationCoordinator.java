@@ -497,7 +497,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected void mergeSchemaFrom(InetAddressAndPort endpoint, Collection<Mutation> mutations)
     {
-        schemaUpdateHandlerRef.get().applyReceivedSchemaMutations(endpoint, mutations);
+        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(endpoint, mutations);
     }
 
     @VisibleForTesting

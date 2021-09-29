@@ -78,19 +78,21 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 
     /**
      * Load schema definitions from disk.
+     *
+     * @return
      */
     @Override
-    public void initializeSchemaFromDisk()
+    public Keyspaces.KeyspacesDiff initializeSchemaFromDisk()
     {
         SchemaDiagnostics.schemataLoading(schema());
 
         Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
         UUID version = UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(keyspaces.hashCode()));
         schema = new Schema(keyspaces, version);
-        SchemaDiagnostics.versionUpdated(SchemaManager.instance.schema());
-        SchemaManager.instance.updateRefs(Keyspaces.diff(Keyspaces.none(), keyspaces));
+        SchemaDiagnostics.versionUpdated(schema());
 
-        SchemaDiagnostics.schemataLoaded(SchemaManager.instance.schema());
+        SchemaDiagnostics.schemataLoaded(schema());
+        return Keyspaces.diff(Keyspaces.none(), keyspaces);
     }
 
     /*
@@ -98,14 +100,14 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public void reloadSchemaFromDisk()
+    public SchemaTransformationResult reloadSchemaFromDisk()
     {
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        apply(existing -> after, false);
+        return apply(existing -> after, false);
     }
 
 
-    public void updateSchema(SchemaTransformationResult update)
+    private void updateSchema(SchemaTransformationResult update)
     {
         assert schema == update.before;
 
@@ -114,7 +116,5 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 
         // TODO notifyPreChanges(diff)
         schema = update.after;
-        SchemaManager.instance.updateRefs(update.diff);
-        SchemaManager.instance.applyChangesLocally(update.diff);
     }
 }
