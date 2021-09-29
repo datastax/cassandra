@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -46,8 +48,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -57,6 +57,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.collect.Iterables.size;
@@ -82,7 +83,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
-    SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactory.instance.getSchemaUpdateHandler();
+    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactory.instance.getSchemaUpdateHandler();
+
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     /**
      * Initialize empty schema object and load the hardcoded system tables
@@ -106,31 +109,38 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void initializeSchemaFromDisk()
     {
-        SchemaDiagnostics.schemataLoading(schema());
-        KeyspacesDiff diff = updateHandler.initializeSchemaFromDisk();
-        updateRefs(diff);
-        SchemaDiagnostics.schemataLoaded(schema());
+        writeLock(() -> {
+            SchemaDiagnostics.schemataLoading(schema());
+            KeyspacesDiff diff = updateHandler.initializeSchemaFromDisk();
+            updateRefs(diff);
+            SchemaDiagnostics.schemataLoaded(schema());
+        });
     }
 
     public void reloadSchemaFromDisk()
     {
-        SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
-        updateRefs(update.diff);
-        applyChangesLocally(update.diff);
+        writeLock(() -> {
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
+            updateRefs(update.diff);
+            applyChangesLocally(update.diff);
+        });
     }
 
     public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
-        SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally);
-        updateRefs(update.diff);
-        applyChangesLocally(update.diff);
-        return update;
+        return writeLock(() -> {
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally);
+            updateRefs(update.diff);
+            applyChangesLocally(update.diff);
+            return update;
+        });
     }
 
     public void clearUnsafeOrThrow()
     {
-        updateRefs(Keyspaces.diff(updateHandler.schema().getKeyspaces(), Keyspaces.none()));
-        updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe().thenAccept(update -> {
+        writeLock(() -> {
+            updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
+            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe(), Duration.ofMinutes(10));
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
         });
@@ -167,7 +177,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     /**
      * Update/create/drop the {@link TableMetadataRef} in {@link SchemaManager}.
      */
-    void updateRefs(KeyspacesDiff diff)
+    private void updateRefs(KeyspacesDiff diff)
     {
         diff.dropped.forEach(this::removeRefs);
         diff.created.forEach(this::addNewRefs);
@@ -189,7 +199,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * Get keyspace instance by name
      *
      * @param keyspaceName The name of the keyspace
-     *
      * @return Keyspace object or null if keyspace was not found, or if the keyspace has not completed construction yet
      */
     @Override
@@ -204,17 +213,19 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public ColumnFamilyStore getColumnFamilyStoreInstance(TableId id)
     {
-        TableMetadata metadata = getTableMetadata(id);
-        if (metadata == null)
-            return null;
+        return readLock(() -> {
+            TableMetadata metadata = getTableMetadata(id);
+            if (metadata == null)
+                return null;
 
-        Keyspace instance = getKeyspaceInstance(metadata.keyspace);
-        if (instance == null)
-            return null;
+            Keyspace instance = getKeyspaceInstance(metadata.keyspace);
+            if (instance == null)
+                return null;
 
-        return instance.hasColumnFamilyStore(metadata.id)
-               ? instance.getColumnFamilyStore(metadata.id)
-               : null;
+            return instance.hasColumnFamilyStore(metadata.id)
+                   ? instance.getColumnFamilyStore(metadata.id)
+                   : null;
+        });
     }
 
     /**
@@ -223,7 +234,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @param keyspaceName The name of the keyspace to remove
      */
-    void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
+    private void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
     {
         CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
         droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
@@ -253,7 +264,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                 future = empty;
                 try
                 {
-                    empty.complete(loadFunction.get());
+                    empty.complete(writeLock(loadFunction));
                 }
                 catch (Throwable t)
                 {
@@ -280,13 +291,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public int getNumberOfTables()
     {
-        return updateHandler.schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
+        return schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
     }
 
     public ViewMetadata getView(String keyspaceName, String viewName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> updateHandler.schema().getKeyspaces().getNullable(keyspaceName),
+        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getNullable(keyspaceName),
                                                            () -> localKeyspaces.get(keyspaceName));
         return (ksm == null) ? null : ksm.views.getNullable(viewName);
     }
@@ -295,16 +306,15 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * Get metadata about keyspace by its name
      *
      * @param keyspaceName The name of the keyspace
-     *
      * @return The keyspace metadata or null if it wasn't found
      */
     @Override
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        return ObjectUtils.getFirstNonNull(() -> updateHandler.schema().getKeyspaces().getNullable(keyspaceName),
-                                           () -> localKeyspaces.get(keyspaceName),
-                                           () -> VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName));
+        return readLock(() -> ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getNullable(keyspaceName),
+                                                          () -> localKeyspaces.get(keyspaceName),
+                                                          () -> VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName)));
     }
 
     /**
@@ -314,7 +324,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public ImmutableList<String> getNonSystemKeyspaces()
     {
-        return ImmutableList.copyOf(updateHandler.schema().getKeyspaces().names());
+        return ImmutableList.copyOf(schema().getKeyspaces().names());
     }
 
     /**
@@ -322,10 +332,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getNonLocalStrategyKeyspaces()
     {
-        return updateHandler.schema().getKeyspaces().stream()
-                                           .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
-                                           .map(keyspace -> keyspace.name)
-                                           .collect(Collectors.toList());
+        return schema().getKeyspaces().stream()
+                       .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
+                       .map(keyspace -> keyspace.name)
+                       .collect(Collectors.toList());
     }
 
     /**
@@ -333,10 +343,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getPartitionedKeyspaces()
     {
-        return updateHandler.schema().getKeyspaces().stream()
-                                           .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
-                                           .map(keyspace -> keyspace.name)
-                                           .collect(Collectors.toList());
+        return schema().getKeyspaces().stream()
+                       .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
+                       .map(keyspace -> keyspace.name)
+                       .collect(Collectors.toList());
     }
 
     /**
@@ -344,7 +354,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public List<String> getUserKeyspaces()
     {
-        return ImmutableList.copyOf(Sets.difference(updateHandler.schema().getKeyspaces().names(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+        return ImmutableList.copyOf(Sets.difference(schema().getKeyspaces().names(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
     }
 
     /**
@@ -359,13 +369,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * Get metadata about keyspace inner ColumnFamilies
      *
      * @param keyspaceName The name of the keyspace
-     *
      * @return metadata about ColumnFamilies the belong to the given keyspace
      */
     public Iterable<TableMetadata> getTablesAndViews(String keyspaceName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> updateHandler.schema().getKeyspaces().getNullable(keyspaceName),
+        KeyspaceMetadata ksm = ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getNullable(keyspaceName),
                                                            () -> localKeyspaces.get(keyspaceName));
         Preconditions.checkNotNull(ksm, "Keyspace %s not found", keyspaceName);
         return ksm.tablesAndViews();
@@ -376,7 +385,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     public Set<String> getKeyspaces()
     {
-        return new ImmutableSet.Builder<String>().addAll(updateHandler.schema().getKeyspaces().names())
+        return new ImmutableSet.Builder<String>().addAll(schema().getKeyspaces().names())
                                                  .addAll(localKeyspaces.getAllNames())
                                                  .build();
     }
@@ -393,29 +402,32 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadataRef getTableMetadataRef(String keyspace, String table)
     {
-        TableMetadata tm = getTableMetadata(keyspace, table);
-        return tm == null
-               ? null
-               : schemaRefCache.getTableMetadataRef(tm.id);
+        return readLock(() -> {
+            TableMetadata tm = getTableMetadata(keyspace, table);
+            return tm == null
+                   ? null
+                   : schemaRefCache.getTableMetadataRef(tm.id);
+        });
     }
 
     public TableMetadataRef getIndexTableMetadataRef(String keyspace, String index)
     {
-        return schemaRefCache.getIndexTableMetadataRef(keyspace, index);
+        return readLock(() -> schemaRefCache.getIndexTableMetadataRef(keyspace, index));
     }
 
     /**
      * Get Table metadata by its identifier
      *
      * @param id table or view identifier
-     *
      * @return metadata about Table or View
      */
     @Override
     public TableMetadataRef getTableMetadataRef(TableId id)
     {
-        TableMetadataRef ref = schemaRefCache.getTableMetadataRef(id);
-        return getTableMetadata(ref.keyspace, ref.name) == null ? null : ref;
+        return readLock(() -> {
+            TableMetadataRef ref = schemaRefCache.getTableMetadataRef(id);
+            return getTableMetadata(ref.keyspace, ref.name) == null ? null : ref;
+        });
     }
 
     @Override
@@ -430,8 +442,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      * this function returns null.
      *
      * @param keyspace The keyspace name
-     * @param table The table name
-     *
+     * @param table    The table name
      * @return TableMetadata object or null if it wasn't found
      */
     public TableMetadata getTableMetadata(String keyspace, String table)
@@ -448,25 +459,27 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadata getTableMetadata(TableId id)
     {
-        return ObjectUtils.getFirstNonNull(() -> updateHandler.schema().getKeyspaces().getTableOrViewNullable(id),
+        return ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getTableOrViewNullable(id),
                                            () -> localKeyspaces.getTableOrView(id),
                                            () -> VirtualKeyspaceRegistry.instance.getTableMetadataNullable(id));
     }
 
     public TableMetadata validateTable(String keyspaceName, String tableName)
     {
-        if (tableName.isEmpty())
-            throw new InvalidRequestException("non-empty table is required");
+        return readLock(() -> {
+            if (tableName.isEmpty())
+                throw new InvalidRequestException("non-empty table is required");
 
-        KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
-        if (keyspace == null)
-            throw new KeyspaceNotDefinedException(format("keyspace %s does not exist", keyspaceName));
+            KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
+            if (keyspace == null)
+                throw new KeyspaceNotDefinedException(format("keyspace %s does not exist", keyspaceName));
 
-        TableMetadata metadata = keyspace.getTableOrViewNullable(tableName);
-        if (metadata == null)
-            throw new InvalidRequestException(format("table %s does not exist", tableName));
+            TableMetadata metadata = keyspace.getTableOrViewNullable(tableName);
+            if (metadata == null)
+                throw new InvalidRequestException(format("table %s does not exist", tableName));
 
-        return metadata;
+            return metadata;
+        });
     }
 
     public TableMetadata getTableMetadata(Descriptor descriptor)
@@ -481,7 +494,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      *
      * @param name fully qualified function name
      * @return an empty list if the keyspace or the function name are not found;
-     *         a non-empty collection of {@link Function} otherwise
+     * a non-empty collection of {@link Function} otherwise
      */
     public Collection<Function> getFunctions(FunctionName name)
     {
@@ -497,10 +510,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     /**
      * Find the function with the specified name
      *
-     * @param name fully qualified function name
+     * @param name     fully qualified function name
      * @param argTypes function argument types
      * @return an empty {@link Optional} if the keyspace or the function name are not found;
-     *         a non-empty optional of {@link Function} otherwise
+     * a non-empty optional of {@link Function} otherwise
      */
     public Optional<Function> findFunction(FunctionName name, List<AbstractType<?>> argTypes)
     {
@@ -515,22 +528,24 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
-        SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
-        updateRefs(update.diff);
-        applyChangesLocally(update.diff);
+        writeLock(() -> {
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
+            updateRefs(update.diff);
+            applyChangesLocally(update.diff);
+        });
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
-        return updateHandler.asGossipAwareTrackerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from);
+        return readLock(() -> updateHandler.asGossipAwareTrackerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
     }
 
     public Schema schema()
     {
-        return updateHandler.schema();
+        return readLock(updateHandler::schema);
     }
 
-    void applyChangesLocally(KeyspacesDiff diff)
+    private void applyChangesLocally(KeyspacesDiff diff)
     {
         diff.dropped.forEach(this::dropKeyspace);
         diff.created.forEach(this::createKeyspace);
@@ -628,4 +643,51 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         keyspace.getColumnFamilyStore(updated.name()).reload();
     }
 
+    private <T> T readLock(Supplier<T> body)
+    {
+        try
+        {
+            lock.readLock().lockInterruptibly();
+            try
+            {
+                return body.get();
+            }
+            finally
+            {
+                lock.readLock().unlock();
+            }
+        }
+        catch (InterruptedException e)
+        {
+            throw Throwables.cleaned(e);
+        }
+    }
+
+    private <T> T writeLock(Supplier<T> body)
+    {
+        try
+        {
+            lock.writeLock().lockInterruptibly();
+            try
+            {
+                return body.get();
+            }
+            finally
+            {
+                lock.writeLock().unlock();
+            }
+        }
+        catch (InterruptedException e)
+        {
+            throw Throwables.cleaned(e);
+        }
+    }
+
+    private void writeLock(Runnable body)
+    {
+        writeLock(() -> {
+            body.run();
+            return null;
+        });
+    }
 }
