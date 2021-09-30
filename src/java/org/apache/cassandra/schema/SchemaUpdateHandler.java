@@ -20,12 +20,9 @@ package org.apache.cassandra.schema;
 
 import java.time.Duration;
 import java.util.Collection;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import javax.annotation.Nonnull;
-
-import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -42,17 +39,26 @@ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResu
  */
 public interface SchemaUpdateHandler
 {
+    /**
+     * Initialize the schema from some storage. This is called in the beginning before we actually start accessing
+     * schema. It should return the applied diff on the schema which is actually the diff between the empty schema
+     * and the loaded one.
+     *
+     * @return the difference in schema made by this method
+     */
     Keyspaces.KeyspacesDiff initializeSchemaFromDisk();
 
     /**
-     * Starts actively synchronizing schema with other nodes
+     * Starts actively synchronizing schema with the rest of the cluster. It is called in the very beginning of the
+     * node startup. It is not expected to block - to await for the startup completion we have another method
+     * {@link #waitUntilReady(Duration)}.
      */
     void start();
 
     /**
-     * Waits until the schema is ready for the specified amount of time and return the result. If the method returns
-     * {@code false} it means that schema readiness could not be achieved within the specified period of time. The
-     * method can be used just to check if schema is ready by passing {@link Duration#ZERO} as the timeout.
+     * Waits until the schema update handler is ready and return the result. If the method returns {@code false} it
+     * means that readiness could not be achieved within the specified period of time. The method can be used just to
+     * check if schema is ready by passing {@link Duration#ZERO} as the timeout - in such case it returns immediately.
      *
      * @param timeout the maximum time to wait for schema readiness
      * @return whether readiness is achieved
@@ -60,7 +66,7 @@ public interface SchemaUpdateHandler
     boolean waitUntilReady(Duration timeout);
 
     /**
-     * Returns the current schema, the newest known version
+     * Returns the runtime schema, the newest known version on which the update handler operates.
      *
      * @return the current schema
      */
@@ -68,38 +74,63 @@ public interface SchemaUpdateHandler
     Schema schema();
 
     /**
-     * Apply the provided transformation to the current schema.
-     * @param transformation           the transformation to apply to the current schema.
-     * @param locally                  whether the updated version should be announced and changes pushed to other nodes
+     * Applies the provided transformation to the current schema. It persists the changes in the underlying storage
+     * and updates the runtime schema, so that the subsequent calls to {@link #schema()} returns the updated schema.
+     * <p>
+     * Allows to pass an additional callback which is triggered once we know the changes to be made but before updating
+     * the runtime schema. Whether the callback is called before or after persisting schema to the underlying storage
+     * is unspecified.
+     *
+     * @param transformation    the transformation to apply to the current schema
+     * @param locally           whether the changes should be immediately synced with the cluster
+     * @param preUpdateCallback additional callback invoked when we know the changes to be made
      */
     SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback);
 
-    /*
-     * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
-     * in-memory representation got out of sync somehow with what's on disk.
+    /**
+     * Reloads the schema from the underlying storage.
+     * <p>
+     * The method is similar to {@link #apply(SchemaTransformation, boolean, Consumer)}, where the transformation is
+     * made from the runtime schema to the schema loaded from the underlying storage. The method synchronizes the change
+     * with the cluster and similarly to {@link #apply(SchemaTransformation, boolean, Consumer)} lets passing pre-update
+     * callback with the same semantics.
+     *
+     * @param preUpdateCallback additional callback invoked when we know the changes to be made
+     * @return the difference between the runtime schema and the schema loaded from the underlying storage
+     * TODO maybe instead of this method, it would be better to have a method which just returns the schema from the underlying storage, then the called could manually invoke #apply and we would not have any redundancy here
      */
     SchemaTransformationResult reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback);
 
     /**
-     * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
-     * interface.
+     * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this interface.
      */
     interface GossipAware extends SchemaUpdateHandler
     {
         /**
-         * Called when schema push message is received.
-         * @return
+         * Called when schema push message is received. It basically does the same thing as
+         * {@link #apply(SchemaTransformation, boolean, Consumer)} but it accepts the transformation in legacy format
+         * - a collection of mutations to be applied on schema keyspace. It lets passing pre-update handler whose
+         * semantics is the same as in case of {@link #apply(SchemaTransformation, boolean, Consumer)}.
+         *
+         * @param pushRequestFrom   the endpoint from which the schema transformation was received
+         * @param schemaMutations   schema transformation
+         * @param preUpdateCallback additional callback invoked when we know the changes to be made
+         * @return the result of changes applied to the runtime schema
          */
         SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback);
 
         /**
-         * Called when schema pull messsage is received.
+         * Called when schema pull message is received. It converts the runtime schema into a collection of mutations
+         * (a legacy schema format).
+         *
+         * @param pullRequestFrom the endpoint from which the schema pull request was received
+         * @return the runtime schema as a collection of mutations
          */
         Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom);
 
         /**
          * Clears the local schema and pull schema from other nodes.
-         *
+         * <p>
          * This method is kind of broken/dangerous because clearing the local schema is not safe at all. First,
          * this method is presumably meant to be called when a node is online (otherwise, just hard-removing the system
          * schema tables is probably easier/safer) but, even if we try to pull from another node right away, there will
@@ -108,24 +139,10 @@ public interface SchemaUpdateHandler
          * ColumnFamilyStore (and other consumers) will still refer to them. So even after the schema is restored from
          * the schema PULL, those ColumnFamilyStore instance will refer to the old refs that will not get updated and
          * that could lead to silent unexpected behavior while the node is not restarted.
-         *
+         * <p>
          * TODO remove or refactor this method as it is dangerous
-         * @return
          */
         @Deprecated
         CompletableFuture<SchemaTransformationResult> clearUnsafe(Consumer<SchemaTransformationResult> preUpdateCallback);
-    }
-
-    default Optional<GossipAware> asGossipAwareTracker()
-    {
-        return this instanceof SchemaUpdateHandler.GossipAware
-               ? Optional.of((SchemaUpdateHandler.GossipAware) this)
-               : Optional.empty();
-    }
-
-    default SchemaUpdateHandler.GossipAware asGossipAwareTrackerOrThrow(String msg)
-    {
-        String format = "The current schema tracker (%s) does not implement GossipAware. %s";
-        return asGossipAwareTracker().orElseThrow(() -> new UnsupportedOperationException(String.format(format, this.getClass().getName(), StringUtils.trimToEmpty(msg))));
     }
 }

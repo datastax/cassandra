@@ -37,6 +37,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.ObjectUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,7 +143,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         writeLock(() -> {
             updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
-            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges), Duration.ofMinutes(10));
+            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges), Duration.ofMinutes(10));
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
             SchemaDiagnostics.schemaCleared(schema());
@@ -504,7 +505,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         writeLock(() -> {
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges);
+            SchemaTransformation.SchemaTransformationResult update = gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges);
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
         });
@@ -512,7 +513,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
-        return readLock(() -> updateHandler.asGossipAwareTrackerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
+        return readLock(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
     }
 
     public Schema schema()
@@ -671,4 +672,18 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             return null;
         });
     }
+
+    private Optional<SchemaUpdateHandler.GossipAware> gossipAwareSchemaUpdateHandler()
+    {
+        return updateHandler instanceof SchemaUpdateHandler.GossipAware
+               ? Optional.of((SchemaUpdateHandler.GossipAware) updateHandler)
+               : Optional.empty();
+    }
+
+    private SchemaUpdateHandler.GossipAware gossipAwareSchemaUpdateHandlerOrThrow(String msg)
+    {
+        String format = "The current schema tracker (%s) does not implement GossipAware. %s";
+        return gossipAwareSchemaUpdateHandler().orElseThrow(() -> new UnsupportedOperationException(String.format(format, this.getClass().getName(), StringUtils.trimToEmpty(msg))));
+    }
+
 }
