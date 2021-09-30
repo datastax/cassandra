@@ -95,7 +95,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         boolean init = DatabaseDescriptor.isDaemonInitialized() || DatabaseDescriptor.isToolInitialized();
         localKeyspaces = new LocalKeyspaces(init);
-        localKeyspaces.getAll().forEach(schemaRefCache::addNewRefs);
+        localKeyspaces.getAll().forEach(ksm -> {
+            schemaRefCache.addNewRefs(ksm);
+            SchemaDiagnostics.metadataInitialized(updateHandler.schema(), ksm);
+        });
     }
 
     public void startSync()
@@ -155,9 +158,19 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     private void updateRefs(KeyspacesDiff diff)
     {
-        diff.dropped.forEach(schemaRefCache::removeRefs);
-        diff.created.forEach(schemaRefCache::addNewRefs);
-        diff.altered.forEach(delta -> schemaRefCache.updateRefs(delta.before, delta.after));
+        Schema schema = updateHandler.schema();
+        diff.dropped.forEach(ksm -> {
+            schemaRefCache.removeRefs(ksm);
+            SchemaDiagnostics.metadataRemoved(schema, ksm);
+        });
+        diff.created.forEach(ksm -> {
+            schemaRefCache.addNewRefs(ksm);
+            SchemaDiagnostics.metadataInitialized(schema, ksm);
+        });
+        diff.altered.forEach(delta -> {
+            schemaRefCache.updateRefs(delta.before, delta.after);
+            SchemaDiagnostics.metadataReloaded(schema, delta.before, delta.after, delta.tables, delta.views, delta.before.tables.indexesDiff(delta.after.tables));
+        });
     }
 
     public void registerListener(SchemaChangeListener listener)
