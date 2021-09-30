@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
@@ -71,6 +70,12 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         this.clock = clock;
         this.schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
         Gossiper.instance.register(this);
+    }
+
+    private void setSchema(Schema schema)
+    {
+        this.schema = schema;
+        SchemaDiagnostics.versionUpdated(schema);
     }
 
     @Override
@@ -161,7 +166,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
         updateSchema(update);
 
-        announceVersionUpdate(after.getVersion());
+        announceVersionUpdate(after);
 
         return update;
     }
@@ -185,7 +190,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         if (!locally)
         {
             migrationCoordinator.pushSchemaMutations(mutations); // this was not there in OSS, but it is there in DSE
-            announceVersionUpdate(after.getVersion());
+            announceVersionUpdate(after);
         }
 
         return update;
@@ -207,19 +212,18 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     {
         Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
         UUID version = SchemaKeyspace.calculateSchemaDigest();
-        schema = new Schema(keyspaces, version);
-        SchemaDiagnostics.versionUpdated(schema);
+        Schema schema = new Schema(keyspaces, version);
+        setSchema(schema);
         if (!keyspaces.isEmpty())
-            announceVersionUpdate(schema.getVersion());
+            announceVersionUpdate(schema);
 
         return Keyspaces.diff(Keyspaces.none(), keyspaces);
     }
 
-    public void announceVersionUpdate(UUID version)
+    private void announceVersionUpdate(Schema schema)
     {
-        SystemKeyspace.updateSchemaVersion(version);
         if (Gossiper.instance.isEnabled())
-            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
+            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
         SchemaDiagnostics.versionAnnounced(schema);
     }
 
@@ -243,7 +247,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
             return;
 
         // TODO notifyPreChanges(diff)
-        schema = update.after;
+        setSchema(update.after);
     }
 
     @Override
@@ -253,7 +257,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
         SchemaKeyspace.truncate();
 
-        schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
+        setSchema(new Schema(Keyspaces.none(), SchemaConstants.emptyVersion));
 
         Optional<InetAddressAndPort> endpoint = Gossiper.instance.getLiveMembers()
                                                                  .stream()

@@ -42,6 +42,8 @@ class SchemaRefCache {
         ksm.tables
                 .indexTables()
                 .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
+
+        SchemaDiagnostics.metadataInitialized(SchemaManager.instance.schema(), ksm);
     }
 
     /**
@@ -79,6 +81,8 @@ class SchemaRefCache {
                 .stream()
                 .map(MapDifference.ValueDifference::rightValue)
                 .forEach(indexTable -> indexMetadataRefs.get(Pair.create(indexTable.keyspace, indexTable.indexName().get())).set(indexTable));
+
+        SchemaDiagnostics.metadataReloaded(SchemaManager.instance.schema(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
 
     /**
@@ -93,6 +97,8 @@ class SchemaRefCache {
                 .indexTables()
                 .keySet()
                 .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
+
+        SchemaDiagnostics.metadataRemoved(SchemaManager.instance.schema(), ksm);
     }
 
     public TableMetadataRef getTableMetadataRef(TableId id) {

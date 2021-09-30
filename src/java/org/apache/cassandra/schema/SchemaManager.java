@@ -110,19 +110,21 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void initializeSchemaFromDisk()
     {
         writeLock(() -> {
-            SchemaDiagnostics.schemataLoading(schema());
+            SchemaDiagnostics.schemaLoading(schema());
             KeyspacesDiff diff = updateHandler.initializeSchemaFromDisk();
             updateRefs(diff);
-            SchemaDiagnostics.schemataLoaded(schema());
+            SchemaDiagnostics.schemaLoaded(schema());
         });
     }
 
     public void reloadSchemaFromDisk()
     {
         writeLock(() -> {
+            SchemaDiagnostics.schemaLoading(schema());
             SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
+            SchemaDiagnostics.schemaLoaded(schema());
         });
     }
 
@@ -143,6 +145,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe(), Duration.ofMinutes(10));
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
+            SchemaDiagnostics.schemaCleared(schema());
         });
     }
 
@@ -152,7 +155,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void addNewRefs(KeyspaceMetadata ksm)
     {
         schemaRefCache.addNewRefs(ksm);
-        SchemaDiagnostics.metadataInitialized(schema(), ksm);
     }
 
     /**
@@ -162,7 +164,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
     {
         schemaRefCache.updateRefs(previous, updated);
-//      TODO  SchemaDiagnostics.metadataReloaded(schema.get(), previous, updated, tablesDiff, viewsDiff, indexesDiff);
     }
 
     /**
@@ -171,7 +172,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private void removeRefs(KeyspaceMetadata ksm)
     {
         schemaRefCache.removeRefs(ksm);
-        SchemaDiagnostics.metadataRemoved(schema(), ksm);
     }
 
     /**
@@ -579,9 +579,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         // deal with all added, and altered views
         keyspace.viewManager.reload(true);
-
-
         schemaChangeNotifier.notifyKeyspaceAltered(delta);
+
+        SchemaDiagnostics.keyspaceAltered(schema(), delta);
     }
 
     private void createKeyspace(KeyspaceMetadata keyspace)
@@ -589,13 +589,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.keyspaceCreating(schema(), keyspace);
         Keyspace.open(keyspace.name);
         schemaChangeNotifier.notifyKeyspaceCreated(keyspace);
+        SchemaDiagnostics.keyspaceCreated(schema(), keyspace);
     }
 
     private void dropKeyspace(KeyspaceMetadata keyspace)
     {
-        SchemaDiagnostics.keyspaceDroping(schema(), keyspace);
+        SchemaDiagnostics.keyspaceDropping(schema(), keyspace);
 
-        // remove the keyspace from the static instances.
+        // remove the keyspace from the static instances
         removeKeyspaceInstance(keyspace.name, ks -> {
             keyspace.views.forEach(v -> dropView(ks, v));
             keyspace.tables.forEach(t -> dropTable(ks, t));
@@ -604,6 +605,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
         Keyspace.writeOrder.awaitNewBarrier();
         schemaChangeNotifier.notifyKeyspaceDropped(keyspace);
+        SchemaDiagnostics.keyspaceDropped(schema(), keyspace);
     }
 
     private void dropView(Keyspace keyspace, ViewMetadata metadata)
@@ -628,7 +630,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void createView(Keyspace keyspace, ViewMetadata view)
     {
+        SchemaDiagnostics.tableCreating(schema(), view.metadata);
         keyspace.initCf(schemaRefCache.getTableMetadataRef(view.metadata.id), true);
+        SchemaDiagnostics.tableCreated(schema(), view.metadata);
     }
 
     private void alterTable(Keyspace keyspace, TableMetadata updated)
@@ -640,7 +644,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void alterView(Keyspace keyspace, ViewMetadata updated)
     {
+        SchemaDiagnostics.tableAltering(schema(), updated.metadata);
         keyspace.getColumnFamilyStore(updated.name()).reload();
+        SchemaDiagnostics.tableAltered(schema(), updated.metadata);
     }
 
     private <T> T readLock(Supplier<T> body)

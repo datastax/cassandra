@@ -84,14 +84,9 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     @Override
     public Keyspaces.KeyspacesDiff initializeSchemaFromDisk()
     {
-        SchemaDiagnostics.schemataLoading(schema());
-
         Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
         UUID version = UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(keyspaces.hashCode()));
-        schema = new Schema(keyspaces, version);
-        SchemaDiagnostics.versionUpdated(schema());
-
-        SchemaDiagnostics.schemataLoaded(schema());
+        setSchema(new Schema(keyspaces, version));
         return Keyspaces.diff(Keyspaces.none(), keyspaces);
     }
 
@@ -115,6 +110,12 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
             return;
 
         // TODO notifyPreChanges(diff)
-        schema = update.after;
+        setSchema(update.after);
+    }
+
+    private void setSchema(Schema schema)
+    {
+        this.schema = schema;
+        SchemaDiagnostics.versionUpdated(schema());
     }
 }

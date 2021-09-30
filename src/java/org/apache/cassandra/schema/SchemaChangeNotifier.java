@@ -86,7 +86,7 @@ public class SchemaChangeNotifier
         keyspace.tables.forEach(this::notifyDropTable);
         keyspace.types.forEach(this::notifyDropType);
         notifyDropKeyspace(keyspace);
-        SchemaDiagnostics.keyspaceDroped(SchemaManager.instance.schema(), keyspace);
+        SchemaDiagnostics.keyspaceDropped(SchemaManager.instance.schema(), keyspace);
     }
 
     private void notifyCreateKeyspace(KeyspaceMetadata ksm)
