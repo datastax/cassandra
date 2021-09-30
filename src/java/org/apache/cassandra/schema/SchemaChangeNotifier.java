@@ -24,6 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 public class SchemaChangeNotifier
 {
@@ -89,95 +90,116 @@ public class SchemaChangeNotifier
         SchemaDiagnostics.keyspaceDropped(SchemaManager.instance.schema(), keyspace);
     }
 
+    public void notifyPreChanges(SchemaTransformationResult transformationResult)
+    {
+        transformationResult.diff.altered.forEach(this::notifyPreAlterKeyspace);
+    }
+
+    private void notifyPreAlterKeyspace(KeyspaceMetadata.KeyspaceDiff keyspaceDiff)
+    {
+        keyspaceDiff.tables.altered.forEach(this::notifyPreAlterTable);
+        keyspaceDiff.views.altered.forEach(this::notifyPreAlterView);
+    }
+
+    private void notifyPreAlterTable(Diff.Altered<TableMetadata> altered)
+    {
+        changeListeners.forEach(l -> l.onPreAlterTable(altered.before, altered.after));
+    }
+
+    private void notifyPreAlterView(Diff.Altered<ViewMetadata> altered)
+    {
+        changeListeners.forEach(l -> l.onPreAlterView(altered.before, altered.after));
+    }
+
     private void notifyCreateKeyspace(KeyspaceMetadata ksm)
     {
-        changeListeners.forEach(l -> l.onCreateKeyspace(ksm.name));
+        changeListeners.forEach(l -> l.onCreateKeyspace(ksm));
     }
 
     private void notifyCreateTable(TableMetadata metadata)
     {
-        changeListeners.forEach(l -> l.onCreateTable(metadata.keyspace, metadata.name));
+        changeListeners.forEach(l -> l.onCreateTable(metadata));
     }
 
     private void notifyCreateView(ViewMetadata view)
     {
-        changeListeners.forEach(l -> l.onCreateView(view.keyspace(), view.name()));
+        changeListeners.forEach(l -> l.onCreateView(view));
     }
 
     private void notifyCreateType(UserType ut)
     {
-        changeListeners.forEach(l -> l.onCreateType(ut.keyspace, ut.getNameAsString()));
+        changeListeners.forEach(l -> l.onCreateType(ut));
     }
 
     private void notifyCreateFunction(UDFunction udf)
     {
-        changeListeners.forEach(l -> l.onCreateFunction(udf.name().keyspace, udf.name().name, udf.argTypes()));
+        changeListeners.forEach(l -> l.onCreateFunction(udf));
     }
 
     private void notifyCreateAggregate(UDAggregate udf)
     {
-        changeListeners.forEach(l -> l.onCreateAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
+        changeListeners.forEach(l -> l.onCreateAggregate(udf));
     }
 
     private void notifyAlterKeyspace(KeyspaceMetadata before, KeyspaceMetadata after)
     {
-        changeListeners.forEach(l -> l.onAlterKeyspace(after.name));
+        changeListeners.forEach(l -> l.onAlterKeyspace(before, after));
     }
 
     private void notifyAlterTable(TableMetadata before, TableMetadata after)
     {
         boolean changeAffectedPreparedStatements = before.changeAffectsPreparedStatements(after);
-        changeListeners.forEach(l -> l.onAlterTable(after.keyspace, after.name, changeAffectedPreparedStatements));
+        changeListeners.forEach(l -> l.onAlterTable(before, after, changeAffectedPreparedStatements));
     }
 
     private void notifyAlterView(ViewMetadata before, ViewMetadata after)
     {
         boolean changeAffectedPreparedStatements = before.metadata.changeAffectsPreparedStatements(after.metadata);
-        changeListeners.forEach(l -> l.onAlterView(after.keyspace(), after.name(), changeAffectedPreparedStatements));
+        changeListeners.forEach(l -> l.onAlterView(before, after, changeAffectedPreparedStatements));
     }
 
     private void notifyAlterType(UserType before, UserType after)
     {
-        changeListeners.forEach(l -> l.onAlterType(after.keyspace, after.getNameAsString()));
+        changeListeners.forEach(l -> l.onAlterType(before, after));
     }
 
     private void notifyAlterFunction(UDFunction before, UDFunction after)
     {
-        changeListeners.forEach(l -> l.onAlterFunction(after.name().keyspace, after.name().name, after.argTypes()));
+        changeListeners.forEach(l -> l.onAlterFunction(before, after));
     }
 
     private void notifyAlterAggregate(UDAggregate before, UDAggregate after)
     {
-        changeListeners.forEach(l -> l.onAlterAggregate(after.name().keyspace, after.name().name, after.argTypes()));
+        changeListeners.forEach(l -> l.onAlterAggregate(before, after));
     }
 
     private void notifyDropKeyspace(KeyspaceMetadata ksm)
     {
-        changeListeners.forEach(l -> l.onDropKeyspace(ksm.name));
+        changeListeners.forEach(l -> l.onDropKeyspace(ksm));
     }
 
     private void notifyDropTable(TableMetadata metadata)
     {
-        changeListeners.forEach(l -> l.onDropTable(metadata.keyspace, metadata.name));
+        changeListeners.forEach(l -> l.onDropTable(metadata));
     }
 
     private void notifyDropView(ViewMetadata view)
     {
-        changeListeners.forEach(l -> l.onDropView(view.keyspace(), view.name()));
+        changeListeners.forEach(l -> l.onDropView(view));
     }
 
     private void notifyDropType(UserType ut)
     {
-        changeListeners.forEach(l -> l.onDropType(ut.keyspace, ut.getNameAsString()));
+        changeListeners.forEach(l -> l.onDropType(ut));
     }
 
     private void notifyDropFunction(UDFunction udf)
     {
-        changeListeners.forEach(l -> l.onDropFunction(udf.name().keyspace, udf.name().name, udf.argTypes()));
+        changeListeners.forEach(l -> l.onDropFunction(udf));
     }
 
     private void notifyDropAggregate(UDAggregate udf)
     {
-        changeListeners.forEach(l -> l.onDropAggregate(udf.name().keyspace, udf.name().name, udf.argTypes()));
+        changeListeners.forEach(l -> l.onDropAggregate(udf));
     }
 }

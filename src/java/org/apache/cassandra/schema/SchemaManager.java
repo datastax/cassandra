@@ -121,7 +121,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         writeLock(() -> {
             SchemaDiagnostics.schemaLoading(schema());
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk(schemaChangeNotifier::notifyPreChanges);
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
             SchemaDiagnostics.schemaLoaded(schema());
@@ -131,7 +131,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
         return writeLock(() -> {
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally);
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally, schemaChangeNotifier::notifyPreChanges);
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
             return update;
@@ -142,7 +142,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         writeLock(() -> {
             updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
-            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe(), Duration.ofMinutes(10));
+            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(updateHandler.asGossipAwareTrackerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges), Duration.ofMinutes(10));
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
             SchemaDiagnostics.schemaCleared(schema());
@@ -529,7 +529,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         writeLock(() -> {
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload);
+            SchemaTransformation.SchemaTransformationResult update = updateHandler.asGossipAwareTrackerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges);
             updateRefs(update.diff);
             applyChangesLocally(update.diff);
         });

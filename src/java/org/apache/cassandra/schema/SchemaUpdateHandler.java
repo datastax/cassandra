@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import javax.annotation.Nonnull;
 
 import org.apache.commons.lang3.StringUtils;
@@ -71,13 +72,13 @@ public interface SchemaUpdateHandler
      * @param transformation           the transformation to apply to the current schema.
      * @param locally                  whether the updated version should be announced and changes pushed to other nodes
      */
-    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally);
+    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback);
 
     /*
      * Reload schema from local disk. Useful if a user made changes to schema tables by hand, or has suspicion that
      * in-memory representation got out of sync somehow with what's on disk.
      */
-    SchemaTransformationResult reloadSchemaFromDisk();
+    SchemaTransformationResult reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback);
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this
@@ -89,7 +90,7 @@ public interface SchemaUpdateHandler
          * Called when schema push message is received.
          * @return
          */
-        SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushReqeustFrom, Collection<Mutation> schemaMutations);
+        SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback);
 
         /**
          * Called when schema pull messsage is received.
@@ -112,7 +113,7 @@ public interface SchemaUpdateHandler
          * @return
          */
         @Deprecated
-        CompletableFuture<SchemaTransformationResult> clearUnsafe();
+        CompletableFuture<SchemaTransformationResult> clearUnsafe(Consumer<SchemaTransformationResult> preUpdateCallback);
     }
 
     default Optional<GossipAware> asGossipAwareTracker()

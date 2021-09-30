@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.function.Consumer;
 import javax.annotation.Nonnull;
 
 import org.slf4j.Logger;
@@ -59,7 +60,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     }
 
     @Override
-    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
+    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -71,6 +72,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         Schema after = new Schema(afterKeyspaces, UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(schema.getKeyspaces().hashCode())));
         SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff);
 
+        preUpdateCallback.accept(update);
         updateSchema(update);
 
         return update;
@@ -95,12 +97,11 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public SchemaTransformationResult reloadSchemaFromDisk()
+    public SchemaTransformationResult reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        return apply(existing -> after, false);
+        return apply(existing -> after, false, preUpdateCallback);
     }
-
 
     private void updateSchema(SchemaTransformationResult update)
     {
@@ -109,7 +110,6 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         if (update.diff.isEmpty())
             return;
 
-        // TODO notifyPreChanges(diff)
         setSchema(update.after);
     }
 

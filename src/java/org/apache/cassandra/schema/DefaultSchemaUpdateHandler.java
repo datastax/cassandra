@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -43,6 +44,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -144,7 +146,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public SchemaTransformation.SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations)
+    public SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Schema before = schema();
 
@@ -162,30 +164,31 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
         UUID version = SchemaKeyspace.calculateSchemaDigest();
         Schema after = new Schema(afterKeyspaces, version);
-        SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff);
 
+        preUpdateCallback.accept(update);
         updateSchema(update);
-
         announceVersionUpdate(after);
 
         return update;
     }
 
     @Override
-    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
+    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
         Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
 
         if (diff.isEmpty())
-            return new SchemaTransformation.SchemaTransformationResult(before, before, diff);
+            return new SchemaTransformationResult(before, before, diff);
 
         Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, transformation.fixedTimestampMicros().orElse(FBUtilities.timestampMicros()));
         SchemaKeyspace.applyChanges(mutations);
         Schema after = new Schema(afterKeyspaces, SchemaKeyspace.calculateSchemaDigest());
-        SchemaTransformation.SchemaTransformationResult update = new SchemaTransformation.SchemaTransformationResult(before, after, diff);
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff);
 
+        preUpdateCallback.accept(update);
         updateSchema(update);
         if (!locally)
         {
@@ -232,26 +235,25 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public SchemaTransformation.SchemaTransformationResult reloadSchemaFromDisk()
+    public SchemaTransformationResult reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        return apply(existing -> after, false);
+        return apply(existing -> after, false, preUpdateCallback);
     }
 
 
-    private void updateSchema(SchemaTransformation.SchemaTransformationResult update)
+    private void updateSchema(SchemaTransformationResult update)
     {
         assert schema == update.before;
 
         if (update.diff.isEmpty())
             return;
 
-        // TODO notifyPreChanges(diff)
         setSchema(update.after);
     }
 
     @Override
-    public CompletableFuture<SchemaTransformation.SchemaTransformationResult> clearUnsafe()
+    public CompletableFuture<SchemaTransformationResult> clearUnsafe(Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         logger.info("Starting local schema reset...");
 
@@ -265,6 +267,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
                                                                  .findFirst();
 
         return endpoint.map(inetAddressAndPort -> migrationCoordinator.pullSchemaFrom(inetAddressAndPort)
-                                                                      .thenApply(schemaMutations -> applyReceivedSchemaMutations(inetAddressAndPort, schemaMutations))).orElse(null);
+                                                                      .thenApply(schemaMutations -> applyReceivedSchemaMutations(inetAddressAndPort, schemaMutations, preUpdateCallback))).orElse(null);
     }
 }
