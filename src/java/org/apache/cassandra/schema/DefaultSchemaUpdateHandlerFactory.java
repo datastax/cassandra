@@ -18,7 +18,17 @@
 
 package org.apache.cassandra.schema;
 
-public interface SchemaUpdateHandlerFactory
+import org.apache.cassandra.config.DatabaseDescriptor;
+
+public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFactory
 {
-    SchemaUpdateHandler getSchemaUpdateHandler();
+    public static final SchemaUpdateHandlerFactory instance = new DefaultSchemaUpdateHandlerFactory();
+
+    @Override
+    public SchemaUpdateHandler getSchemaUpdateHandler()
+    {
+        return DatabaseDescriptor.isDaemonInitialized()
+               ? new DefaultSchemaUpdateHandler()
+               : new OfflineSchemaUpdateHandler();
+    }
 }

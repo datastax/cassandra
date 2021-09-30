@@ -83,7 +83,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
-    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactory.instance.getSchemaUpdateHandler();
+    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler();
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
