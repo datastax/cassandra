@@ -94,7 +94,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         boolean init = DatabaseDescriptor.isDaemonInitialized() || DatabaseDescriptor.isToolInitialized();
         localKeyspaces = new LocalKeyspaces(init);
-        localKeyspaces.getAll().forEach(this::addNewRefs);
+        localKeyspaces.getAll().forEach(schemaRefCache::addNewRefs);
     }
 
     public void startSync()
@@ -150,38 +150,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * Should be called after a keyspace is added to the local schema. It updates the table and index references cache.
-     */
-    private void addNewRefs(KeyspaceMetadata ksm)
-    {
-        schemaRefCache.addNewRefs(ksm);
-    }
-
-    /**
-     * Should be called once a keyspace metadata is changed (tables, views, indexes). It updates the table and index
-     * references cache.
-     */
-    private void updateRefs(KeyspaceMetadata previous, KeyspaceMetadata updated)
-    {
-        schemaRefCache.updateRefs(previous, updated);
-    }
-
-    /**
-     * Should be called once a keyspace is removed from local schema. It updates the table and index reference cache.
-     */
-    private void removeRefs(KeyspaceMetadata ksm)
-    {
-        schemaRefCache.removeRefs(ksm);
-    }
-
-    /**
      * Update/create/drop the {@link TableMetadataRef} in {@link SchemaManager}.
      */
     private void updateRefs(KeyspacesDiff diff)
     {
-        diff.dropped.forEach(this::removeRefs);
-        diff.created.forEach(this::addNewRefs);
-        diff.altered.forEach(delta -> this.updateRefs(delta.before, delta.after));
+        diff.dropped.forEach(schemaRefCache::removeRefs);
+        diff.created.forEach(schemaRefCache::addNewRefs);
+        diff.altered.forEach(delta -> schemaRefCache.updateRefs(delta.before, delta.after));
     }
 
     public void registerListener(SchemaChangeListener listener)
