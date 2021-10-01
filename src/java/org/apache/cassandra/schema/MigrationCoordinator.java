@@ -35,10 +35,10 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
-import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -89,6 +89,8 @@ public class MigrationCoordinator
     public static final String IGNORED_ENDPOINTS_PROP = "cassandra.skip_schema_check_for_endpoints";
 
     private final MessagingService messagingService;
+
+    private final AtomicReference<ScheduledFuture<?>> periodicPullTask = new AtomicReference<>();
 
     private static ImmutableSet<UUID> getIgnoredVersions()
     {
@@ -170,25 +172,17 @@ public class MigrationCoordinator
     private final Map<UUID, VersionInfo> versionInfo = new HashMap<>();
     private final Map<InetAddressAndPort, UUID> endpointVersions = new HashMap<>();
     private final Set<InetAddressAndPort> ignoredEndpoints = getIgnoredEndpoints();
-    private final AtomicReference<SchemaUpdateHandler.GossipAware> schemaUpdateHandlerRef = new AtomicReference<>();
 
     public MigrationCoordinator(MessagingService messagingService)
     {
         this.messagingService = messagingService;
     }
 
-    public void start(@Nonnull SchemaUpdateHandler.GossipAware schemaUpdateHandler)
+    public void start()
     {
-        Preconditions.checkNotNull(schemaUpdateHandler);
-        if (schemaUpdateHandlerRef.compareAndSet(null, schemaUpdateHandler))
-        {
-            ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES);
-        }
-        else
-        {
-            if (schemaUpdateHandler != schemaUpdateHandlerRef.get())
-                throw new IllegalStateException("Migration coordinator has been already started");
-        }
+        periodicPullTask.updateAndGet(curTask -> curTask == null
+                                                 ? ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES)
+                                                 : curTask);
     }
 
     @VisibleForTesting

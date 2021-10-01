@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -202,19 +203,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public ColumnFamilyStore getColumnFamilyStoreInstance(TableId id)
     {
-        return readLock(() -> {
-            TableMetadata metadata = getTableMetadata(id);
-            if (metadata == null)
-                return null;
+        TableMetadata metadata = getTableMetadata(id);
+        if (metadata == null)
+            return null;
 
-            Keyspace instance = getKeyspaceInstance(metadata.keyspace);
-            if (instance == null)
-                return null;
+        Keyspace instance = Keyspace.open(metadata.keyspace);
+        if (instance == null)
+            return null;
 
-            return instance.hasColumnFamilyStore(metadata.id)
-                   ? instance.getColumnFamilyStore(metadata.id)
-                   : null;
-        });
+        return instance.hasColumnFamilyStore(metadata.id)
+               ? instance.getColumnFamilyStore(metadata.id)
+               : null;
     }
 
     /**
@@ -301,9 +300,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
     {
         Preconditions.checkNotNull(keyspaceName);
-        return readLock(() -> ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getNullable(keyspaceName),
-                                                          () -> localKeyspaces.get(keyspaceName),
-                                                          () -> VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName)));
+        return ObjectUtils.getFirstNonNull(() -> schema().getKeyspaces().getNullable(keyspaceName),
+                                           () -> localKeyspaces.get(keyspaceName),
+                                           () -> VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(keyspaceName));
     }
 
     /**
@@ -391,17 +390,15 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadataRef getTableMetadataRef(String keyspace, String table)
     {
-        return readLock(() -> {
-            TableMetadata tm = getTableMetadata(keyspace, table);
-            return tm == null
-                   ? null
-                   : schemaRefCache.getTableMetadataRef(tm.id);
-        });
+        TableMetadata tm = getTableMetadata(keyspace, table);
+        return tm == null
+               ? null
+               : schemaRefCache.getTableMetadataRef(tm.id);
     }
 
     public TableMetadataRef getIndexTableMetadataRef(String keyspace, String index)
     {
-        return readLock(() -> schemaRefCache.getIndexTableMetadataRef(keyspace, index));
+        return schemaRefCache.getIndexTableMetadataRef(keyspace, index);
     }
 
     /**
@@ -413,10 +410,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     @Override
     public TableMetadataRef getTableMetadataRef(TableId id)
     {
-        return readLock(() -> {
-            TableMetadataRef ref = schemaRefCache.getTableMetadataRef(id);
-            return getTableMetadata(ref.keyspace, ref.name) == null ? null : ref;
-        });
+        return schemaRefCache.getTableMetadataRef(id);
     }
 
     @Override
@@ -455,20 +449,18 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public TableMetadata validateTable(String keyspaceName, String tableName)
     {
-        return readLock(() -> {
-            if (tableName.isEmpty())
-                throw new InvalidRequestException("non-empty table is required");
+        if (tableName.isEmpty())
+            throw new InvalidRequestException("non-empty table is required");
 
-            KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
-            if (keyspace == null)
-                throw new KeyspaceNotDefinedException(format("keyspace %s does not exist", keyspaceName));
+        KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
+        if (keyspace == null)
+            throw new KeyspaceNotDefinedException(format("keyspace %s does not exist", keyspaceName));
 
-            TableMetadata metadata = keyspace.getTableOrViewNullable(tableName);
-            if (metadata == null)
-                throw new InvalidRequestException(format("table %s does not exist", tableName));
+        TableMetadata metadata = keyspace.getTableOrViewNullable(tableName);
+        if (metadata == null)
+            throw new InvalidRequestException(format("table %s does not exist", tableName));
 
-            return metadata;
-        });
+        return metadata;
     }
 
     public TableMetadata getTableMetadata(Descriptor descriptor)
@@ -531,7 +523,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public Schema schema()
     {
-        return readLock(updateHandler::schema);
+        return updateHandler.schema();
     }
 
     private void applyChangesLocally(KeyspacesDiff diff)
@@ -642,7 +634,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         try
         {
-            lock.readLock().lockInterruptibly();
+            Preconditions.checkState(lock.readLock().tryLock(1, TimeUnit.MINUTES), "Failed to acquire read lock for schema operations");
             try
             {
                 return body.get();
@@ -662,7 +654,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         try
         {
-            lock.writeLock().lockInterruptibly();
+            Preconditions.checkState(lock.writeLock().tryLock(1, TimeUnit.MINUTES), "Failed to acquire write lock for schema operations");
             try
             {
                 return body.get();
@@ -698,5 +690,4 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         String format = "The current schema tracker (%s) does not implement GossipAware. %s";
         return gossipAwareSchemaUpdateHandler().orElseThrow(() -> new UnsupportedOperationException(String.format(format, this.getClass().getName(), StringUtils.trimToEmpty(msg))));
     }
-
 }

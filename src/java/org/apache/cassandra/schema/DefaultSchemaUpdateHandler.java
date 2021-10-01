@@ -83,7 +83,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     @Override
     public void start()
     {
-        migrationCoordinator.start(this);
+        migrationCoordinator.start();
     }
 
     @Override
