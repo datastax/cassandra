@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.schema;
 
+import java.util.concurrent.Executor;
+
 public interface SchemaUpdateHandlerFactory
 {
-    SchemaUpdateHandler getSchemaUpdateHandler();
+    SchemaUpdateHandler getSchemaUpdateHandler(Executor executor);
 }

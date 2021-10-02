@@ -23,6 +23,6 @@ public class KeyspaceNotDefinedException extends InvalidRequestException
 {
     public KeyspaceNotDefinedException(String why)
     {
-        super(why);
+        super(why, new Throwable());
     }
 }

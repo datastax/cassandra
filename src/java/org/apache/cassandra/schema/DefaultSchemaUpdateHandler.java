@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -56,21 +57,24 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     private final MigrationCoordinator migrationCoordinator;
     private final Clock clock;
     private final boolean requireSchemas;
+    private final Executor executor;
     private volatile Schema schema;
 
-    public DefaultSchemaUpdateHandler()
+    public DefaultSchemaUpdateHandler(Executor executor)
     {
         this(MigrationCoordinator.instance,
              !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(),
-             Clock.systemDefaultZone());
+             Clock.systemDefaultZone(),
+             executor);
     }
 
-    public DefaultSchemaUpdateHandler(MigrationCoordinator migrationCoordinator, boolean requireSchemas, Clock clock)
+    public DefaultSchemaUpdateHandler(MigrationCoordinator migrationCoordinator, boolean requireSchemas, Clock clock, Executor executor)
     {
         this.migrationCoordinator = migrationCoordinator;
         this.requireSchemas = requireSchemas;
         this.clock = clock;
         this.schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
+        this.executor = executor;
         Gossiper.instance.register(this);
     }
 
@@ -146,7 +150,12 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback)
+    public CompletableFuture<SchemaTransformationResult> applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback)
+    {
+        return CompletableFuture.supplyAsync(() -> applyReceivedSchemaMutationsInternal(pushRequestFrom, schemaMutations, preUpdateCallback), executor);
+    }
+
+    private SchemaTransformationResult applyReceivedSchemaMutationsInternal(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Schema before = schema();
 
@@ -174,7 +183,12 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
+    public CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
+    {
+        return CompletableFuture.supplyAsync(() -> applyInternal(transformation, locally, preUpdateCallback), executor);
+    }
+
+    private SchemaTransformationResult applyInternal(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -199,28 +213,30 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         return update;
     }
 
+
     @Override
-    public Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom)
+    public CompletableFuture<Collection<Mutation>> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom)
     {
-        return SchemaKeyspace.convertSchemaToMutations();
+        return CompletableFuture.supplyAsync(SchemaKeyspace::convertSchemaToMutations, executor);
     }
 
     /**
      * Load schema definitions from disk.
-     *
-     * @return
      */
     @Override
-    public Keyspaces.KeyspacesDiff initializeSchemaFromDisk()
+    public CompletableFuture<SchemaTransformationResult> initializeSchemaFromDisk()
     {
-        Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
-        UUID version = SchemaKeyspace.calculateSchemaDigest();
-        Schema schema = new Schema(keyspaces, version);
-        setSchema(schema);
-        if (!keyspaces.isEmpty())
-            announceVersionUpdate(schema);
+        return CompletableFuture.supplyAsync(() -> {
+            Schema before = schema();
+            Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
+            UUID version = SchemaKeyspace.calculateSchemaDigest();
+            Schema after = new Schema(keyspaces, version);
+            setSchema(after);
+            if (!keyspaces.isEmpty())
+                announceVersionUpdate(after);
 
-        return Keyspaces.diff(Keyspaces.none(), keyspaces);
+            return new SchemaTransformationResult(before, after, Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces()));
+        }, executor);
     }
 
     private void announceVersionUpdate(Schema schema)
@@ -235,12 +251,13 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public SchemaTransformationResult reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback)
+    public CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback)
     {
-        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        return apply(existing -> after, false, preUpdateCallback);
+        return CompletableFuture.supplyAsync(() -> {
+            Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
+            return applyInternal(existing -> after, false, preUpdateCallback);
+        }, executor);
     }
-
 
     private void updateSchema(SchemaTransformationResult update)
     {
@@ -255,18 +272,15 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     @Override
     public CompletableFuture<SchemaTransformationResult> clearUnsafe(Consumer<SchemaTransformationResult> preUpdateCallback)
     {
-        logger.info("Starting local schema reset...");
-
-        SchemaKeyspace.truncate();
-
-        setSchema(new Schema(Keyspaces.none(), SchemaConstants.emptyVersion));
-
         Optional<InetAddressAndPort> endpoint = Gossiper.instance.getLiveMembers()
                                                                  .stream()
                                                                  .filter(migrationCoordinator::shouldPullFromEndpoint)
                                                                  .findFirst();
 
-        return endpoint.map(inetAddressAndPort -> migrationCoordinator.pullSchemaFrom(inetAddressAndPort)
-                                                                      .thenApply(schemaMutations -> applyReceivedSchemaMutations(inetAddressAndPort, schemaMutations, preUpdateCallback))).orElse(null);
+        return endpoint.map(inetAddressAndPort -> migrationCoordinator.pullSchemaFrom(inetAddressAndPort).thenApplyAsync(pulledSchema -> {
+            SchemaKeyspace.truncate();
+            setSchema(new Schema(Keyspaces.none(), SchemaConstants.emptyVersion));
+            return applyReceivedSchemaMutationsInternal(inetAddressAndPort, pulledSchema, preUpdateCallback);
+        }, executor)).orElse(null);
     }
 }

@@ -139,6 +139,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
 
         keyspaces = Keyspaces.builder()
                              .add(keyspaces)
+                             .add(SchemaManager.instance.getLocalKeyspaces())
                              .add(VirtualKeyspaceRegistry.instance.virtualKeyspacesMetadata())
                              .build();
 

@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.schema;
 
+import java.util.concurrent.Executor;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFactory
@@ -25,10 +27,10 @@ public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFac
     public static final SchemaUpdateHandlerFactory instance = new DefaultSchemaUpdateHandlerFactory();
 
     @Override
-    public SchemaUpdateHandler getSchemaUpdateHandler()
+    public SchemaUpdateHandler getSchemaUpdateHandler(Executor executor)
     {
         return DatabaseDescriptor.isDaemonInitialized()
-               ? new DefaultSchemaUpdateHandler()
-               : new OfflineSchemaUpdateHandler();
+               ? new DefaultSchemaUpdateHandler(executor)
+               : new OfflineSchemaUpdateHandler(executor);
     }
 }

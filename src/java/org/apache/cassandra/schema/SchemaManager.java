@@ -26,9 +26,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -43,6 +40,7 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -59,6 +57,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -85,9 +84,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
-    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler();
+    private final ThreadLocal<SchemaManager> threadContext = new ThreadLocal<>();
 
-    private final ReadWriteLock lock = new ReentrantReadWriteLock();
+    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler(this::execute);
 
     /**
      * Initialize empty schema object and load the hardcoded system tables
@@ -102,6 +101,29 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         });
     }
 
+    private void execute(Runnable runnable)
+    {
+        if (threadContext.get() == this)
+        {
+            runnable.run();
+        }
+        else
+        {
+            Stage.SCHEMA_UPDATE.execute(() -> {
+                assert threadContext.get() == null;
+                threadContext.set(this);
+                try
+                {
+                    runnable.run();
+                }
+                finally
+                {
+                    threadContext.remove();
+                }
+            });
+        }
+    }
+
     public void startSync()
     {
         updateHandler.start();
@@ -114,43 +136,49 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void initializeSchemaFromDisk()
     {
-        writeLock(() -> {
-            SchemaDiagnostics.schemaLoading(schema());
-            KeyspacesDiff diff = updateHandler.initializeSchemaFromDisk();
-            updateRefs(diff);
-            SchemaDiagnostics.schemaLoaded(schema());
-        });
+        SchemaDiagnostics.schemaLoading(schema());
+        FBUtilities.waitOnFuture(updateHandler.initializeSchemaFromDisk()
+                                              .thenAccept(update -> {
+                                                  assert threadContext.get() == this;
+                                                  updateRefs(update.diff);
+                                                  SchemaDiagnostics.schemaLoaded(update.after);
+                                              }));
     }
 
     public void reloadSchemaFromDisk()
     {
-        writeLock(() -> {
-            SchemaDiagnostics.schemaLoading(schema());
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk(schemaChangeNotifier::notifyPreChanges);
-            updateRefs(update.diff);
-            applyChangesLocally(update.diff);
-            SchemaDiagnostics.schemaLoaded(schema());
-        });
+        SchemaDiagnostics.schemaLoading(schema());
+        FBUtilities.waitOnFuture(updateHandler.reloadSchemaFromDisk(schemaChangeNotifier::notifyPreChanges)
+                                              .thenAccept(update -> {
+                                                  assert threadContext.get() == this;
+                                                  updateRefs(update.diff);
+                                                  applyChangesLocally(update.diff);
+                                                  SchemaDiagnostics.schemaLoaded(schema());
+                                              }));
     }
 
-    public SchemaTransformation.SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
+    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
-        return writeLock(() -> {
-            SchemaTransformation.SchemaTransformationResult update = updateHandler.apply(transformation, locally, schemaChangeNotifier::notifyPreChanges);
-            updateRefs(update.diff);
-            applyChangesLocally(update.diff);
-            return update;
-        });
+        return FBUtilities.waitOnFuture(updateHandler.apply(transformation, locally, schemaChangeNotifier::notifyPreChanges)
+                                                     .thenApply(update -> {
+                                                         assert threadContext.get() == this;
+                                                         updateRefs(update.diff);
+                                                         applyChangesLocally(update.diff);
+                                                         return update;
+                                                     }));
     }
 
     public void clearUnsafeOrThrow()
     {
-        writeLock(() -> {
+        Stage.SCHEMA_UPDATE.submit(() -> {
             updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
-            SchemaTransformation.SchemaTransformationResult update = FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges), Duration.ofMinutes(10));
-            updateRefs(update.diff);
-            applyChangesLocally(update.diff);
-            SchemaDiagnostics.schemaCleared(schema());
+            gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges)
+                                                       .thenAccept(update -> {
+                                                           assert threadContext.get() == this;
+                                                           updateRefs(update.diff);
+                                                           applyChangesLocally(update.diff);
+                                                           SchemaDiagnostics.schemaCleared(schema());
+                                                       });
         });
     }
 
@@ -224,18 +252,24 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
      */
     private void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
     {
-        CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
-        droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
+        try
+        {
+            CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
+            droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
 
-        CompletableFuture<Keyspace> existingFuture = keyspaceInstances.put(keyspaceName, droppedFuture);
-        if (existingFuture == null || existingFuture.isCompletedExceptionally())
-            return;
+            CompletableFuture<Keyspace> existingFuture = keyspaceInstances.put(keyspaceName, droppedFuture);
+            if (existingFuture == null || existingFuture.isCompletedExceptionally())
+                return;
 
-        Keyspace instance = existingFuture.join();
-        unloadFunction.accept(instance);
+            Keyspace instance = existingFuture.join();
+            unloadFunction.accept(instance);
 
-        CompletableFuture<Keyspace> future = keyspaceInstances.remove(keyspaceName);
-        assert future == droppedFuture;
+            CompletableFuture<Keyspace> future = keyspaceInstances.remove(keyspaceName);
+            assert future == droppedFuture;
+        } catch (Throwable t) {
+            logger.error("Dupa", new Throwable(t));
+            throw t;
+        }
     }
 
     @Override
@@ -252,7 +286,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                 future = empty;
                 try
                 {
-                    empty.complete(writeLock(loadFunction));
+                    empty.complete(FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(loadFunction, this::execute)));
                 }
                 catch (Throwable t)
                 {
@@ -376,6 +410,11 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return new ImmutableSet.Builder<String>().addAll(schema().getKeyspaces().names())
                                                  .addAll(localKeyspaces.getAllNames())
                                                  .build();
+    }
+
+    public Set<KeyspaceMetadata> getLocalKeyspaces()
+    {
+        return localKeyspaces.getAll();
     }
 
     /* TableMetadata/Ref query/control methods */
@@ -509,16 +548,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
-        writeLock(() -> {
-            SchemaTransformation.SchemaTransformationResult update = gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges);
-            updateRefs(update.diff);
-            applyChangesLocally(update.diff);
-        });
+        FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from)
+                                 .applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges)
+                                 .thenAccept(update -> {
+                                     updateRefs(update.diff);
+                                     applyChangesLocally(update.diff);
+                                 }));
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
-        return readLock(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
+        return FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
     }
 
     public Schema schema()
@@ -591,7 +631,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void dropView(Keyspace keyspace, ViewMetadata metadata)
     {
-        Keyspace.open(metadata.keyspace()).viewManager.dropView(metadata.name());
+        keyspace.viewManager.dropView(metadata.name());
         dropTable(keyspace, metadata.metadata);
     }
 
@@ -628,54 +668,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.tableAltering(schema(), updated.metadata);
         keyspace.getColumnFamilyStore(updated.name()).reload();
         SchemaDiagnostics.tableAltered(schema(), updated.metadata);
-    }
-
-    private <T> T readLock(Supplier<T> body)
-    {
-        try
-        {
-            Preconditions.checkState(lock.readLock().tryLock(1, TimeUnit.MINUTES), "Failed to acquire read lock for schema operations");
-            try
-            {
-                return body.get();
-            }
-            finally
-            {
-                lock.readLock().unlock();
-            }
-        }
-        catch (InterruptedException e)
-        {
-            throw Throwables.cleaned(e);
-        }
-    }
-
-    private <T> T writeLock(Supplier<T> body)
-    {
-        try
-        {
-            Preconditions.checkState(lock.writeLock().tryLock(1, TimeUnit.MINUTES), "Failed to acquire write lock for schema operations");
-            try
-            {
-                return body.get();
-            }
-            finally
-            {
-                lock.writeLock().unlock();
-            }
-        }
-        catch (InterruptedException e)
-        {
-            throw Throwables.cleaned(e);
-        }
-    }
-
-    private void writeLock(Runnable body)
-    {
-        writeLock(() -> {
-            body.run();
-            return null;
-        });
     }
 
     private Optional<SchemaUpdateHandler.GossipAware> gossipAwareSchemaUpdateHandler()
