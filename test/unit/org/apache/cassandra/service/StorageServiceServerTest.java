@@ -29,6 +29,7 @@ import java.util.*;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -75,24 +76,29 @@ public class StorageServiceServerTest
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);
         Keyspace.setInitialized();
-    }
-
-    @Test
-    public void testRegularMode() throws ConfigurationException
-    {
         mkdirs();
         cleanup();
         StorageService.instance.initServer(0);
-        for (String path : DatabaseDescriptor.getAllDataFileLocations())
-        {
-            // verify that storage directories are there.
-            assertTrue(new File(path).exists());
-        }
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
         // a proper test would be to call decommission here, but decommission() mixes both shutdown and datatransfer
         // calls.  This test is only interested in the shutdown-related items which a properly handled by just
         // stopping the client.
         //StorageService.instance.decommission();
         StorageService.instance.stopClient();
+    }
+
+    @Test
+    public void testRegularMode() throws ConfigurationException
+    {
+        for (String path : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            // verify that storage directories are there.
+            assertTrue(new File(path).exists());
+        }
     }
 
     @Test
