@@ -169,7 +169,6 @@ public class Keyspace
     public void setMetadata(KeyspaceMetadata metadata)
     {
         Preconditions.checkArgument(metadata.name.equals(this.metadata.name));
-        Preconditions.checkArgument(columnFamilyStores.size() == (metadata.tables.size() + metadata.views.size()));
         metadata.tables.forEach(t -> Preconditions.checkArgument(columnFamilyStores.containsKey(t.id)));
         metadata.views.forEach(v -> Preconditions.checkArgument(columnFamilyStores.containsKey(v.metadata.id)));
 

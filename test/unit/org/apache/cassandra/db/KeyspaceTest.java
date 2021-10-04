@@ -20,6 +20,13 @@ package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ForkJoinPool;
+
+import org.apache.cassandra.schema.Keyspaces;
+import org.apache.cassandra.schema.LocalKeyspaces;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
+import org.apache.cassandra.schema.SchemaUpdateHandler;
 
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
@@ -500,13 +507,13 @@ public class KeyspaceTest extends CQLTester
     @Test
     public void shouldThrowOnMissingKeyspace()
     {
-        SchemaProvider schema = Mockito.mock(SchemaProvider.class);
+        SchemaUpdateHandler suhMock = Mockito.mock(SchemaUpdateHandler.class);
+        SchemaManager schemaManager = new SchemaManager(new LocalKeyspaces(true), ignored -> suhMock, ForkJoinPool.commonPool(), true);
         String ksName = "MissingKeyspace";
         
-        Mockito.when(schema.getKeyspaceMetadata(ksName)).thenReturn(null);
+        Mockito.when(suhMock.schema()).thenReturn(new Schema(Keyspaces.none(), UUID.randomUUID()));
 
-        Assertions.assertThatThrownBy(() -> Keyspace.open(ksName, schema, false))
-                  .isInstanceOf(AssertionError.class)
-                  .hasMessage("Unknown keyspace " + ksName);
+        Assertions.assertThatThrownBy(() -> Keyspace.open(ksName, schemaManager, false))
+                  .hasMessageEndingWith("Unknown keyspace " + ksName);
     }
 }

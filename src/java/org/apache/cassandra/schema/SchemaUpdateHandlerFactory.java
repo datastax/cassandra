@@ -22,5 +22,5 @@ import java.util.concurrent.Executor;
 
 public interface SchemaUpdateHandlerFactory
 {
-    SchemaUpdateHandler getSchemaUpdateHandler(Executor executor);
+    SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor);
 }

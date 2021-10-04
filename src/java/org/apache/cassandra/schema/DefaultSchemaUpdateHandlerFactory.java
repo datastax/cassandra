@@ -27,9 +27,9 @@ public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFac
     public static final SchemaUpdateHandlerFactory instance = new DefaultSchemaUpdateHandlerFactory();
 
     @Override
-    public SchemaUpdateHandler getSchemaUpdateHandler(Executor executor)
+    public SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor)
     {
-        return DatabaseDescriptor.isDaemonInitialized()
+        return online
                ? new DefaultSchemaUpdateHandler(executor)
                : new OfflineSchemaUpdateHandler(executor);
     }

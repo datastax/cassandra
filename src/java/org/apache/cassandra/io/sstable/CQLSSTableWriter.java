@@ -30,6 +30,9 @@ import java.util.SortedSet;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Sets;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.cql3.statements.schema.CreateTypeStatement;
@@ -98,6 +101,7 @@ public class CQLSSTableWriter implements Closeable
 
     static
     {
+        System.setProperty("cassandra.schema.force_load_local_keyspaces", "true");
         DatabaseDescriptor.clientInitialization(false);
         // Partitioner is not set in client mode.
         if (DatabaseDescriptor.getPartitioner() == null)
@@ -501,11 +505,11 @@ public class CQLSSTableWriter implements Closeable
             if (insertStatement == null)
                 throw new IllegalStateException("No insert statement specified, you should provide an insert statement through using()");
 
+            Preconditions.checkState(Sets.difference(SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES, SchemaManager.instance.getKeyspaces()).isEmpty(),
+                                     "Local keyspaces were not loaded. If this is running as a client, please make sure to add %s=true system property.", SchemaManager.FORCE_LOAD_LOCAL_KEYSPACES_PROP);
+
             synchronized (CQLSSTableWriter.class)
             {
-                SchemaManager.instance.apply(SchemaTransformations.addKeyspace(SchemaKeyspace.metadata(), true), false);
-                SchemaManager.instance.apply(SchemaTransformations.addKeyspace(SystemKeyspace.metadata(), true), false);
-
                 String keyspaceName = schemaStatement.keyspace();
 
                 SchemaManager.instance.apply(SchemaTransformations.addKeyspace(KeyspaceMetadata.create(keyspaceName,

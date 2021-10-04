@@ -241,16 +241,14 @@ public class CleanupTest
 
     private void testCleanupWithNoTokenRange(String cfsName, boolean isUserDefined) throws Exception
     {
-
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
         tmd.clearUnsafe();
         tmd.updateHostId(UUID.randomUUID(), InetAddressAndPort.getByName("127.0.0.1"));
         byte[] tk1 = {2};
         tmd.updateNormalToken(new BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
 
-
         Keyspace keyspace = Keyspace.open(KEYSPACE2);
-        keyspace.setMetadata(KeyspaceMetadata.create(KEYSPACE2, KeyspaceParams.nts("DC1", 1)));
+        keyspace.setMetadata(keyspace.getMetadata().withSwapped(KeyspaceParams.nts("DC1", 1)));
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfsName);
 
         // insert data and verify we get it back w/ range query
@@ -258,7 +256,7 @@ public class CleanupTest
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).build()).size());
 
         // remove replication on DC1
-        keyspace.setMetadata(KeyspaceMetadata.create(KEYSPACE2, KeyspaceParams.nts("DC1", 0)));
+        keyspace.setMetadata(keyspace.getMetadata().withSwapped(KeyspaceParams.nts("DC1", 0)));
 
         // clear token range for localhost on DC1
         if (isUserDefined)

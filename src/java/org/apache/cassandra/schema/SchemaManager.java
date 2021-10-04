@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -41,7 +42,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -63,6 +63,8 @@ import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.collect.Iterables.size;
 import static java.lang.String.format;
+import static org.apache.cassandra.config.DatabaseDescriptor.isDaemonInitialized;
+import static org.apache.cassandra.config.DatabaseDescriptor.isToolInitialized;
 
 /**
  * Manages keyspace instances. It provides methods to query schema, but it does not provide any methods to modify the
@@ -72,6 +74,12 @@ import static java.lang.String.format;
 public final class SchemaManager implements SchemaProvider, IEndpointStateChangeSubscriber
 {
     private final static Logger logger = LoggerFactory.getLogger(SchemaManager.class);
+
+    public static final String FORCE_LOAD_LOCAL_KEYSPACES_PROP = "cassandra.schema.force_load_local_keyspaces";
+    private final static boolean FORCE_LOAD_LOCAL_KEYSPACES = Boolean.getBoolean(FORCE_LOAD_LOCAL_KEYSPACES_PROP);
+
+    public static final String FORCE_OFFLINE_MODE_PROP = "cassandra.schema.force_offline_mode";
+    private final static boolean FORCE_OFFLINE_MODE = Boolean.getBoolean(FORCE_OFFLINE_MODE_PROP);
 
     public static final SchemaManager instance = new SchemaManager();
 
@@ -86,18 +94,32 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final ThreadLocal<SchemaManager> threadContext = new ThreadLocal<>();
 
-    private final SchemaUpdateHandler updateHandler = SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler(this::execute);
+    private final SchemaUpdateHandler updateHandler;
+
+    private final Executor executor;
+
+    private final boolean online;
 
     /**
      * Initialize empty schema object and load the hardcoded system tables
      */
     private SchemaManager()
     {
-        boolean init = DatabaseDescriptor.isDaemonInitialized() || DatabaseDescriptor.isToolInitialized();
-        localKeyspaces = new LocalKeyspaces(init);
-        localKeyspaces.getAll().forEach(ksm -> {
+        this(new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized()),
+             executor -> SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler(!FORCE_OFFLINE_MODE && isDaemonInitialized(), executor),
+             Stage.SCHEMA_UPDATE.executor(),
+             !FORCE_OFFLINE_MODE && (isDaemonInitialized() || isToolInitialized()));
+    }
+
+    public SchemaManager(LocalKeyspaces localKeyspaces, java.util.function.Function<Executor, SchemaUpdateHandler> updateHandlerBuilder, Executor executor, boolean online)
+    {
+        this.online = online;
+        this.executor = executor;
+        this.updateHandler = updateHandlerBuilder.apply(this::execute);
+        this.localKeyspaces = localKeyspaces;
+        this.localKeyspaces.getAll().forEach(ksm -> {
             schemaRefCache.addNewRefs(ksm);
-            SchemaDiagnostics.metadataInitialized(updateHandler.schema(), ksm);
+            SchemaDiagnostics.metadataInitialized(this.updateHandler.schema(), ksm);
         });
     }
 
@@ -109,7 +131,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         }
         else
         {
-            Stage.SCHEMA_UPDATE.execute(() -> {
+            executor.execute(() -> {
                 assert threadContext.get() == null;
                 threadContext.set(this);
                 try
@@ -170,16 +192,14 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     public void clearUnsafeOrThrow()
     {
-        Stage.SCHEMA_UPDATE.submit(() -> {
-            updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
-            gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges)
-                                                       .thenAccept(update -> {
-                                                           assert threadContext.get() == this;
-                                                           updateRefs(update.diff);
-                                                           applyChangesLocally(update.diff);
-                                                           SchemaDiagnostics.schemaCleared(schema());
-                                                       });
-        });
+        FBUtilities.waitOnFuture(CompletableFuture.runAsync(() -> updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none())), executor)
+                                                  .thenCompose(ignored -> gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges))
+                                                  .thenAccept(update -> {
+                                                      assert threadContext.get() == this;
+                                                      updateRefs(update.diff);
+                                                      applyChangesLocally(update.diff);
+                                                      SchemaDiagnostics.schemaCleared(schema());
+                                                  }));
     }
 
     /**
@@ -412,9 +432,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                                                  .build();
     }
 
-    public Set<KeyspaceMetadata> getLocalKeyspaces()
+    public Keyspaces getLocalKeyspaces()
     {
-        return localKeyspaces.getAll();
+        return Keyspaces.builder().add(localKeyspaces.getAll()).build();
     }
 
     /* TableMetadata/Ref query/control methods */
@@ -568,9 +588,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void applyChangesLocally(KeyspacesDiff diff)
     {
-        diff.dropped.forEach(this::dropKeyspace);
-        diff.created.forEach(this::createKeyspace);
-        diff.altered.forEach(this::alterKeyspace);
+        if (online)
+        {
+            diff.dropped.forEach(this::dropKeyspace);
+            diff.created.forEach(this::createKeyspace);
+            diff.altered.forEach(this::alterKeyspace);
+        }
     }
 
     private void alterKeyspace(KeyspaceDiff delta)
