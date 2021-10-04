@@ -508,7 +508,7 @@ public class KeyspaceTest extends CQLTester
     public void shouldThrowOnMissingKeyspace()
     {
         SchemaUpdateHandler suhMock = Mockito.mock(SchemaUpdateHandler.class);
-        SchemaManager schemaManager = new SchemaManager(new LocalKeyspaces(true), ignored -> suhMock, ForkJoinPool.commonPool(), true);
+        SchemaManager schemaManager = new SchemaManager(new LocalKeyspaces(true), (a, b, c, d) -> suhMock, ForkJoinPool.commonPool(), true, true);
         String ksName = "MissingKeyspace";
         
         Mockito.when(suhMock.schema()).thenReturn(new Schema(Keyspaces.none(), UUID.randomUUID()));

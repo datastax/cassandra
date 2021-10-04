@@ -19,8 +19,11 @@
 package org.apache.cassandra.schema;
 
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 public interface SchemaUpdateHandlerFactory
 {
-    SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor);
+    SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor, Consumer<SchemaTransformationResult> preUpdateCallback, Consumer<SchemaTransformationResult> postUpdateCallback);
 }

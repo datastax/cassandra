@@ -38,11 +38,15 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     private volatile Schema schema;
 
     private final Executor executor;
+    private final Consumer<SchemaTransformationResult> preUpdateCallback;
+    private final Consumer<SchemaTransformationResult> postUpdateCallback;
 
-    public OfflineSchemaUpdateHandler(Executor executor)
+    public OfflineSchemaUpdateHandler(Executor executor, Consumer<SchemaTransformationResult> preUpdateCallback, Consumer<SchemaTransformationResult> postUpdateCallback)
     {
         this.schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
         this.executor = executor;
+        this.preUpdateCallback = preUpdateCallback;
+        this.postUpdateCallback = postUpdateCallback;
     }
 
     @Override
@@ -65,12 +69,12 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     }
 
     @Override
-    public CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
+    public CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally)
     {
-        return CompletableFuture.supplyAsync(() -> applyInternal(transformation, locally, preUpdateCallback), executor);
+        return CompletableFuture.supplyAsync(() -> applyInternal(transformation, locally), executor);
     }
 
-    private SchemaTransformationResult applyInternal(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback)
+    private SchemaTransformationResult applyInternal(SchemaTransformation transformation, boolean locally)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -84,6 +88,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 
         preUpdateCallback.accept(update);
         updateSchema(update);
+        postUpdateCallback.accept(update);
 
         return update;
     }
@@ -111,11 +116,11 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback)
+    public CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk()
     {
         return CompletableFuture.supplyAsync(() -> {
             Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-            return applyInternal(existing -> after, false, preUpdateCallback);
+            return applyInternal(existing -> after, false);
         }, executor);
     }
 

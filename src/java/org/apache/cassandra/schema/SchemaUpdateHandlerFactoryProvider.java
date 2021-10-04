@@ -25,6 +25,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
 
+/**
+ * Provides the instance of SchemaUpdateHandler factory pointed by {@link #SUH_FACTORY_CLASS_PROPERTY} system property.
+ * If the property is not defined, the default factory {@link DefaultSchemaUpdateHandler} instance is returned.
+ */
 public class SchemaUpdateHandlerFactoryProvider implements Provider<SchemaUpdateHandlerFactory>
 {
     private static final String SUH_FACTORY_CLASS_PROPERTY = "cassandra.schema.update_handler_factory.class";

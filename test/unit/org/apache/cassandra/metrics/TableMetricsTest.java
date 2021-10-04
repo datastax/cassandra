@@ -55,8 +55,6 @@ public class TableMetricsTest extends SchemaLoader
     @BeforeClass
     public static void setup() throws ConfigurationException, IOException
     {
-        SchemaManager.instance.clearUnsafeOrThrow();
-
         EmbeddedCassandraService cassandra = new EmbeddedCassandraService();
         cassandra.start();
 

@@ -27,14 +27,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -81,6 +80,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public static final String FORCE_OFFLINE_MODE_PROP = "cassandra.schema.force_offline_mode";
     private final static boolean FORCE_OFFLINE_MODE = Boolean.getBoolean(FORCE_OFFLINE_MODE_PROP);
 
+    public static final String SCHEMA_UPDATE_TIMEOUT_PROP = "cassandra.schema.update_timeout_seconds";
+    private final static Duration SCHEMA_UPDATE_TIMEOUT = Duration.ofSeconds(Integer.getInteger(SCHEMA_UPDATE_TIMEOUT_PROP, 30));
+
     public static final SchemaManager instance = new SchemaManager();
 
     private final LocalKeyspaces localKeyspaces;
@@ -94,7 +96,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final ThreadLocal<SchemaManager> threadContext = new ThreadLocal<>();
 
-    private final SchemaUpdateHandler updateHandler;
+    @VisibleForTesting
+    final SchemaUpdateHandler updateHandler;
 
     private final Executor executor;
 
@@ -106,16 +109,17 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     private SchemaManager()
     {
         this(new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized()),
-             executor -> SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler(!FORCE_OFFLINE_MODE && isDaemonInitialized(), executor),
+             SchemaUpdateHandlerFactoryProvider.instance.get(),
              Stage.SCHEMA_UPDATE.executor(),
-             !FORCE_OFFLINE_MODE && (isDaemonInitialized() || isToolInitialized()));
+             !FORCE_OFFLINE_MODE && (isDaemonInitialized() || isToolInitialized()),
+             !FORCE_OFFLINE_MODE && isDaemonInitialized());
     }
 
-    public SchemaManager(LocalKeyspaces localKeyspaces, java.util.function.Function<Executor, SchemaUpdateHandler> updateHandlerBuilder, Executor executor, boolean online)
+    public SchemaManager(LocalKeyspaces localKeyspaces, SchemaUpdateHandlerFactory updateHandlerFactory, Executor executor, boolean online, boolean updateHandlerMode)
     {
         this.online = online;
         this.executor = executor;
-        this.updateHandler = updateHandlerBuilder.apply(this::execute);
+        this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(updateHandlerMode, this::execute, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
         this.localKeyspaces = localKeyspaces;
         this.localKeyspaces.getAll().forEach(ksm -> {
             schemaRefCache.addNewRefs(ksm);
@@ -146,6 +150,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         }
     }
 
+    private void onSchemaChanged(SchemaTransformationResult update)
+    {
+        updateRefs(update.diff);
+        applyChangesLocally(update.diff);
+    }
+
     public void startSync()
     {
         updateHandler.start();
@@ -161,45 +171,29 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         SchemaDiagnostics.schemaLoading(schema());
         FBUtilities.waitOnFuture(updateHandler.initializeSchemaFromDisk()
                                               .thenAccept(update -> {
-                                                  assert threadContext.get() == this;
+                                                  assert threadContext.get() == this : "threadContext is defined: " + (threadContext.get() != null);
                                                   updateRefs(update.diff);
                                                   SchemaDiagnostics.schemaLoaded(update.after);
-                                              }));
+                                              }), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public void reloadSchemaFromDisk()
     {
         SchemaDiagnostics.schemaLoading(schema());
-        FBUtilities.waitOnFuture(updateHandler.reloadSchemaFromDisk(schemaChangeNotifier::notifyPreChanges)
-                                              .thenAccept(update -> {
-                                                  assert threadContext.get() == this;
-                                                  updateRefs(update.diff);
-                                                  applyChangesLocally(update.diff);
-                                                  SchemaDiagnostics.schemaLoaded(schema());
-                                              }));
+        FBUtilities.waitOnFuture(updateHandler.reloadSchemaFromDisk()
+                                              .thenAccept(update -> SchemaDiagnostics.schemaLoaded(schema())), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
-        return FBUtilities.waitOnFuture(updateHandler.apply(transformation, locally, schemaChangeNotifier::notifyPreChanges)
-                                                     .thenApply(update -> {
-                                                         assert threadContext.get() == this;
-                                                         updateRefs(update.diff);
-                                                         applyChangesLocally(update.diff);
-                                                         return update;
-                                                     }));
+        return FBUtilities.waitOnFuture(updateHandler.apply(transformation, locally), SCHEMA_UPDATE_TIMEOUT);
     }
 
-    public void clearUnsafeOrThrow()
+    public void clearUnsafe()
     {
         FBUtilities.waitOnFuture(CompletableFuture.runAsync(() -> updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none())), executor)
-                                                  .thenCompose(ignored -> gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe(schemaChangeNotifier::notifyPreChanges))
-                                                  .thenAccept(update -> {
-                                                      assert threadContext.get() == this;
-                                                      updateRefs(update.diff);
-                                                      applyChangesLocally(update.diff);
-                                                      SchemaDiagnostics.schemaCleared(schema());
-                                                  }));
+                                                  .thenCompose(ignored -> gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe())
+                                                  .thenAccept(update -> SchemaDiagnostics.schemaCleared(schema())), SCHEMA_UPDATE_TIMEOUT);
     }
 
     /**
@@ -286,7 +280,9 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
             CompletableFuture<Keyspace> future = keyspaceInstances.remove(keyspaceName);
             assert future == droppedFuture;
-        } catch (Throwable t) {
+        }
+        catch (Throwable t)
+        {
             logger.error("Dupa", new Throwable(t));
             throw t;
         }
@@ -306,11 +302,11 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                 future = empty;
                 try
                 {
-                    empty.complete(FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(loadFunction, this::execute)));
+                    empty.complete(FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(loadFunction, this::execute), SCHEMA_UPDATE_TIMEOUT));
                 }
                 catch (Throwable t)
                 {
-                    empty.completeExceptionally(t);
+                    empty.completeExceptionally(new Throwable(t));
                     // Remove future so that construction can be retried later
                     keyspaceInstances.remove(keyspaceName, future);
                 }
@@ -573,16 +569,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from)
-                                 .applyReceivedSchemaMutations(from, payload, schemaChangeNotifier::notifyPreChanges)
-                                 .thenAccept(update -> {
-                                     updateRefs(update.diff);
-                                     applyChangesLocally(update.diff);
-                                 }));
+                                 .applyReceivedSchemaMutations(from, payload), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
-        return FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from));
+        return FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Schema schema()

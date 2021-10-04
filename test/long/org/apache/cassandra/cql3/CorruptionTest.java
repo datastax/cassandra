@@ -59,7 +59,7 @@ public class CorruptionTest extends SchemaLoader
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
-        SchemaManager.instance.clearUnsafeOrThrow();
+        SchemaManager.instance.clearUnsafe();
 
         cassandra = new EmbeddedCassandraService();
         cassandra.start();

@@ -38,6 +38,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -82,8 +84,6 @@ public class MigrationCoordinator
 
     private static final int MIGRATION_DELAY_IN_MS = 60000;
     private static final int MAX_OUTSTANDING_VERSION_REQUESTS = 3;
-
-    public static final MigrationCoordinator instance = new MigrationCoordinator(MessagingService.instance());
 
     public static final String IGNORED_VERSIONS_PROP = "cassandra.skip_schema_check_for_versions";
     public static final String IGNORED_ENDPOINTS_PROP = "cassandra.skip_schema_check_for_endpoints";
@@ -172,10 +172,12 @@ public class MigrationCoordinator
     private final Map<UUID, VersionInfo> versionInfo = new HashMap<>();
     private final Map<InetAddressAndPort, UUID> endpointVersions = new HashMap<>();
     private final Set<InetAddressAndPort> ignoredEndpoints = getIgnoredEndpoints();
+    private final BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback;
 
-    public MigrationCoordinator(MessagingService messagingService)
+    public MigrationCoordinator(MessagingService messagingService, BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback)
     {
         this.messagingService = messagingService;
+        this.schemaUpdateCallback = schemaUpdateCallback;
     }
 
     public void start()
@@ -386,11 +388,6 @@ public class MigrationCoordinator
             FBUtilities.waitOnFuture(result, Duration.ofMinutes(10));
     }
 
-    public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
-    {
-        reportEndpointVersion(endpoint, state, false);
-    }
-
     public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state, boolean waitForPull)
     {
         if (state != null)
@@ -491,7 +488,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected void mergeSchemaFrom(InetAddressAndPort endpoint, Collection<Mutation> mutations)
     {
-        SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(endpoint, mutations);
+        schemaUpdateCallback.accept(endpoint, mutations);
     }
 
     @VisibleForTesting
@@ -593,6 +590,7 @@ public class MigrationCoordinator
      * @param waitMillis
      * @return true if response for all schemas were received, false if we timed out waiting
      */
+    @VisibleForTesting
     public boolean awaitSchemaRequests(long waitMillis)
     {
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))

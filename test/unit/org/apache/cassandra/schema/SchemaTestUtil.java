@@ -149,7 +149,7 @@ public class SchemaTestUtil
     public static void announce(Collection<Mutation> schema)
     {
         SchemaManager.instance.applyReceivedSchemaMutationsOrThrow(null, schema);
-        MigrationCoordinator.instance.pushSchemaMutations(schema);
+        defaultSchemaUpdateHandler().migrationCoordinator.pushSchemaMutations(schema);
     }
 
     public static void addOrUpdateKeyspace(KeyspaceMetadata ksm, boolean locally)
@@ -160,5 +160,15 @@ public class SchemaTestUtil
     public static void dropKeyspaceIfExist(String ksName, boolean locally)
     {
         SchemaManager.instance.apply(current -> current.without(Collections.singletonList(ksName)), locally);
+    }
+
+    public static DefaultSchemaUpdateHandler defaultSchemaUpdateHandler()
+    {
+        return (DefaultSchemaUpdateHandler) SchemaManager.instance.updateHandler;
+    }
+
+    public static MigrationCoordinator migrationCoordinator()
+    {
+        return defaultSchemaUpdateHandler().migrationCoordinator;
     }
 }

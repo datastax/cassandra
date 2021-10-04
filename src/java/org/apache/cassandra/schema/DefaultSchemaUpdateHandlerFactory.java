@@ -19,18 +19,20 @@
 package org.apache.cassandra.schema;
 
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFactory
 {
     public static final SchemaUpdateHandlerFactory instance = new DefaultSchemaUpdateHandlerFactory();
 
     @Override
-    public SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor)
+    public SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor, Consumer<SchemaTransformationResult> preUpdateCallback, Consumer<SchemaTransformationResult> postUpdateCallback)
     {
         return online
-               ? new DefaultSchemaUpdateHandler(executor)
-               : new OfflineSchemaUpdateHandler(executor);
+               ? new DefaultSchemaUpdateHandler(executor, preUpdateCallback, postUpdateCallback)
+               : new OfflineSchemaUpdateHandler(executor, preUpdateCallback, postUpdateCallback);
     }
 }

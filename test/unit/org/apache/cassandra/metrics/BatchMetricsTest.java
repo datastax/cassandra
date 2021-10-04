@@ -66,8 +66,6 @@ public class BatchMetricsTest extends SchemaLoader
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
-        SchemaManager.instance.clearUnsafeOrThrow();
-
         cassandra = new EmbeddedCassandraService();
         cassandra.start();
 

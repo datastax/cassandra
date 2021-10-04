@@ -48,8 +48,6 @@ public class CQLMetricsTest extends SchemaLoader
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
-        SchemaManager.instance.clearUnsafeOrThrow();
-
         cassandra = new EmbeddedCassandraService();
         cassandra.start();
 

@@ -99,7 +99,6 @@ import org.apache.cassandra.schema.ReplicationParams;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaTransformations;
-import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ViewMetadata;
@@ -5550,7 +5549,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void resetLocalSchema() throws IOException
     {
-        SchemaManager.instance.clearUnsafeOrThrow();
+        SchemaManager.instance.clearUnsafe();
     }
 
     public void reloadLocalSchema()

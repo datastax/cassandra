@@ -504,7 +504,7 @@ public class FBUtilities
         }
         catch (ExecutionException ee)
         {
-            throw Throwables.cleaned(ee);
+            throw new RuntimeException(Throwables.cleaned(ee));
         }
         catch (InterruptedException ie)
         {

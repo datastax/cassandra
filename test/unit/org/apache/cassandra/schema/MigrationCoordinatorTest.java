@@ -84,7 +84,7 @@ public class MigrationCoordinatorTest
 
         private InstrumentedCoordinator(MessagingService messagingService)
         {
-            super(messagingService);
+            super(messagingService, (ignored1, ignored2) -> {});
             this.messagingService = messagingService;
             Mockito.doAnswer(a -> requests.add(a.getArgument(2, Callback.class)))
                    .when(messagingService)

@@ -85,7 +85,7 @@ public interface SchemaUpdateHandler
      * @param locally           whether the changes should be immediately synced with the cluster
      * @param preUpdateCallback additional callback invoked when we know the changes to be made
      */
-    CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally, Consumer<SchemaTransformationResult> preUpdateCallback);
+    CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally);
 
     /**
      * Reloads the schema from the underlying storage.
@@ -99,7 +99,7 @@ public interface SchemaUpdateHandler
      * @return the difference between the runtime schema and the schema loaded from the underlying storage
      * TODO maybe instead of this method, it would be better to have a method which just returns the schema from the underlying storage, then the called could manually invoke #apply and we would not have any redundancy here
      */
-    CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk(Consumer<SchemaTransformationResult> preUpdateCallback);
+    CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk();
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this interface.
@@ -117,7 +117,7 @@ public interface SchemaUpdateHandler
          * @param preUpdateCallback additional callback invoked when we know the changes to be made
          * @return the result of changes applied to the runtime schema
          */
-        CompletableFuture<SchemaTransformationResult> applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations, Consumer<SchemaTransformationResult> preUpdateCallback);
+        CompletableFuture<SchemaTransformationResult> applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations);
 
         /**
          * Called when schema pull message is received. It converts the runtime schema into a collection of mutations
@@ -139,10 +139,9 @@ public interface SchemaUpdateHandler
          * ColumnFamilyStore (and other consumers) will still refer to them. So even after the schema is restored from
          * the schema PULL, those ColumnFamilyStore instance will refer to the old refs that will not get updated and
          * that could lead to silent unexpected behavior while the node is not restarted.
-         * <p>
-         * TODO remove or refactor this method as it is dangerous
          */
         @Deprecated
-        CompletableFuture<SchemaTransformationResult> clearUnsafe(Consumer<SchemaTransformationResult> preUpdateCallback);
+        // TODO remove or refactor this method as it is dangerous
+        CompletableFuture<SchemaTransformationResult> clearUnsafe();
     }
 }
