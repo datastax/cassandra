@@ -331,11 +331,21 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         }
     }
 
+    /**
+     * Returns the number of tables in all local and non-local keyspaces. It does not count tables in virtual keyspaces.
+     */
     public int getNumberOfTables()
     {
         return schema().getKeyspaces().stream().mapToInt(k -> size(k.tablesAndViews())).sum() + localKeyspaces.getAllTablesAndViewsCount();
     }
 
+    /**
+     * Finds a view metadata by keyspace and view names. Does not look into virtual keyspaces.
+     *
+     * @param keyspaceName local or non-local keyspace, but not a virtual keyspace
+     * @param viewName     view name
+     * @return view metadata or {@code null} if view wasn't found
+     */
     public ViewMetadata getView(String keyspaceName, String viewName)
     {
         Preconditions.checkNotNull(keyspaceName);
@@ -345,10 +355,10 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * Get metadata about keyspace by its name
+     * Finds a keyspace metadata by name.
      *
-     * @param keyspaceName The name of the keyspace
-     * @return The keyspace metadata or null if it wasn't found
+     * @param keyspaceName local, non-local or virtual keyspace name.
+     * @return keyspace metadata or {@code null} if keyspace wasn't found
      */
     @Override
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
@@ -360,51 +370,45 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     }
 
     /**
-     * @return collection of the non-system keyspaces (note that this count as system only the
-     * non replicated keyspaces, so keyspace like system_traces which are replicated are actually
-     * returned. See getUserKeyspace() below if you don't want those)
+     * Returns all non-local keyspaces, that is, all but {@link SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES}
+     * or virtual keyspaces.
      */
-    public ImmutableList<String> getNonSystemKeyspaces()
+    public Keyspaces getNonSystemKeyspaces()
     {
-        return ImmutableList.copyOf(schema().getKeyspaces().names());
+        return schema().getKeyspaces();
     }
 
     /**
-     * @return a collection of keyspaces that do not use LocalStrategy for replication
+     * Returns all non-local keyspaces whose replication strategy is not {@link LocalStrategy}.
      */
-    public List<String> getNonLocalStrategyKeyspaces()
+    public Keyspaces getNonLocalStrategyKeyspaces()
     {
-        return schema().getKeyspaces().stream()
-                       .filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class)
-                       .map(keyspace -> keyspace.name)
-                       .collect(Collectors.toList());
+        return schema().getKeyspaces().filter(keyspace -> keyspace.params.replication.klass != LocalStrategy.class);
     }
 
     /**
-     * @return a collection of keyspaces that partition data across the ring
+     * Returns keyspaces that partition data across the ring.
      */
-    public List<String> getPartitionedKeyspaces()
+    public Keyspaces getPartitionedKeyspaces()
     {
-        return schema().getKeyspaces().stream()
-                       .filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned())
-                       .map(keyspace -> keyspace.name)
-                       .collect(Collectors.toList());
+        return schema().getKeyspaces().filter(keyspace -> Keyspace.open(keyspace.name).getReplicationStrategy().isPartitioned());
     }
 
     /**
-     * @return collection of the user defined keyspaces
+     * Returns user keyspaces, that is all but {@link SchemaConstants#LOCAL_SYSTEM_KEYSPACE_NAMES},
+     * {@link SchemaConstants#REPLICATED_SYSTEM_KEYSPACE_NAMES} or virtual keyspaces.
      */
-    public List<String> getUserKeyspaces()
+    public Keyspaces getUserKeyspaces()
     {
-        return ImmutableList.copyOf(Sets.difference(schema().getKeyspaces().names(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+        return schema().getKeyspaces().without(SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES);
     }
 
     /**
-     * @return collection of the user defined keyspaces, excluding DSE internal keyspaces.
+     * Returns non-internal keyspaces
      */
-    public List<String> getNonInternalKeyspaces()
+    public Keyspaces getNonInternalKeyspaces()
     {
-        return getUserKeyspaces().stream().filter(ks -> !SchemaConstants.isInternalKeyspace(ks)).collect(Collectors.toList());
+        return getUserKeyspaces().filter(ks -> !SchemaConstants.isInternalKeyspace(ks.name));
     }
 
     /**

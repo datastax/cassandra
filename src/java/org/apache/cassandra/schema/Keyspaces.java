@@ -191,6 +191,11 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         return keyspaces.values().toString();
     }
 
+    public int size()
+    {
+        return keyspaces.size();
+    }
+
     public static final class Builder
     {
         private final ImmutableMap.Builder<String, KeyspaceMetadata> keyspaces = new ImmutableMap.Builder<>();
