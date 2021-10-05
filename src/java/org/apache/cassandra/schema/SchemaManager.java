@@ -47,6 +47,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -158,6 +159,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         logger.debug("Schema changed: {}", update);
         updateRefs(update.diff);
         applyChangesLocally(update.diff);
+        SystemKeyspace.updateSchemaVersion(update.after.getVersion());
         SchemaDiagnostics.versionUpdated(update.after);
 
         announceVersionUpdate(update.after);
@@ -190,6 +192,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                                               .thenAccept(update -> {
                                                   assert threadContext.get() == this;
                                                   updateRefs(update.diff);
+                                                  SystemKeyspace.updateSchemaVersion(update.after.getVersion());
                                                   SchemaDiagnostics.versionUpdated(update.after);
                                                   announceVersionUpdate(update.after);
                                                   logger.debug("Initialized schema from disk: {}", update);
