@@ -184,17 +184,17 @@ public class MigrationCoordinator
      *                             and pushing changes
      * @param schemaUpdateCallback called when we receive a schema which should be applied on this node
      * @param schemaSupplier       provides the current schema on this node
-     * @param executor             executor on which the period checks are scheduled
+     * @param periodicCheckExecutor             executor on which the periodic checks are scheduled
      */
     public MigrationCoordinator(MessagingService messagingService,
                                 BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback,
                                 Supplier<Schema> schemaSupplier,
-                                ScheduledThreadPoolExecutor executor)
+                                ScheduledThreadPoolExecutor periodicCheckExecutor)
     {
         this.messagingService = messagingService;
         this.schemaUpdateCallback = schemaUpdateCallback;
         this.schemaSupplier = schemaSupplier;
-        this.executor = executor;
+        this.executor = periodicCheckExecutor;
     }
 
     public void start()

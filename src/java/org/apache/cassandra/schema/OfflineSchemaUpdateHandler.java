@@ -20,7 +20,6 @@ package org.apache.cassandra.schema;
 
 import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import javax.annotation.Nonnull;
@@ -37,14 +36,12 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 
     private volatile Schema schema;
 
-    private final Executor executor;
     private final Consumer<SchemaTransformationResult> preUpdateCallback;
     private final Consumer<SchemaTransformationResult> postUpdateCallback;
 
     public OfflineSchemaUpdateHandler(Executor executor, Consumer<SchemaTransformationResult> preUpdateCallback, Consumer<SchemaTransformationResult> postUpdateCallback)
     {
         this.schema = new Schema(Keyspaces.none(), SchemaConstants.emptyVersion);
-        this.executor = executor;
         this.preUpdateCallback = preUpdateCallback;
         this.postUpdateCallback = postUpdateCallback;
     }
@@ -69,12 +66,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     }
 
     @Override
-    public CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally)
-    {
-        return CompletableFuture.supplyAsync(() -> applyInternal(transformation, locally), executor);
-    }
-
-    private SchemaTransformationResult applyInternal(SchemaTransformation transformation, boolean locally)
+    public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
         Schema before = schema();
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -99,16 +91,14 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
      * @return
      */
     @Override
-    public CompletableFuture<SchemaTransformationResult> initializeSchemaFromDisk()
+    public SchemaTransformationResult initializeSchemaFromDisk()
     {
-        return CompletableFuture.supplyAsync(() -> {
-            Schema before = schema();
-            Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
-            UUID version = UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(keyspaces.hashCode()));
-            Schema after = new Schema(keyspaces, version);
-            setSchema(after);
-            return new SchemaTransformationResult(before, after, Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces()));
-        }, executor);
+        Schema before = schema();
+        Keyspaces keyspaces = SchemaKeyspace.fetchNonSystemKeyspaces();
+        UUID version = UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(keyspaces.hashCode()));
+        Schema after = new Schema(keyspaces, version);
+        setSchema(after);
+        return new SchemaTransformationResult(before, after, Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces()));
     }
 
     /*
@@ -116,12 +106,10 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
      * in-memory representation got out of sync somehow with what's on disk.
      */
     @Override
-    public CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk()
+    public SchemaTransformationResult reloadSchemaFromDisk()
     {
-        return CompletableFuture.supplyAsync(() -> {
-            Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-            return applyInternal(existing -> after, false);
-        }, executor);
+        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
+        return apply(existing -> after, false);
     }
 
     private void updateSchema(SchemaTransformationResult update)

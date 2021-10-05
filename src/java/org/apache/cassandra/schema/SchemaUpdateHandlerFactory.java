@@ -25,5 +25,17 @@ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResu
 
 public interface SchemaUpdateHandlerFactory
 {
+    /**
+     * A factory which provides the appropriate schema update handler. The actual implementation may be different for
+     * different run modes (client, tool, daemon).
+     *
+     * @param online             whether schema update handler should work online and be aware of the other nodes (when in daemon mode)
+     * @param executor           executor which should be used to run asynchronous updates (for example, if the handler receives
+     *                           the update from outside, this executor should be used to apply the update)
+     * @param preUpdateCallback  callback which will be called right before the runtime schema is updated, the callback
+     *                           is not called in expected to be called in {@link SchemaUpdateHandler#initializeSchemaFromDisk()}
+     * @param postUpdateCallback callback which will be called right after the runtime schema is updated, the callback
+     *                           is not called in expected to be called in {@link SchemaUpdateHandler#initializeSchemaFromDisk()}
+     */
     SchemaUpdateHandler getSchemaUpdateHandler(boolean online, Executor executor, Consumer<SchemaTransformationResult> preUpdateCallback, Consumer<SchemaTransformationResult> postUpdateCallback);
 }

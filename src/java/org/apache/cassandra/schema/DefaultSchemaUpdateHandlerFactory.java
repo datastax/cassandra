@@ -21,7 +21,6 @@ package org.apache.cassandra.schema;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 public class DefaultSchemaUpdateHandlerFactory implements SchemaUpdateHandlerFactory

@@ -43,10 +43,12 @@ public interface SchemaUpdateHandler
      * Initialize the schema from some storage. This is called in the beginning before we actually start accessing
      * schema. It should return the applied diff on the schema which is actually the diff between the empty schema
      * and the loaded one.
+     * <p>
+     * This method is not expected to call pre-update and post-update callbacks
      *
      * @return the difference in schema made by this method
      */
-    CompletableFuture<SchemaTransformationResult> initializeSchemaFromDisk();
+    SchemaTransformationResult initializeSchemaFromDisk();
 
     /**
      * Starts actively synchronizing schema with the rest of the cluster. It is called in the very beginning of the
@@ -81,25 +83,23 @@ public interface SchemaUpdateHandler
      * the runtime schema. Whether the callback is called before or after persisting schema to the underlying storage
      * is unspecified.
      *
-     * @param transformation    the transformation to apply to the current schema
-     * @param locally           whether the changes should be immediately synced with the cluster
-     * @param preUpdateCallback additional callback invoked when we know the changes to be made
+     * @param transformation the transformation to apply to the current schema
+     * @param locally        whether the changes should be immediately synced with the cluster
      */
-    CompletableFuture<SchemaTransformationResult> apply(SchemaTransformation transformation, boolean locally);
+    SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally);
 
     /**
      * Reloads the schema from the underlying storage.
      * <p>
-     * The method is similar to {@link #apply(SchemaTransformation, boolean, Consumer)}, where the transformation is
+     * The method is similar to {@link #apply(SchemaTransformation, boolean)}, where the transformation is
      * made from the runtime schema to the schema loaded from the underlying storage. The method synchronizes the change
-     * with the cluster and similarly to {@link #apply(SchemaTransformation, boolean, Consumer)} lets passing pre-update
+     * with the cluster and similarly to {@link #apply(SchemaTransformation, boolean)} lets passing pre-update
      * callback with the same semantics.
      *
-     * @param preUpdateCallback additional callback invoked when we know the changes to be made
      * @return the difference between the runtime schema and the schema loaded from the underlying storage
      * TODO maybe instead of this method, it would be better to have a method which just returns the schema from the underlying storage, then the called could manually invoke #apply and we would not have any redundancy here
      */
-    CompletableFuture<SchemaTransformationResult> reloadSchemaFromDisk();
+    SchemaTransformationResult reloadSchemaFromDisk();
 
     /**
      * If schema tracker needs to process native schema messages exchanged via Gossip, it should implement this interface.
@@ -108,16 +108,15 @@ public interface SchemaUpdateHandler
     {
         /**
          * Called when schema push message is received. It basically does the same thing as
-         * {@link #apply(SchemaTransformation, boolean, Consumer)} but it accepts the transformation in legacy format
+         * {@link #apply(SchemaTransformation, boolean)} but it accepts the transformation in legacy format
          * - a collection of mutations to be applied on schema keyspace. It lets passing pre-update handler whose
-         * semantics is the same as in case of {@link #apply(SchemaTransformation, boolean, Consumer)}.
+         * semantics is the same as in case of {@link #apply(SchemaTransformation, boolean)}.
          *
-         * @param pushRequestFrom   the endpoint from which the schema transformation was received
-         * @param schemaMutations   schema transformation
-         * @param preUpdateCallback additional callback invoked when we know the changes to be made
+         * @param pushRequestFrom the endpoint from which the schema transformation was received
+         * @param schemaMutations schema transformation
          * @return the result of changes applied to the runtime schema
          */
-        CompletableFuture<SchemaTransformationResult> applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations);
+        SchemaTransformationResult applyReceivedSchemaMutations(InetAddressAndPort pushRequestFrom, Collection<Mutation> schemaMutations);
 
         /**
          * Called when schema pull message is received. It converts the runtime schema into a collection of mutations
@@ -126,7 +125,7 @@ public interface SchemaUpdateHandler
          * @param pullRequestFrom the endpoint from which the schema pull request was received
          * @return the runtime schema as a collection of mutations
          */
-        CompletableFuture<Collection<Mutation>> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom);
+        Collection<Mutation> prepareRequestedSchemaMutations(InetAddressAndPort pullRequestFrom);
 
         /**
          * Clears the local schema and pull schema from other nodes.
@@ -142,6 +141,6 @@ public interface SchemaUpdateHandler
          */
         @Deprecated
         // TODO remove or refactor this method as it is dangerous
-        CompletableFuture<SchemaTransformationResult> clearUnsafe();
+        SchemaTransformationResult clearUnsafe();
     }
 }

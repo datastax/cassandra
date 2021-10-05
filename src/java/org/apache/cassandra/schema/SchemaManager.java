@@ -190,40 +190,54 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.waitUntilReady(timeout);
     }
 
+    private <T> T execute(Supplier<CompletableFuture<T>> f)
+    {
+        CompletableFuture<Void> start = new CompletableFuture<>();
+        CompletableFuture<T> r = start.thenComposeAsync(ignored -> f.get(), this::execute);
+        start.complete(null);
+        return FBUtilities.waitOnFuture(r, SCHEMA_UPDATE_TIMEOUT);
+    }
+
     public void initializeSchemaFromDisk()
     {
         logger.debug("Initializing schema from disk");
         SchemaDiagnostics.schemaLoading(schema());
-        FBUtilities.waitOnFuture(updateHandler.initializeSchemaFromDisk()
-                                              .thenAccept(update -> {
-                                                  assert threadContext.get() == this;
-                                                  updateRefs(update.diff);
-                                                  announceVersionUpdate(update.after);
-                                                  logger.debug("Initialized schema from disk: {}", update);
-                                                  SchemaDiagnostics.schemaLoaded(update.after);
-                                              }), SCHEMA_UPDATE_TIMEOUT);
+        FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> {
+            assert threadContext.get() == this;
+            SchemaTransformationResult update = updateHandler.initializeSchemaFromDisk();
+            updateRefs(update.diff);
+            announceVersionUpdate(update.after);
+            logger.debug("Initialized schema from disk: {}", update);
+            SchemaDiagnostics.schemaLoaded(update.after);
+            return update;
+        }, this::execute), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public void reloadSchemaFromDisk()
     {
         logger.debug("Reloading schema from disk");
         SchemaDiagnostics.schemaLoading(schema());
-        FBUtilities.waitOnFuture(updateHandler.reloadSchemaFromDisk()
-                                              .thenAccept(update -> SchemaDiagnostics.schemaLoaded(schema())), SCHEMA_UPDATE_TIMEOUT);
+        FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> {
+            SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
+            SchemaDiagnostics.schemaLoaded(schema());
+            return update;
+        }, this::execute), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
         logger.debug("Applying schema transformation{}: {}", locally ? " locally" : "", transformation);
-        return FBUtilities.waitOnFuture(updateHandler.apply(transformation, locally), SCHEMA_UPDATE_TIMEOUT);
+        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> updateHandler.apply(transformation, locally), this::execute), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public void clearUnsafe()
     {
         logger.debug("Clearing schema");
-        FBUtilities.waitOnFuture(CompletableFuture.runAsync(() -> updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none())), executor)
-                                                  .thenCompose(ignored -> gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe())
-                                                  .thenAccept(update -> SchemaDiagnostics.schemaCleared(schema())), SCHEMA_UPDATE_TIMEOUT);
+        FBUtilities.waitOnFuture(CompletableFuture.runAsync(() -> {
+            updateRefs(Keyspaces.diff(schema().getKeyspaces(), Keyspaces.none()));
+            SchemaTransformationResult update = gossipAwareSchemaUpdateHandlerOrThrow(null).clearUnsafe();
+            SchemaDiagnostics.schemaCleared(schema());
+        }, executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     /**
@@ -591,19 +605,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         logger.debug("Applying schema mutations from {}: {}", from, payload);
-        FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from)
-                                 .applyReceivedSchemaMutations(from, payload), SCHEMA_UPDATE_TIMEOUT);
+        FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload), this::execute), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
         logger.debug("Preparing schema mutations for {}", from);
-        return FBUtilities.waitOnFuture(gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from).whenComplete((mutations, t) -> {
-            if (t == null)
-                logger.debug("Prepared schema mutations for {}: {}", from, mutations);
-            else
-                logger.warn("Failed to prepare schema mutations for " + from, t);
-        }), SCHEMA_UPDATE_TIMEOUT);
+        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from), this::execute), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Schema schema()
