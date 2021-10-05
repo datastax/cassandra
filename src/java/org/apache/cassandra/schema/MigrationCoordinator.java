@@ -636,6 +636,7 @@ public class MigrationCoordinator
 
     public void pushSchemaMutations(Collection<Mutation> schemaMutations)
     {
+        logger.debug("Pushing schema mutations: {}", schemaMutations);
         Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
         Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
         Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schemaMutations);
@@ -643,6 +644,7 @@ public class MigrationCoordinator
         {
             if (shouldPushSchemaTo(endpoint))
             {
+                logger.debug("Pushing schema mutations to {}: {}", endpoint, schemaMutations);
                 MessagingService.instance().send(message, endpoint);
                 schemaDestinationEndpoints.add(endpoint);
             }

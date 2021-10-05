@@ -760,7 +760,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
         protected String getMonitorTimeoutMessage()
         {
             return String.format("Schema agreement not reached. Schema versions of the instances: %s",
-                                 instances.stream().map(IInstance::schemaVersion).collect(Collectors.toList()));
+                                 instances.stream().map(IInstance::schemaVersion).distinct().collect(Collectors.toList()));
         }
     }
 

@@ -277,5 +277,15 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         {
             return created.isEmpty() && dropped.isEmpty() && altered.isEmpty();
         }
+
+        @Override
+        public String toString()
+        {
+            return "KeyspacesDiff{" +
+                   "created=" + created +
+                   ", dropped=" + dropped +
+                   ", altered=" + altered +
+                   '}';
+        }
     }
 }

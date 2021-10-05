@@ -102,7 +102,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     private void setSchema(Schema schema)
     {
         this.schema = schema;
-        SchemaDiagnostics.versionUpdated(schema);
     }
 
     @Override
@@ -198,7 +197,6 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
         preUpdateCallback.accept(update);
         updateSchema(update);
-        announceVersionUpdate(after);
         postUpdateCallback.accept(update);
 
         return update;
@@ -226,12 +224,10 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
         preUpdateCallback.accept(update);
         updateSchema(update);
-        if (!locally)
-        {
-            migrationCoordinator.pushSchemaMutations(mutations); // this was not there in OSS, but it is there in DSE
-            announceVersionUpdate(after);
-        }
         postUpdateCallback.accept(update);
+
+        if (!locally)
+            migrationCoordinator.pushSchemaMutations(mutations); // this was not there in OSS, but it is there in DSE
 
         return update;
     }
@@ -255,18 +251,8 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
             UUID version = SchemaKeyspace.calculateSchemaDigest();
             Schema after = new Schema(keyspaces, version);
             setSchema(after);
-            if (!keyspaces.isEmpty())
-                announceVersionUpdate(after);
-
             return new SchemaTransformationResult(before, after, Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces()));
         }, executor);
-    }
-
-    private void announceVersionUpdate(Schema schema)
-    {
-        if (Gossiper.instance.isEnabled())
-            Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
-        SchemaDiagnostics.versionAnnounced(schema);
     }
 
     /*

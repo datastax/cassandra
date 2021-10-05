@@ -61,7 +61,6 @@ public interface SchemaTransformation
         @Override
         public String toString()
         {
-            return String.format("SchemaTransformationResult{before=%s, after=%s, diff=%s}", before, after, diff);
-        }
+            return String.format("SchemaTransformationResult{%s --> %s, diff=%s}", before.getVersion(), after.getVersion(), diff);        }
     }
 }

@@ -487,6 +487,7 @@ public class FBUtilities
         }
         catch (ExecutionException ee)
         {
+            logger.info("Exception occurred in async code", ee);
             throw Throwables.cleaned(ee);
         }
         catch (InterruptedException ie)
@@ -504,7 +505,8 @@ public class FBUtilities
         }
         catch (ExecutionException ee)
         {
-            throw new RuntimeException(Throwables.cleaned(ee));
+            logger.info("Exception occurred in async code", ee);
+            throw Throwables.cleaned(ee);
         }
         catch (InterruptedException ie)
         {
