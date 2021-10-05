@@ -30,7 +30,6 @@ import org.apache.cassandra.distributed.api.TokenSupplier;
 import org.apache.cassandra.distributed.shared.NetworkTopology;
 import org.apache.cassandra.schema.MigrationCoordinator;
 import org.apache.cassandra.schema.SchemaManager;
-import org.apache.cassandra.schema.SchemaUpdateHandler;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;

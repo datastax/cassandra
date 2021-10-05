@@ -36,11 +36,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -173,17 +174,33 @@ public class MigrationCoordinator
     private final Map<InetAddressAndPort, UUID> endpointVersions = new HashMap<>();
     private final Set<InetAddressAndPort> ignoredEndpoints = getIgnoredEndpoints();
     private final BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback;
+    private final Supplier<Schema> schemaSupplier;
+    private final ScheduledThreadPoolExecutor executor;
 
-    public MigrationCoordinator(MessagingService messagingService, BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback)
+    /**
+     * Creates but does not start migration coordinator instance.
+     *
+     * @param messagingService     messaging service instance used to communicate with other nodes for pulling schema
+     *                             and pushing changes
+     * @param schemaUpdateCallback called when we receive a schema which should be applied on this node
+     * @param schemaSupplier       provides the current schema on this node
+     * @param executor             executor on which the period checks are scheduled
+     */
+    public MigrationCoordinator(MessagingService messagingService,
+                                BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback,
+                                Supplier<Schema> schemaSupplier,
+                                ScheduledThreadPoolExecutor executor)
     {
         this.messagingService = messagingService;
         this.schemaUpdateCallback = schemaUpdateCallback;
+        this.schemaSupplier = schemaSupplier;
+        this.executor = executor;
     }
 
     public void start()
     {
         periodicPullTask.updateAndGet(curTask -> curTask == null
-                                                 ? ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES)
+                                                 ? executor.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES)
                                                  : curTask);
     }
 
@@ -264,7 +281,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected boolean shouldPullSchema(UUID version)
     {
-        Schema schema = SchemaManager.instance.schema();
+        Schema schema = schemaSupplier.get();
 
         if (Objects.equals(schema.getVersion(), version))
         {
@@ -321,7 +338,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected boolean shouldPullImmediately(InetAddressAndPort endpoint, UUID version)
     {
-        Schema schema = SchemaManager.instance.schema();
+        Schema schema = schemaSupplier.get();
         if (schema.isEmpty() || getUptimeFn.getAsLong() < MIGRATION_DELAY_IN_MS)
         {
             // If we think we may be bootstrapping or have recently started, submit MigrationTask immediately
@@ -338,7 +355,7 @@ public class MigrationCoordinator
     @VisibleForTesting
     protected boolean isLocalVersion(UUID version)
     {
-        return SchemaManager.instance.schema().getVersion().equals(version);
+        return schemaSupplier.get().getVersion().equals(version);
     }
 
     /**

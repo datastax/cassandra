@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.ApplicationState;
@@ -79,7 +80,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
 
     private MigrationCoordinator createMigrationCoordinator()
     {
-        return new MigrationCoordinator(MessagingService.instance(), this::applyReceivedSchemaMutations);
+        return new MigrationCoordinator(MessagingService.instance(), this::applyReceivedSchemaMutations, this::schema, ScheduledExecutors.scheduledTasks);
     }
 
     public DefaultSchemaUpdateHandler(MigrationCoordinator migrationCoordinator,
