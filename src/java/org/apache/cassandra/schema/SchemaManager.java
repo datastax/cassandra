@@ -27,7 +27,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
-import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -105,6 +104,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private final Executor executor;
 
+    private final boolean updateInstances;
+
     private final boolean online;
 
     /**
@@ -119,11 +120,12 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
              !FORCE_OFFLINE_MODE && isDaemonInitialized());
     }
 
-    public SchemaManager(LocalKeyspaces localKeyspaces, SchemaUpdateHandlerFactory updateHandlerFactory, Executor executor, boolean online, boolean updateHandlerMode)
+    public SchemaManager(LocalKeyspaces localKeyspaces, SchemaUpdateHandlerFactory updateHandlerFactory, Executor executor, boolean updateInstances, boolean online)
     {
+        this.updateInstances = updateInstances;
         this.online = online;
         this.executor = executor;
-        this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(updateHandlerMode, this::execute, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
+        this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(online, this::execute, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
         this.localKeyspaces = localKeyspaces;
         this.localKeyspaces.getAll().forEach(ksm -> {
             schemaRefCache.addNewRefs(ksm);
@@ -159,17 +161,21 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         logger.debug("Schema changed: {}", update);
         updateRefs(update.diff);
         applyChangesLocally(update.diff);
-        SystemKeyspace.updateSchemaVersion(update.after.getVersion());
-        SchemaDiagnostics.versionUpdated(update.after);
-
         announceVersionUpdate(update.after);
     }
 
     private void announceVersionUpdate(Schema schema)
     {
-        if (Gossiper.instance.isEnabled())
+        if (online)
+        {
+            SystemKeyspace.updateSchemaVersion(schema.getVersion());
+            SchemaDiagnostics.versionUpdated(schema);
+        }
+        if (online && Gossiper.instance.isEnabled())
+        {
             Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(schema.getVersion()));
-        SchemaDiagnostics.versionAnnounced(schema);
+            SchemaDiagnostics.versionAnnounced(schema);
+        }
     }
 
     public void startSync()
@@ -192,8 +198,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                                               .thenAccept(update -> {
                                                   assert threadContext.get() == this;
                                                   updateRefs(update.diff);
-                                                  SystemKeyspace.updateSchemaVersion(update.after.getVersion());
-                                                  SchemaDiagnostics.versionUpdated(update.after);
                                                   announceVersionUpdate(update.after);
                                                   logger.debug("Initialized schema from disk: {}", update);
                                                   SchemaDiagnostics.schemaLoaded(update.after);
@@ -609,7 +613,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
 
     private void applyChangesLocally(KeyspacesDiff diff)
     {
-        if (online)
+        if (updateInstances)
         {
             diff.dropped.forEach(this::dropKeyspace);
             diff.created.forEach(this::createKeyspace);
