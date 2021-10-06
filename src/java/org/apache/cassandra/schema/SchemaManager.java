@@ -124,8 +124,8 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     {
         this.updateInstances = updateInstances;
         this.online = online;
-        this.executor = executor;
-        this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(online, this::execute, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
+        this.executor = createExecutor(executor);
+        this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(online, this.executor, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
         this.localKeyspaces = localKeyspaces;
         this.localKeyspaces.getAll().forEach(ksm -> {
             schemaRefCache.addNewRefs(ksm);
@@ -133,32 +133,35 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         });
     }
 
-    private void execute(Runnable runnable)
+    private Executor createExecutor(Executor underlying)
     {
-        if (threadContext.get() == this)
-        {
-            runnable.run();
-        }
-        else
-        {
-            executor.execute(() -> {
-                assert threadContext.get() == null;
-                threadContext.set(this);
-                try
-                {
-                    runnable.run();
-                }
-                finally
-                {
-                    threadContext.remove();
-                }
-            });
-        }
+        return runnable -> {
+            if (threadContext.get() == this)
+            {
+                runnable.run();
+            }
+            else
+            {
+                underlying.execute(() -> {
+                    assert threadContext.get() == null;
+                    threadContext.set(this);
+                    try
+                    {
+                        runnable.run();
+                    }
+                    finally
+                    {
+                        threadContext.remove();
+                    }
+                });
+            }
+        };
     }
 
     private void onSchemaChanged(SchemaTransformationResult update)
     {
         logger.debug("Schema changed: {}", update);
+        assert threadContext.get() == this;
         updateRefs(update.diff);
         applyChangesLocally(update.diff);
         announceVersionUpdate(update.after);
@@ -190,14 +193,6 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         return updateHandler.waitUntilReady(timeout);
     }
 
-    private <T> T execute(Supplier<CompletableFuture<T>> f)
-    {
-        CompletableFuture<Void> start = new CompletableFuture<>();
-        CompletableFuture<T> r = start.thenComposeAsync(ignored -> f.get(), this::execute);
-        start.complete(null);
-        return FBUtilities.waitOnFuture(r, SCHEMA_UPDATE_TIMEOUT);
-    }
-
     public void initializeSchemaFromDisk()
     {
         logger.debug("Initializing schema from disk");
@@ -210,7 +205,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             logger.debug("Initialized schema from disk: {}", update);
             SchemaDiagnostics.schemaLoaded(update.after);
             return update;
-        }, this::execute), SCHEMA_UPDATE_TIMEOUT);
+        }, executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public void reloadSchemaFromDisk()
@@ -221,13 +216,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
             SchemaTransformationResult update = updateHandler.reloadSchemaFromDisk();
             SchemaDiagnostics.schemaLoaded(schema());
             return update;
-        }, this::execute), SCHEMA_UPDATE_TIMEOUT);
+        }, executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public SchemaTransformationResult apply(SchemaTransformation transformation, boolean locally)
     {
         logger.debug("Applying schema transformation{}: {}", locally ? " locally" : "", transformation);
-        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> updateHandler.apply(transformation, locally), this::execute), SCHEMA_UPDATE_TIMEOUT);
+        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> updateHandler.apply(transformation, locally), executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public void clearUnsafe()
@@ -338,7 +333,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
                 future = empty;
                 try
                 {
-                    empty.complete(FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(loadFunction, this::execute), SCHEMA_UPDATE_TIMEOUT));
+                    empty.complete(FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(loadFunction, executor), SCHEMA_UPDATE_TIMEOUT));
                 }
                 catch (Throwable t)
                 {
@@ -605,13 +600,13 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
     public void applyReceivedSchemaMutationsOrThrow(InetAddressAndPort from, Collection<Mutation> payload)
     {
         logger.debug("Applying schema mutations from {}: {}", from, payload);
-        FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload), this::execute), SCHEMA_UPDATE_TIMEOUT);
+        FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema push request from " + from).applyReceivedSchemaMutations(from, payload), executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Collection<Mutation> prepareRequestedSchemaMutationsOrThrow(InetAddressAndPort from)
     {
         logger.debug("Preparing schema mutations for {}", from);
-        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from), this::execute), SCHEMA_UPDATE_TIMEOUT);
+        return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from), executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
     public Schema schema()
