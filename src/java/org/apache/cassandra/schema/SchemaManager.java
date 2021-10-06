@@ -288,7 +288,7 @@ public final class SchemaManager implements SchemaProvider, IEndpointStateChange
         if (metadata == null)
             return null;
 
-        Keyspace instance = Keyspace.open(metadata.keyspace);
+        Keyspace instance = getKeyspaceInstance(metadata.keyspace);
         if (instance == null)
             return null;
 
