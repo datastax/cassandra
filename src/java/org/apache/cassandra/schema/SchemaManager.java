@@ -69,11 +69,23 @@ import static org.apache.cassandra.config.DatabaseDescriptor.isDaemonInitialized
 import static org.apache.cassandra.config.DatabaseDescriptor.isToolInitialized;
 
 /**
- * Manages keyspace instances. It provides methods to query schema, but it does not provide any methods to modify the
- * schema. All schema modification are managed by the implementation of {@link SchemaUpdateHandler}. Once the schema is
- * updated, {@link SchemaUpdateHandler} applies the changes to the keyspace instances stored by {@link SchemaManager}.
+ * Manages shared schema, keyspace instances and table metadata refs in a thread-safe way. Provides methods
+ * to initialize, modify and query both the shared and local schema, as well as to register listeners.
+ * <p>
+ * This class should be the only entity used to query and manage schema. Internal details should not be access in
+ * production code (would be great if they were not accessed in the test code as well).
+ * <p>
+ * TL;DR: All modifications are made using the provided executor, which is expected to be single thread executor
+ * (by default it is {@link Stage#SCHEMA_UPDATE}) and guarantees thread safety. Modification is made using the
+ * implementation of {@link SchemaUpdateHandler} obtained from the provided factory. After each modification,
+ * the internally managed table metadata refs and keyspaces instances are updated and notifications are sent to the
+ * registered listeners - all of those operations are chained and executed in the same thread. When the schema change
+ * is received from outside and processed internally by the update handler, the update handler should make that change
+ * using the provided executor (the same as the one used in the manager for modifications by default), and then it
+ * executes the post-update callback registered by the manager, which performs the remaining updates for tables metadata
+ * refs and keyspace instances (see {@link #onSchemaChanged(SchemaTransformationResult)}.
  */
-public final class SchemaManager implements SchemaProvider, IEndpointStateChangeSubscriber
+public final class SchemaManager implements SchemaProvider
 {
     private final static Logger logger = LoggerFactory.getLogger(SchemaManager.class);
 

@@ -29,13 +29,11 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
 /**
- * Schema update handler is responsible for maintaining the current schema and synchronizing it with other nodes in
+ * Schema update handler is responsible for maintaining the shared schema and synchronizing it with other nodes in
  * the cluster, which means pushing and pulling changes, as well as tracking the current version in the cluster.
  * <p/>
- * The changes made in schema are applied to {@link SchemaManager}.
- * <p/>
- * The interface has been extracted to abstract out that functionality, allow for various implementations like Gossip
- * based (the default), ETCD, offline, etc., and make it easier for mocking in unit tests.
+ * The interface has been extracted to abstract out that functionality. It allows for various implementations like
+ * Gossip based (the default), ETCD, offline, etc., and make it easier for mocking in unit tests.
  */
 public interface SchemaUpdateHandler
 {
@@ -58,7 +56,7 @@ public interface SchemaUpdateHandler
     void start();
 
     /**
-     * Waits until the schema update handler is ready and return the result. If the method returns {@code false} it
+     * Waits until the schema update handler is ready and returns the result. If the method returns {@code false} it
      * means that readiness could not be achieved within the specified period of time. The method can be used just to
      * check if schema is ready by passing {@link Duration#ZERO} as the timeout - in such case it returns immediately.
      *
