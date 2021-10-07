@@ -145,8 +145,8 @@ public enum Verb
 
     // P1 because messages can be arbitrarily large or aren't crucial
     SCHEMA_PUSH_RSP        (98,  P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,                 () -> ResponseVerbHandler.instance                             ),
-    SCHEMA_PUSH_REQ        (18, P1, rpcTimeout, MIGRATION, () -> SchemaMutationsSerializer.instance, () -> SchemaPushVerbHandler.instance, SCHEMA_PUSH_RSP     ),
-    SCHEMA_PULL_RSP        (88, P1, rpcTimeout, MIGRATION, () -> SchemaMutationsSerializer.instance, () -> ResponseVerbHandler.instance                             ),
+    SCHEMA_PUSH_REQ        (18,  P1, rpcTimeout,      MIGRATION,         () -> SchemaMutationsSerializer.instance,   () -> SchemaPushVerbHandler.instance,      SCHEMA_PUSH_RSP     ),
+    SCHEMA_PULL_RSP        (88,  P1, rpcTimeout,      MIGRATION,         () -> SchemaMutationsSerializer.instance,   () -> ResponseVerbHandler.instance                             ),
     SCHEMA_PULL_REQ        (28,  P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,                 () -> SchemaPullVerbHandler.instance,      SCHEMA_PULL_RSP     ),
     SCHEMA_VERSION_RSP     (80,  P1, rpcTimeout,      MIGRATION,         () -> UUIDSerializer.serializer,            () -> ResponseVerbHandler.instance                             ),
     SCHEMA_VERSION_REQ     (20,  P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,                 () -> SchemaVersionVerbHandler.instance,   SCHEMA_VERSION_RSP  ),

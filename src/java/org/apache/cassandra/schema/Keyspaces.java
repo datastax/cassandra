@@ -68,7 +68,7 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         return keyspaces.values().stream();
     }
 
-    public Set<String> names()
+    public ImmutableSet<String> names()
     {
         return keyspaces.keySet();
     }

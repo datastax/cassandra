@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledFuture;
@@ -73,7 +74,7 @@ import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 public class MigrationCoordinator
 {
     private static final Logger logger = LoggerFactory.getLogger(MigrationCoordinator.class);
-    private static final Future<Void> FINISHED_FUTURE = Futures.immediateFuture(null);
+    private static final CompletableFuture<Void> FINISHED_FUTURE = CompletableFuture.completedFuture(null);
 
     private static LongSupplier getUptimeFn = () -> ManagementFactory.getRuntimeMXBean().getUptime();
 
@@ -221,7 +222,7 @@ public class MigrationCoordinator
         return futures;
     }
 
-    private synchronized Future<Void> maybePullSchema(VersionInfo info)
+    private synchronized CompletableFuture<Void> maybePullSchema(VersionInfo info)
     {
         if (info.endpoints.isEmpty() || info.wasReceived() || !shouldPullSchema(info.version))
             return FINISHED_FUTURE;
@@ -247,7 +248,7 @@ public class MigrationCoordinator
         }
 
         // no suitable endpoints were found, check again in a minute, the periodic task will pick it up
-        return null;
+        return FINISHED_FUTURE;
     }
 
     // used only in log message
@@ -368,7 +369,7 @@ public class MigrationCoordinator
         return !isLocalVersion(info.version);
     }
 
-    private synchronized Future<Void> reportEndpointVersionInternal(InetAddressAndPort endpoint, UUID version)
+    public synchronized CompletableFuture<Void> reportEndpointVersion(InetAddressAndPort endpoint, UUID version)
     {
         if (ignoredEndpoints.contains(endpoint) || IGNORED_VERSIONS.contains(version))
         {
@@ -393,30 +394,15 @@ public class MigrationCoordinator
         return maybePullSchema(info);
     }
 
-    public void reportEndpointVersion(InetAddressAndPort endpoint, UUID version)
-    {
-        reportEndpointVersionInternal(endpoint, version);
-    }
-
-    public void reportEndpointVersion(InetAddressAndPort endpoint, UUID version, boolean waitForPull)
-    {
-        Future<Void> result = reportEndpointVersionInternal(endpoint, version);
-        if (result != null && waitForPull)
-            FBUtilities.waitOnFuture(result, Duration.ofMinutes(10));
-    }
-
-    public void reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state, boolean waitForPull)
+    public CompletableFuture<Void> reportEndpointVersion(InetAddressAndPort endpoint, EndpointState state)
     {
         if (state != null)
         {
             UUID version = state.getSchemaVersion();
             if (version != null)
-            {
-                Future<Void> result = reportEndpointVersionInternal(endpoint, version);
-                if (result != null && waitForPull)
-                    FBUtilities.waitOnFuture(result, Duration.ofMinutes(10));
-            }
+                return reportEndpointVersion(endpoint, version);
         }
+        return FINISHED_FUTURE;
     }
 
     private synchronized void removeEndpointFromVersion(InetAddressAndPort endpoint, UUID version)
@@ -448,18 +434,13 @@ public class MigrationCoordinator
         }
     }
 
-    private Future<Void> scheduleSchemaPull(InetAddressAndPort endpoint, VersionInfo info)
+    private CompletableFuture<Void> scheduleSchemaPull(InetAddressAndPort endpoint, VersionInfo info)
     {
-        FutureTask<Void> task = new FutureTask<>(() -> pullSchema(endpoint, new Callback(endpoint, info)), null);
-        if (shouldPullImmediately(endpoint, info.version))
-        {
-            submitToMigrationIfNotShutdown(task);
-        }
-        else
-        {
-            ScheduledExecutors.nonPeriodicTasks.schedule(() -> submitToMigrationIfNotShutdown(task), MIGRATION_DELAY_IN_MS, TimeUnit.MILLISECONDS);
-        }
-        return task;
+        Executor executor = shouldPullImmediately(endpoint, info.version)
+                            ? MigrationCoordinator::submitToMigrationIfNotShutdown
+                            : r -> ScheduledExecutors.nonPeriodicTasks.schedule(() -> submitToMigrationIfNotShutdown(r), MIGRATION_DELAY_IN_MS, TimeUnit.MILLISECONDS);
+
+        return CompletableFuture.runAsync(() -> pullSchema(endpoint, new Callback(endpoint, info)), executor);
     }
 
     public CompletableFuture<Collection<Mutation>> pullSchemaFrom(InetAddressAndPort endpoint)

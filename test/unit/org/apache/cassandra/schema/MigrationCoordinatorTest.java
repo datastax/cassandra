@@ -19,6 +19,7 @@
 package org.apache.cassandra.schema;
 
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -42,6 +43,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
@@ -143,6 +145,11 @@ public class MigrationCoordinatorTest
         {
             mergedSchemasFrom.add(endpoint);
         }
+
+        public void reportEndpointVersionBlocking(InetAddressAndPort endpoint, UUID version)
+        {
+            FBUtilities.waitOnFuture(this.reportEndpointVersion(endpoint, version), Duration.ofSeconds(10));
+        }
     }
 
     @Test
@@ -154,12 +161,12 @@ public class MigrationCoordinatorTest
         Assert.assertTrue(coordinator.requests.isEmpty());
 
         // first schema report should send a migration request
-        coordinator.reportEndpointVersion(EP1, V1, true);
+        coordinator.reportEndpointVersionBlocking(EP1, V1);
         Assert.assertEquals(1, coordinator.requests.size());
         Assert.assertFalse(coordinator.awaitSchemaRequests(1));
 
         // second should not
-        coordinator.reportEndpointVersion(EP2, V1, true);
+        coordinator.reportEndpointVersionBlocking(EP2, V1);
         Assert.assertEquals(1, coordinator.requests.size());
         Assert.assertFalse(coordinator.awaitSchemaRequests(1));
 
@@ -180,7 +187,7 @@ public class MigrationCoordinatorTest
         Assert.assertTrue(coordinator.awaitSchemaRequests(1));
 
         // and migration tasks should not be sent out for subsequent version reports
-        coordinator.reportEndpointVersion(EP3, V1, true);
+        coordinator.reportEndpointVersionBlocking(EP3, V1);
         Assert.assertTrue(coordinator.requests.isEmpty());
 
     }
@@ -228,7 +235,7 @@ public class MigrationCoordinatorTest
     private static void assertNoContact(InstrumentedCoordinator coordinator, InetAddressAndPort endpoint, UUID version, boolean startupShouldBeUnblocked)
     {
         Assert.assertTrue(coordinator.requests.isEmpty());
-        coordinator.reportEndpointVersion(EP1, V1, true);
+        coordinator.reportEndpointVersionBlocking(EP1, V1);
         Assert.assertTrue(coordinator.requests.isEmpty());
 
         Assert.assertEquals(startupShouldBeUnblocked, coordinator.awaitSchemaRequests(1));
@@ -291,11 +298,11 @@ public class MigrationCoordinatorTest
     {
         InstrumentedCoordinator coordinator = new InstrumentedCoordinator();
 
-        coordinator.reportEndpointVersion(EP3, V2, true);
+        coordinator.reportEndpointVersionBlocking(EP3, V2);
         coordinator.requests.remove().response(Collections.emptyList());
 
-        coordinator.reportEndpointVersion(EP1, V1, true);
-        coordinator.reportEndpointVersion(EP2, V1, true);
+        coordinator.reportEndpointVersionBlocking(EP1, V1);
+        coordinator.reportEndpointVersionBlocking(EP2, V1);
 
         MigrationCoordinator.Callback prev = null;
         Set<InetAddressAndPort> EPs = Sets.newHashSet(EP1, EP2);

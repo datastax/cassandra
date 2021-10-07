@@ -30,6 +30,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.ByteArrayUtil;
 
+/**
+ * Update handler which works only in memory. It does not load or save the schema anywhere. It is used in client mode
+ * applications.
+ */
 public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 {
     private final static Logger logger = LoggerFactory.getLogger(OfflineSchemaUpdateHandler.class);

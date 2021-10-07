@@ -25,6 +25,13 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import org.apache.cassandra.utils.Pair;
 
+/**
+ * Manages the cached {@link TableMetadataRef} objects which holds the references to {@link TableMetadata} objects.
+ * <p>
+ * The purpose of {@link TableMetadataRef} is that the reference to {@link TableMetadataRef} remains unchanged when
+ * the metadata of the table changes. {@link TableMetadata} is immutable, so when it changes, we only switch
+ * the reference inside the existing {@link TableMetadataRef} object.
+ */
 class SchemaRefCache
 {
     // UUID -> mutable metadata ref map. We have to update these in place every time a table changes.

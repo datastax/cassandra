@@ -26,6 +26,11 @@ import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 
+/**
+ * Registers schema change listeners and sends the notifications. The interface of this class just takes the high level
+ * keyspace metadata changes. It iterates over all keyspaces elements and distribute appropriate notifications about
+ * changes around those elements (tables, views, types, functions).
+ */
 public class SchemaChangeNotifier
 {
     private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();

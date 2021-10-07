@@ -224,7 +224,7 @@ public class GossipHelper
             pullTo.acceptsOnInstance((InetSocketAddress pullFrom) -> {
                 InetAddressAndPort endpoint = toCassandraInetAddressAndPort(pullFrom);
                 EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-                SchemaTestUtil.migrationCoordinator().reportEndpointVersion(endpoint, state, false);
+                SchemaTestUtil.migrationCoordinator().reportEndpointVersion(endpoint, state);
                 SchemaTestUtil.migrationCoordinator().awaitSchemaRequests(TimeUnit.SECONDS.toMillis(10));
             }).accept(pullFrom);
         }

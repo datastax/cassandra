@@ -55,7 +55,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 @NotThreadSafe
-public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAware, IEndpointStateChangeSubscriber
+public class DefaultSchemaUpdateHandler implements GossipAwareSchemaUpdateHandler, IEndpointStateChangeSubscriber
 {
     private final static Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 
@@ -116,8 +116,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
     }
 
     @Override
-    public @Nonnull
-    Schema schema()
+    public @Nonnull Schema schema()
     {
         return schema;
     }

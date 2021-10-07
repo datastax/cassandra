@@ -25,18 +25,16 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableCollection;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapDifference;
 
 import org.apache.cassandra.diag.DiagnosticEvent;
+import org.apache.cassandra.utils.Collectors3;
 
 public final class SchemaEvent extends DiagnosticEvent
 {
@@ -101,19 +99,19 @@ public final class SchemaEvent extends DiagnosticEvent
         this.viewsDiff = viewsDiff;
         this.indexesDiff = indexesDiff;
 
-        this.keyspaces = ImmutableSet.copyOf(schema.getKeyspaces().names());
+        this.keyspaces = schema.getKeyspaces().names();
         this.numberOfTables = schema.getKeyspaces().stream().mapToInt(ks -> ks.tables.size()).sum();
         this.version = schema.getVersion();
 
-        this.indexTables = ImmutableMap.copyOf(schema.getKeyspaces().stream()
+        this.indexTables = schema.getKeyspaces().stream()
                                                      .flatMap(ks -> ks.tables.indexTables().entrySet().stream())
-                                                     .collect(Collectors.toMap(e -> String.format("%s,%s", e.getValue().keyspace, e.getKey()),
-                                                                               e -> String.format("%s,%s,%s", e.getValue().id.toHexString(), e.getValue().keyspace, e.getValue().name))));
+                                                     .collect(Collectors3.toImmutableMap(e -> String.format("%s,%s", e.getValue().keyspace, e.getKey()),
+                                                                               e -> String.format("%s,%s,%s", e.getValue().id.toHexString(), e.getValue().keyspace, e.getValue().name)));
 
-        this.tables = ImmutableList.copyOf(schema.getKeyspaces().stream()
+        this.tables = schema.getKeyspaces().stream()
                                                  .flatMap(ks -> StreamSupport.stream(ks.tablesAndViews().spliterator(), false))
                                                  .map(e -> String.format("%s,%s,%s", e.id.toHexString(), e.keyspace, e.name))
-                                                 .collect(Collectors.toList()));
+                                                 .collect(Collectors3.toImmutableList());
     }
 
     public SchemaEventType getType()

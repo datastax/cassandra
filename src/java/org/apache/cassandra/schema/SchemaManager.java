@@ -52,7 +52,6 @@ import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
@@ -105,6 +104,12 @@ public final class SchemaManager implements SchemaProvider
     private final SchemaRefCache schemaRefCache = new SchemaRefCache();
 
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
+    // We operate on futures because we need to achieve atomic initialization with at-most-once semantics for
+    // loadFunction. Although it seems that this is a valid case for using ConcurrentHashMap.computeIfAbsent,
+    // we should not use it because we have no knowledge about the loadFunction and in fact that load function may
+    // do some nested calls to getOrCreateKeyspaceInstance, also using different threads, and in a blocking manner.
+    // This may lead to a deadlock. The documentation of ConcurrentHashMap says that manipulating other keys inside
+    // the lambda passed to the computeIfAbsent method is prohibited.
     private final ConcurrentMap<String, CompletableFuture<Keyspace>> keyspaceInstances = new NonBlockingHashMap<>();
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
@@ -738,16 +743,16 @@ public final class SchemaManager implements SchemaProvider
         SchemaDiagnostics.tableAltered(schema(), updated.metadata);
     }
 
-    private Optional<SchemaUpdateHandler.GossipAware> gossipAwareSchemaUpdateHandler()
+    private Optional<GossipAwareSchemaUpdateHandler> gossipAwareSchemaUpdateHandler()
     {
-        return updateHandler instanceof SchemaUpdateHandler.GossipAware
-               ? Optional.of((SchemaUpdateHandler.GossipAware) updateHandler)
+        return updateHandler instanceof GossipAwareSchemaUpdateHandler
+               ? Optional.of((GossipAwareSchemaUpdateHandler) updateHandler)
                : Optional.empty();
     }
 
-    private SchemaUpdateHandler.GossipAware gossipAwareSchemaUpdateHandlerOrThrow(String msg)
+    private GossipAwareSchemaUpdateHandler gossipAwareSchemaUpdateHandlerOrThrow(String msg)
     {
-        String format = "The current schema tracker (%s) does not implement GossipAware. %s";
+        String format = "The current schema update handler (%s) does not implement GossipAware. %s";
         return gossipAwareSchemaUpdateHandler().orElseThrow(() -> new UnsupportedOperationException(String.format(format, this.getClass().getName(), StringUtils.trimToEmpty(msg))));
     }
 }
