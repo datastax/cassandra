@@ -845,13 +845,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private boolean isReplacing()
+    public boolean isReplacing()
     {
+        if (replacing)
+            return true;
+
         if (System.getProperty("cassandra.replace_address_first_boot", null) != null && SystemKeyspace.bootstrapComplete())
         {
             logger.info("Replace address on first boot requested; this node is already bootstrapped");
             return false;
         }
+
         return DatabaseDescriptor.getReplaceAddress() != null;
     }
 
@@ -923,9 +927,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     appStates.put(ApplicationState.STATUS_WITH_PORT, valueFactory.hibernate(true));
                     appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
                 }
-
-                // TODO try to figure out if we really need this
-                // SchemaManager.instance.onRemove(DatabaseDescriptor.getReplaceAddress());
             }
             else
             {

@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -98,6 +99,8 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler.GossipAwa
         this.preUpdateCallback = preUpdateCallback;
         this.postUpdateCallback = postUpdateCallback;
         this.migrationCoordinator = migrationCoordinator == null ? createMigrationCoordinator(executor) : migrationCoordinator;
+        if (StorageService.instance.isReplacing())
+            onRemove(DatabaseDescriptor.getReplaceAddress());
         Gossiper.instance.register(this);
     }
 
