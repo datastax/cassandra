@@ -79,7 +79,6 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 import org.apache.cassandra.tracing.Tracing;
@@ -436,7 +435,7 @@ public class CassandraDaemon
             logger.debug("Completed submission of build tasks for any materialized views defined at startup");
         };
 
-        ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY_MILLIS, TimeUnit.MILLISECONDS);
 
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))
             Gossiper.waitToSettle();

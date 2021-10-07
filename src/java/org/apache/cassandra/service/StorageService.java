@@ -142,7 +142,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final Logger logger = LoggerFactory.getLogger(StorageService.class);
 
     public static final int INDEFINITE = -1;
-    public static final int RING_DELAY = getRingDelay(); // delay after which we assume ring has stablized
+    public static final int RING_DELAY_MILLIS = getRingDelay(); // delay after which we assume ring has stablized
     public static final int SCHEMA_DELAY_MILLIS = getSchemaDelay();
 
     private final JMXProgressSupport progressSupport = new JMXProgressSupport(this);
@@ -722,10 +722,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public synchronized void initServer() throws ConfigurationException
     {
-        initServer(SCHEMA_DELAY_MILLIS);
+        initServer(SCHEMA_DELAY_MILLIS, RING_DELAY_MILLIS);
     }
 
-    public synchronized void initServer(int schemaTimeoutMillis) throws ConfigurationException
+    public synchronized void initServer(int schemaAndRingDelayMillis) throws ConfigurationException
+    {
+        initServer(schemaAndRingDelayMillis);
+    }
+
+    public synchronized void initServer(int schemaTimeoutMillis, int ringTimeoutMillis) throws ConfigurationException
     {
         logger.info("Cassandra version: {}", FBUtilities.getReleaseVersionString());
         logger.info("CQL version: {}", QueryProcessor.CQL_VERSION);
@@ -792,7 +797,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (joinRing)
         {
-            joinTokenRing(schemaTimeoutMillis);
+            joinTokenRing(schemaTimeoutMillis, ringTimeoutMillis);
         }
         else
         {
@@ -987,15 +992,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new IllegalStateException("Could not achieve schema readiness in " + Duration.ofMillis(timeoutMillis));
     }
 
-    private void joinTokenRing(long schemaTimeoutMillis) throws ConfigurationException
+    private void joinTokenRing(long schemaTimeoutMillis, long ringTimeoutMillis) throws ConfigurationException
     {
-        joinTokenRing(!isSurveyMode, shouldBootstrap(), schemaTimeoutMillis, INDEFINITE);
+        joinTokenRing(!isSurveyMode, shouldBootstrap(), schemaTimeoutMillis, INDEFINITE, ringTimeoutMillis);
     }
 
     private void joinTokenRing(boolean finishJoiningRing,
                               boolean shouldBootstrap,
                               long schemaTimeoutMillis,
-                              long bootstrapTimeoutMillis) throws ConfigurationException
+                              long bootstrapTimeoutMillis,
+                              long ringTimeoutMillis) throws ConfigurationException
     {
         joined = true;
 
@@ -1026,7 +1032,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (shouldBootstrap)
         {
-            current.addAll(prepareForBootstrap(schemaTimeoutMillis));
+            current.addAll(prepareForBootstrap(schemaTimeoutMillis, ringTimeoutMillis));
             dataAvailable = bootstrap(bootstrapTokens, bootstrapTimeoutMillis);
         }
         else
@@ -1103,7 +1109,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Joining ring by operator request");
             try
             {
-                joinTokenRing(0);
+                joinTokenRing(0, 0);
             }
             catch (ConfigurationException e)
             {
@@ -1590,7 +1596,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     @VisibleForTesting
-    public Collection<InetAddressAndPort> prepareForBootstrap(long schemaTimeoutMillis)
+    public Collection<InetAddressAndPort> prepareForBootstrap(long schemaTimeoutMillis, long ringTimeoutMillis)
     {
         Set<InetAddressAndPort> collisions = new HashSet<>();
         if (SystemKeyspace.bootstrapInProgress())
@@ -1651,9 +1657,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     InetAddressAndPort existing = getTokenMetadata().getEndpoint(token);
                     if (existing != null)
                     {
-                        long nanoDelay = schemaTimeoutMillis * 1000000L;
+                        long nanoDelay = ringTimeoutMillis * 1000000L;
                         if (Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp() > (System.nanoTime() - nanoDelay))
-                            throw new UnsupportedOperationException("Cannot replace a live node... ");
+                            throw new UnsupportedOperationException("Cannot replace a live node... " + existing);
                         collisions.add(existing);
                     }
                     else
@@ -1666,7 +1672,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 try
                 {
-                    Thread.sleep(RING_DELAY);
+                    Thread.sleep(RING_DELAY_MILLIS);
                 }
                 catch (InterruptedException e)
                 {
@@ -1706,8 +1712,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                             valueFactory.bootReplacing(DatabaseDescriptor.getReplaceAddress().address) :
                                                             valueFactory.bootstrapping(tokens)));
             Gossiper.instance.addLocalApplicationStates(states);
-            setMode(Mode.JOINING, "sleeping " + RING_DELAY + " ms for pending range setup", true);
-            Uninterruptibles.sleepUninterruptibly(RING_DELAY, MILLISECONDS);
+            setMode(Mode.JOINING, "sleeping " + RING_DELAY_MILLIS + " ms for pending range setup", true);
+            Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
         }
         else
         {
@@ -4415,7 +4421,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
 
             startLeaving();
-            long timeout = Math.max(RING_DELAY, BatchlogManager.getBatchlogTimeout());
+            long timeout = Math.max(RING_DELAY_MILLIS, BatchlogManager.getBatchlogTimeout());
             setMode(Mode.LEAVING, "sleeping " + timeout + " ms for batch processing and pending range setup", true);
             Thread.sleep(timeout);
 
@@ -4465,7 +4471,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, valueFactory.left(getLocalTokens(),Gossiper.computeExpireTime()));
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.left(getLocalTokens(),Gossiper.computeExpireTime()));
-        int delay = Math.max(RING_DELAY, Gossiper.intervalInMillis * 2);
+        int delay = Math.max(RING_DELAY_MILLIS, Gossiper.intervalInMillis * 2);
         logger.info("Announcing that I have left the ring for {}ms", delay);
         Uninterruptibles.sleepUninterruptibly(delay, MILLISECONDS);
     }
@@ -4596,8 +4602,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.moving(newToken));
         setMode(Mode.MOVING, String.format("Moving %s from %s to %s.", localAddress, getLocalTokens().iterator().next(), newToken), true);
 
-        setMode(Mode.MOVING, String.format("Sleeping %s ms before start streaming/fetching ranges", RING_DELAY), true);
-        Uninterruptibles.sleepUninterruptibly(RING_DELAY, MILLISECONDS);
+        setMode(Mode.MOVING, String.format("Sleeping %s ms before start streaming/fetching ranges", RING_DELAY_MILLIS), true);
+        Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
 
         RangeRelocator relocator = new RangeRelocator(Collections.singleton(newToken), keyspacesToProcess, getTokenMetadata());
         relocator.calculateToFromStreams();
