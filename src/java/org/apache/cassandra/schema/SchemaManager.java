@@ -621,6 +621,11 @@ public final class SchemaManager implements SchemaProvider
         return FBUtilities.waitOnFuture(CompletableFuture.supplyAsync(() -> gossipAwareSchemaUpdateHandlerOrThrow("Received schema pull request from " + from).prepareRequestedSchemaMutations(from), executor), SCHEMA_UPDATE_TIMEOUT);
     }
 
+    /**
+     * Returns the schema as seen by the update handler. This means that when there is an ongoing schema change,
+     * this method returns the updated schema as soon as the update is persisted. However, the changes may not be
+     * applied yet to the table metadata refs and keyspaces instances.
+     */
     public Schema schema()
     {
         return updateHandler.schema();

@@ -78,6 +78,7 @@ import org.apache.cassandra.distributed.shared.ShutdownException;
 import org.apache.cassandra.distributed.shared.Versions;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import org.reflections.Reflections;
@@ -754,7 +755,10 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
 
         protected boolean isCompleted()
         {
-            return 1 == instances.stream().filter(instanceFilter).map(IInstance::schemaVersion).distinct().count();
+            Set<UUID> schemaVersions = instances.stream().filter(instanceFilter).map(IInstance::schemaVersion).collect(Collectors.toSet());
+            if (schemaVersions.contains(SchemaConstants.emptyVersion))
+                return false;
+            return schemaVersions.size() == 1;
         }
 
         protected String getMonitorTimeoutMessage()

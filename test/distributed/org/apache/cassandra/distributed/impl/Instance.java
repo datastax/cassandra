@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -103,7 +104,6 @@ import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaManager;
-import org.apache.cassandra.schema.SchemaUpdateHandler;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
@@ -223,7 +223,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     {
         // we do not use method reference syntax here, because we need to sync on the node-local schema instance
         //noinspection Convert2MethodRef
-        return SchemaManager.instance.schema().getVersion();
+        return Optional.ofNullable(SystemKeyspace.getSchemaVersion()).orElse(SchemaConstants.emptyVersion);
     }
 
     public void startup()
