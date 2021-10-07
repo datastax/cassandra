@@ -99,8 +99,6 @@ public class DefaultSchemaUpdateHandler implements GossipAwareSchemaUpdateHandle
         this.preUpdateCallback = preUpdateCallback;
         this.postUpdateCallback = postUpdateCallback;
         this.migrationCoordinator = migrationCoordinator == null ? createMigrationCoordinator(executor) : migrationCoordinator;
-        if (StorageService.instance.isReplacing())
-            onRemove(DatabaseDescriptor.getReplaceAddress());
         Gossiper.instance.register(this);
     }
 
@@ -112,6 +110,8 @@ public class DefaultSchemaUpdateHandler implements GossipAwareSchemaUpdateHandle
     @Override
     public void start()
     {
+        if (StorageService.instance.isReplacing())
+            onRemove(DatabaseDescriptor.getReplaceAddress());
         migrationCoordinator.start();
     }
 
