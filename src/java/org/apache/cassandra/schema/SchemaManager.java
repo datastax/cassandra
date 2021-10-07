@@ -101,7 +101,7 @@ public final class SchemaManager implements SchemaProvider
 
     private final LocalKeyspaces localKeyspaces;
 
-    private final SchemaRefCache schemaRefCache = new SchemaRefCache();
+    private final TableMetadataRefCache tableMetadataRefCache = new TableMetadataRefCache();
 
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
     // We operate on futures because we need to achieve atomic initialization with at-most-once semantics for
@@ -145,7 +145,7 @@ public final class SchemaManager implements SchemaProvider
         this.updateHandler = updateHandlerFactory.getSchemaUpdateHandler(online, this.executor, schemaChangeNotifier::notifyPreChanges, this::onSchemaChanged);
         this.localKeyspaces = localKeyspaces;
         this.localKeyspaces.getAll().forEach(ksm -> {
-            schemaRefCache.addNewRefs(ksm);
+            tableMetadataRefCache.addNewRefs(ksm);
             SchemaDiagnostics.metadataInitialized(this.updateHandler.schema(), ksm);
         });
     }
@@ -259,15 +259,15 @@ public final class SchemaManager implements SchemaProvider
     {
         Schema schema = updateHandler.schema();
         diff.dropped.forEach(ksm -> {
-            schemaRefCache.removeRefs(ksm);
+            tableMetadataRefCache.removeRefs(ksm);
             SchemaDiagnostics.metadataRemoved(schema, ksm);
         });
         diff.created.forEach(ksm -> {
-            schemaRefCache.addNewRefs(ksm);
+            tableMetadataRefCache.addNewRefs(ksm);
             SchemaDiagnostics.metadataInitialized(schema, ksm);
         });
         diff.altered.forEach(delta -> {
-            schemaRefCache.updateRefs(delta.before, delta.after);
+            tableMetadataRefCache.updateRefs(delta.before, delta.after);
             SchemaDiagnostics.metadataReloaded(schema, delta.before, delta.after, delta.tables, delta.views, delta.before.tables.indexesDiff(delta.after.tables));
         });
     }
@@ -500,12 +500,12 @@ public final class SchemaManager implements SchemaProvider
         TableMetadata tm = getTableMetadata(keyspace, table);
         return tm == null
                ? null
-               : schemaRefCache.getTableMetadataRef(tm.id);
+               : tableMetadataRefCache.getTableMetadataRef(tm.id);
     }
 
     public TableMetadataRef getIndexTableMetadataRef(String keyspace, String index)
     {
-        return schemaRefCache.getIndexTableMetadataRef(keyspace, index);
+        return tableMetadataRefCache.getIndexTableMetadataRef(keyspace, index);
     }
 
     /**
@@ -517,7 +517,7 @@ public final class SchemaManager implements SchemaProvider
     @Override
     public TableMetadataRef getTableMetadataRef(TableId id)
     {
-        return schemaRefCache.getTableMetadataRef(id);
+        return tableMetadataRefCache.getTableMetadataRef(id);
     }
 
     @Override
@@ -657,8 +657,8 @@ public final class SchemaManager implements SchemaProvider
         assert delta.before.name.equals(delta.after.name);
 
         // drop tables and views
-        delta.tables.dropped.forEach(t -> dropTable(keyspace, t));
         delta.views.dropped.forEach(v -> dropView(keyspace, v));
+        delta.tables.dropped.forEach(t -> dropTable(keyspace, t));
 
         // add tables and views
         delta.tables.created.forEach(t -> createTable(keyspace, t));
@@ -718,14 +718,14 @@ public final class SchemaManager implements SchemaProvider
     private void createTable(Keyspace keyspace, TableMetadata table)
     {
         SchemaDiagnostics.tableCreating(schema(), table);
-        keyspace.initCf(schemaRefCache.getTableMetadataRef(table.id), true);
+        keyspace.initCf(tableMetadataRefCache.getTableMetadataRef(table.id), true);
         SchemaDiagnostics.tableCreated(schema(), table);
     }
 
     private void createView(Keyspace keyspace, ViewMetadata view)
     {
         SchemaDiagnostics.tableCreating(schema(), view.metadata);
-        keyspace.initCf(schemaRefCache.getTableMetadataRef(view.metadata.id), true);
+        keyspace.initCf(tableMetadataRefCache.getTableMetadataRef(view.metadata.id), true);
         SchemaDiagnostics.tableCreated(schema(), view.metadata);
     }
 

@@ -3299,12 +3299,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return sstable -> !sstable.isMarkedSuspect() && !compacting.contains(sstable);
     }
 
-    /*
+    /**
      * Called when the table this is the store of has been dropped to perform any necessary actions.
      */
     public void onTableDropped()
     {
-        // make sure all the indexes are dropped, or else.
         indexManager.markAllIndexesRemoved();
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(metadata()));
         if (DatabaseDescriptor.isAutoSnapshot())

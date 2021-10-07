@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.Pair;
  * the metadata of the table changes. {@link TableMetadata} is immutable, so when it changes, we only switch
  * the reference inside the existing {@link TableMetadataRef} object.
  */
-class SchemaRefCache
+class TableMetadataRefCache
 {
     // UUID -> mutable metadata ref map. We have to update these in place every time a table changes.
     private final Map<TableId, TableMetadataRef> metadataRefs = new NonBlockingHashMap<>();
