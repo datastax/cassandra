@@ -1,6 +1,9 @@
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 
+4.1
+ * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
+
 4.0.4
 Merged from 3.0:
  * Fix flaky test - test_cqlsh_completion.TestCqlshCompletion (CASSANDRA-17338)
