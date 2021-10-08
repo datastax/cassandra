@@ -727,7 +727,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public synchronized void initServer(int schemaAndRingDelayMillis) throws ConfigurationException
     {
-        initServer(schemaAndRingDelayMillis);
+        initServer(schemaAndRingDelayMillis, schemaAndRingDelayMillis);
     }
 
     public synchronized void initServer(int schemaTimeoutMillis, int ringTimeoutMillis) throws ConfigurationException
