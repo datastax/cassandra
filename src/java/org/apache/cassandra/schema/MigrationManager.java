@@ -17,49 +17,30 @@
  */
 package org.apache.cassandra.schema;
 
-import java.util.*;
-import java.util.concurrent.*;
-import java.lang.management.ManagementFactory;
-import java.util.function.LongSupplier;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.Future;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.exceptions.AlreadyExistsException;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.*;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.concurrent.Stage.MIGRATION;
-import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
 
 public class MigrationManager
 {
     private static final Logger logger = LoggerFactory.getLogger(MigrationManager.class);
 
     private MigrationManager() {}
-
-    @VisibleForTesting
-    static boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
-    {
-        // only push schema to nodes with known and equal versions
-        return !endpoint.equals(FBUtilities.getBroadcastAddressAndPort())
-               && MessagingService.instance().versions.knows(endpoint)
-               && MessagingService.instance().versions.getRaw(endpoint) == MessagingService.current_version;
-    }
-
-    public static Future<?> announceWithoutPush(Collection<Mutation> schema)
-    {
-        return MIGRATION.submit(() -> SchemaManager.instance.mergeAndAnnounceVersion(schema));
-    }
 
     public static KeyspacesDiff announce(SchemaTransformation transformation, boolean locally)
     {
@@ -73,24 +54,8 @@ public class MigrationManager
         if (locally || result.diff.isEmpty())
             return result.diff;
 
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(schemaDestinationEndpoints, schemaEndpointsIgnored,
-                                                                    transformation);
+        Pair<Set<InetAddressAndPort>, Set<InetAddressAndPort>> endpoints = MigrationCoordinator.instance.pushSchemaMutations(result.mutations);
+        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(endpoints.getLeft(), endpoints.getRight(), transformation);
 
         return result.diff;
     }
