@@ -43,7 +43,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.StorageService;
 
 @NotThreadSafe
-public class DefaultSchemaUpdateHandler implements IEndpointStateChangeSubscriber
+public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
 {
     private final static Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 

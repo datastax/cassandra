@@ -85,7 +85,7 @@ public final class SchemaManager implements SchemaProvider
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
-    public final DefaultSchemaUpdateHandler updateHandler;
+    public final SchemaUpdateHandler updateHandler;
 
     private final boolean online;
 
@@ -94,10 +94,12 @@ public final class SchemaManager implements SchemaProvider
      */
     private SchemaManager()
     {
+        this.online = isDaemonInitialized();
         this.localKeyspaces = new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized());
         this.localKeyspaces.getAll().forEach(this::loadNew);
-        this.updateHandler = new DefaultSchemaUpdateHandler(MigrationCoordinator.instance, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone());
-        this.online = isDaemonInitialized();
+        this.updateHandler = online
+                             ? new DefaultSchemaUpdateHandler(MigrationCoordinator.instance, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone())
+                             : new OfflineSchemaUpdateHandler();
     }
 
     public void startSync()
@@ -130,7 +132,7 @@ public final class SchemaManager implements SchemaProvider
      *
      * @param ksm The metadata about keyspace
      */
-    synchronized public void load(KeyspaceMetadata ksm)
+    private synchronized void load(KeyspaceMetadata ksm)
     {
         Preconditions.checkArgument(!SchemaConstants.isLocalSystemKeyspace(ksm.name));
         KeyspaceMetadata previous = sharedKeyspaces.getNullable(ksm.name);
@@ -285,7 +287,7 @@ public final class SchemaManager implements SchemaProvider
      *
      * @param ksm The keyspace definition to remove
      */
-    synchronized void unload(KeyspaceMetadata ksm)
+    private synchronized void unload(KeyspaceMetadata ksm)
     {
         sharedKeyspaces = sharedKeyspaces.without(ksm.name);
 
@@ -787,7 +789,9 @@ public final class SchemaManager implements SchemaProvider
 
     public Map<UUID, Set<InetAddressAndPort>> getOutstandingSchemaVersions()
     {
-        return updateHandler.getOutstandingSchemaVersions();
+        return updateHandler instanceof DefaultSchemaUpdateHandler
+               ? ((DefaultSchemaUpdateHandler) updateHandler).getOutstandingSchemaVersions()
+               : Collections.emptyMap();
     }
 
 }
