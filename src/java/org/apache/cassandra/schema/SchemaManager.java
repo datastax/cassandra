@@ -87,6 +87,8 @@ public final class SchemaManager implements SchemaProvider
 
     public final DefaultSchemaUpdateHandler updateHandler;
 
+    private final boolean online;
+
     /**
      * Initialize empty schema object and load the hardcoded system tables
      */
@@ -95,6 +97,7 @@ public final class SchemaManager implements SchemaProvider
         this.localKeyspaces = new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized());
         this.localKeyspaces.getAll().forEach(this::loadNew);
         this.updateHandler = new DefaultSchemaUpdateHandler(MigrationCoordinator.instance, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone());
+        this.online = isDaemonInitialized();
     }
 
     public void startSync()
@@ -115,19 +118,9 @@ public final class SchemaManager implements SchemaProvider
      */
     public void loadFromDisk()
     {
-        loadFromDisk(true);
-    }
-
-    /**
-     * Load schema definitions from disk.
-     *
-     * @param updateVersion true if schema version needs to be updated
-     */
-    public void loadFromDisk(boolean updateVersion)
-    {
         SchemaDiagnostics.schemaLoading(this);
         SchemaKeyspace.fetchNonSystemKeyspaces().forEach(this::load);
-        if (updateVersion)
+        if (online)
             updateVersion();
         SchemaDiagnostics.schemaLoaded(this);
     }
