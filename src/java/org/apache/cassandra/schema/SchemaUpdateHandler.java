@@ -20,6 +20,8 @@ package org.apache.cassandra.schema;
 
 import java.time.Duration;
 
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+
 public interface SchemaUpdateHandler
 {
     /**
@@ -38,4 +40,30 @@ public interface SchemaUpdateHandler
      * @return whether readiness is achieved
      */
     boolean waitUntilReady(Duration timeout);
+
+    /**
+     * Applies schema transformation, saves the updated schema in the underlying storage, executes the callbacks
+     * if they were provided in the factory method, announces the updated schema version and eventually synchronizes
+     * the schema with other nodes.
+     *
+     * @param transformation schema transformation to be performed
+     * @return transformation result
+     */
+    SchemaTransformationResult apply(SchemaTransformation transformation);
+
+    /**
+     * Resets the schema either by reloading data from the local storage or from the other nodes. Once the schema is
+     * refreshed, the callbacks provided in the factory method are executed, and the updated schema version is announced.
+     *
+     * @param local whether we should reset with locally stored schema or fetch the schema from other nodes
+     * @return transformation result
+     */
+    SchemaTransformationResult reset(boolean local);
+
+    /**
+     * Clears the locally stored schema entirely. After this operation the schema is equal to {@link SharedSchema#EMPTY}.
+     * The method does not execute any callback. It is indended to reinitialize the schema later using the method
+     * {@link #reset(boolean)}.
+     */
+    void clear();
 }

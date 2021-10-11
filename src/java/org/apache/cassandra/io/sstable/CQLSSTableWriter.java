@@ -55,7 +55,6 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Utility to write SSTables.
@@ -517,7 +516,7 @@ public class CQLSSTableWriter implements Closeable
                                                                                                            Tables.none(),
                                                                                                            Views.none(),
                                                                                                            Types.none(),
-                                                                                                           Functions.none()), true), false, FBUtilities.timestampMicros());
+                                                                                                           Functions.none()), true));
 
                 KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
 
@@ -525,9 +524,9 @@ public class CQLSSTableWriter implements Closeable
                 if (tableMetadata == null)
                 {
                     Types types = createTypes(keyspaceName);
-                    SchemaManager.instance.transform(SchemaTransformations.addTypes(types, true), false, FBUtilities.timestampMicros());
+                    SchemaManager.instance.transform(SchemaTransformations.addTypes(types, true));
                     tableMetadata = createTable(types);
-                    SchemaManager.instance.transform(SchemaTransformations.addTable(tableMetadata, true), false, FBUtilities.timestampMicros());
+                    SchemaManager.instance.transform(SchemaTransformations.addTable(tableMetadata, true));
                 }
 
                 UpdateStatement preparedInsert = prepareInsert();

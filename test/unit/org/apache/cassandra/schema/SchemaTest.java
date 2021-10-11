@@ -65,7 +65,7 @@ public class SchemaTest
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            SchemaManager.instance.transform(keyspaces -> keyspaces.without(Arrays.asList("ks0", "ks1")), true, FBUtilities.timestampMicros());
+            SchemaManager.instance.transform(keyspaces -> keyspaces.without(Arrays.asList("ks0", "ks1")));
 
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
             assertNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));

@@ -19,9 +19,17 @@
 package org.apache.cassandra.schema;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+import org.apache.cassandra.utils.ByteArrayUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Update handler which works only in memory. It does not load or save the schema anywhere. It is used in client mode
@@ -29,10 +37,15 @@ import org.slf4j.LoggerFactory;
  */
 public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
 {
-    private final static Logger logger = LoggerFactory.getLogger(OfflineSchemaUpdateHandler.class);
+    private static final Logger logger = LoggerFactory.getLogger(OfflineSchemaUpdateHandler.class);
 
-    public OfflineSchemaUpdateHandler()
+    private final Consumer<SchemaTransformationResult> updateCallback;
+
+    private volatile SharedSchema schema = SharedSchema.EMPTY;
+
+    public OfflineSchemaUpdateHandler(Consumer<SchemaTransformationResult> updateCallback)
     {
+        this.updateCallback = updateCallback;
     }
 
     @Override
@@ -47,4 +60,39 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         return true;
     }
 
+    private SharedSchema schema()
+    {
+        return schema;
+    }
+
+    @Override
+    public SchemaTransformationResult apply(SchemaTransformation transformation)
+    {
+        SharedSchema before = schema();
+        Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
+
+        if (diff.isEmpty())
+            return new SchemaTransformationResult(before, before, diff, Collections.emptyList());
+
+        SharedSchema after = new SharedSchema(afterKeyspaces, UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(schema.getKeyspaces().hashCode())));
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff, SchemaKeyspace.convertSchemaDiffToMutations(diff, transformation.fixedTimestampMicros().orElse(FBUtilities.timestampMicros())));
+        this.schema = after;
+        logger.debug("Schema updated: {}", update);
+        updateCallback.accept(update);
+
+        return update;
+    }
+
+    @Override
+    public SchemaTransformationResult reset(boolean local)
+    {
+        return new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE, Collections.emptyList());
+    }
+
+    @Override
+    public void clear()
+    {
+        this.schema = SharedSchema.EMPTY;
+    }
 }

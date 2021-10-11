@@ -18,16 +18,18 @@
 
 package org.apache.cassandra.schema;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Future;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -150,43 +152,34 @@ public class SchemaTestUtil
         List<Mutation> mutations = Collections.singletonList(schema.build());
 
         if (announceLocally)
-            SchemaManager.instance.merge(mutations);
+            mergeAndAnnounceLocally(mutations);
         else
             announce(mutations);
     }
 
     public static void announce(Collection<Mutation> schema)
     {
-        Future<?> f = MigrationCoordinator.instance.announceWithoutPush(schema);
+        SchemaPushVerbHandler.instance.doVerb(Message.out(SCHEMA_PUSH_REQ, schema));
+        FBUtilities.waitOnFuture(Stage.MIGRATION.submit(() -> {}), Duration.ofSeconds(10)); // simply wait for stage executor to complete previously scheduled tasks
 
-        Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
-        Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
-        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schema);
-        for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
-        {
-            if (MigrationCoordinator.instance.shouldPushSchemaTo(endpoint))
-            {
-                MessagingService.instance().send(message, endpoint);
-                schemaDestinationEndpoints.add(endpoint);
-            }
-            else
-            {
-                schemaEndpointsIgnored.add(endpoint);
-            }
-        }
-
-        SchemaAnnouncementDiagnostics.schemaMutationsAnnounced(schemaDestinationEndpoints, schemaEndpointsIgnored);
-        FBUtilities.waitOnFuture(f);
+        Pair<Set<InetAddressAndPort>, Set<InetAddressAndPort>> endpoints = SchemaManager.instance.getMigrationCoordinator().pushSchemaMutations(schema);
+        SchemaAnnouncementDiagnostics.schemaMutationsAnnounced(endpoints.getLeft(), endpoints.getRight());
     }
 
     public static void addOrUpdateKeyspace(KeyspaceMetadata ksm, boolean locally)
     {
-        SchemaManager.instance.transform(current -> current.withAddedOrUpdated(ksm), locally, FBUtilities.timestampMicros());
+        SchemaManager.instance.transform(current -> current.withAddedOrUpdated(ksm));
     }
 
     public static void dropKeyspaceIfExist(String ksName, boolean locally)
     {
-        SchemaManager.instance.transform(current -> current.without(Collections.singletonList(ksName)), locally, FBUtilities.timestampMicros());
+        SchemaManager.instance.transform(current -> current.without(Collections.singletonList(ksName)));
+    }
+
+    public static void mergeAndAnnounceLocally(Collection<Mutation> schemaMutations)
+    {
+        SchemaPushVerbHandler.instance.doVerb(Message.out(SCHEMA_PUSH_REQ, schemaMutations));
+        FBUtilities.waitOnFuture(Stage.MIGRATION.submit(() -> {}), Duration.ofSeconds(10)); // simply wait for stage executor to complete previously scheduled tasks
     }
 
 }

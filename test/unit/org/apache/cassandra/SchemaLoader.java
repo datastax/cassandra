@@ -40,7 +40,6 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.index.sasi.disk.OnDiskIndexBuilder;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -765,19 +764,19 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
                                                        Views.none(),
                                                        Types.none(),
                                                        Functions.none());
-        MigrationManager.announce(SchemaTransformations.addKeyspace(ksm, true), true);
+        SchemaManager.instance.transform(SchemaTransformations.addKeyspace(ksm, true));
 
         for (String typeCQL : typesCQL)
         {
             Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
             SchemaTransformation t = SchemaTransformations.addOrUpdateType(CreateTypeStatement.parse(typeCQL,
                                                                                                      keyspace, types));
-            MigrationManager.announce(t, true);
+            SchemaManager.instance.transform(t);
         }
 
         Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
         TableMetadata metadata = CreateTableStatement.parse(schemaCQL, keyspace, types).build();
-        MigrationManager.announce(SchemaTransformations.addTable(metadata, true), true);
+        SchemaManager.instance.transform(SchemaTransformations.addTable(metadata, true));
     }
 
     private static CompressionParams compressionParams(int chunkLength)

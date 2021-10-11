@@ -58,7 +58,6 @@ import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Utility to write SSTables.
@@ -592,10 +591,10 @@ public class StressCQLSSTableWriter implements Closeable
         {
             String keyspace = schemaStatement.keyspace();
 
-            SchemaManager.instance.transform(SchemaTransformations.addKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), true), false, FBUtilities.timestampMicros());
+            SchemaManager.instance.transform(SchemaTransformations.addKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), true));
 
             Types types = createTypes(keyspace, typeStatements);
-            SchemaManager.instance.transform(SchemaTransformations.addTypes(types, true), false, FBUtilities.timestampMicros());
+            SchemaManager.instance.transform(SchemaTransformations.addTypes(types, true));
 
             KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceMetadata(keyspace);
 
@@ -619,7 +618,7 @@ public class StressCQLSSTableWriter implements Closeable
             ColumnFamilyStore cfs =  ColumnFamilyStore.createColumnFamilyStore(ks, tableMetadata.name, TableMetadataRef.forOfflineTools(tableMetadata), directories, false, false, true);
 
             ks.initCfCustom(cfs);
-            SchemaManager.instance.transform(SchemaTransformations.addTable(tableMetadata, true), false, FBUtilities.timestampMicros());
+            SchemaManager.instance.transform(SchemaTransformations.addTable(tableMetadata, true));
 
             return cfs;
         }

@@ -18,49 +18,83 @@
 
 package org.apache.cassandra.schema;
 
+import java.lang.management.ManagementFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.schema.MigrationCoordinator.MAX_OUTSTANDING_VERSION_REQUESTS;
 
 @NotThreadSafe
 public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
 {
-    private final static Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
+    private static final Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 
     @VisibleForTesting
     final MigrationCoordinator migrationCoordinator;
 
     private final Clock clock;
     private final boolean requireSchemas;
+    private final Consumer<SchemaTransformationResult> updateCallback;
+    private volatile SharedSchema schema = SharedSchema.EMPTY;
+
+    private MigrationCoordinator createMigrationCoordinator()
+    {
+        return new MigrationCoordinator(MessagingService.instance(),
+                                        Stage.MIGRATION.executor(),
+                                        ScheduledExecutors.scheduledTasks,
+                                        () -> ManagementFactory.getRuntimeMXBean().getUptime(),
+                                        MAX_OUTSTANDING_VERSION_REQUESTS,
+                                        Gossiper.instance,
+                                        () -> schema.getVersion(),
+                                        (from, mutations) -> updateReceived(mutations));
+    }
 
     public DefaultSchemaUpdateHandler(MigrationCoordinator migrationCoordinator,
                                       boolean requireSchemas,
-                                      Clock clock)
+                                      Clock clock,
+                                      Consumer<SchemaTransformationResult> updateCallback)
     {
         this.requireSchemas = requireSchemas;
         this.clock = clock;
-        this.migrationCoordinator = migrationCoordinator;
+        this.updateCallback = updateCallback;
+        this.migrationCoordinator = migrationCoordinator == null ? createMigrationCoordinator() : migrationCoordinator;
         Gossiper.instance.register(this);
+        SchemaPushVerbHandler.instance.register(msg -> CompletableFuture.runAsync(() -> updateReceived(msg.payload), this.migrationCoordinator.executor));
+        SchemaPullVerbHandler.instance.register(msg -> this.migrationCoordinator.pushSchemaMutations(msg, SchemaKeyspace.convertSchemaToMutations()));
     }
 
     public void start()
@@ -70,6 +104,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         migrationCoordinator.start();
     }
 
+    @Override
     public boolean waitUntilReady(Duration timeout)
     {
         logger.debug("Waiting for schema to be ready (max {})", timeout);
@@ -149,6 +184,96 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     public void onRestart(InetAddressAndPort endpoint, EndpointState state)
     {
         // no-op
+    }
+
+    private synchronized SchemaTransformationResult applyMutations(Collection<Mutation> schemaMutations)
+    {
+        // fetch the current state of schema for the affected keyspaces only
+        SharedSchema before = schema;
+
+        // apply the schema mutations
+        SchemaKeyspace.applyChanges(schemaMutations);
+
+        // only compare the keyspaces affected by this set of schema mutations
+        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(schemaMutations);
+
+        // apply the schema mutations and fetch the new versions of the altered keyspaces
+        Keyspaces updatedKeyspaces = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
+        Set<String> removedKeyspaces = affectedKeyspaces.stream().filter(ks -> !updatedKeyspaces.containsKeyspace(ks)).collect(Collectors.toSet());
+        Keyspaces afterKeyspaces = before.getKeyspaces().withAddedOrReplaced(updatedKeyspaces).without(removedKeyspaces);
+
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
+        UUID version = SchemaKeyspace.calculateSchemaDigest();
+        SharedSchema after = new SharedSchema(afterKeyspaces, version);
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff, schemaMutations);
+
+        updateSchema(update);
+        return update;
+    }
+
+    @Override
+    public synchronized SchemaTransformationResult apply(SchemaTransformation transformation)
+    {
+        SharedSchema before = schema;
+        Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
+
+        if (diff.isEmpty())
+            return new SchemaTransformationResult(before, before, diff, Collections.emptyList());
+
+        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, transformation.fixedTimestampMicros().orElse(FBUtilities.timestampMicros()));
+        SchemaKeyspace.applyChanges(mutations);
+
+        SharedSchema after = new SharedSchema(afterKeyspaces, SchemaKeyspace.calculateSchemaDigest());
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff, mutations);
+
+        updateSchema(update);
+        Pair<Set<InetAddressAndPort>, Set<InetAddressAndPort>> endpoints = migrationCoordinator.pushSchemaMutations(mutations);
+        SchemaAnnouncementDiagnostics.schemaTransformationAnnounced(endpoints.getLeft(), endpoints.getRight(), transformation);
+
+        return update;
+    }
+
+    private void updateSchema(SchemaTransformationResult update)
+    {
+        this.schema = update.after;
+        logger.debug("Schema updated: {}", update);
+        SystemKeyspace.updateSchemaVersion(update.after.getVersion());
+        updateCallback.accept(update);
+        migrationCoordinator.announce(update.after);
+    }
+
+    private synchronized SchemaTransformationResult reload()
+    {
+        SharedSchema before = this.schema;
+        SharedSchema after = new SharedSchema(SchemaKeyspace.fetchNonSystemKeyspaces(), SchemaKeyspace.calculateSchemaDigest());
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces());
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff, SchemaKeyspace.convertSchemaDiffToMutations(diff, FBUtilities.timestampMicros()));
+
+        updateSchema(update);
+        return update;
+    }
+
+    @Override
+    public SchemaTransformationResult reset(boolean local)
+    {
+        return local
+               ? reload()
+               : FBUtilities.waitOnFuture(migrationCoordinator.pullSchemaFromAnyNode().thenApply(this::applyMutations));
+    }
+
+    @Override
+    public synchronized void clear()
+    {
+        SchemaKeyspace.truncate();
+        this.schema = SharedSchema.EMPTY;
+    }
+
+    private SchemaTransformationResult updateReceived(Collection<Mutation> schemaMutations)
+    {
+        SchemaTransformationResult result = applyMutations(schemaMutations);
+        updateCallback.accept(result);
+        return result;
     }
 
     public Map<UUID, Set<InetAddressAndPort>> getOutstandingSchemaVersions()

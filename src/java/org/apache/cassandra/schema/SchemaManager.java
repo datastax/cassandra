@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MapDifference;
@@ -38,15 +39,12 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
-import org.apache.cassandra.service.StorageService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,7 +79,7 @@ public final class SchemaManager implements SchemaProvider
     // the lambda passed to the computeIfAbsent method is prohibited.
     private final ConcurrentMap<String, CompletableFuture<Keyspace>> keyspaceInstances = new NonBlockingHashMap<>();
 
-    private volatile UUID version;
+    private volatile UUID version = SchemaConstants.emptyVersion;
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
@@ -98,7 +96,7 @@ public final class SchemaManager implements SchemaProvider
         this.localKeyspaces = new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized());
         this.localKeyspaces.getAll().forEach(this::loadNew);
         this.updateHandler = online
-                             ? new DefaultSchemaUpdateHandler(MigrationCoordinator.instance, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone())
+                             ? new DefaultSchemaUpdateHandler(null, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone(), this::mergeAndUpdateVersion)
                              : new OfflineSchemaUpdateHandler();
     }
 
@@ -118,12 +116,10 @@ public final class SchemaManager implements SchemaProvider
      * load keyspace (keyspace) definitions, but do not initialize the keyspace instances.
      * Schema version may be updated as the result.
      */
-    public void loadFromDisk()
+    public synchronized void loadFromDisk()
     {
         SchemaDiagnostics.schemaLoading(this);
-        SchemaKeyspace.fetchNonSystemKeyspaces().forEach(this::load);
-        if (online)
-            updateVersion();
+        updateHandler.reset(true);
         SchemaDiagnostics.schemaLoaded(this);
     }
 
@@ -551,30 +547,10 @@ public final class SchemaManager implements SchemaProvider
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
      * will be converted into UUID which would act as content-based version of the schema.
      */
-    public void updateVersion()
+    private void updateVersion(UUID version)
     {
-        version = SchemaKeyspace.calculateSchemaDigest();
-        SystemKeyspace.updateSchemaVersion(version);
+        this.version = version;
         SchemaDiagnostics.versionUpdated(this);
-    }
-
-    /*
-     * Like updateVersion, but also announces via gossip
-     */
-    public void updateVersionAndAnnounce()
-    {
-        updateVersion();
-        passiveAnnounceVersion();
-    }
-
-    /**
-     * Announce my version passively over gossip.
-     * Used to notify nodes as they arrive in the cluster.
-     */
-    private void passiveAnnounceVersion()
-    {
-        Gossiper.instance.addLocalApplicationState(ApplicationState.SCHEMA, StorageService.instance.valueFactory.schema(version));
-        SchemaDiagnostics.versionAnnounced(this);
     }
 
     /**
@@ -582,9 +558,36 @@ public final class SchemaManager implements SchemaProvider
      */
     public synchronized void clear()
     {
-        getNonSystemKeyspaces().forEach(this::unload);
-        updateVersionAndAnnounce();
+        sharedKeyspaces.forEach(this::unload);
+        updateVersion(SchemaConstants.emptyVersion);
         SchemaDiagnostics.schemaCleared(this);
+    }
+
+    private synchronized SchemaTransformationResult localDiff(SchemaTransformationResult result)
+    {
+        Keyspaces localBefore = sharedKeyspaces;
+        UUID localVersion = version;
+        boolean needNewDiff = false;
+
+        if (!Objects.equals(localBefore, result.before.getKeyspaces()))
+        {
+            logger.info("Schema was different to what we expected: {}", Keyspaces.diff(result.before.getKeyspaces(), localBefore));
+            needNewDiff = true;
+        }
+
+        if (!Objects.equals(localVersion, result.before.getVersion()))
+        {
+            logger.info("Schema version was different to what we expected: {} != {}", result.before.getVersion(), localVersion);
+            needNewDiff = true;
+        }
+
+        if (needNewDiff)
+            return new SchemaTransformationResult(new SharedSchema(localBefore, localVersion),
+                                                  result.after,
+                                                  Keyspaces.diff(localBefore, result.after.getKeyspaces()),
+                                                  result.mutations);
+
+        return result;
     }
 
     /*
@@ -593,66 +596,42 @@ public final class SchemaManager implements SchemaProvider
      */
     public synchronized void reloadSchemaAndAnnounceVersion()
     {
-        Keyspaces before = snapshot().filter(k -> !SchemaConstants.isLocalSystemKeyspace(k.name));
-        Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        merge(Keyspaces.diff(before, after));
-        updateVersionAndAnnounce();
+        updateHandler.reset(true);
     }
 
     /**
      * Merge remote schema in form of mutations with local and mutate ks/cf metadata objects
      * (which also involves fs operations on add/drop ks/cf)
      *
-     * @param mutations the schema changes to apply
-     *
      * @throws ConfigurationException If one of metadata attributes has invalid value
      */
-    public synchronized void mergeAndAnnounceVersion(Collection<Mutation> mutations)
+    private synchronized void mergeAndUpdateVersion(SchemaTransformationResult result)
     {
-        merge(mutations);
-        updateVersionAndAnnounce();
-    }
-
-    public synchronized SchemaTransformationResult transform(SchemaTransformation transformation, boolean locally, long now)
-    {
-        KeyspacesDiff diff;
-        Keyspaces before = snapshot();
-        Keyspaces after = transformation.apply(before);
-        diff = Keyspaces.diff(before, after);
-
-        if (diff.isEmpty())
-            return new SchemaTransformationResult(new SharedSchema(before), new SharedSchema(after), diff, Collections.emptyList());
-
-        Collection<Mutation> mutations = SchemaKeyspace.convertSchemaDiffToMutations(diff, now);
-        SchemaKeyspace.applyChanges(mutations);
-
-        SchemaTransformationResult result = new SchemaTransformationResult(new SharedSchema(before), new SharedSchema(after), diff, mutations);
+        result = localDiff(result);
         schemaChangeNotifier.notifyPreChanges(result);
-        merge(diff);
-        updateVersion();
-        if (!locally)
-            passiveAnnounceVersion();
-
-        return result;
+        merge(result.diff);
+        updateVersion(result.after.getVersion());
     }
 
-    synchronized void merge(Collection<Mutation> mutations)
+    public synchronized SchemaTransformationResult transform(SchemaTransformation transformation)
     {
-        // only compare the keyspaces affected by this set of schema mutations
-        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(mutations);
+        return updateHandler.apply(transformation);
+    }
 
-        // fetch the current state of schema for the affected keyspaces only
-        Keyspaces before = snapshot().filter(k -> affectedKeyspaces.contains(k.name));
+    /**
+     * Clear all locally stored schema information and reset schema to initial state.
+     * Called by user (via JMX) who wants to get rid of schema disagreement.
+     */
+    public void resetLocalSchema()
+    {
+        logger.debug("Clearing local schema...");
+        updateHandler.clear();
 
-        // apply the schema mutations
-        SchemaKeyspace.applyChanges(mutations);
+        logger.debug("Clearing local schema keyspace instances...");
+        clear();
 
-        // apply the schema mutations and fetch the new versions of the altered keyspaces
-        Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
-
-        KeyspacesDiff diff = Keyspaces.diff(before, after);
-        schemaChangeNotifier.notifyPreChanges(new SchemaTransformationResult(new SharedSchema(before), new SharedSchema(after), diff, mutations));
-        merge(diff);
+        updateHandler.reset(false);
+        logger.info("Local schema reset is complete.");
     }
 
     private void merge(KeyspacesDiff diff)
@@ -794,4 +773,11 @@ public final class SchemaManager implements SchemaProvider
                : Collections.emptyMap();
     }
 
+    @VisibleForTesting
+    public MigrationCoordinator getMigrationCoordinator()
+    {
+        return updateHandler instanceof DefaultSchemaUpdateHandler
+               ? ((DefaultSchemaUpdateHandler) updateHandler).migrationCoordinator
+               : null;
+    }
 }
