@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.schema;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
@@ -29,6 +31,7 @@ import com.google.common.collect.MapDifference;
 import org.apache.commons.lang3.ObjectUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -38,6 +41,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -81,6 +85,8 @@ public final class SchemaManager implements SchemaProvider
 
     private final SchemaChangeNotifier schemaChangeNotifier = new SchemaChangeNotifier();
 
+    public final DefaultSchemaUpdateHandler updateHandler;
+
     /**
      * Initialize empty schema object and load the hardcoded system tables
      */
@@ -88,6 +94,19 @@ public final class SchemaManager implements SchemaProvider
     {
         this.localKeyspaces = new LocalKeyspaces(FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized());
         this.localKeyspaces.getAll().forEach(this::loadNew);
+        this.updateHandler = new DefaultSchemaUpdateHandler(MigrationCoordinator.instance, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone());
+    }
+
+    public void startSync()
+    {
+        logger.debug("Starting update handler");
+        updateHandler.start();
+    }
+
+    public boolean waitUntilReady(Duration timeout)
+    {
+        logger.debug("Waiting for update handler to be ready...");
+        return updateHandler.waitUntilReady(timeout);
     }
 
     /**
@@ -772,4 +791,10 @@ public final class SchemaManager implements SchemaProvider
         keyspace.getColumnFamilyStore(updated.name()).reload();
         SchemaDiagnostics.tableAltered(this, updated.metadata);
     }
+
+    public Map<UUID, Set<InetAddressAndPort>> getOutstandingSchemaVersions()
+    {
+        return updateHandler.getOutstandingSchemaVersions();
+    }
+
 }

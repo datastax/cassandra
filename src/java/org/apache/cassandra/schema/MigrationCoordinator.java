@@ -76,7 +76,7 @@ public class MigrationCoordinator
     private static final CompletableFuture<Void> FINISHED_FUTURE = CompletableFuture.completedFuture(null);
 
     private static final int MIGRATION_DELAY_IN_MS = 60000;
-    private static final int MAX_OUTSTANDING_VERSION_REQUESTS = 3;
+    public static final int MAX_OUTSTANDING_VERSION_REQUESTS = 3;
 
     public static final MigrationCoordinator instance = new MigrationCoordinator(MessagingService.instance(),
                                                                                  Stage.MIGRATION.executor(),
