@@ -773,11 +773,4 @@ public final class SchemaManager implements SchemaProvider
                : Collections.emptyMap();
     }
 
-    @VisibleForTesting
-    public MigrationCoordinator getMigrationCoordinator()
-    {
-        return updateHandler instanceof DefaultSchemaUpdateHandler
-               ? ((DefaultSchemaUpdateHandler) updateHandler).migrationCoordinator
-               : null;
-    }
 }
