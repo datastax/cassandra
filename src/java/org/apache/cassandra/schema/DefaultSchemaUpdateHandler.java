@@ -83,6 +83,11 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
                                         (from, mutations) -> updateReceived(mutations));
     }
 
+    public DefaultSchemaUpdateHandler(Consumer<SchemaTransformationResult> updateCallback)
+    {
+        this(null, !CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getBoolean(), Clock.systemDefaultZone(), updateCallback);
+    }
+
     public DefaultSchemaUpdateHandler(MigrationCoordinator migrationCoordinator,
                                       boolean requireSchemas,
                                       Clock clock,

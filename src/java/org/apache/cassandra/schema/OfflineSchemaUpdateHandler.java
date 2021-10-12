@@ -19,14 +19,13 @@
 package org.apache.cassandra.schema;
 
 import java.time.Duration;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.ByteArrayUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -60,15 +59,10 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         return true;
     }
 
-    private SharedSchema schema()
-    {
-        return schema;
-    }
-
     @Override
     public SchemaTransformationResult apply(SchemaTransformation transformation)
     {
-        SharedSchema before = schema();
+        SharedSchema before = schema;
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
         Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
 
@@ -87,7 +81,10 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     @Override
     public SchemaTransformationResult reset(boolean local)
     {
-        return new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE, Collections.emptyList());
+        SchemaTransformationResult update = new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE, Collections.emptyList());
+        updateCallback.accept(update);
+
+        return update;
     }
 
     @Override
