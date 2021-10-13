@@ -575,6 +575,18 @@ public final class SchemaManager implements SchemaProvider
         SchemaDiagnostics.schemaCleared(this);
     }
 
+    /**
+     * When we receive {@link SchemaTransformationResult} in a callback invocation, the transformation result includes
+     * pre-transformation and post-transformation schema metadata and versions, and a diff between them. Basically
+     * we expect that the local image of the schema metadata ({@link #sharedKeyspaces}) and version ({@link #version})
+     * are the same as pre-transformation. However, it might not always be true because some changes might not be
+     * applied completely due to some errors. This methods is to emit warning in such case and recalculate diff so that
+     * it contains the changes between the local schema image ({@link #sharedKeyspaces} and the post-transformation
+     * schema. That recalculation allows the following updates in the callback to recover the schema.
+     *
+     * @param result the incoming transformation result
+     * @return recalculated transformation result if needed, otherwise the provided incoming result
+     */
     private synchronized SchemaTransformationResult localDiff(SchemaTransformationResult result)
     {
         Keyspaces localBefore = sharedKeyspaces;
