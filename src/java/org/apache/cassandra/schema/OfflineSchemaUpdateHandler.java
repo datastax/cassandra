@@ -19,7 +19,6 @@
 package org.apache.cassandra.schema;
 
 import java.time.Duration;
-import java.util.Collections;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -28,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.ByteArrayUtil;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Update handler which works only in memory. It does not load or save the schema anywhere. It is used in client mode
@@ -60,7 +58,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     }
 
     @Override
-    public SchemaTransformationResult apply(SchemaTransformation transformation)
+    public synchronized SchemaTransformationResult apply(SchemaTransformation transformation)
     {
         SharedSchema before = schema;
         Keyspaces afterKeyspaces = transformation.apply(before.getKeyspaces());
@@ -69,7 +67,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         if (diff.isEmpty())
             return new SchemaTransformationResult(before, before, diff);
 
-        SharedSchema after = new SharedSchema(afterKeyspaces, UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(schema.getKeyspaces().hashCode())));
+        SharedSchema after = new SharedSchema(afterKeyspaces, UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(afterKeyspaces.hashCode())));
         SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff);
         this.schema = after;
         logger.debug("Schema updated: {}", update);
@@ -81,14 +79,14 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     @Override
     public SchemaTransformationResult reset(boolean local)
     {
-        SchemaTransformationResult update = new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE);
-        updateCallback.accept(update);
+        if (!local)
+            throw new UnsupportedOperationException();
 
-        return update;
+        return apply(ignored -> SchemaKeyspace.fetchNonSystemKeyspaces());
     }
 
     @Override
-    public void clear()
+    public synchronized void clear()
     {
         this.schema = SharedSchema.EMPTY;
     }
