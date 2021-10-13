@@ -67,10 +67,10 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
         Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), afterKeyspaces);
 
         if (diff.isEmpty())
-            return new SchemaTransformationResult(before, before, diff, Collections.emptyList());
+            return new SchemaTransformationResult(before, before, diff);
 
         SharedSchema after = new SharedSchema(afterKeyspaces, UUID.nameUUIDFromBytes(ByteArrayUtil.bytes(schema.getKeyspaces().hashCode())));
-        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff, SchemaKeyspace.convertSchemaDiffToMutations(diff, transformation.fixedTimestampMicros().orElse(FBUtilities.timestampMicros())));
+        SchemaTransformationResult update = new SchemaTransformationResult(before, after, diff);
         this.schema = after;
         logger.debug("Schema updated: {}", update);
         updateCallback.accept(update);
@@ -81,7 +81,7 @@ public class OfflineSchemaUpdateHandler implements SchemaUpdateHandler
     @Override
     public SchemaTransformationResult reset(boolean local)
     {
-        SchemaTransformationResult update = new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE, Collections.emptyList());
+        SchemaTransformationResult update = new SchemaTransformationResult(schema, schema, Keyspaces.KeyspacesDiff.NONE);
         updateCallback.accept(update);
 
         return update;
