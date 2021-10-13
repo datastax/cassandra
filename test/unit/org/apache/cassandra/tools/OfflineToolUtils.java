@@ -56,26 +56,26 @@ public abstract class OfflineToolUtils
     private static List<ThreadInfo> initialThreads;
 
     static final String[] EXPECTED_THREADS_WITH_SCHEMA = {
-    "PerDiskMemtableFlushWriter_0:[1-9]",
-    "MemtablePostFlush:[1-9]",
-    "MemtableFlushWriter:[1-9]",
-    "MemtableReclaimMemory:[1-9]",
     };
     static final String[] OPTIONAL_THREADS_WITH_SCHEMA = {
-    "ScheduledTasks:[1-9]",
-    "OptionalTasks:[1-9]",
-    "Reference-Reaper:[1-9]",
-    "LocalPool-Cleaner:[1-9]",
-    "CacheCleanupExecutor:[1-9]",
-    "CompactionExecutor:[1-9]",
-    "ValidationExecutor:[1-9]",
-    "NonPeriodicTasks:[1-9]",
-    "Sampler:[1-9]",
-    "SecondaryIndexManagement:[1-9]",
-    "Strong-Reference-Leak-Detector:[1-9]",
-    "Background_Reporter:[1-9]",
-    "EXPIRING-MAP-REAPER:[1-9]",
-    };
+            "PerDiskMemtableFlushWriter_0:[1-9]",
+            "MemtablePostFlush:[1-9]",
+            "MemtableFlushWriter:[1-9]",
+            "MemtableReclaimMemory:[1-9]",
+            "ScheduledTasks:[1-9]",
+            "OptionalTasks:[1-9]",
+            "Reference-Reaper:[1-9]",
+            "LocalPool-Cleaner:[1-9]",
+            "CacheCleanupExecutor:[1-9]",
+            "CompactionExecutor:[1-9]",
+            "ValidationExecutor:[1-9]",
+            "NonPeriodicTasks:[1-9]",
+            "Sampler:[1-9]",
+            "SecondaryIndexManagement:[1-9]",
+            "Strong-Reference-Leak-Detector:[1-9]",
+            "Background_Reporter:[1-9]",
+            "EXPIRING-MAP-REAPER:[1-9]",
+            };
 
     public void assertNoUnexpectedThreadsStarted(String[] expectedThreadNames, String[] optionalThreadNames)
     {
