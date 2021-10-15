@@ -82,4 +82,13 @@ public class RoleTestUtils
         ColumnFamilyStore rolesTable = Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.ROLES);
         return rolesTable.metric.readLatency.latency.getCount();
     }
+
+    public static RoleOptions getLoginRoleOptions()
+    {
+        RoleOptions roleOptions = new RoleOptions();
+        roleOptions.setOption(IRoleManager.Option.SUPERUSER, false);
+        roleOptions.setOption(IRoleManager.Option.LOGIN, true);
+        roleOptions.setOption(IRoleManager.Option.PASSWORD, "ignored");
+        return roleOptions;
+    }
 }
