@@ -469,7 +469,6 @@ public class ColumnFamilyStoreTest
         String indexTableFile = (String) files.get(1);
         assertThat(baseTableFile).isNotEqualTo(indexTableFile);
         assertThat(Directories.isSecondaryIndexFolder(new File(indexTableFile).parent())).isTrue();
-        assertThat(indexTableFile).endsWith(baseTableFile);
 
         Set<String> originalFiles = new HashSet<>();
         Iterables.toList(cfs.concatWithIndexes()).stream()
