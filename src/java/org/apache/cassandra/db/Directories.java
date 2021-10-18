@@ -1017,32 +1017,6 @@ public class Directories
         return snapshots;
     }
 
-    @VisibleForTesting
-    protected Map<String, Set<File>> listSnapshotDirsByTag()
-    {
-        Map<String, Set<File>> snapshotDirsByTag = new HashMap<>();
-        for (final File dir : dataPaths)
-        {
-            File snapshotDir = isSecondaryIndexFolder(dir)
-                               ? new File(dir.parentPath(), SNAPSHOT_SUBDIR)
-                               : new File(dir, SNAPSHOT_SUBDIR);
-            if (snapshotDir.exists() && snapshotDir.isDirectory())
-            {
-                final File[] snapshotDirs  = snapshotDir.tryList();
-                if (snapshotDirs != null)
-                {
-                    for (final File snapshot : snapshotDirs)
-                    {
-                        if (snapshot.isDirectory()) {
-                            snapshotDirsByTag.computeIfAbsent(snapshot.name(), k -> new LinkedHashSet<>()).add(snapshot.toAbsolute());
-                        }
-                    }
-                }
-            }
-        }
-        return snapshotDirsByTag;
-    }
-
     public boolean snapshotExists(String snapshotName)
     {
         for (File dir : dataPaths)

@@ -534,7 +534,7 @@ public class DirectoriesTest
         Collection<DataDirectory> paths = new ArrayList<>();
         paths.add(new DataDirectory(new File("/tmp/aaa")));
         paths.add(new DataDirectory(new File("/tmp/aa")));
-        paths.add(new DataDirectory(new File("/tmp/a")));
+        paths.add(new DataDirectory(new File("/tmp/a").toPath()));
 
         for (TableMetadata cfm : CFM)
         {
@@ -627,6 +627,20 @@ public class DirectoriesTest
     public void testDirectoriesTableSymlink() throws IOException
     {
         testDirectoriesSymlinksHelper(false);
+    }
+
+    @Test
+    public void testFileActionHasPrivilege() throws IOException
+    {
+        Path p = Files.createTempDirectory("something");
+        File file = new File(p);
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.X));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.W));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XW));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.R));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XR));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.RW));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XRW));
     }
 
     /**
