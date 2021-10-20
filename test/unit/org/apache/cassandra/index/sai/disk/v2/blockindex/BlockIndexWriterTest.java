@@ -328,7 +328,7 @@ public class BlockIndexWriterTest extends SaiRandomizedTest
         builder.add(ByteBuffer.wrap("ccc".getBytes(StandardCharsets.UTF_8)), 1000);
         builder.add(ByteBuffer.wrap("ccc".getBytes(StandardCharsets.UTF_8)), 1001);
 
-        BlockIndexMeta meta1 = builder.flush(indexDescriptor1, indexContext1);
+        BlockIndexMeta meta1 = builder.flush(indexDescriptor1, indexContext1, true);
         builder.release("testMerge 1");
 
         IndexDescriptor indexDescriptor2 = newIndexDescriptor();
@@ -340,7 +340,7 @@ public class BlockIndexWriterTest extends SaiRandomizedTest
         builder2.add(ByteBuffer.wrap("ddd".getBytes(StandardCharsets.UTF_8)), 2000);
         builder2.add(ByteBuffer.wrap("ddd".getBytes(StandardCharsets.UTF_8)), 2001);
 
-        BlockIndexMeta meta2 = builder2.flush(indexDescriptor2, indexContext2);
+        BlockIndexMeta meta2 = builder2.flush(indexDescriptor2, indexContext2, true);
         builder2.release("testMerge 2");
 
         try (BlockIndexFileProvider fileProvider1 = new PerIndexFileProvider(indexDescriptor1, indexContext1);

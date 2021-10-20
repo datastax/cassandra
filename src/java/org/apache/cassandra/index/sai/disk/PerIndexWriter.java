@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
@@ -44,4 +45,6 @@ public interface PerIndexWriter
      * Note: Implementations should be idempotent, i.e. safe to call multiple times without producing undesirable side-effects.
      */
     void abort(Throwable cause);
+
+    IndexContext indexContext();
 }

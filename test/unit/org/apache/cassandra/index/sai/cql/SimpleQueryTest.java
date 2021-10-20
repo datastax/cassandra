@@ -54,6 +54,19 @@ public class SimpleQueryTest extends SAITester
     }
 
     @Test
+    public void literalTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int primary key, value text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (id, value) VALUES(?, ?)", 1, "1");
+        flush();
+        execute("INSERT INTO %s (id, value) VALUES(?, ?)", 10, "10");
+        flush();
+        compact();
+        assertEquals(1, execute("SELECT * FROM %s WHERE value = '1'").size());
+    }
+
+    @Test
     public void stringTest() throws Throwable
     {
         String string = "1";

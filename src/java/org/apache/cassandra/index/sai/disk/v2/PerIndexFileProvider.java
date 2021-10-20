@@ -47,7 +47,12 @@ import static org.apache.cassandra.index.sai.disk.format.IndexComponent.TERMS_IN
 
 public class PerIndexFileProvider implements BlockIndexFileProvider
 {
-    private static final Set<IndexComponent> components = EnumSet.of(TERMS_DATA, TERMS_INDEX, POSTING_LISTS, KD_TREE_POSTING_LISTS);
+    private static final Set<IndexComponent> components = EnumSet.of(TERMS_DATA,
+                                                                     TERMS_INDEX,
+                                                                     POSTING_LISTS,
+                                                                     ORDER_MAP,
+                                                                     KD_TREE_POSTING_LISTS,
+                                                                     ROW_ID_POINT_ID_MAP);
 
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;

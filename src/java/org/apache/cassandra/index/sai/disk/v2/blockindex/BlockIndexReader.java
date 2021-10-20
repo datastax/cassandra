@@ -71,9 +71,6 @@ public class BlockIndexReader implements AutoCloseable
 {
     final FileHandle indexFile;
     final PackedLongValues leafFilePointers;
-    final LongArrayList compressedLeafFPs = new LongArrayList();
-    final IntArrayList compressedLeafLengths = new IntArrayList();
-    final IntArrayList leafLengths = new IntArrayList();
     final IntIntHashMap nodeIDToLeaf = new IntIntHashMap();
     final IntLongHashMap leafToOrderMapFP = new IntLongHashMap();
     final BlockIndexMeta meta;
@@ -116,7 +113,6 @@ public class BlockIndexReader implements AutoCloseable
         this.orderMapInput = fileProvider.openOrderMapInput(temporary);
         this.orderMapRandoInput = new SeekingRandomAccessInput(orderMapInput);
         SharedIndexInput multiPostingsInput = fileProvider.openMultiPostingsInput(temporary);
-//        SharedIndexInput bytesCompressedInput = fileProvider.openCompressedValuesInput(temporary);
 
         orderMapReader = DirectReaders.getReaderForBitsPerValue((byte) DirectWriter.unsignedBitsRequired(LEAF_SIZE - 1));
 
@@ -228,8 +224,6 @@ public class BlockIndexReader implements AutoCloseable
         boolean readBlock = false;
         BytesRefBuilder builder = new BytesRefBuilder();
 
-        private byte[] compBytes = new byte[10];
-        private byte[] uncompBytes = new byte[10];
         SharedIndexInput leafLevelPostingsInput, multiPostingsInput, bytesInput;
 
         @Override

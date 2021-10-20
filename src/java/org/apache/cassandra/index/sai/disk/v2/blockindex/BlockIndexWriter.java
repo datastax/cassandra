@@ -63,7 +63,6 @@ import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.packed.DirectWriter;
 
-import static org.apache.cassandra.index.sai.disk.v1.NumericValuesWriter.BLOCK_SIZE;
 import static org.apache.cassandra.index.sai.disk.v1.TrieTermsDictionaryReader.trieSerializer;
 import static org.apache.cassandra.index.sai.disk.v2.blockindex.BytesUtil.fixedLength;
 
@@ -76,7 +75,9 @@ import static org.apache.cassandra.index.sai.disk.v2.blockindex.BytesUtil.fixedL
  */
 public class BlockIndexWriter implements Closeable
 {
-    public static final int LEAF_SIZE = 1024;
+    public static final int LEAF_SIZE = Integer.getInteger("cassandra.sai.block.index.leaf.size", 1024);
+    public static final int BLOCK_SIZE = Integer.getInteger("cassandra.sai.block.index.block.size", 128);
+
     // TODO: when the previous leaf min value is the same,
     //       write the leaf file pointer to the first occurence of the min value
     private final LongArrayList leafBytesFPs = new LongArrayList();
@@ -124,7 +125,7 @@ public class BlockIndexWriter implements Closeable
         this.postingsWriter = new PostingsWriter(leafPostingsOut);
     }
 
-    public long addAll(TermsIterator termsIterator) throws IOException
+    public long addAll(TermsIterator termsIterator, long segmentRowIdOffset) throws IOException
     {
         long numRows = 0;
         while (termsIterator.hasNext())
@@ -139,7 +140,7 @@ public class BlockIndexWriter implements Closeable
                     {
                         break;
                     }
-                    add(term, rowID);
+                    add(term, rowID + segmentRowIdOffset);
                     numRows++;
                 }
             }

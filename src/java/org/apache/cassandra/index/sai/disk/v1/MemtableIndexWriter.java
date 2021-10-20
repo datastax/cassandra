@@ -70,6 +70,12 @@ public class MemtableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexContext indexContext()
+    {
+        return indexContext;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary

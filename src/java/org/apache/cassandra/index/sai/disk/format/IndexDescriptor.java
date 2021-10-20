@@ -82,7 +82,6 @@ public class IndexDescriptor
 
     public final Version version;
     public final Descriptor descriptor;
-    public final TableMetadata tableMetadata;
     public final PrimaryKey.PrimaryKeyFactory primaryKeyFactory;
     public final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
     public final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
@@ -95,7 +94,6 @@ public class IndexDescriptor
     {
         this.version = version;
         this.descriptor = descriptor;
-        this.tableMetadata = tableMetadata;
         this.primaryKeyFactory = PrimaryKey.factory(tableMetadata, version.onDiskFormat().indexFeatureSet());
     }
 

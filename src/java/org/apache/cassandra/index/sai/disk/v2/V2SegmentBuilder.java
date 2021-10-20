@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRefBuilder;
 
 import static org.apache.cassandra.index.sai.disk.v2.blockindex.BytesUtil.gatherBytes;
@@ -119,7 +120,7 @@ public class V2SegmentBuilder
         return ramIndexer.rowCount == 0;
     }
 
-    public BlockIndexMeta flush(IndexDescriptor indexDescriptor, IndexContext columnContext) throws IOException
+    public BlockIndexMeta flush(IndexDescriptor indexDescriptor, IndexContext columnContext, boolean temporary) throws IOException
     {
         assert !flushed;
         flushed = true;
@@ -132,9 +133,17 @@ public class V2SegmentBuilder
 
         try (BlockIndexFileProvider fileProvider = new PerIndexFileProvider(indexDescriptor, columnContext))
         {
-            BlockIndexWriter writer = new BlockIndexWriter(fileProvider, true);
-            writer.addAll(ramIndexer.getTermsWithPostings());
-            return writer.finish();
+            BlockIndexWriter writer = new BlockIndexWriter(fileProvider, temporary);
+            writer.addAll(ramIndexer.getTermsWithPostings(), temporary ? 0 : segmentRowIdOffset);
+            BlockIndexMeta metadata =  writer.finish();
+            if (!temporary)
+            {
+                try (final IndexOutput out = fileProvider.openMetadataOutput())
+                {
+                    metadata.write(out);
+                }
+            }
+            return metadata;
         }
     }
 

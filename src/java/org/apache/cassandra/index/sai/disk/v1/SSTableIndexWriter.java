@@ -86,6 +86,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexContext indexContext()
+    {
+        return indexContext;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row) throws IOException
     {
         if (maybeAbort())

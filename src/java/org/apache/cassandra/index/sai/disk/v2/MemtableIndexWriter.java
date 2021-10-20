@@ -65,6 +65,12 @@ public class MemtableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexContext indexContext()
+    {
+        return indexContext;
+    }
+
+    @Override
     public void addRow(PrimaryKey rowKey, Row row) throws IOException
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary
@@ -133,7 +139,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         try (BlockIndexFileProvider fileProvider = new PerIndexFileProvider(indexDescriptor, indexContext);
              BlockIndexWriter writer = new BlockIndexWriter(fileProvider, false))
         {
-            numRows = writer.addAll(terms);
+            numRows = writer.addAll(terms, 0L);
             // If no rows were written we need to delete any created column index components
             // so that the index is correctly identified as being empty (only having a completion marker)
             if (numRows == 0)

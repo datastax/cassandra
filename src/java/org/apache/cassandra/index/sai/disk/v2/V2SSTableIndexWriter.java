@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,7 +67,7 @@ public class V2SSTableIndexWriter implements PerIndexWriter
 
     protected final IndexDescriptor indexDescriptor;
     protected final IndexContext indexContext;
-    protected final List<BlockIndexMeta> segments = new ArrayList<>();
+    protected final List<BlockIndexMeta> metadatas = new ArrayList<>();
     protected final List<Long> offsets = new ArrayList<>();
 
     private final int nowInSec = FBUtilities.nowInSeconds();
@@ -94,6 +95,12 @@ public class V2SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public IndexContext indexContext()
+    {
+        return indexContext;
+    }
+
+    @Override
     public void addRow(PrimaryKey key, Row row) throws IOException
     {
         if (maybeAbort())
@@ -117,6 +124,77 @@ public class V2SSTableIndexWriter implements PerIndexWriter
             if (value != null)
                 addTerm(TypeUtil.instance.encode(value.duplicate(), indexContext.getValidator(), false), key, indexContext.getValidator());
         }
+    }
+
+    @Override
+    public void flush() throws IOException
+    {
+        if (maybeAbort())
+        {
+            logger.warn(indexContext.logMessage("Indexing operation was aborted"));
+            return;
+        }
+
+        Stopwatch stopwatch = Stopwatch.createStarted();
+
+        boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
+        logger.debug(indexContext.logMessage("Completing index flush with {}buffered data..."), emptySegment ? "no " : "");
+
+        try
+        {
+            // parts are present but there is something still in memory, let's flush that inline
+            if (!emptySegment)
+            {
+                flushSegment(!metadatas.isEmpty());
+
+                logger.debug(indexContext.logMessage("Final flush on sstable {} resulting in {} segments. Elapsed time {}ms"),
+                             indexDescriptor.descriptor,
+                             metadatas.size(),
+                             stopwatch.elapsed(TimeUnit.MILLISECONDS));
+            }
+
+            // Even an empty segment may carry some fixed memory, so remove it:
+            if (currentBuilder != null)
+            {
+                currentBuilder.release("Flushing final segment");
+                currentBuilder = null;
+            }
+
+            compactSegments();
+
+            logger.debug(indexContext.logMessage("Segment compaction finished on sstable {}. Elapsed time {}ms"),
+                         indexDescriptor.descriptor,
+                         stopwatch.elapsed(TimeUnit.MILLISECONDS));
+
+            indexDescriptor.createComponentOnDisk(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+        }
+        finally
+        {
+            if (indexContext.getIndexMetrics() != null)
+            {
+                indexContext.getIndexMetrics().segmentsPerCompaction.update(metadatas.size());
+                metadatas.clear();
+                indexContext.getIndexMetrics().compactionCount.inc();
+            }
+        }
+    }
+
+    @Override
+    public void abort(Throwable cause)
+    {
+        aborted = true;
+
+        logger.warn(indexContext.logMessage("Aborting SSTable index flush for {}..."), indexDescriptor.descriptor, cause);
+
+        // It's possible for the current builder to be unassigned after we flush a final segment.
+        if (currentBuilder != null)
+        {
+            // If an exception is thrown out of any writer operation prior to successful segment
+            // flush, we will end up here, and we need to free up builder memory tracked by the limiter:
+            currentBuilder.release("Aborting index writer");
+        }
+
+        indexDescriptor.deleteColumnIndex(indexContext);
     }
 
     /**
@@ -154,7 +232,7 @@ public class V2SSTableIndexWriter implements PerIndexWriter
         }
         else if (currentBuilder.shouldFlush(key.sstableRowId()))
         {
-            flushSegment();
+            flushSegment(true);
             currentBuilder = newSegmentBuilder();
         }
 
@@ -184,23 +262,28 @@ public class V2SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    private void flushSegment() throws IOException
+    private long flushSegment(boolean temporary) throws IOException
     {
         long start = System.nanoTime();
 
         try
         {
-            BlockIndexMeta segmentMetadata = currentBuilder.flush(indexDescriptor, indexContext);
+            BlockIndexMeta segmentMetadata = currentBuilder.flush(indexDescriptor, indexContext, temporary);
             long segmentRowIdOffset = currentBuilder.segmentRowIdOffset;
 
             long flushMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 
+            long numRows = -1;
             if (segmentMetadata != null)
             {
-                segments.add(segmentMetadata);
-                offsets.add(segmentRowIdOffset);
+                if (temporary)
+                {
+                    metadatas.add(segmentMetadata);
+                    offsets.add(segmentRowIdOffset);
+                }
 
                 //TODO Need to look at some of these metrics
+                numRows = segmentMetadata.numRows;
                 double rowCount = segmentMetadata.numRows;
                 if (indexContext.getIndexMetrics() != null)
                     indexContext.getIndexMetrics().compactionSegmentCellsPerSecond.update((long)(rowCount / flushMillis * 1000.0));
@@ -219,6 +302,7 @@ public class V2SSTableIndexWriter implements PerIndexWriter
             // that abort logic will release the current builder's memory against the limiter.
             currentBuilder.release("Flushing index segment");
             currentBuilder = null;
+            return numRows;
         }
         catch (Throwable t)
         {
@@ -231,76 +315,19 @@ public class V2SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    @Override
-    public void flush() throws IOException
-    {
-        if (maybeAbort())
-        {
-            logger.warn(indexContext.logMessage("Indexing operation was aborted"));
-            return;
-        }
-
-        boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
-        logger.debug(indexContext.logMessage("Completing index flush with {}buffered data..."), emptySegment ? "no " : "");
-
-        try
-        {
-            // parts are present but there is something still in memory, let's flush that inline
-            if (!emptySegment)
-            {
-                flushSegment();
-            }
-
-            // Even an empty segment may carry some fixed memory, so remove it:
-            if (currentBuilder != null)
-            {
-                currentBuilder.release("Flushing final segment");
-                currentBuilder = null;
-            }
-
-            compactSegments();
-
-            indexDescriptor.createComponentOnDisk(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
-        }
-        finally
-        {
-            if (indexContext.getIndexMetrics() != null)
-            {
-                indexContext.getIndexMetrics().segmentsPerCompaction.update(segments.size());
-                segments.clear();
-                indexContext.getIndexMetrics().compactionCount.inc();
-            }
-        }
-    }
-
-    @Override
-    public void abort(Throwable cause)
-    {
-        aborted = true;
-
-        logger.warn(indexContext.logMessage("Aborting SSTable index flush for {}..."), indexDescriptor.descriptor, cause);
-
-        // It's possible for the current builder to be unassigned after we flush a final segment.
-        if (currentBuilder != null)
-        {
-            // If an exception is thrown out of any writer operation prior to successful segment
-            // flush, we will end up here, and we need to free up builder memory tracked by the limiter:
-            currentBuilder.release("Aborting index writer");
-        }
-
-        indexDescriptor.deleteColumnIndex(indexContext);
-    }
 
     private void compactSegments() throws IOException
     {
-        if (segments.isEmpty())
+        if (metadatas.isEmpty())
             return;
+
+        Stopwatch stopwatch = Stopwatch.createStarted();
 
         List<BlockIndexReader> readers = new ArrayList<>();
         List<BlockIndexReader.IndexIterator> iterators = new ArrayList<>();
         try (BlockIndexFileProvider fileProvider = new PerIndexFileProvider(indexDescriptor, indexContext))
         {
-            Iterator<BlockIndexMeta> metadataIterator = segments.iterator();
+            Iterator<BlockIndexMeta> metadataIterator = metadatas.iterator();
             Iterator<Long> offsetIterator = offsets.iterator();
             while (metadataIterator.hasNext())
             {
@@ -311,6 +338,11 @@ public class V2SSTableIndexWriter implements PerIndexWriter
                 iterators.add(reader.iterator(offset));
             }
 
+            logger.debug(indexContext.logMessage("Created iterators for {} segments for sstable {}. Elapsed time {} ms"),
+                         metadatas.size(),
+                         indexDescriptor.descriptor,
+                         stopwatch.elapsed(TimeUnit.MILLISECONDS));
+
             try (MergeIndexIterators mergeIndexIterators = new MergeIndexIterators(iterators))
             {
 
@@ -318,6 +350,7 @@ public class V2SSTableIndexWriter implements PerIndexWriter
 
                 // TODO: write row id -> point id map
                 // TODO: write point id -> row id map?
+                long terms = 0;
                 while (true)
                 {
                     BlockIndexReader.IndexState state = mergeIndexIterators.next();
@@ -327,21 +360,32 @@ public class V2SSTableIndexWriter implements PerIndexWriter
                     }
                     //TODO Probably ought to be using type here
                     writer.add(BytesUtil.fixedLength(state.term), state.rowid);
+                    terms++;
                 }
+                logger.debug(indexContext.logMessage("Completed adding {} terms to writer for sstable {}. Elapsed time {} ms"),
+                             terms,
+                             indexDescriptor.descriptor,
+                             stopwatch.elapsed(TimeUnit.MILLISECONDS));
+
                 BlockIndexMeta metadata = writer.finish();
+
+                logger.debug(indexContext.logMessage("Completed writing index files for sstable {}. Elapsed time {} ms"),
+                             indexDescriptor.descriptor,
+                             stopwatch.elapsed(TimeUnit.MILLISECONDS));
 
                 try (final IndexOutput out = fileProvider.openMetadataOutput())
                 {
                     metadata.write(out);
                 }
-
-                // TODO: put in file provider
-                indexDescriptor.deletePerIndexTemporaryComponents(indexContext);
             }
             finally
             {
                 FileUtils.closeQuietly(readers);
             }
+        }
+        finally
+        {
+            indexDescriptor.deletePerIndexTemporaryComponents(indexContext);
         }
     }
 
