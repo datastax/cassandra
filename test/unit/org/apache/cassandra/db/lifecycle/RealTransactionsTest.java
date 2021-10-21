@@ -81,7 +81,7 @@ public class RealTransactionsTest extends SchemaLoader
         SSTableReader oldSSTable = getSSTable(cfs, 1);
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
         SSTableReader newSSTable = replaceSSTable(cfs, txn, false);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
 
         // both sstables are in the same folder
         assertFiles(oldSSTable.descriptor.directory.path(), new HashSet<>(newSSTable.getAllFilePaths()));
@@ -98,7 +98,7 @@ public class RealTransactionsTest extends SchemaLoader
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
 
         replaceSSTable(cfs, txn, true);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
 
         assertFiles(oldSSTable.descriptor.directory.path(), new HashSet<>(oldSSTable.getAllFilePaths()));
     }

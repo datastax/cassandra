@@ -580,7 +580,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         truncate(cfs);
         cfs.disableAutoCompaction();
         SSTableReader s = writeFile(cfs, 1000);
-        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UNKNOWN, s))
+        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UNKNOWN, cfs.metadata, s))
         {
             SSTableSplitter splitter = new SSTableSplitter(cfs, txn, 10);
             splitter.split();
@@ -631,7 +631,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         Set<SSTableReader> compacting = Sets.newHashSet(s);
         try (ISSTableScanner scanner = compacting.iterator().next().getScanner();
              CompactionController controller = new CompactionController(cfs, compacting, 0);
-             LifecycleTransaction txn = offline ? LifecycleTransaction.offline(OperationType.UNKNOWN, compacting)
+             LifecycleTransaction txn = offline ? LifecycleTransaction.offline(OperationType.UNKNOWN, cfs.metadata, compacting)
                                        : cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN);
              SSTableRewriter rewriter = new SSTableRewriter(txn, 100, 10000000, offline, true);
              CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, Collections.singletonList(scanner), controller, FBUtilities.nowInSeconds(), UUIDGen.getTimeUUID())

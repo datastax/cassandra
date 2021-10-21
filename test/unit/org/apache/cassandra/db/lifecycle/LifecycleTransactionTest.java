@@ -77,7 +77,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     public void testUpdates() // (including obsoletion)
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = Tracker.newDummyTracker();
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         SSTableReader[] readers = readersArray(0, 3, cfs);
         SSTableReader[] readers2 = readersArray(0, 4, cfs);
         SSTableReader[] readers3 = readersArray(0, 4, cfs);
@@ -141,7 +141,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     public void testCancellation()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = Tracker.newDummyTracker();
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         List<SSTableReader> readers = readers(0, 3, cfs);
         tracker.addInitialSSTables(readers);
         LifecycleTransaction txn = tracker.tryModify(readers, OperationType.UNKNOWN);
@@ -185,7 +185,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     public void testSplit()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = Tracker.newDummyTracker();
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         List<SSTableReader> readers = readers(0, 4, cfs);
         tracker.addInitialSSTables(readers);
         LifecycleTransaction txn = tracker.tryModify(readers, OperationType.UNKNOWN);
@@ -252,7 +252,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
 
     protected TestableTransaction newTest()
     {
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
         SSTableReader.resetTidying();
         return new TxnTest();
     }
@@ -271,7 +271,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
 
         private static Tracker tracker(ColumnFamilyStore cfs, List<SSTableReader> readers)
         {
-            Tracker tracker = new Tracker(cfs, cfs.createMemtable(new AtomicReference<>(CommitLogPosition.NONE)), false);
+            Tracker tracker = new Tracker(cfs, cfs.metadata, cfs.createMemtable(new AtomicReference<>(CommitLogPosition.NONE)), false);
             tracker.addInitialSSTables(readers);
             return tracker;
         }

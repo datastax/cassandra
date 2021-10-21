@@ -291,7 +291,7 @@ public class SSTableFlushObserverTest
                                           TableMetadata metadata,
                                           Map<PartitionHeader, List<Unfiltered>> partitions)
     {
-        LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION);
+        LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION, TableMetadataRef.forOfflineTools(metadata));
         FlushObserver observer = new FlushObserver();
 
         String sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0];

@@ -150,7 +150,7 @@ public class SSTableZeroCopyWriterTest
         Descriptor desc = store.newSSTableDescriptor(dir);
         TableMetadataRef metadata = SchemaManager.instance.getTableMetadataRef(desc);
 
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM, metadata);
         Set<Component> componentsToWrite = desc.getFormat().requiredComponents();
 
         SSTableZeroCopyWriter btzcw = new SSTableZeroCopyWriter(desc, metadata, txn, componentsToWrite);

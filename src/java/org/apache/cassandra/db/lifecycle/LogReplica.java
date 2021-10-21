@@ -131,7 +131,7 @@ final class LogReplica implements AutoCloseable
 
     void delete()
     {
-        LogTransaction.delete(file);
+        DefaultLogTransaction.delete(file);
         syncDirectory();
     }
 

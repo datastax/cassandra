@@ -1159,4 +1159,16 @@ public class FBUtilities
             // ignore
         }
     }
+
+    public static <T> T instantiate(String customImpl, String what)
+    {
+        try
+        {
+            return (T) Class.forName(customImpl).newInstance();
+        }
+        catch (Throwable ex)
+        {
+            throw new IllegalStateException(String.format("Unknown custom %s: %s" , what, customImpl));
+        }
+    }
 }

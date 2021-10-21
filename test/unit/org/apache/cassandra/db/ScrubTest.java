@@ -465,7 +465,7 @@ public class ScrubTest
             List<String> keys = Arrays.asList("t", "a", "b", "z", "c", "y", "d");
             Descriptor desc = cfs.newSSTableDescriptor(tempDataDir);
 
-            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
                  SSTableTxnWriter writer = new SSTableTxnWriter(txn, createTestWriter(desc, keys.size(), cfs.metadata, txn)))
             {
                 for (String k : keys)
@@ -502,7 +502,7 @@ public class ScrubTest
             if (sstable.last.compareTo(sstable.first) < 0)
                 sstable.last = sstable.first;
 
-            try (LifecycleTransaction scrubTxn = LifecycleTransaction.offline(OperationType.SCRUB, sstable);
+            try (LifecycleTransaction scrubTxn = LifecycleTransaction.offline(OperationType.SCRUB, cfs.metadata, sstable);
                  Scrubber scrubber = new Scrubber(cfs, scrubTxn, false, true))
             {
                 scrubber.scrub();

@@ -17,25 +17,13 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.nio.file.Path;
-import java.util.List;
-import java.util.function.BiPredicate;
-
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.io.util.File;
-
 /**
- * An interface for listing files in a folder
+ * An interface for retrying failed log transaction deletion
  */
-public interface LogAwareFileLister
+public interface FailedTransactionDeletionHandler
 {
     /**
-     * Listing files that are not removed by log transactions in a folder.
-     *
-     * @param folder The folder to scan
-     * @param filter The filter determines which files the client wants returned
-     * @param onTxnErr The behavior when we fail to list files
-     * @return all files that are not removed by log transactions
+     * Rescheduled failed log transaction deletion due to mmap not being finalized or Windows constraint.
      */
-    List<File> list(Path folder, BiPredicate<File, Directories.FileType> filter, Directories.OnTxnErr onTxnErr);
+    void rescheduleFailedDeletions();
 }

@@ -17,25 +17,23 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.nio.file.Path;
-import java.util.List;
-import java.util.function.BiPredicate;
-
-import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.io.util.File;
 
 /**
- * An interface for listing files in a folder
+ * Removes any leftovers from unfinished log transactions as indicated by any transaction log files
  */
-public interface LogAwareFileLister
+public interface LogFileCleaner
 {
     /**
-     * Listing files that are not removed by log transactions in a folder.
+     * list all log files under given directory
      *
-     * @param folder The folder to scan
-     * @param filter The filter determines which files the client wants returned
-     * @param onTxnErr The behavior when we fail to list files
-     * @return all files that are not removed by log transactions
+     * @param directory directory to scan
      */
-    List<File> list(Path folder, BiPredicate<File, Directories.FileType> filter, Directories.OnTxnErr onTxnErr);
+    void list(File directory);
+
+    /**
+     * Removes any leftovers from unfinished transactions as indicated by any transaction log files that
+     * are found via {@link #list(File)}
+     */
+    boolean removeUnfinishedLeftovers();
 }

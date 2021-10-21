@@ -21,6 +21,8 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
@@ -42,6 +44,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.notifications.*;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -70,25 +73,28 @@ public class Tracker
     private final Collection<INotificationConsumer> subscribers = new CopyOnWriteArrayList<>();
 
     public final ColumnFamilyStore cfstore;
+    public final TableMetadataRef metadata;
     final AtomicReference<View> view;
     public final boolean loadsstables;
 
     /**
-     * @param columnFamilyStore
+     * @param columnFamilyStore column family store for the table
+     * @param metadata metadata for the table
      * @param memtable Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
      */
-    public Tracker(ColumnFamilyStore columnFamilyStore, Memtable memtable, boolean loadsstables)
+    public Tracker(@Nullable ColumnFamilyStore columnFamilyStore, TableMetadataRef metadata, Memtable memtable, boolean loadsstables)
     {
         this.cfstore = columnFamilyStore;
+        this.metadata = metadata;
         this.view = new AtomicReference<>();
         this.loadsstables = loadsstables;
         this.reset(memtable);
     }
 
-    public static Tracker newDummyTracker()
+    public static Tracker newDummyTracker(TableMetadataRef metadata)
     {
-        return new Tracker(null, null, false);
+        return new Tracker(null, metadata, null, false);
     }
 
     public LifecycleTransaction tryModify(SSTableReader sstable, OperationType operationType)
@@ -264,7 +270,7 @@ public class Tracker
      */
     public Throwable dropSSTables(final Predicate<SSTableReader> remove, OperationType operationType, Throwable accumulate)
     {
-        try (LogTransaction txnLogs = new LogTransaction(operationType))
+        try (LogTransaction txnLogs = LogTransactionsFactory.instance.createLogTransaction(operationType, metadata))
         {
             Pair<View, View> result = apply(view -> {
                 Set<SSTableReader> toremove = copyOf(filter(view.sstables, and(remove, notIn(view.compacting))));

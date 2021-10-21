@@ -147,7 +147,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
 
         try (RandomAccessReader dataFile = sstable.openDataReader();
-             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD))
+             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, tracker.metadata))
         {
             perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable);
             boolean perColumnOnly = perSSTableFileLock == null;
@@ -212,6 +212,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
+                txn.trackNewAttachedIndexFiles(sstable);
             }
 
             return false;

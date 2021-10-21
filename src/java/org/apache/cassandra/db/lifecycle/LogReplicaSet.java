@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +44,7 @@ import org.apache.cassandra.utils.Throwables;
  * @see LogReplica
  * @see LogFile
  */
-public class LogReplicaSet implements AutoCloseable
+final class LogReplicaSet implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(LogReplicaSet.class);
 

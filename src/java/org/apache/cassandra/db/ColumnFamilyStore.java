@@ -435,7 +435,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         Memtable initialMemtable = null;
         if (DatabaseDescriptor.isDaemonInitialized())
             initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
-        data = new Tracker(this, initialMemtable, loadSSTables);
+        data = new Tracker(this, metadata, initialMemtable, loadSSTables);
 
         // Note that this needs to happen before we load the first sstables, or the global sstable tracker will not
         // be notified on the initial loading.
@@ -1153,7 +1153,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             long maxBytesOnDisk = 0;
             long minBytesOnDisk = Long.MAX_VALUE;
             List<SSTableReader> sstables = new ArrayList<>();
-            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH))
+            try (LifecycleTransaction txn = LifecycleTransaction.offline( OperationType.FLUSH, metadata))
             {
                 List<Flushing.FlushRunnable> flushRunnables = null;
                 List<SSTableMultiWriter> flushResults = null;
