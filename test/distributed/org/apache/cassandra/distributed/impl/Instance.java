@@ -523,7 +523,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 {
                     // Even though we don't use MessagingService, access the static SocketFactory
                     // instance here so that we start the static event loop state
-//                    -- not sure what that means?  SocketFactory.instance.getClass();
+                    //  -- not sure what that means?  SocketFactory.instance.getClass();
                     registerMockMessaging(cluster);
                 }
                 registerInboundFilter(cluster);
@@ -536,7 +536,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 if (config.has(GOSSIP))
                 {
                     StorageService.instance.initServer();
-                    StorageService.instance.removeShutdownHook();
+                    JVMStabilityInspector.removeShutdownHooks();
                     Gossiper.waitToSettle();
                 }
                 else
@@ -699,7 +699,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
             if (config.has(GOSSIP) || config.has(NETWORK))
             {
-                StorageService.instance.shutdownServer();
+                JVMStabilityInspector.removeShutdownHooks();
             }
 
             error = parallelRun(error, executor,

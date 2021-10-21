@@ -78,7 +78,7 @@ public class JVMStabilityInspectorTest
 
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.die);
             killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new Throwable());
+            JVMStabilityInspector.inspectCommitLogThrowable("testKill", new Throwable());
             assertTrue(killerForTests.wasKilled());
 
             killerForTests.reset();
@@ -154,7 +154,7 @@ public class JVMStabilityInspectorTest
             assertTrue(killerForTests.wasKilled());
 
             killerForTests.reset();
-            JVMStabilityInspector.inspectCommitLogThrowable(new FileNotFoundException("Too many open files"));
+            JVMStabilityInspector.inspectCommitLogThrowable("fileHandleTest", new FileNotFoundException("Too many open files"));
             assertTrue(killerForTests.wasKilled());
 
         }
