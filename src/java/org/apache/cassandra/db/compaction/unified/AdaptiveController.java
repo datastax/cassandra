@@ -95,13 +95,14 @@ public class AdaptiveController extends Controller
                               long expiredSSTableCheckFrequency,
                               boolean ignoreOverlapsInExpirationCheck,
                               boolean l0ShardsEnabled,
+                              CompactionAggregatePrioritizer prioritizer,
                               int intervalSec,
                               int minW,
                               int maxW,
                               double threshold,
                               int minCost)
     {
-        super(clock, env, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled);
+        super(clock, env, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, prioritizer);
 
         this.W = W;
         this.intervalSec = intervalSec;
@@ -122,6 +123,7 @@ public class AdaptiveController extends Controller
                                   long expiredSSTableCheckFrequency,
                                   boolean ignoreOverlapsInExpirationCheck,
                                   boolean l0ShardsEnabled,
+                                  CompactionAggregatePrioritizer prioritizer,
                                   Map<String, String> options)
     {
         int W = options.containsKey(STARTING_SCALING_PARAMETER) ? Integer.parseInt(options.get(STARTING_SCALING_PARAMETER)) : DEFAULT_STARTING_SCALING_PARAMETER;
@@ -131,7 +133,7 @@ public class AdaptiveController extends Controller
         double threshold = options.containsKey(THRESHOLD) ? Double.parseDouble(options.get(THRESHOLD)) : DEFAULT_THRESHOLD;
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
 
-        return new AdaptiveController(MonotonicClock.preciseTime, env, W, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost);
+        return new AdaptiveController(MonotonicClock.preciseTime, env, W, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, prioritizer, intervalSec, minW, maxW, threshold, minCost);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

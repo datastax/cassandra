@@ -66,6 +66,7 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.compaction.unified.AdaptiveController;
+import org.apache.cassandra.db.compaction.unified.CompactionAggregatePrioritizer;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.CostsCalculator;
 import org.apache.cassandra.db.compaction.unified.StaticController;
@@ -387,6 +388,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          expiredSSTableCheckFrequency,
                                                          ignoreOverlaps,
                                                          l0ShardsEnabled,
+                                                         CompactionAggregatePrioritizer.instance,
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
@@ -403,7 +405,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        0,
                                                        expiredSSTableCheckFrequency,
                                                        ignoreOverlaps,
-                                                       l0ShardsEnabled);
+                                                       l0ShardsEnabled,
+                                                       CompactionAggregatePrioritizer.instance);
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
     }

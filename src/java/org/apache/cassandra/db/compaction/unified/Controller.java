@@ -161,6 +161,8 @@ public abstract class Controller
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean l0ShardsEnabled;
+
+    protected final CompactionAggregatePrioritizer prioritizer;
     @Nullable protected volatile CostsCalculator calculator;
     @Nullable private volatile Metrics metrics;
 
@@ -175,7 +177,8 @@ public abstract class Controller
                int maxSSTablesToCompact,
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
-               boolean l0ShardsEnabled)
+               boolean l0ShardsEnabled,
+               CompactionAggregatePrioritizer prioritizer)
     {
         this.clock = clock;
         this.env = env;
@@ -215,6 +218,7 @@ public abstract class Controller
         }
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
         this.l0ShardsEnabled = l0ShardsEnabled;
+        this.prioritizer = prioritizer;
     }
 
     @VisibleForTesting
@@ -253,6 +257,14 @@ public abstract class Controller
     public boolean areL0ShardsEnabled()
     {
         return l0ShardsEnabled;
+    }
+
+    /**
+     * @return compaction aggregate prioritizer for current strategy
+     */
+    public CompactionAggregatePrioritizer aggregatePrioritizer()
+    {
+        return prioritizer;
     }
 
     /**
@@ -579,6 +591,7 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 l0ShardsEnabled,
+                                                CompactionAggregatePrioritizer.instance,
                                                 options)
                : StaticController.fromOptions(env,
                                               survivalFactors,
@@ -591,6 +604,7 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               l0ShardsEnabled,
+                                              CompactionAggregatePrioritizer.instance,
                                               options);
     }
 
