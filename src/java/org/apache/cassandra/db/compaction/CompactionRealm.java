@@ -80,6 +80,11 @@ public interface CompactionRealm
     }
 
     /**
+     * @return the replication factor for this table.
+     */
+    int getKeyspaceReplicationFactor();
+
+    /**
      * @return the partitioner used by this table.
      */
     default IPartitioner getPartitioner()

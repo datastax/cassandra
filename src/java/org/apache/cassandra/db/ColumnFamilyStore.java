@@ -549,6 +549,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return metric;
     }
 
+    @Override
+    public int getKeyspaceReplicationFactor()
+    {
+        return keyspace.getReplicationStrategy().getReplicationFactor().allReplicas;
+    }
+
     public Directories getDirectories()
     {
         return directories;

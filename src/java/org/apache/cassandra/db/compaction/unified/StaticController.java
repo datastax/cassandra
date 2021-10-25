@@ -43,7 +43,7 @@ public class StaticController extends Controller
     @VisibleForTesting // comp. simulation
     public StaticController(Environment env,
                             int[] scalingParameters,
-                            double survivalFactor,
+                            double[] survivalFactors,
                             long dataSetSizeMB,
                             int numShards,
                             long minSSTableSizeMB,
@@ -51,11 +51,12 @@ public class StaticController extends Controller
                             double maxSpaceOverhead,
                             int maxSSTablesToCompact,
                             long expiredSSTableCheckFrequency,
-                            boolean ignoreOverlapsInExpirationCheck)
+                            boolean ignoreOverlapsInExpirationCheck,
+                            boolean l0ShardsEnabled)
     {
         super(MonotonicClock.preciseTime,
               env,
-              survivalFactor,
+              survivalFactors,
               dataSetSizeMB,
               numShards,
               minSSTableSizeMB,
@@ -63,12 +64,13 @@ public class StaticController extends Controller
               maxSpaceOverhead,
               maxSSTablesToCompact,
               expiredSSTableCheckFrequency,
-              ignoreOverlapsInExpirationCheck);
+              ignoreOverlapsInExpirationCheck,
+              l0ShardsEnabled);
         this.scalingParameters = scalingParameters;
     }
 
     static Controller fromOptions(Environment env,
-                                  double survivalFactor,
+                                  double[] survivalFactors,
                                   long dataSetSizeMB,
                                   int numShards,
                                   long minSSTableSizeMB,
@@ -77,12 +79,13 @@ public class StaticController extends Controller
                                   int maxSSTablesToCompact,
                                   long expiredSSTableCheckFrequency,
                                   boolean ignoreOverlapsInExpirationCheck,
+                                  boolean l0ShardsEnabled,
                                   Map<String, String> options)
     {
         int[] Ws = parseScalingParameters(options.getOrDefault(STATIC_SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
         return new StaticController(env,
                                     Ws,
-                                    survivalFactor,
+                                    survivalFactors,
                                     dataSetSizeMB,
                                     numShards,
                                     minSSTableSizeMB,
@@ -90,7 +93,8 @@ public class StaticController extends Controller
                                     maxSpaceOverhead,
                                     maxSSTablesToCompact,
                                     expiredSSTableCheckFrequency,
-                                    ignoreOverlapsInExpirationCheck);
+                                    ignoreOverlapsInExpirationCheck,
+                                    l0ShardsEnabled);
     }
 
     @VisibleForTesting
@@ -124,6 +128,6 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %f, Ws: %s, cost: %s", minSstableSizeMB, survivalFactor, Arrays.toString(scalingParameters), calculator);
+        return String.format("Static controller, m: %d, o: %s, Ws: %s, cost: %s", minSstableSizeMB, Arrays.toString(survivalFactors), Arrays.toString(scalingParameters), calculator);
     }
 }

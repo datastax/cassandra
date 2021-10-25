@@ -92,7 +92,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
         when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
-        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getSurvivalFactor(1)).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
@@ -152,7 +152,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
         when(controller.getMinSstableSizeBytes()).thenReturn(minSize);
-        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getSurvivalFactor(1)).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSize);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
