@@ -481,6 +481,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     private static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
+        components = sstableWatcher.discoverComponents(descriptor, components);
+
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
         assert components.contains(Component.PRIMARY_INDEX) : "Primary index component is missing for sstable " + descriptor;
@@ -540,6 +542,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                       boolean validate,
                                       boolean isOffline)
     {
+        components = sstableWatcher.discoverComponents(descriptor, components);
+
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
         assert !validate || components.contains(Component.PRIMARY_INDEX) : "Primary index component is missing for sstable " + descriptor;
