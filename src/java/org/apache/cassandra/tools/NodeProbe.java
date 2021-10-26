@@ -1714,7 +1714,7 @@ public class NodeProbe implements AutoCloseable
 
     public long getPid()
     {
-        return NativeLibrary.getProcessID();
+        return NativeLibrary.instance.getProcessID();
     }
 
     public void resumeBootstrap(PrintStream out) throws IOException

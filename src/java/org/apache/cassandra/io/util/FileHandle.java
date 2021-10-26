@@ -165,7 +165,7 @@ public class FileHandle extends SharedCloseableImpl
             else
                 return metadata.chunkFor(before).offset;
         }).orElse(before);
-        NativeLibrary.trySkipCache(channel.getFileDescriptor(), 0, position, path());
+        NativeLibrary.instance.trySkipCache(channel.getFileDescriptor(), 0, position, path());
     }
 
     public Rebufferer instantiateRebufferer()

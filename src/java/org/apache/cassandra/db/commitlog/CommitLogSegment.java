@@ -174,7 +174,7 @@ public abstract class CommitLogSegment
         try
         {
             channel = FileChannel.open(logFile.toPath(), StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
-            fd = NativeLibrary.getfd(channel);
+            fd = NativeLibrary.instance.getfd(channel);
         }
         catch (IOException e)
         {

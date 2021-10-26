@@ -282,7 +282,7 @@ public class StartupChecks
         public void execute() throws StartupException
         {
             // Fail-fast if the native library could not be linked.
-            if (!NativeLibrary.isAvailable())
+            if (!NativeLibrary.instance.isAvailable())
                 throw new StartupException(StartupException.ERR_WRONG_MACHINE_STATE, "The native library could not be initialized properly. ");
         }
     };

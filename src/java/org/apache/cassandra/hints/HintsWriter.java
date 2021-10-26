@@ -70,7 +70,7 @@ class HintsWriter implements AutoCloseable
         File file = new File(directory, descriptor.fileName());
 
         FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
-        int fd = NativeLibrary.getfd(channel);
+        int fd = NativeLibrary.instance.getfd(channel);
 
         CRC32 crc = new CRC32();
 
@@ -295,7 +295,7 @@ class HintsWriter implements AutoCloseable
             // don't skip page cache for tiny files, on the assumption that if they are tiny, the target node is probably
             // alive, and if so, the file will be closed and dispatched shortly (within a minute), and the file will be dropped.
             if (position >= DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024L)
-                NativeLibrary.trySkipCache(fd, 0, position - (position % PAGE_SIZE), file.path());
+                NativeLibrary.instance.trySkipCache(fd, 0, position - (position % PAGE_SIZE), file.path());
         }
     }
 }

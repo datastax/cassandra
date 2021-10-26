@@ -181,7 +181,7 @@ public final class ChannelProxy extends SharedCloseableImpl
 
     public int getFileDescriptor()
     {
-        return NativeLibrary.getfd(channel);
+        return NativeLibrary.instance.getfd(channel);
     }
 
     @Override

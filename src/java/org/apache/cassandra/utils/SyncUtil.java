@@ -186,7 +186,7 @@ public class SyncUtil
     public static void sync(FileChannel fc) throws IOException
     {
         Objects.requireNonNull(fc);
-        sync(NativeLibrary.getFileDescriptor(fc));
+        sync(NativeLibrary.instance.getFileDescriptor(fc));
     }
 
     public static void trySync(int fd)
@@ -194,7 +194,7 @@ public class SyncUtil
         if (SKIP_SYNC)
             return;
         else
-            NativeLibrary.trySync(fd);
+            NativeLibrary.instance.trySync(fd);
     }
 
     public static void trySyncDir(File dir)
@@ -202,14 +202,14 @@ public class SyncUtil
         if (SKIP_SYNC)
             return;
 
-        int directoryFD = NativeLibrary.tryOpenDirectory(dir.path());
+        int directoryFD = NativeLibrary.instance.tryOpenDirectory(dir);
         try
         {
             trySync(directoryFD);
         }
         finally
         {
-            NativeLibrary.tryCloseFD(directoryFD);
+            NativeLibrary.instance.tryCloseFD(directoryFD);
         }
     }
 }

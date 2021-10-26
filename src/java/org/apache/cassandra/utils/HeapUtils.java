@@ -114,7 +114,7 @@ public final class HeapUtils
      */
     public static Long getProcessId()
     {
-        long pid = NativeLibrary.getProcessID();
+        long pid = NativeLibrary.instance.getProcessID();
         if (pid >= 0)
             return pid;
 
