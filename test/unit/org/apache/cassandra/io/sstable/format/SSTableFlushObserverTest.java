@@ -294,7 +294,7 @@ public class SSTableFlushObserverTest
         LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION, TableMetadataRef.forOfflineTools(metadata));
         FlushObserver observer = new FlushObserver();
 
-        String sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0];
+        File sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0];
         File directory = new File(sstableDirectory, metadata.keyspace + File.pathSeparator() + metadata.name);
         directory.deleteOnExit();
 

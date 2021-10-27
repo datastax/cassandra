@@ -143,7 +143,7 @@ public class StandaloneScrubber
                     headerFixBuilder = headerFixBuilder.dryRun();
 
                 for (Pair<Descriptor, Set<Component>> p : listResult)
-                    headerFixBuilder.withPath(Paths.get(p.left.filenameFor(Component.DATA)));
+                    headerFixBuilder.withPath(p.left.fileFor(Component.DATA).toPath());
 
                 SSTableHeaderFix headerFix = headerFixBuilder.build();
                 try

@@ -31,6 +31,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
@@ -41,13 +42,13 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     private final SSTableReader sstable;
     private final DecoratedKey key;
     private final DeletionTime partitionLevelDeletion;
-    private final String filename;
+    private final File filename;
 
     protected final SSTableSimpleIterator iterator;
     private final Row staticRow;
 
     public SSTableIdentityIterator(SSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
-            String filename, SSTableSimpleIterator iterator) throws IOException
+                                   File filename, SSTableSimpleIterator iterator) throws IOException
     {
         super();
         this.sstable = sstable;
@@ -193,7 +194,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         // creator is responsible for closing file when finished
     }
 
-    public String getPath()
+    public File getPath()
     {
         return filename;
     }

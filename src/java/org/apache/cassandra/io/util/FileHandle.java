@@ -242,7 +242,7 @@ public class FileHandle extends SharedCloseableImpl
      */
     public static class Builder implements AutoCloseable
     {
-        private final String path;
+        private final File path;
 
         private ChannelProxy channel;
         private CompressionMetadata compressionMetadata;
@@ -255,7 +255,7 @@ public class FileHandle extends SharedCloseableImpl
         private boolean compressed = false;
         private long length = -1;
 
-        public Builder(String path)
+        public Builder(File path)
         {
             this.path = path;
         }
@@ -263,7 +263,7 @@ public class FileHandle extends SharedCloseableImpl
         public Builder(ChannelProxy channel)
         {
             this.channel = channel;
-            this.path = channel.filePath();
+            this.path = channel.getFile();
         }
 
         public Builder compressed(boolean compressed)
@@ -369,7 +369,7 @@ public class FileHandle extends SharedCloseableImpl
             try
             {
                 if (compressed && compressionMetadata == null)
-                    compressionMetadata = CompressionMetadata.create(channelCopy.filePath());
+                    compressionMetadata = CompressionMetadata.create(channelCopy.getFile());
 
                 long length = overrideLength > 0 ? overrideLength : compressed ? compressionMetadata.compressedFileLength : channelCopy.size();
 

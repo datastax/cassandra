@@ -24,13 +24,13 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
+
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -47,9 +47,11 @@ import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSNoDiskAvailableForWriteError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.TableMetadata;
@@ -190,9 +192,19 @@ public class Directories
         this(metadata, dataDirectories.getDataDirectoriesFor(metadata));
     }
 
+    public Directories(final KeyspaceMetadata ksMetadata, final TableMetadata metadata)
+    {
+        this(ksMetadata, metadata, dataDirectories.getDataDirectoriesFor(metadata));
+    }
+
     public Directories(final TableMetadata metadata, Collection<DataDirectory> paths)
     {
-        this(metadata, paths.toArray(new DataDirectory[paths.size()]));
+        this(null, metadata, paths.toArray(new DataDirectory[paths.size()]));
+    }
+
+    public Directories(final TableMetadata metadata, DataDirectory[] paths)
+    {
+        this(null, metadata, paths);
     }
 
     /**
@@ -201,10 +213,11 @@ public class Directories
      *
      * @param metadata metadata of ColumnFamily
      */
-    public Directories(final TableMetadata metadata, DataDirectory[] paths)
+    public Directories(@Nullable KeyspaceMetadata ksMetadata,  final TableMetadata metadata, DataDirectory[] dirs)
     {
         this.metadata = metadata;
-        this.paths = paths;
+        this.paths =  StorageProvider.instance.createDataDirectories(ksMetadata, metadata.keyspace, dirs);
+
         ImmutableMap.Builder<Path, DataDirectory> canonicalPathsBuilder = ImmutableMap.builder();
         String tableId = metadata.id.toHexString();
         int idx = metadata.name.indexOf(SECONDARY_INDEX_NAME_SEPARATOR);
@@ -276,7 +289,7 @@ public class Directories
                 {
                     File destFile = new File(dataPath, indexFile.name());
                     logger.trace("Moving index file {} to {}", indexFile, destFile);
-                    FileUtils.renameWithConfirm(indexFile, destFile);
+                    indexFile.move(destFile);
                 }
             }
         }
@@ -683,17 +696,17 @@ public class Directories
         private final DataDirectory[] nonLocalSystemKeyspacesDirectories;
 
 
-        public DataDirectories(String[] locationsForNonSystemKeyspaces, String[] locationsForSystemKeyspace)
+        public DataDirectories(File[] locationsForNonSystemKeyspaces, File[] locationsForSystemKeyspace)
         {
             nonLocalSystemKeyspacesDirectories = toDataDirectories(locationsForNonSystemKeyspaces);
             localSystemKeyspaceDataDirectories = toDataDirectories(locationsForSystemKeyspace);
         }
 
-        private static DataDirectory[] toDataDirectories(String... locations)
+        private static DataDirectory[] toDataDirectories(File... locations)
         {
             DataDirectory[] directories = new DataDirectory[locations.length];
             for (int i = 0; i < locations.length; ++i)
-                directories[i] = new DataDirectory(new File(locations[i]));
+                directories[i] = new DataDirectory(locations[i]);
             return directories;
         }
 
@@ -887,7 +900,7 @@ public class Directories
             {
                 for (Component c : entry.getValue())
                 {
-                    l.add(new File(entry.getKey().filenameFor(c)));
+                    l.add(entry.getKey().fileFor(c));
                 }
             }
             return l;

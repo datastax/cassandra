@@ -106,10 +106,10 @@ public class FileUtilsTest
     @Test
     public void testFolderSize() throws Exception
     {
-        File folder = createFolder(Paths.get(DatabaseDescriptor.getAllDataFileLocations()[0], "testFolderSize"));
+        File folder = createFolder(DatabaseDescriptor.getAllDataFileLocations()[0], "testFolderSize");
         folder.deleteOnExit();
 
-        File childFolder = createFolder(Paths.get(folder.path(), "child"));
+        File childFolder = createFolder(folder, "child");
 
         File[] files = {
                        createFile(new File(folder, "001"), 10000),
@@ -226,9 +226,9 @@ public class FileUtilsTest
     }
 
 
-    private File createFolder(Path path)
+    private File createFolder(File folder, String additionalName)
     {
-        File folder = new File(path);
+        folder = folder.resolve(additionalName);
         FileUtils.createDirectory(folder);
         return folder;
     }

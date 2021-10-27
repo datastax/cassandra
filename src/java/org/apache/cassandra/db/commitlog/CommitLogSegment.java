@@ -73,7 +73,7 @@ public abstract class CommitLogSegment
     static
     {
         long maxId = Long.MIN_VALUE;
-        for (File file : new File(DatabaseDescriptor.getCommitLogLocation()).tryList())
+        for (File file : DatabaseDescriptor.getCommitLogLocation().tryList())
         {
             if (CommitLogDescriptor.isValid(file.name()))
                 maxId = Math.max(CommitLogDescriptor.fromFileName(file.name()).id, maxId);

@@ -41,6 +41,8 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 public final class ChannelProxy extends SharedCloseableImpl
 {
     private final String filePath;
+    private final File file;
+
     private final FileChannel channel;
 
     public static FileChannel openChannel(File file)
@@ -55,21 +57,17 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public ChannelProxy(String path)
-    {
-        this (new File(path));
-    }
-
     public ChannelProxy(File file)
     {
-        this(file.path(), openChannel(file));
+        this(file, openChannel(file));
     }
 
-    public ChannelProxy(String filePath, FileChannel channel)
+    public ChannelProxy(File file, FileChannel channel)
     {
-        super(new Cleanup(filePath, channel));
+        super(new Cleanup(file.path(), channel));
 
-        this.filePath = filePath;
+        this.filePath = file.path();
+        this.file = file;
         this.channel = channel;
     }
 
@@ -78,6 +76,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         super(copy);
 
         this.filePath = copy.filePath;
+        this.file = copy.file;
         this.channel = copy.channel;
     }
 
@@ -117,7 +116,7 @@ public final class ChannelProxy extends SharedCloseableImpl
      */
     public final ChannelProxy newChannel()
     {
-        return new ChannelProxy(filePath);
+        return new ChannelProxy(file);
     }
 
     public ChannelProxy sharedCopy()
@@ -128,6 +127,11 @@ public final class ChannelProxy extends SharedCloseableImpl
     public String filePath()
     {
         return filePath;
+    }
+
+    public File getFile()
+    {
+        return file;
     }
 
     public int read(ByteBuffer buffer, long position)
@@ -187,6 +191,6 @@ public final class ChannelProxy extends SharedCloseableImpl
     @Override
     public String toString()
     {
-        return filePath();
+        return filePath().toString();
     }
 }

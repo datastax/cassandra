@@ -234,7 +234,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
             Assert.assertFalse(new File(segment).exists());
 
         // and combined index doesn't exist either
-        Assert.assertFalse(new File(index.outputFile).exists());
+        Assert.assertFalse(index.outputFile.exists());
     }
 
     private static void populateSegment(TableMetadata metadata, PerSSTableIndexWriter.Index index, Map<Long, Set<Integer>> data)

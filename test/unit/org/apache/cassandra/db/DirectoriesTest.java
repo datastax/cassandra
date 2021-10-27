@@ -180,7 +180,7 @@ public class DirectoriesTest
         Descriptor desc = new Descriptor(dir, KS, cf, getId(gen), SSTableFormat.Type.BIG);
         for (Component c : new Component[]{ Component.DATA, Component.PRIMARY_INDEX, Component.FILTER })
         {
-            File f = new File(desc.filenameFor(c));
+            File f = desc.fileFor(c);
             f.createFileIfNotExists();
             addTo.add(f);
         }
@@ -265,9 +265,9 @@ public class DirectoriesTest
 
         // check true snapshot size
         Descriptor parentSnapshot = new Descriptor(parentSnapshotDirectory, KS, PARENT_CFM.name, getId(0), SSTableFormat.Type.BIG);
-        createFile(parentSnapshot.filenameFor(Component.DATA), 30);
+        createFile(parentSnapshot.fileFor(Component.DATA), 30);
         Descriptor indexSnapshot = new Descriptor(indexSnapshotDirectory, KS, INDEX_CFM.name, getId(0), SSTableFormat.Type.BIG);
-        createFile(indexSnapshot.filenameFor(Component.DATA), 40);
+        createFile(indexSnapshot.fileFor(Component.DATA), 40);
 
         assertEquals(30, parentDirectories.trueSnapshotsSize());
         assertEquals(40, indexDirectories.trueSnapshotsSize());
@@ -287,16 +287,15 @@ public class DirectoriesTest
         assertEquals(parentBackupDirectory, indexBackupDirectory.parent());
     }
 
-    private File createFile(String fileName, int size)
+    private File createFile(File file, int size)
     {
-        File newFile = new File(fileName);
-        try (FileOutputStreamPlus writer = new FileOutputStreamPlus(newFile);)
+        try (FileOutputStreamPlus writer = new FileOutputStreamPlus(file);)
         {
             writer.write(new byte[size]);
             writer.flush();
         }
         catch (IOException ignore) {}
-        return newFile;
+        return file;
     }
 
     @Test
@@ -700,30 +699,28 @@ public class DirectoriesTest
     public void testDataDirectoriesIterator() throws IOException
     {
         Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
-        Path subDir_1 = Files.createDirectory(tmpDir.resolve("a"));
-        Path subDir_2 = Files.createDirectory(tmpDir.resolve("b"));
-        Path subDir_3 = Files.createDirectory(tmpDir.resolve("c"));
+        File subDir_1 = new File(Files.createDirectory(tmpDir.resolve("a")));
+        File subDir_2 = new File(Files.createDirectory(tmpDir.resolve("b")));
+        File subDir_3 = new File(Files.createDirectory(tmpDir.resolve("c")));
 
-        DataDirectories directories = new DataDirectories(new String[]{subDir_1.toString(), subDir_2.toString()},
-                                                          new String[]{subDir_3.toString()});
+        DataDirectories directories = new DataDirectories(new File[]{subDir_1, subDir_2}, new File[]{subDir_3});
 
         Iterator<DataDirectory> iter = directories.iterator();
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_1)), iter.next());
+        assertEquals(new DataDirectory(subDir_1), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_2)), iter.next());
+        assertEquals(new DataDirectory(subDir_2), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_3)), iter.next());
+        assertEquals(new DataDirectory(subDir_3), iter.next());
         assertFalse(iter.hasNext());
 
-        directories = new DataDirectories(new String[]{subDir_1.toString(), subDir_2.toString()},
-                                                          new String[]{subDir_1.toString()});
+        directories = new DataDirectories(new File[]{subDir_1, subDir_2}, new File[]{subDir_1});
 
         iter = directories.iterator();
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_1)), iter.next());
+        assertEquals(new DataDirectory(subDir_1), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_2)), iter.next());
+        assertEquals(new DataDirectory(subDir_2), iter.next());
         assertFalse(iter.hasNext());
     }
 

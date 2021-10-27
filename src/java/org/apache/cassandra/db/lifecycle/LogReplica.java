@@ -58,7 +58,7 @@ final class LogReplica implements AutoCloseable
         if (folderFD == -1 && !FBUtilities.isWindows)
             throw new FSReadError(new IOException(String.format("Invalid folder descriptor trying to create log replica %s", directory.path())), directory.path());
 
-        return new LogReplica(new File(fileName), folderFD);
+        return new LogReplica(directory.resolve(fileName), folderFD);
     }
 
     static LogReplica open(File file)

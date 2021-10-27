@@ -85,9 +85,10 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return bufferHolder.offset() + buffer.position();
     }
 
-    public String getPath()
+    @Override
+    public File getPath()
     {
-        return getChannel().filePath();
+        return getChannel().getFile();
     }
 
     public ChannelProxy getChannel()

@@ -282,8 +282,8 @@ final class LogReplicaSet implements AutoCloseable
     }
 
     @VisibleForTesting
-    List<String> getFilePaths()
+    List<File> getFilePaths()
     {
-        return replicas().stream().map(LogReplica::file).map(File::path).collect(Collectors.toList());
+        return replicas().stream().map(LogReplica::file).collect(Collectors.toList());
     }
 }

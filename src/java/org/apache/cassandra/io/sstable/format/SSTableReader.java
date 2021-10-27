@@ -496,7 +496,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
         catch (IOException e)
         {
-            throw new CorruptSSTableException(e, descriptor.filenameFor(Component.STATS));
+            throw new CorruptSSTableException(e, descriptor.fileFor(Component.STATS));
         }
 
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
@@ -562,7 +562,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
         catch (Throwable t)
         {
-            throw new CorruptSSTableException(t, descriptor.filenameFor(Component.STATS));
+            throw new CorruptSSTableException(t, descriptor.fileFor(Component.STATS));
         }
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
         StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
@@ -710,7 +710,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                                   Set<Component> actualComponents)
     throws CorruptSSTableException, FSReadError
     {
-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
+        File tocFile = descriptor.fileFor(Component.TOC);
         if (tocFile.exists())
         {
             try
@@ -718,8 +718,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 Set<Component> expectedComponents = readTOC(descriptor, false);
                 if (expectedComponents.contains(Component.COMPRESSION_INFO) && !actualComponents.contains(Component.COMPRESSION_INFO))
                 {
-                    String compressionInfoFileName = descriptor.filenameFor(Component.COMPRESSION_INFO);
-                    throw new CorruptSSTableException(new NoSuchFileException(compressionInfoFileName), compressionInfoFileName);
+                    File compressionInfoFileName = descriptor.fileFor(Component.COMPRESSION_INFO);
+                    throw new CorruptSSTableException(new NoSuchFileException(compressionInfoFileName.toString()), compressionInfoFileName);
                 }
             }
             catch (IOException e)
@@ -826,9 +826,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public static void saveSummary(Descriptor descriptor, DecoratedKey first, DecoratedKey last, IndexSummary summary)
     {
-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+        File summariesFile = descriptor.fileFor(Component.SUMMARY);
         if (summariesFile.exists())
-            FileUtils.deleteWithConfirm(summariesFile);
+            summariesFile.delete();
 
         try (DataOutputStreamPlus oStream = new FileOutputStreamPlus(summariesFile))
         {
@@ -848,7 +848,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public static void saveBloomFilter(Descriptor descriptor, IFilter filter)
     {
-        File filterFile = new File(descriptor.filenameFor(Component.FILTER));
+        File filterFile = descriptor.fileFor(Component.FILTER);
         try (DataOutputStreamPlus stream = new FileOutputStreamPlus(filterFile))
         {
             BloomFilter.serializer.serialize((BloomFilter) filter, stream);
@@ -1720,7 +1720,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         for (Component component : components)
         {
-            File sourceFile = new File(descriptor.filenameFor(component));
+            File sourceFile = descriptor.fileFor(component);
             if (!sourceFile.exists())
                 continue;
             File targetLink = new File(snapshotDirectoryPath, sourceFile.name());
@@ -2222,14 +2222,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 }
                 catch (RuntimeException | Error ex)
                 {
-                    logger.error("Failed to run on-close listeners for sstable " + descriptor.baseFilename(), ex);
+                    logger.error("Failed to run on-close listeners for sstable " + descriptor.baseFileUri(), ex);
                     exceptions = ex;
                 }
 
                 Throwable closeExceptions = Throwables.close(null, closables);
                 if (closeExceptions != null)
                 {
-                    logger.error("Failed to close some sstable components of " + descriptor.baseFilename(), closeExceptions);
+                    logger.error("Failed to close some sstable components of " + descriptor.baseFileUri(), closeExceptions);
                     exceptions = Throwables.merge(exceptions, closeExceptions);
                 }
 
@@ -2239,7 +2239,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 }
                 catch (RuntimeException | Error ex)
                 {
-                    logger.error("Failed to release the global ref of " + descriptor.baseFilename(), ex);
+                    logger.error("Failed to release the global ref of " + descriptor.baseFileUri(), ex);
                     exceptions = Throwables.merge(exceptions, ex);
                 }
 
@@ -2536,9 +2536,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             logger.error(message);
             throw new RuntimeException(message);
         }
-        if (new File(newDescriptor.filenameFor(Component.DATA)).exists())
+        if (newDescriptor.fileFor(Component.DATA).exists())
         {
-            String msg = String.format("File %s already exists, can't move the file there", newDescriptor.filenameFor(Component.DATA));
+            String msg = String.format("File %s already exists, can't move the file there", newDescriptor.fileFor(Component.DATA));
             logger.error(msg);
             throw new RuntimeException(msg);
         }

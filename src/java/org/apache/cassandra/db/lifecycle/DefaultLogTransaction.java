@@ -250,7 +250,7 @@ final class DefaultLogTransaction extends LogTransaction
     }
 
     @VisibleForTesting
-    List<String> logFilePaths()
+    List<File> logFilePaths()
     {
         return txnFile.getFilePaths();
     }
@@ -393,10 +393,10 @@ final class DefaultLogTransaction extends LogTransaction
                 try
                 {
                     // If we can't successfully delete the DATA component, set the task to be retried later: see TransactionTidier
-                    File datafile = new File(desc.filenameFor(Component.DATA));
+                    File datafile = desc.fileFor(Component.DATA);
 
                     if (logger.isTraceEnabled())
-                        logger.trace("Tidier running for old sstable {}", desc.baseFilename());
+                        logger.trace("Tidier running for old sstable {}", desc.baseFileUri());
 
                     if (datafile.exists())
                         delete(datafile);

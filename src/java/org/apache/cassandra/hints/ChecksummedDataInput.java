@@ -226,7 +226,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
 
     public void tryUncacheRead()
     {
-        NativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getPath());
+        NativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getFile().toString());
     }
 
     private void updateCrc()
@@ -250,9 +250,9 @@ public class ChecksummedDataInput extends RebufferingInputStream
         channel.close();
     }
 
-    protected String getPath()
+    protected File getFile()
     {
-        return channel.filePath();
+        return channel.getFile();
     }
 
     public ChannelProxy getChannel()

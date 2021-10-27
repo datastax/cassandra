@@ -42,16 +42,16 @@ public class DataIntegrityMetadata
         private final ChecksumType checksumType;
         private final RandomAccessReader reader;
         public final int chunkSize;
-        private final String dataFilename;
+        private final File dataFilename;
 
         public ChecksumValidator(Descriptor descriptor) throws IOException
         {
             this(ChecksumType.CRC32,
-                 RandomAccessReader.open(new File(descriptor.filenameFor(Component.CRC))),
-                 descriptor.filenameFor(Component.DATA));
+                 RandomAccessReader.open(descriptor.fileFor(Component.CRC)),
+                 descriptor.fileFor(Component.DATA));
         }
 
-        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, String dataFilename) throws IOException
+        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, File dataFilename) throws IOException
         {
             this.checksumType = checksumType;
             this.reader = reader;
@@ -125,8 +125,8 @@ public class DataIntegrityMetadata
         {
             this.descriptor = descriptor;
             checksum = ChecksumType.CRC32.newInstance();
-            digestReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DIGEST)));
-            dataReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DATA)));
+            digestReader = RandomAccessReader.open(descriptor.fileFor(Component.DIGEST));
+            dataReader = RandomAccessReader.open(descriptor.fileFor(Component.DATA));
             try
             {
                 storedDigestValue = Long.parseLong(digestReader.readLine());
@@ -135,7 +135,7 @@ public class DataIntegrityMetadata
             {
                 close();
                 // Attempting to create a FileDigestValidator without a DIGEST file will fail
-                throw new IOException("Corrupted SSTable : " + descriptor.filenameFor(Component.DATA));
+                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
             }
         }
 
@@ -149,7 +149,7 @@ public class DataIntegrityMetadata
             long calculatedDigestValue = checkedInputStream.getChecksum().getValue();
             if (storedDigestValue != calculatedDigestValue)
             {
-                throw new IOException("Corrupted SSTable : " + descriptor.filenameFor(Component.DATA));
+                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
             }
         }
 

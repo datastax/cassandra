@@ -24,6 +24,7 @@ import java.io.DataInput;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.DataPosition;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileSegmentInputStream;
 
@@ -42,7 +43,7 @@ public class EncryptedFileSegmentInputStream extends FileSegmentInputStream impl
      */
     private int totalChunkOffset;
 
-    public EncryptedFileSegmentInputStream(String filePath, long segmentOffset, int position, int expectedLength, ChunkProvider chunkProvider)
+    public EncryptedFileSegmentInputStream(File filePath, long segmentOffset, int position, int expectedLength, ChunkProvider chunkProvider)
     {
         super(chunkProvider.nextChunk(), filePath, position);
         this.segmentOffset = segmentOffset;

@@ -584,8 +584,8 @@ public class SSTableReaderTest
 
         executeInternal(String.format("ALTER TABLE \"%s\".\"%s\" WITH bloom_filter_fp_chance = 0.3", ks, cf));
 
-        File summaryFile = new File(desc.filenameFor(Component.SUMMARY));
-        Path bloomPath = new File(desc.filenameFor(Component.FILTER)).toPath();
+        File summaryFile = desc.fileFor(Component.SUMMARY);
+        Path bloomPath = desc.fileFor(Component.FILTER).toPath();
         Path summaryPath = summaryFile.toPath();
 
         long bloomModified = Files.getLastModifiedTime(bloomPath).toMillis();
@@ -943,19 +943,19 @@ public class SSTableReaderTest
         // make sure the new directory is empty and that the old files exist:
         for (Component c : sstable.components)
         {
-            File f = new File(notLiveDesc.filenameFor(c));
+            File f = notLiveDesc.fileFor(c);
             assertFalse(f.exists());
-            assertTrue(new File(sstable.descriptor.filenameFor(c)).exists());
+            assertTrue(sstable.descriptor.fileFor(c).exists());
         }
         notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
         // make sure the files were moved:
         for (Component c : sstable.components)
         {
-            File f = new File(notLiveDesc.filenameFor(c));
+            File f = notLiveDesc.fileFor(c);
             assertTrue(f.exists());
             assertTrue(f.toString().contains(String.format("-%s-", id)));
             f.deleteOnExit();
-            assertFalse(new File(sstable.descriptor.filenameFor(c)).exists());
+            assertFalse(sstable.descriptor.fileFor(c).exists());
         }
     }
 
@@ -1006,7 +1006,7 @@ public class SSTableReaderTest
         Descriptor desc = setUpForTestVerfiyCompressionInfoExistence();
 
         // delete the compression info, so it is corrupted.
-        File compressionInfoFile = new File(desc.filenameFor(Component.COMPRESSION_INFO));
+        File compressionInfoFile = desc.fileFor(Component.COMPRESSION_INFO);
         compressionInfoFile.tryDelete();
         assertFalse("CompressionInfo file should not exist", compressionInfoFile.exists());
 
@@ -1026,7 +1026,7 @@ public class SSTableReaderTest
         SSTableReader.verifyCompressionInfoExistenceIfApplicable(desc, components);
 
         // mark the toc file not readable in order to trigger the FSReadError
-        File tocFile = new File(desc.filenameFor(Component.TOC));
+        File tocFile = desc.fileFor(Component.TOC);
         tocFile.trySetReadable(false);
 
         expectedException.expect(FSReadError.class);
@@ -1071,14 +1071,14 @@ public class SSTableReaderTest
         checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys, false);
 
         // corrupted bf file should fail to deserialize and we should fall back to recreating it
-        Files.write(Paths.get(sstable.descriptor.filenameFor(Component.FILTER)), new byte[] { 0, 0, 0, 0});
+        Files.write(sstable.descriptor.fileFor(Component.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
         checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
 
         // missing primary index file should make BF fail to load and we should install the empty one
         if (sstable.descriptor.getFormat().getType() == SSTableFormat.Type.BIG)
-            new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
+            sstable.descriptor.fileFor(Component.PRIMARY_INDEX).delete();
         else
-            new File(sstable.descriptor.filenameFor(Component.PARTITION_INDEX)).delete();
+            sstable.descriptor.fileFor(Component.PARTITION_INDEX).delete();
 
         checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys, false);
     }
@@ -1089,7 +1089,7 @@ public class SSTableReaderTest
         TableMetadata metadata = sstable.metadata.get().unbuild().bloomFilterFpChance(fpChance).build();
         ValidationMetadata prevValidationMetadata = getValidationMetadata(desc);
         Assert.assertNotNull(prevValidationMetadata);
-        File bfFile = new File(desc.filenameFor(Component.FILTER));
+        File bfFile = desc.fileFor(Component.FILTER);
 
         SSTableReader target = null;
         try
@@ -1160,7 +1160,7 @@ public class SSTableReaderTest
         }
         catch (Throwable t)
         {
-            throw new CorruptSSTableException(t, descriptor.filenameFor(Component.STATS));
+            throw new CorruptSSTableException(t, descriptor.fileFor(Component.STATS));
         }
 
         return (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
@@ -1174,8 +1174,8 @@ public class SSTableReaderTest
         cfs.clearUnsafe();
         Descriptor desc = sstable.descriptor;
 
-        File compressionInfoFile = new File(desc.filenameFor(Component.COMPRESSION_INFO));
-        File tocFile = new File(desc.filenameFor(Component.TOC));
+        File compressionInfoFile = desc.fileFor(Component.COMPRESSION_INFO);
+        File tocFile = desc.fileFor(Component.TOC);
         assertTrue("CompressionInfo file should exist", compressionInfoFile.exists());
         assertTrue("TOC file should exist", tocFile.exists());
         return desc;

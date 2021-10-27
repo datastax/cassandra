@@ -59,7 +59,7 @@ public class ComponentContext implements AutoCloseable
 
         for (Component component : Sets.intersection(MUTABLE_COMPONENTS, descriptor.getFormat().supportedComponents()))
         {
-            File file = new File(descriptor.filenameFor(component));
+            File file = descriptor.fileFor(component);
             if (!file.exists())
                 continue;
 
@@ -81,9 +81,9 @@ public class ComponentContext implements AutoCloseable
      */
     public FileChannel channel(Descriptor descriptor, Component component, long size) throws IOException
     {
-        String toTransfer = hardLinks.containsKey(component) ? hardLinks.get(component).path() : descriptor.filenameFor(component);
+        File toTransfer = hardLinks.containsKey(component) ? hardLinks.get(component) : descriptor.fileFor(component);
         @SuppressWarnings("resource") // file channel will be closed by Caller
-        FileChannel channel = new File(toTransfer).newReadChannel();
+        FileChannel channel = toTransfer.newReadChannel();
 
         assert size == channel.size() : String.format("Entire sstable streaming expects %s file size to be %s but got %s.",
                                                       component, size, channel.size());

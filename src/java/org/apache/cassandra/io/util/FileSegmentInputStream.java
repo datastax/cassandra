@@ -26,17 +26,18 @@ import java.nio.ByteBuffer;
  */
 public class FileSegmentInputStream extends DataInputBuffer implements FileDataInput
 {
-    private final String filePath;
+    private final File filePath;
     private final long offset;
 
-    public FileSegmentInputStream(ByteBuffer buffer, String filePath, long offset)
+    public FileSegmentInputStream(ByteBuffer buffer, File filePath, long offset)
     {
         super(buffer, false);
         this.filePath = filePath;
         this.offset = offset;
     }
 
-    public String getPath()
+    @Override
+    public File getPath()
     {
         return filePath;
     }

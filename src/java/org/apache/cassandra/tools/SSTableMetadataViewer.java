@@ -324,9 +324,9 @@ public class SSTableMetadataViewer
         StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);
         CompactionMetadata compaction = (CompactionMetadata) metadata.get(MetadataType.COMPACTION);
         CompressionMetadata compression = null;
-        File compressionFile = new File(descriptor.filenameFor(Component.COMPRESSION_INFO));
+        File compressionFile = descriptor.fileFor(Component.COMPRESSION_INFO);
         if (compressionFile.exists())
-            compression = CompressionMetadata.create(fname);
+            compression = CompressionMetadata.create(compressionFile);
         SerializationHeader.Component header = (SerializationHeader.Component) metadata
                 .get(MetadataType.HEADER);
 
@@ -466,7 +466,7 @@ public class SSTableMetadataViewer
     private void printMinMaxToken(Descriptor descriptor, IPartitioner partitioner, AbstractType<?> keyType)
             throws IOException
     {
-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+        File summariesFile = descriptor.fileFor(Component.SUMMARY);
         if (!summariesFile.exists())
             return;
 

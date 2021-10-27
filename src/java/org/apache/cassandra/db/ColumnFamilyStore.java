@@ -732,7 +732,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
             }
 
-            File dataFile = new File(desc.filenameFor(Component.DATA));
+            File dataFile = desc.fileFor(Component.DATA);
             if (components.contains(Component.DATA) && dataFile.length() > 0)
                 // everything appears to be in order... moving on.
                 continue;
@@ -741,15 +741,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             logger.warn("Removing orphans for {}: {}", desc, components);
             for (Component component : components)
             {
-                File file = new File(desc.filenameFor(component));
+                File file = desc.fileFor(component);
                 if (file.exists())
-                    FileUtils.deleteWithConfirm(desc.filenameFor(component));
+                    desc.fileFor(component).delete();
             }
         }
 
         // cleanup incomplete saved caches
         Pattern tmpCacheFilePattern = Pattern.compile(metadata.keyspace + '-' + metadata.name + "-(Key|Row)Cache.*\\.tmp$");
-        File dir = new File(DatabaseDescriptor.getSavedCachesLocation());
+        File dir = DatabaseDescriptor.getSavedCachesLocation();
 
         if (dir.exists())
         {
@@ -2629,8 +2629,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return getLiveSSTables().stream()
                                 .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
                                 .sorted((o1, o2) -> {
-                                    File f1 = new File(o1.descriptor.filenameFor(Component.DATA));
-                                    File f2 = new File(o2.descriptor.filenameFor(Component.DATA));
+                                    File f1 = o1.descriptor.fileFor(Component.DATA);
+                                    File f2 = o2.descriptor.fileFor(Component.DATA);
                                     return Longs.compare(f1.lastModified(), f2.lastModified());
                                 }).collect(Collectors.toList());
     }
@@ -3123,7 +3123,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         private final boolean useSpecificExecutorForSystemKeyspaces;
 
         public PerDiskFlushExecutors(int flushWriters,
-                                     String[] locationsForNonSystemKeyspaces,
+                                     File[] locationsForNonSystemKeyspaces,
                                      boolean useSpecificLocationForSystemKeyspaces)
         {
             ExecutorService[] flushExecutors = createPerDiskFlushWriters(locationsForNonSystemKeyspaces.length, flushWriters);

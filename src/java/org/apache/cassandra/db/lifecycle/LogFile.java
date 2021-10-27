@@ -320,8 +320,7 @@ final class LogFile implements AutoCloseable
         for (SSTableReader sstable : tables)
         {
             File directory = sstable.descriptor.directory;
-            String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
-            replicas.maybeCreateReplica(directory, fileName, records);
+            replicas.maybeCreateReplica(directory, getFileName(), records);
         }
         return LogRecord.make(type, tables);
     }
@@ -329,8 +328,7 @@ final class LogFile implements AutoCloseable
     private LogRecord makeAddRecord(SSTable table)
     {
         File directory = table.descriptor.directory;
-        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
-        replicas.maybeCreateReplica(directory, fileName, records);
+        replicas.maybeCreateReplica(directory, getFileName(), records);
         return LogRecord.make(Type.ADD, table);
     }
 
@@ -344,8 +342,7 @@ final class LogFile implements AutoCloseable
         assert type == Type.ADD || type == Type.REMOVE;
 
         File directory = table.descriptor.directory;
-        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
-        replicas.maybeCreateReplica(directory, fileName, records);
+        replicas.maybeCreateReplica(directory, getFileName(), records);
         return record.asType(type);
     }
 
@@ -484,7 +481,7 @@ final class LogFile implements AutoCloseable
     }
 
     @VisibleForTesting
-    List<String> getFilePaths()
+    List<File> getFilePaths()
     {
         return replicas.getFilePaths();
     }

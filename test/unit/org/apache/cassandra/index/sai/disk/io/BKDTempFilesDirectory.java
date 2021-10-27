@@ -71,7 +71,7 @@ public class BKDTempFilesDirectory extends Directory
     {
         final File indexInput = getTmpFileByName(name);
         
-        try (FileHandle.Builder builder = new FileHandle.Builder(indexInput.path()))
+        try (FileHandle.Builder builder = new FileHandle.Builder(indexInput))
         {
             final FileHandle handle = builder.complete();
             final RandomAccessReader reader = handle.createReader();

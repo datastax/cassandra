@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.util;
 
 import java.io.*;
+import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
@@ -403,6 +404,22 @@ public final class PathUtils
         }
     }
 
+    /**
+     * Copy a file to a target file
+     */
+    public static void copy(Path from, Path to, StandardCopyOption option)
+    {
+        logger.trace("Copying {} to {}", from, to);
+        try
+        {
+            Files.copy(from, to, option);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(String.format("Failed to copy %s to %s", from, to), e);
+        }
+    }
+
     // true if can determine exists, false if any exception occurs
     public static boolean exists(Path path)
     {
@@ -504,6 +521,18 @@ public final class PathUtils
         if (parent == file)
             return toRealPath(file);
         return toRealPath(parent).resolve(parent.relativize(file));
+    }
+
+    public static Path getPath(String pathOrURI)
+    {
+        try
+        {
+            return Paths.get(URI.create(pathOrURI));
+        }
+        catch (IllegalArgumentException ex)
+        {
+            return Paths.get(pathOrURI);
+        }
     }
 
     private static Path toRealPath(Path path)

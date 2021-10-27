@@ -47,6 +47,7 @@ import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.db.lifecycle.LogTransactionTest.getAllFilePaths;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -84,8 +85,8 @@ public class RealTransactionsTest extends SchemaLoader
         LifecycleTransaction.waitForDeletions();
 
         // both sstables are in the same folder
-        assertFiles(oldSSTable.descriptor.directory.path(), new HashSet<>(newSSTable.getAllFilePaths()));
-        assertFiles(newSSTable.descriptor.directory.path(), new HashSet<>(newSSTable.getAllFilePaths()));
+        assertFiles(oldSSTable.descriptor.directory, getAllFilePaths(newSSTable));
+        assertFiles(newSSTable.descriptor.directory, getAllFilePaths(newSSTable));
     }
 
     @Test
@@ -100,7 +101,7 @@ public class RealTransactionsTest extends SchemaLoader
         replaceSSTable(cfs, txn, true);
         LifecycleTransaction.waitForDeletions();
 
-        assertFiles(oldSSTable.descriptor.directory.path(), new HashSet<>(oldSSTable.getAllFilePaths()));
+        assertFiles(oldSSTable.descriptor.directory, getAllFilePaths(oldSSTable));
     }
 
     @Test
@@ -111,8 +112,8 @@ public class RealTransactionsTest extends SchemaLoader
 
         SSTableReader ssTableReader = getSSTable(cfs, 100);
 
-        String dataFolder = cfs.getLiveSSTables().iterator().next().descriptor.directory.path();
-        assertFiles(dataFolder, new HashSet<>(ssTableReader.getAllFilePaths()));
+        File dataFolder = cfs.getLiveSSTables().iterator().next().descriptor.directory;
+        assertFiles(dataFolder, getAllFilePaths(ssTableReader));
     }
 
     private SSTableReader getSSTable(ColumnFamilyStore cfs, int numPartitions) throws IOException
@@ -198,17 +199,15 @@ public class RealTransactionsTest extends SchemaLoader
         return null;
     }
 
-    private void assertFiles(String dirPath, Set<String> expectedFiles)
+    private void assertFiles(File dirPath, Set<File> expectedFiles)
     {
-        File dir = new File(dirPath);
-        for (File file : dir.tryList())
+        for (File file : dirPath.tryList())
         {
             if (file.isDirectory())
                 continue;
 
-            String filePath = file.path();
-            assertTrue(filePath, expectedFiles.contains(filePath));
-            expectedFiles.remove(filePath);
+            assertTrue(file.toString(), expectedFiles.contains(file));
+            expectedFiles.remove(file);
         }
 
         assertTrue(expectedFiles.isEmpty());
