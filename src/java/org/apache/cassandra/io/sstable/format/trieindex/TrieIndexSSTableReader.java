@@ -947,9 +947,6 @@ public class TrieIndexSSTableReader extends SSTableReader
     /**
      * Load the bloom filter from Filter.db file, if it exists and if the FP chance has not changed.
      * Otherwise recreate the bloom filter using the current FP chance.
-     *
-     * @param InvalidateJmxPermissionsCacheTestsstableMetadata the sstable metadata, for extracting and changing the FP chance
-     * @param fpChance        the current FP chance taken from the table metadata
      */
     @VisibleForTesting
     static @Nonnull IFilter getBloomFilter(Descriptor descriptor, Set<Component> components, ValidationMetadata validationMetadata, boolean isOffline, TableMetadata metadata, long estimatedKeysCount)

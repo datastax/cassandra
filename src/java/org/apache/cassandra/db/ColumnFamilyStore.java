@@ -1875,8 +1875,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         writeSnapshotManifest(filesJSONArr, snapshotName);
         if (!SchemaConstants.isLocalSystemKeyspace(metadata.keyspace) && !SchemaConstants.isReplicatedSystemKeyspace(metadata.keyspace))
             writeSnapshotSchema(snapshotName);
-        if (!SchemaConstants.isLocalSystemKeyspace(metadata.keyspace) && !SchemaConstants.isReplicatedSystemKeyspace(metadata.keyspace))
-            writeSnapshotSchema(snapshotName);
 
         if (ephemeral)
             createEphemeralSnapshotMarkerFile(snapshotName);
