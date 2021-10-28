@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.NavigableSet;
 import javax.annotation.Nullable;
 import com.google.common.collect.Iterators;
@@ -44,7 +45,9 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -57,6 +60,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -217,7 +221,6 @@ public class PmemPartition implements Partition
     private Row updateStaticRow(Row staticRow) throws IOException
     {
         Row newStaticRow = staticRow ;
-        int version = 0;
         long oldStaticRowHandle = 0;
         TransactionalMemoryBlock oldStaticBlock = null;
         try(DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
@@ -236,8 +239,11 @@ public class PmemPartition implements Partition
                                                                               EncodingStats.NO_STATS);
             // statsCollector.get());
             SerializationHelper helper = new SerializationHelper(serializationHeader);
+            int version = PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap().size(); //added by ssuvarna
+
             PmemRowSerializer.serializer.serializeStaticRow(newStaticRow, helper, dob, version);
             int size = dob.getLength();
+
             TransactionalMemoryBlock staticRowBlock;
             if (oldStaticRowHandle == 0)
                 staticRowBlock = heap.allocateMemoryBlock(size);
@@ -271,17 +277,27 @@ public class PmemPartition implements Partition
 
     private Row getStaticRow(long staticRowAddress)
     {
-        SerializationHeader serializationHeader ;
-        serializationHeader = new SerializationHeader(false,
-                                                      tableMetadata,
-                                                      tableMetadata.regularAndStaticColumns(),
-                                                      EncodingStats.NO_STATS);
-        DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
         TransactionalMemoryBlock staticRowMemoryBlock = heap.memoryBlockFromHandle(staticRowAddress);
 
-        MemoryBlockDataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(staticRowMemoryBlock, heap);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(staticRowMemoryBlock, heap);
+
         try
         {
+            int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+            SerializationHeader serializationHeader;
+            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap();
+            if (sHeaderMap.size() > 1)
+            {
+                serializationHeader = sHeaderMap.get(savedVersion);
+            }
+            else
+            {
+                serializationHeader = new SerializationHeader(false,
+                                                              tableMetadata,
+                                                              tableMetadata.regularAndStaticColumns(),
+                                                              EncodingStats.NO_STATS);
+            }
+            DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
             return PmemRowSerializer.serializer.deserializeStaticRow(memoryBlockDataInputPlus, serializationHeader, helper);
         }
         catch (IOException e)
@@ -375,7 +391,8 @@ public class PmemPartition implements Partition
     @Override
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter columns, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed)
     {
-        if (clusteringsInQueryOrder.isEmpty() || block.getLong(DELETION_INFO_OFFSET) == -1)
+       // if (clusteringsInQueryOrder.isEmpty() || block.getLong(DELETION_INFO_OFFSET) == -1)
+        if (block.getLong(DELETION_INFO_OFFSET) == -1)
         {
             closeCartIterator();
             return EmptyIterators.unfilteredRow(tableMetadata, key, reversed);
@@ -529,7 +546,7 @@ public class PmemPartition implements Partition
                                              boolean isReversed)
         {
             this.header =  SerializationHeader.makeWithoutStats(tableMetadata);
-            this.pmemRowTree = new LongART(heap, pmemRowMapTreeAddr);
+            this.pmemRowTree = LongART.fromHandle(heap, pmemRowMapTreeAddr);
             this.deletionTime = deletionTime;
             this.pmemRowTreeIterator =  pmemRowTree.getEntryIterator();
             this.clusteringsIterator = clusteringsInQueryOrder.iterator();
@@ -563,17 +580,27 @@ public class PmemPartition implements Partition
             long valueBlockAddr = pmemRowTree.get(clusteringBytes);
             if (valueBlockAddr == 0)
                 return null;
-            SerializationHeader serializationHeader;
-            serializationHeader = new SerializationHeader(false,
-                                                          tableMetadata,
-                                                          tableMetadata.regularAndStaticColumns(),
-                                                          EncodingStats.NO_STATS);
-            DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
+
             TransactionalMemoryBlock cellMemoryBlock = heap.memoryBlockFromHandle(valueBlockAddr);
-            MemoryBlockDataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
+            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
             builder.newRow(clustering);
             try
             {
+                int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+                SerializationHeader serializationHeader;
+                Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap();
+                if (sHeaderMap.size() > 1)
+                {
+                    serializationHeader = sHeaderMap.get(savedVersion);
+                }
+                else
+                {
+                    serializationHeader = new SerializationHeader(false,
+                                                                  tableMetadata,
+                                                                  tableMetadata.regularAndStaticColumns(),
+                                                                  EncodingStats.NO_STATS);
+                }
+                DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
                 unfiltered = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
             }
             catch (IOException e)

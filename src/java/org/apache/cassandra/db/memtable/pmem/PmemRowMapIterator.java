@@ -33,6 +33,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -40,12 +41,15 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import java.util.Iterator;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,22 +68,26 @@ public class PmemRowMapIterator extends AbstractIterator<Unfiltered> implements 
 
     private PmemRowMapIterator(TableMetadata metadata,
                                LongART pmemRowMapTree, TransactionalHeap heap, DecoratedKey key,
-                               DeletionTime deletionTime, AutoCloseableIterator cartIterator)
+                               DeletionTime deletionTime, boolean reversed, AutoCloseableIterator cartIterator)
     {
         this.metadata = metadata;
         this.heap = heap;
         this.header =  SerializationHeader.makeWithoutStats(metadata);
         this.dkey = key;
         this.deletionTime = deletionTime;
-        this.pmemRowTreeIterator =  pmemRowMapTree.getEntryIterator();
+        this.reversed = reversed;
+        if(reversed)
+            this.pmemRowTreeIterator = pmemRowMapTree.getReverseEntryIterator();
+        else
+            this.pmemRowTreeIterator =  pmemRowMapTree.getEntryIterator();
     	this.cartIterator = cartIterator;
    }
 
    private PmemRowMapIterator(TableMetadata metadata,
                               LongART pmemRowMapTree, TransactionalHeap heap, DecoratedKey key,
-                              DeletionTime deletionTime, Slice slice, AutoCloseableIterator cartIterator)
+                              DeletionTime deletionTime, Slice slice, boolean reversed, AutoCloseableIterator cartIterator)
    {
-       this(metadata,pmemRowMapTree,heap, key, deletionTime, cartIterator);
+       this(metadata,pmemRowMapTree,heap, key, deletionTime, reversed, cartIterator);
        boolean includeStart = slice.start().isInclusive();
        boolean includeEnd = slice.end().isInclusive();
        ClusteringBound start = slice.start() == ClusteringBound.BOTTOM ? null : slice.start();
@@ -91,19 +99,30 @@ public class PmemRowMapIterator extends AbstractIterator<Unfiltered> implements 
            byte[] clusteringStartBytes= ByteSourceInverse.readBytes(clusteringByteSource);
            clusteringByteSource = metadata.comparator.asByteComparable(end).asComparableBytes(ByteComparable.Version.OSS41);
            byte[] clusteringEndBytes= ByteSourceInverse.readBytes(clusteringByteSource);
-           this.pmemRowTreeIterator = pmemRowMapTree.getEntryIterator(clusteringStartBytes, includeStart, clusteringEndBytes, includeEnd);
+           if(reversed)
+               this.pmemRowTreeIterator = pmemRowMapTree.getReverseEntryIterator(clusteringStartBytes, includeStart, clusteringEndBytes, includeEnd);
+           else
+               this.pmemRowTreeIterator = pmemRowMapTree.getEntryIterator(clusteringStartBytes, includeStart, clusteringEndBytes, includeEnd);
        }
        else if ((start != null) && (start.size() != 0) )
        {
            ByteSource clusteringByteSource = metadata.comparator.asByteComparable(start).asComparableBytes(ByteComparable.Version.OSS41);
            byte[] clusteringBytes= ByteSourceInverse.readBytes(clusteringByteSource);
-           this.pmemRowTreeIterator = pmemRowMapTree.getTailEntryIterator(clusteringBytes, includeStart);
+           if(reversed) {
+                this.pmemRowTreeIterator = pmemRowMapTree.getReverseTailEntryIterator(clusteringBytes, includeStart);
+            }
+           else
+               this.pmemRowTreeIterator = pmemRowMapTree.getTailEntryIterator(clusteringBytes, includeStart);
        }
        else if ((end != null) && (end.size() != 0))
        {
            ByteSource clusteringByteSource = metadata.comparator.asByteComparable(end).asComparableBytes(ByteComparable.Version.OSS41);
            byte[] clusteringBytes= ByteSourceInverse.readBytes(clusteringByteSource);
-           this.pmemRowTreeIterator = pmemRowMapTree.getHeadEntryIterator(clusteringBytes, includeEnd);
+           if(reversed) {
+                 this.pmemRowTreeIterator = pmemRowMapTree.getReverseHeadEntryIterator(clusteringBytes, includeEnd);
+            }
+           else
+               this.pmemRowTreeIterator = pmemRowMapTree.getHeadEntryIterator(clusteringBytes, includeEnd);
        }
    }
 
@@ -111,8 +130,7 @@ public class PmemRowMapIterator extends AbstractIterator<Unfiltered> implements 
                                                LongART pmemRowMapTree, TransactionalHeap heap, DecoratedKey key,
                                                DeletionTime deletionTime, boolean reversed, AutoCloseableIterator cartIterator)
     {
-        PmemRowMapIterator pmemRowMapIterator = new PmemRowMapIterator(metadata, pmemRowMapTree, heap, key, deletionTime, cartIterator);
-        pmemRowMapIterator.reversed = reversed;
+        PmemRowMapIterator pmemRowMapIterator = new PmemRowMapIterator(metadata, pmemRowMapTree, heap, key, deletionTime, reversed, cartIterator);
         return pmemRowMapIterator;
     }
     public static UnfilteredRowIterator create(TableMetadata metadata,
@@ -120,9 +138,8 @@ public class PmemRowMapIterator extends AbstractIterator<Unfiltered> implements 
                                                DeletionTime deletionTime, Slice slice, boolean reversed, Row staticRow,
                                                AutoCloseableIterator cartIterator)//,SerializationHeader header,SerializationHelper helper)
     {
-        PmemRowMapIterator pmemRowMapIterator = new PmemRowMapIterator(metadata, pmemRowMapTree, heap, key, deletionTime, slice,cartIterator);
+        PmemRowMapIterator pmemRowMapIterator = new PmemRowMapIterator(metadata, pmemRowMapTree, heap, key, deletionTime, slice, reversed, cartIterator);
         pmemRowMapIterator.staticRow = staticRow;
-        pmemRowMapIterator.reversed = reversed;
         return pmemRowMapIterator;
     }
 
@@ -134,16 +151,26 @@ public class PmemRowMapIterator extends AbstractIterator<Unfiltered> implements 
             LongART.Entry nextEntry = (LongART.Entry) pmemRowTreeIterator.next();
             ByteComparable clusteringByteComparable = ByteComparable.fixedLength(nextEntry.getKey());
             Clustering clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
-            SerializationHeader serializationHeader ;
-            serializationHeader = new SerializationHeader(false,
-                                                          metadata,
-                                                          metadata.regularAndStaticColumns(),
-                                                          EncodingStats.NO_STATS);
-            DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);//TODO: Check if version needs to be set
             TransactionalMemoryBlock cellMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
-            MemoryBlockDataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
+            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
             try
             {
+                int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+
+                SerializationHeader serializationHeader;
+                Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(metadata.id).getSerializationHeaderMap();
+                if (sHeaderMap.size() > 1)
+                {
+                    serializationHeader = sHeaderMap.get(savedVersion);
+                }
+                else
+                {
+                    serializationHeader = new SerializationHeader(false,
+                                                                  metadata,
+                                                                  metadata.regularAndStaticColumns(),
+                                                                  EncodingStats.NO_STATS);
+                }
+                DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
                 builder.newRow(clustering);
                 Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
                 return unfiltered == null ? endOfData() : unfiltered;

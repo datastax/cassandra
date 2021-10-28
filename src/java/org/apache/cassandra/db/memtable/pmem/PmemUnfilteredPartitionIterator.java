@@ -80,7 +80,7 @@ public  class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartitio
         {
             dkey = BufferDecoratedKey.fromByteComparable(ByteComparable.fixedLength(nextEntry.getKey()),
                                                          BYTE_COMPARABLE_VERSION, tableMetadata.partitioner);
-            pMemPartition = new PmemPartition(heap,dkey,tableMetadata, iter);
+            pMemPartition = new PmemPartition(heap,dkey,tableMetadata, null);
             pMemPartition.load(heap,nextEntry.getValue());
         }
         catch(Exception e)
@@ -103,7 +103,7 @@ public  class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartitio
     @Override
     public void close()
     {
-        if (iter != null && nextEntry == null) {
+        if (iter != null) {
             closeCartIterator();
         }
     }

@@ -197,6 +197,7 @@ public class PmemRowSerializer extends UnfilteredSerializer
         boolean hasComplexDeletion = row.hasComplexDeletion();
         boolean hasAllColumns = helper.hasAllColumns(row, isStatic);
         boolean hasExtendedFlags = hasExtendedFlags(row);
+        out.writeUnsignedVInt(version);
 
         if (isStatic)
             extendedFlags |= IS_STATIC;
@@ -361,11 +362,10 @@ public class PmemRowSerializer extends UnfilteredSerializer
     {
         long size = 1; // flags
 
+        size += TypeSizes.sizeofUnsignedVInt(version);
+
         if (hasExtendedFlags(row))
             size += 1; // extended flags
-
-        if (!row.isStatic())
-            size += Clustering.serializer.serializedSize(row.clustering(), version, header.clusteringTypes());
 
         return size + serializedRowBodySize(row, header, previousUnfilteredSize, version);
     }
@@ -373,8 +373,6 @@ public class PmemRowSerializer extends UnfilteredSerializer
     private long serializedRowBodySize(Row row, SerializationHeader header, long previousUnfilteredSize, int version)
     {
         long size = 0;
-        if(version > 1)
-            size += 2; //Add 1 byte for size & another for version
 
         if (header.isForSSTable())
             size += TypeSizes.sizeofUnsignedVInt(previousUnfilteredSize);
@@ -478,16 +476,12 @@ public class PmemRowSerializer extends UnfilteredSerializer
     public Unfiltered deserialize(DataInputPlus in, SerializationHeader header, DeserializationHelper helper, Row.Builder builder)
     throws IOException
     {
-        while (true)
-        {
-            Unfiltered unfiltered = deserializeOne(in, header, helper, builder);
-            if (unfiltered == null)
-                return null;
 
-            // Skip empty rows, see deserializeOne javadoc
-            if (!unfiltered.isEmpty())
-                return unfiltered;
-        }
+        Unfiltered unfiltered = deserializeOne(in, header, helper, builder);
+        if (unfiltered == null || unfiltered.isEmpty())
+            return null;
+
+        return unfiltered;
     }
 
     /**

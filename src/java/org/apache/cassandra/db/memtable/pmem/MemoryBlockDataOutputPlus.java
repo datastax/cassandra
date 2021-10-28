@@ -20,10 +20,11 @@ package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Memory;
-import org.apache.cassandra.io.util.UnbufferedDataOutputStreamPlus;
 
 public class MemoryBlockDataOutputPlus implements DataOutputPlus
 {
@@ -56,9 +57,15 @@ public class MemoryBlockDataOutputPlus implements DataOutputPlus
     @Override
     public void write(ByteBuffer buffer) throws IOException
     {
-        byte[] bufferArray = buffer.array();
-        block.copyFromArray(bufferArray,0,position, bufferArray.length);
-        position += bufferArray.length;
+        if (buffer.hasArray())
+        {
+            byte[] bufferArray = buffer.array();
+            block.copyFromArray(bufferArray, buffer.arrayOffset()+buffer.position(), position, buffer.remaining());
+            position += buffer.remaining();
+        }
+        else {
+           throw new UnsupportedOperationException();
+        }
     }
 
     @Override
@@ -114,21 +121,21 @@ public class MemoryBlockDataOutputPlus implements DataOutputPlus
     public void writeChar(int v)
     {
         block.setByte(position, (byte) v);
-        position += 2;
+        position += Byte.BYTES;
     }
 
     @Override
     public void writeInt(int v)
     {
         block.setInt(position, v);
-        position += 4;
+        position += Integer.BYTES;
     }
 
     @Override
     public void writeLong(long v)
     {
         block.setLong(position, v);
-        position += 8;
+        position += Long.BYTES;
     }
 
     @Override
@@ -162,9 +169,12 @@ public class MemoryBlockDataOutputPlus implements DataOutputPlus
     {
         try
         {
-            UnbufferedDataOutputStreamPlus.writeUTF(s, this);
+            int strlen = s.length();
+            writeShort(strlen);
+            block.copyFromArray(s.getBytes(StandardCharsets.UTF_8), 0, position, strlen);
+            position += strlen;
         }
-        catch (IOException e)
+        catch (Exception e)
         {
             e.printStackTrace();
         }

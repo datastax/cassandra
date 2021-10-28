@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
@@ -138,7 +139,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public float readFloat() throws IOException
     {
-        float retVal = block.getInt(position);
+        float retVal = Float.intBitsToFloat(block.getInt(position));
         position += Integer.BYTES;
         return retVal;
     }
@@ -146,7 +147,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public double readDouble() throws IOException
     {
-        double retVal = block.getLong(position);
+        double retVal = Double.longBitsToDouble(block.getLong(position));
         position += Long.BYTES;
         return retVal;
     }
@@ -160,9 +161,10 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public String readUTF() throws IOException
     {
-        int utflen = block.getShort(position);
+        int utflen = readShort();
         byte[] bytes = new byte[utflen];
         block.copyToArray(position,bytes,0,utflen);
-        return new String(bytes);
+        position += utflen;
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

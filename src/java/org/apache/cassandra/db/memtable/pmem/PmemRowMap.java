@@ -21,6 +21,7 @@ package org.apache.cassandra.db.memtable.pmem;
 import java.io.IOError;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +32,8 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -38,7 +41,9 @@ import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -73,7 +78,7 @@ public class PmemRowMap
 
     public static PmemRowMap loadFromAddress(TransactionalHeap heap, long address, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion)
     {
-        LongART arTree = new LongART(heap, address);
+        LongART arTree = LongART.fromHandle(heap, address);
         return (new PmemRowMap(heap, arTree, tableMetadata, partitionLevelDeletion));
     }
 
@@ -87,15 +92,24 @@ public class PmemRowMap
         byte[] clusteringBytes = ByteSourceInverse.readBytes(clusteringByteSource);
         long rowHandle = rowMapTree.get(clusteringBytes);
         TransactionalMemoryBlock block = heap.memoryBlockFromHandle(rowHandle);
-        MemoryBlockDataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(block, heap); //TODO: Pass the heap as parameter for now until memoryblock.copyfromArray is sorted out
-
-        SerializationHeader serializationHeader = new SerializationHeader(false,
-                                                                          metadata,
-                                                                          metadata.regularAndStaticColumns(),
-                                                                          EncodingStats.NO_STATS);
-        DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(block, heap); //TODO: Pass the heap as parameter for now until memoryblock.copyfromArray is sorted out
         try
         {
+            int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+            SerializationHeader serializationHeader;
+            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(metadata.id).getSerializationHeaderMap();
+            if (sHeaderMap.size() > 1)
+            {
+                serializationHeader = sHeaderMap.get(savedVersion);
+            }
+            else
+            {
+                serializationHeader = new SerializationHeader(false,
+                                                              metadata,
+                                                              metadata.regularAndStaticColumns(),
+                                                              EncodingStats.NO_STATS);
+            }
+            DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
             row = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
         }
         catch (IOException e)
@@ -118,16 +132,26 @@ public class PmemRowMap
         builder.newRow(clustering);
 
         TransactionalMemoryBlock oldBlock = heap.memoryBlockFromHandle(mb);
-        MemoryBlockDataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(oldBlock, heap); //TODO: Pass the heap as parameter for now until memoryblock.copyfromArray is sorted out
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(oldBlock, heap); //TODO: Pass the heap as parameter for now until memoryblock.copyfromArray is sorted out
 
-        SerializationHeader serializationHeader = new SerializationHeader(false,
-                                                                          tableMetadata,
-                                                                          tableMetadata.regularAndStaticColumns(),
-                                                                          EncodingStats.NO_STATS);
-        DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
         Row currentRow;
         try
         {
+            int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+            SerializationHeader serializationHeader;
+            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap();
+            if (sHeaderMap.size() > 1)
+            {
+                serializationHeader = sHeaderMap.get(savedVersion);
+            }
+            else
+            {
+                serializationHeader = new SerializationHeader(false,
+                                                              tableMetadata,
+                                                              tableMetadata.regularAndStaticColumns(),
+                                                              EncodingStats.NO_STATS);
+            }
+            DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
             currentRow = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
         }
         catch (IOException e)
@@ -156,11 +180,10 @@ public class PmemRowMap
         // statsCollector.get());
         SerializationHelper helper = new SerializationHelper(serializationHeader);
 
-        int version = 0;//TODO: Need to handle table versions
-        try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
-        {
-            PmemRowSerializer.serializer.serialize(row, helper, dob, 0, version);
-            int size = dob.getLength();
+        int version = PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap().size();
+        long size = PmemRowSerializer.serializer.serializedSize(row,helper.header,0,version);
+
+        try{
 
             if (mb == 0)
                 cellMemoryRegion = heap.allocateMemoryBlock(size);
@@ -173,9 +196,10 @@ public class PmemRowMap
             {
                 cellMemoryRegion = oldBlock;//TODO: should we zero out if size is greater ?
             }
-            MemoryBlockDataOutputPlus cellsOutputPlus = new MemoryBlockDataOutputPlus(cellMemoryRegion, 0);
-            cellsOutputPlus.write(dob.getData(), 0, dob.getLength());
-            dob.clear();
+
+            DataOutputPlus memoryBlockDataOutputPlus = new MemoryBlockDataOutputPlus(cellMemoryRegion, 0);
+            PmemRowSerializer.serializer.serialize(row, helper, memoryBlockDataOutputPlus, 0, version);
+
         }
         catch (IOException e)
         {
