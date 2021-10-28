@@ -23,6 +23,7 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
@@ -30,6 +31,7 @@ import org.apache.cassandra.io.util.FileUtils;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -55,6 +57,9 @@ public class ComponentContext implements AutoCloseable
 
     public static ComponentContext create(Descriptor descriptor)
     {
+        if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_hardlinks_for_entire_sstable_streaming)
+            return new ComponentContext(Collections.emptyMap(), ComponentManifest.create(descriptor));
+
         Map<Component, File> hardLinks = new HashMap<>(1);
 
         for (Component component : Sets.intersection(MUTABLE_COMPONENTS, descriptor.getFormat().supportedComponents()))

@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Counter;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LogRecord.Type;
@@ -385,7 +386,7 @@ final class DefaultLogTransaction extends LogTransaction
         @Override
         public void commit()
         {
-            if (onlineTxn)
+            if (onlineTxn && DatabaseDescriptor.getRawConfig().storage_flags.supports_sstable_read_meter)
                 SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
 
             synchronized (lock)

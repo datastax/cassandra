@@ -2302,6 +2302,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 return;
             }
 
+            if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_sstable_read_meter)
+            {
+                readMeter = new RestorableMeter();
+                readMeterSyncFuture = NULL;
+                return;
+            }
+
             readMeter = SystemKeyspace.getSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
             // sync the average read rate to system.sstable_activity every five minutes, starting one minute from now
             readMeterSyncFuture = new WeakReference<>(syncExecutor.scheduleAtFixedRate(new Runnable()
