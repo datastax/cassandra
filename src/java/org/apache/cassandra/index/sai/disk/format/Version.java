@@ -17,6 +17,14 @@
  */
 package org.apache.cassandra.index.sai.disk.format;
 
+import java.util.List;
+
+import com.google.common.base.Objects;
+import com.google.common.collect.Lists;
+
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
+
 import static com.google.common.base.Preconditions.checkArgument;
 
 /**
@@ -25,22 +33,51 @@ import static com.google.common.base.Preconditions.checkArgument;
  */
 public class Version
 {
-    private static final Version AA = new Version('a', 'a');
+    // 6.8 formats
+    public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
+
+    // These are in reverse order so that the latest version is used first. Version matching tests
+    // are more likely to match the latest version so we want to test that one first.
+    public static final List<Version> ALL = Lists.newArrayList(AA);
 
     public static final Version EARLIEST = AA;
-    public static final Version LATEST = AA;
+    // The latest version can be configured to be an earlier version to support partial upgrades that don't
+    // write newer versions of the on-disk formats.
+    public static final Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", "aa"));
 
     private final String version;
+    private final OnDiskFormat onDiskFormat;
+    private final FileNameFormatter fileNameFormatter;
 
-    public Version(char major, char minor)
+    private Version(String version, OnDiskFormat onDiskFormat, FileNameFormatter fileNameFormatter)
     {
-        this.version = major + "" + minor;
+        this.version = version;
+        this.onDiskFormat = onDiskFormat;
+        this.fileNameFormatter = fileNameFormatter;
     }
 
     public static Version parse(String input)
     {
+        checkArgument(input != null);
         checkArgument(input.length() == 2);
-        return new Version(input.charAt(0), input.charAt(1));
+        if (input.equals(AA.version))
+            return AA;
+        throw new IllegalArgumentException();
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hashCode(version);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Version other = (Version)o;
+        return Objects.equal(version, other.version);
     }
 
     @Override
@@ -52,5 +89,38 @@ public class Version
     public boolean onOrAfter(Version other)
     {
         return version.compareTo(other.version) >= 0;
+    }
+
+    public OnDiskFormat onDiskFormat()
+    {
+        return onDiskFormat;
+    }
+
+    public FileNameFormatter fileNameFormatter()
+    {
+        return fileNameFormatter;
+    }
+
+    public static interface FileNameFormatter
+    {
+        public String format(IndexComponent indexComponent, IndexContext indexContext);
+    }
+
+    //
+    // Version.AA filename formatter. This is the old DSE 6.8 SAI on-disk filename format
+    //
+    // Format: <sstable descriptor>-SAI(_<index name>)_<component name>.db
+    //
+    private static final String VERSION_AA_PER_SSTABLE_FORMAT = "SAI_%s.db";
+    private static final String VERSION_AA_PER_INDEX_FORMAT = "SAI_%s_%s.db";
+
+    private static String aaFileNameFormat(IndexComponent indexComponent, IndexContext indexContext)
+    {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        stringBuilder.append(indexContext == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponent.representation)
+                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexContext.getIndexName(), indexComponent.representation));
+
+        return stringBuilder.toString();
     }
 }
