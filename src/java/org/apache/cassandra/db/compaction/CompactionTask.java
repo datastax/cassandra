@@ -339,7 +339,7 @@ public class CompactionTask extends AbstractCompactionTask
             if (!fullyExpiredSSTables.isEmpty())
             {
                 logger.debug("Compaction {} dropping expired sstables: {}", transaction.opId().toString(), fullyExpiredSSTables);
-                fullyExpiredSSTables.forEach(transaction::obsolete);
+                fullyExpiredSSTables.forEach(reader -> { if (reader instanceof SSTableReader) transaction.obsolete((SSTableReader)reader); });
             }
 
             long lastBytesScanned = 0;
