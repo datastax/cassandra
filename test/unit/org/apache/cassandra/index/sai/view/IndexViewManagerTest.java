@@ -125,6 +125,7 @@ public class IndexViewManagerTest extends SAITester
         store.disableAutoCompaction();
 
         List<Descriptor> descriptors = new ArrayList<>();
+
         // create sstable 1 from flush
         execute("INSERT INTO %s(k, v) VALUES (1, 10)");
         execute("INSERT INTO %s(k, v) VALUES (2, 20)");

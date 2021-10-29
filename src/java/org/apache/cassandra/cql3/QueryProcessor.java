@@ -577,7 +577,7 @@ public class QueryProcessor implements QueryHandler
     {
         Prepared prepared = prepareInternal(query);
 
-        return executeInternalWithPaging(prepared.statement, pageSize, values);
+        return executeInternalWithPaging(prepared.statement, pageSize.rows(), values);
     }
 
     /**
@@ -603,7 +603,7 @@ public class QueryProcessor implements QueryHandler
         SelectStatement select = (SelectStatement) statement;
         long nowInSec = FBUtilities.nowInSeconds();
         QueryPager pager = select.getQuery(makeInternalOptionsWithNowInSec(select, nowInSec, values), nowInSec).getPager(null, ProtocolVersion.CURRENT);
-        return UntypedResultSet.create(select, pager, pageSize);
+        return UntypedResultSet.create(select, pager, PageSize.inRows(pageSize));
     }
 
     /**
