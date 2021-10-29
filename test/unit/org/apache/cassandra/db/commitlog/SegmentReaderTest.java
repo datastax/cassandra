@@ -24,7 +24,6 @@ import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.Random;
 import java.util.function.BiFunction;
-
 import javax.crypto.Cipher;
 
 import org.junit.Assert;
@@ -41,9 +40,9 @@ import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
 import org.apache.cassandra.io.compress.ZstdCompressor;
 import org.apache.cassandra.security.CipherFactory;
-import org.apache.cassandra.security.EncryptionUtils;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
+import org.apache.cassandra.security.EncryptionUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class SegmentReaderTest
