@@ -76,6 +76,13 @@ public class FileUtilsTest
     }
 
     @Test
+    public void testDelete()
+    {
+        File file = FileUtils.createDeletableTempFile("testTruncate", "1");
+        FileUtils.delete(file);
+    }
+
+    @Test
     public void testTruncate() throws IOException
     {
         File file = FileUtils.createDeletableTempFile("testTruncate", "1");
