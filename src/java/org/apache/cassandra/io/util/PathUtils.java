@@ -82,7 +82,7 @@ import net.openhft.chronicle.core.util.ThrowingFunction;
  *
  * This class tries to apply uniform IOException handling, and does not propagate IOException except for NoSuchFileException.
  * Any harmless/application error exceptions are propagated as UncheckedIOException, and anything else as an FSReadError or FSWriteError.
- * Semantically this is a little incoherent throughout the codebase, as we intercept IOException haphazardly and treaat
+ * Semantically this is a little incoherent throughout the codebase, as we intercept IOException haphazardly and treat
  * it inconsistently - we should ideally migrate to using {@link #propagate(IOException, Path, boolean)} et al globally.
  */
 public final class PathUtils

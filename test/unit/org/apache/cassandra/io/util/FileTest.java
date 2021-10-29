@@ -122,7 +122,7 @@ public class FileTest
         return file.getParent() + File.pathSeparator() + ".." + File.pathSeparator() + file.getParentFile().getName() + File.pathSeparator() + file.getName();
     }
 
-    private void    testEquivalence(String path) throws IOException
+    private void testEquivalence(String path) throws IOException
     {
         java.io.File file = new java.io.File(path); //checkstyle: permit this instantiation
         if (file.exists()) testExists(path);
