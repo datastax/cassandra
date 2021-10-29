@@ -310,6 +310,18 @@ public class Tracker
         return accumulate;
     }
 
+    /**
+     * Unload all sstables from current tracker without deleting files
+     */
+    public void unloadSSTables()
+    {
+        Pair<View, View> result = apply(view -> {
+            Set<SSTableReader> toUnload = copyOf(filter(view.sstables, notIn(view.compacting)));
+            return updateLiveSet(toUnload, emptySet()).apply(view);
+        });
+
+        release(selfRefs(result.left.sstables));
+    }
 
     /**
      * Removes every SSTable in the directory from the Tracker's view.

@@ -383,10 +383,10 @@ public class ColumnContext
      * Called when index is dropped. Mark all {@link SSTableIndex} as obsolete and per-column index files
      * will be removed when in-flight queries completed.
      */
-    public void invalidate()
+    public void invalidate(boolean obsolete)
     {
         liveMemtables.clear();
-        viewManager.invalidate();
+        viewManager.invalidate(obsolete);
         indexMetrics.release();
         columnQueryMetrics.release();
 

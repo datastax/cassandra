@@ -147,13 +147,16 @@ public class IndexViewManager
         update(toRemove, Collections.emptyList(), false, false);
     }
 
-    public void invalidate()
+    public void invalidate(boolean obsolete)
     {
         View currentView = view.get();
 
         for (SSTableIndex index : currentView)
         {
-            index.markObsolete();
+            if (obsolete)
+                index.markObsolete();
+            else
+                index.release();
         }
 
         view.set(new View(context, Collections.emptyList()));

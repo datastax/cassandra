@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.locator.LocalStrategy;
 
 public final class SchemaConstants
 {
@@ -83,6 +84,17 @@ public final class SchemaConstants
     public static boolean isLocalSystemKeyspace(String keyspaceName)
     {
         return LOCAL_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
+    }
+
+    /**
+     * @return whether or not the keyspace is a really system one (w/ LocalStrategy, unmodifiable, hardcoded)
+     *        or it's having {@link LocalStrategy}
+     */
+    public static boolean isKeyspaceWithLocalStrategy(String keyspaceName)
+    {
+        return isLocalSystemKeyspace(keyspaceName) ||
+               (SchemaManager.instance.getKeyspaceMetadata(keyspaceName) != null
+                && SchemaManager.instance.getKeyspaceMetadata(keyspaceName).params.replication.klass.equals(LocalStrategy.class));
     }
 
     /**
