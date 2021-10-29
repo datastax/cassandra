@@ -30,7 +30,6 @@ import com.google.common.collect.Lists;
 
 import org.apache.cassandra.io.util.File;
 import org.apache.commons.io.FileUtils;
-
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -38,9 +37,9 @@ import org.junit.Test;
 
 import net.openhft.chronicle.core.io.IORuntimeException;
 import net.openhft.chronicle.queue.ChronicleQueue;
-import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.queue.ExcerptAppender;
 import net.openhft.chronicle.queue.RollCycles;
+import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.wire.WireOut;
 import org.apache.cassandra.audit.BinAuditLogger;
 import org.apache.cassandra.tools.ToolRunner.ObservableTool;
