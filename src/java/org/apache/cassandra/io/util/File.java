@@ -425,14 +425,14 @@ public class File implements Comparable<File>
         return path == null ? "" : filename(path);
     }
 
-    public void forEach(Consumer<File> forEach)
+    public void forEach(Consumer<File> fileConsumer)
     {
-        PathUtils.forEach(path, path -> forEach.accept(new File(path)));
+        PathUtils.forEach(path, path -> fileConsumer.accept(new File(path)));
     }
 
-    public void forEachRecursive(Consumer<File> forEach)
+    public void forEachRecursive(Consumer<File> fileConsumer)
     {
-        PathUtils.forEachRecursive(path, path -> forEach.accept(new File(path)));
+        PathUtils.forEachRecursive(path, path -> fileConsumer.accept(new File(path)));
     }
 
     /**

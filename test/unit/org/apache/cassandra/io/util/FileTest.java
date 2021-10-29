@@ -21,12 +21,15 @@ package org.apache.cassandra.io.util;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.RateLimiter;
@@ -110,7 +113,7 @@ public class FileTest
         return file.getParent() + File.pathSeparator() + ".." + File.pathSeparator() + file.getParentFile().getName() + File.pathSeparator() + file.getName();
     }
 
-    private void    testEquivalence(String path) throws IOException
+    private void testEquivalence(String path) throws IOException
     {
         java.io.File file = new java.io.File(path);
         if (file.exists()) testExists(path);
@@ -315,6 +318,52 @@ public class FileTest
         Assert.assertTrue("" + NANOSECONDS.toMillis(end - start), SECONDS.toNanos(1) <= end - start);
         Assert.assertFalse(subdir.exists());
         Assert.assertFalse(file.exists());
+    }
+
+    @Test
+    public void testDeleteWithAccumulate()
+    {
+        File file = new File(dir, "testdelete");
+        Assert.assertTrue(file.tryCreateDirectory());
+
+        Throwable accumulate = null;
+        accumulate = file.delete(accumulate);
+        Assert.assertNull(accumulate);
+        accumulate = file.delete(accumulate);
+        Assert.assertNotNull(accumulate);
+        Assert.assertTrue(accumulate instanceof UncheckedIOException);
+        Assert.assertTrue(accumulate.getCause() instanceof NoSuchFileException);
+    }
+
+    @Test
+    public void testForEachRecursive() throws IOException
+    {
+        File subdir = new File(dir, "forEachRecursive");
+        Assert.assertTrue(subdir.tryCreateDirectory());
+        Assert.assertTrue(new File(subdir, "subsubdir").tryCreateDirectory());
+        File file = new File(subdir, "f");
+        Assert.assertTrue(file.createFileIfNotExists());
+        Assert.assertTrue(subdir.exists());
+        Assert.assertTrue(file.exists());
+        
+        subdir.forEachRecursive(f -> f.toPath());
+    }
+
+    @Test
+    public void testList()
+    {
+        File subdir = new File(dir, "testList");
+        Assert.assertTrue(subdir.tryCreateDirectory());
+        Assert.assertTrue(new File(subdir, "subsubdir").tryCreateDirectory());
+        File file = new File(subdir, "f");
+        Assert.assertTrue(file.createFileIfNotExists());
+        Assert.assertTrue(subdir.exists());
+        Assert.assertTrue(file.exists());
+
+        Function<Stream<File>, Stream<File>> toFiles = Function.identity();
+        String[] result = PathUtils.list(subdir.path, stream -> toFiles.apply(stream.map(File::new)).map(File::name), String[]::new);
+        Assert.assertNotNull(result);
+        Assert.assertTrue(result.length == 2);
     }
 
     @Test

@@ -142,7 +142,6 @@ public class LegacySSTableTest
     protected Descriptor getDescriptor(String legacyVersion, String table) throws IOException
     {
         Path file = Files.list(getTableDir(legacyVersion, table).toPath()).findFirst().orElseThrow(() -> new RuntimeException(String.format("No files for verion=%s and table=%s", legacyVersion, table)));
-//        return Descriptor.fromFilename(file.toFile());
         return Descriptor.fromFilename(new File(file));
     }
 
