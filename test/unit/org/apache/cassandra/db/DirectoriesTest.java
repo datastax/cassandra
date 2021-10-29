@@ -815,6 +815,20 @@ public class DirectoriesTest
         testDirectoriesSymlinksHelper(false);
     }
 
+    @Test
+    public void testFileActionHasPrivilege() throws IOException
+    {
+        Path p = Files.createTempDirectory("something");
+        File file = new File(p);
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.X));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.W));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XW));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.R));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XR));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.RW));
+        assertTrue(Directories.FileAction.hasPrivilege(file, Directories.FileAction.XRW));
+    }
+
     /**
      * Makes sure we can find the data directory for a file when the table directory is a symlink
      *
