@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
@@ -196,7 +197,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, Integer.BYTES);
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(temporaryFolder.newFolder(),
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                                 "test",
                                                                                 "test",
                                                                                 new SequenceBasedSSTableUniqueIdentifier(20)));
@@ -243,7 +244,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int generation) throws Throwable
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(temporaryFolder.newFolder(),
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                                 "test",
                                                                                 "test",
                                                                                 new SequenceBasedSSTableUniqueIdentifier(generation)));

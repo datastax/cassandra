@@ -45,6 +45,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -153,7 +154,7 @@ public class IndexViewManagerTest extends SAITester
         getCurrentColumnFamilyStore().getLiveSSTables().stream().map(t -> t.descriptor).forEach(descriptors::add);
 
         List<SSTableReader> sstables = descriptors.stream()
-                                                  .map(desc -> new Descriptor(tmpDir.toFile(), KEYSPACE, tableName, desc.generation))
+                                                  .map(desc -> new Descriptor(new File(tmpDir), KEYSPACE, tableName, desc.generation))
                                                   .map(desc -> desc.getFormat().getReaderFactory().open(desc))
                                                   .collect(Collectors.toList());
         assertThat(sstables).hasSize(4);

@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -77,7 +78,7 @@ public class SaiRandomizedTest extends RandomizedTest
                                               .addPartitionKeyColumn(randomSimpleString(3, 15), Int32Type.instance)
                                               .partitioner(Murmur3Partitioner.instance)
                                               .build();
-        return indexInputLeakDetector.newIndexDescriptor(new Descriptor(temporaryFolder.newFolder(),
+        return indexInputLeakDetector.newIndexDescriptor(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                         randomSimpleString(5, 13),
                                                                         randomSimpleString(3, 17),
                                                                         new SequenceBasedSSTableUniqueIdentifier(randomIntBetween(0, 128))),

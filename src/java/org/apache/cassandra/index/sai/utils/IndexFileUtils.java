@@ -86,7 +86,7 @@ public class IndexFileUtils
 
         IncrementalChecksumSequentialWriter(File file)
         {
-            super(file, writerOption);
+            super(new org.apache.cassandra.io.util.File(file), writerOption);
         }
 
         @Override

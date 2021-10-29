@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
@@ -118,7 +119,7 @@ public abstract class AbstractOnDiskBenchmark
                    .addRegularColumn("col", IntegerType.instance)
                    .build();
 
-        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(),
+        descriptor = new Descriptor(new File(Files.createTempDirectory("jmh")),
                                     metadata.keyspace,
                                     metadata.name,
                                     new SequenceBasedSSTableUniqueIdentifier(1));
