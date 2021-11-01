@@ -41,16 +41,16 @@ import org.apache.lucene.util.ArrayUtil;
  * Page-aware random access reader for a trie terms dictionary written by {@link TrieTermsDictionaryWriter}.
  */
 @NotThreadSafe
-class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
+public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 {
-    static final long NOT_FOUND = -1;
+    public static final long NOT_FOUND = -1;
 
-    TrieTermsDictionaryReader(Rebufferer rebufferer, long root)
+    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root)
     {
         super(rebufferer, root);
     }
 
-    static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<Long, DataOutputPlus>()
+    public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<Long, DataOutputPlus>()
     {
         @Override
         public int sizeofNode(SerializationNode<Long> node, long nodePosition)
@@ -210,10 +210,10 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         return SizedInts.read(contents, payloadPos, bytes);
     }
 
-    private static class ImmutableTransitionBytesCollector extends TransitionBytesCollector
+    public static class ImmutableTransitionBytesCollector extends TransitionBytesCollector
     {
         @Override
-        ByteComparable toByteComparable()
+        public ByteComparable toByteComparable()
         {
             assert pos > 0;
             final int length = pos;
@@ -221,18 +221,18 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         }
 
         @Override
-        void pop()
+        public void pop()
         {
             throw new UnsupportedOperationException();
         }
     }
 
-    private static class TransitionBytesCollector
+    public static class TransitionBytesCollector
     {
         protected byte[] bytes = new byte[32];
         protected int pos = 0;
 
-        void add(int b)
+        public void add(int b)
         {
             if (pos == bytes.length)
             {
@@ -241,13 +241,13 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
             bytes[pos++] = (byte) b;
         }
 
-        void pop()
+        public void pop()
         {
             assert pos >= 0;
             pos--;
         }
 
-        ByteComparable toByteComparable()
+        public ByteComparable toByteComparable()
         {
             assert pos > 0;
             final byte[] value = new byte[pos];
