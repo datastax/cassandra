@@ -54,16 +54,18 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.lucene.store.IndexInput;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 
 public abstract class AbstractOnDiskBenchmark
 {
     private static Random random = new Random();
 
+    protected TableMetadata metadata;
+    protected IndexDescriptor indexDescriptor;
+
     private Descriptor descriptor;
 
-    TableMetadata metadata;
-    IndexDescriptor indexDescriptor;
     String index;
     IndexContext indexContext;
     private FileHandle token;
