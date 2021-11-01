@@ -30,12 +30,12 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
  */
 public interface PerSSTableWriter
 {
-    public static final PerSSTableWriter NONE = () -> {};
+    public static final PerSSTableWriter NONE = (key) -> {};
 
-    default void startPartition(DecoratedKey key, long position) throws IOException
+    default void startPartition(long position) throws IOException
     {}
 
-    void nextRow() throws IOException;
+    void nextRow(PrimaryKey primaryKey) throws IOException;
 
     default void complete(Stopwatch stopwatch) throws IOException
     {}

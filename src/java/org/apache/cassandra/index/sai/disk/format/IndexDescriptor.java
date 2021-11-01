@@ -27,25 +27,29 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.FBUtilities;
@@ -73,6 +77,9 @@ public class IndexDescriptor
 
     public final Version version;
     public final Descriptor descriptor;
+    public final IPartitioner partitioner;
+    public final ClusteringComparator clusteringComparator;
+    public final PrimaryKey.Factory primaryKeyFactory;
     public final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
     public final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     public final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
@@ -80,19 +87,28 @@ public class IndexDescriptor
     public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
     public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexTemporaryFileMap = Maps.newHashMap();
 
-    private IndexDescriptor(Version version, Descriptor descriptor)
+    private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
         this.version = version;
         this.descriptor = descriptor;
+        this.partitioner = partitioner;
+        this.clusteringComparator = clusteringComparator;
+        this.primaryKeyFactory = PrimaryKey.factory(clusteringComparator, version.onDiskFormat().indexFeatureSet());
     }
 
-    public static IndexDescriptor create(Descriptor descriptor)
+    public static IndexDescriptor create(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
-        Preconditions.checkArgument(descriptor != null, "Descriptor can't be null");
+        return new IndexDescriptor(Version.LATEST, descriptor, partitioner, clusteringComparator);
+    }
 
+    public static IndexDescriptor create(SSTableReader sstable)
+    {
         for (Version version : Version.ALL)
         {
-            IndexDescriptor indexDescriptor = new IndexDescriptor(version, descriptor);
+            IndexDescriptor indexDescriptor = new IndexDescriptor(version,
+                                                                  sstable.descriptor,
+                                                                  sstable.metadata().partitioner,
+                                                                  sstable.metadata().comparator);
 
             if (version.onDiskFormat().isPerSSTableBuildComplete(indexDescriptor))
             {
@@ -100,7 +116,10 @@ public class IndexDescriptor
                 return indexDescriptor;
             }
         }
-        return new IndexDescriptor(Version.LATEST, descriptor);
+        return new IndexDescriptor(Version.LATEST,
+                                   sstable.descriptor,
+                                   sstable.metadata().partitioner,
+                                   sstable.metadata().comparator);
     }
 
     public boolean hasComponent(IndexComponent indexComponent)
@@ -114,6 +133,16 @@ public class IndexDescriptor
         registerPerIndexComponents(indexContext);
         return perIndexComponents.containsKey(indexContext.getIndexName()) &&
                perIndexComponents.get(indexContext.getIndexName()).contains(indexComponent);
+    }
+
+    public String componentName(IndexComponent indexComponent)
+    {
+        return version.fileNameFormatter().format(indexComponent, null);
+    }
+
+    public String componentName(IndexComponent indexComponent, IndexContext indexContext)
+    {
+        return version.fileNameFormatter().format(indexComponent, indexContext);
     }
 
     public File fileFor(IndexComponent component)
@@ -131,7 +160,7 @@ public class IndexDescriptor
     {
         registerPerSSTableComponents();
         return perSSTableComponents.stream()
-                                   .map(c -> new Component(Component.Type.CUSTOM, version.fileNameFormatter().format(c, null)))
+                                   .map(c -> new Component(Component.Type.CUSTOM, componentName(c)))
                                    .collect(Collectors.toSet());
     }
 
@@ -141,9 +170,14 @@ public class IndexDescriptor
         return perIndexComponents.containsKey(indexContext.getIndexName())
                ? perIndexComponents.get(indexContext.getIndexName())
                                    .stream()
-                                   .map(c -> new Component(Component.Type.CUSTOM, version.fileNameFormatter().format(c, indexContext)))
+                                   .map(c -> new Component(Component.Type.CUSTOM, componentName(c, indexContext)))
                                                                          .collect(Collectors.toSet())
                                                      : Collections.emptySet();
+    }
+
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(SSTableReader sstable) throws IOException
+    {
+        return version.onDiskFormat().newPrimaryKeyMapFactory(this, sstable);
     }
 
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
@@ -492,7 +526,7 @@ public class IndexDescriptor
 
     private File createFile(IndexComponent component, IndexContext indexContext, boolean temporary)
     {
-        Component customComponent = new Component(Component.Type.CUSTOM, version.fileNameFormatter().format(component, indexContext));
+        Component customComponent = new Component(Component.Type.CUSTOM, componentName(component, indexContext));
         return temporary ? descriptor.tmpFileFor(customComponent) : descriptor.fileFor(customComponent);
     }
 

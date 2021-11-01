@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -33,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -47,8 +47,8 @@ public interface SegmentMerger extends Closeable
 
     SegmentMetadata merge(IndexDescriptor indexDescriptor,
                           IndexContext indexContext,
-                          DecoratedKey minKey,
-                          DecoratedKey maxKey,
+                          PrimaryKey minKey,
+                          PrimaryKey maxKey,
                           long maxSSTableRowId) throws IOException;
 
     @SuppressWarnings("resource")
@@ -77,8 +77,8 @@ public interface SegmentMerger extends Closeable
         @Override
         public SegmentMetadata merge(IndexDescriptor indexDescriptor,
                                      IndexContext indexContext,
-                                     DecoratedKey minKey,
-                                     DecoratedKey maxKey,
+                                     PrimaryKey minKey,
+                                     PrimaryKey maxKey,
                                      long maxSSTableRowId) throws IOException
         {
             try (final TermsIteratorMerger merger = new TermsIteratorMerger(segmentTermsIterators.toArray(new TermsIterator[0]), indexContext.getValidator()))
@@ -155,8 +155,8 @@ public interface SegmentMerger extends Closeable
         @Override
         public SegmentMetadata merge(IndexDescriptor indexDescriptor,
                                      IndexContext indexContext,
-                                     DecoratedKey minKey,
-                                     DecoratedKey maxKey,
+                                     PrimaryKey minKey,
+                                     PrimaryKey maxKey,
                                      long maxSSTableRowId) throws IOException
         {
             final MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, indexContext.getValidator());

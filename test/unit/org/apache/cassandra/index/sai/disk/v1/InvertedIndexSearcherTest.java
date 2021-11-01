@@ -24,11 +24,9 @@ import java.util.List;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -36,38 +34,21 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.LongArrays;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-import static org.apache.cassandra.Util.dk;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 public class InvertedIndexSearcherTest extends SaiRandomizedTest
 {
-    private static final KeyFetcher KEY_FETCHER = new KeyFetcher(null) {
-        @Override
-        public DecoratedKey apply(RandomAccessReader reader, long keyOffset)
-        {
-            return dk(String.format("pkvalue_%07d", keyOffset));
-        }
-
-        @Override
-        public RandomAccessReader createReader()
-        {
-            return null;
-        }
-    };
-
     @BeforeClass
     public static void setupCQLTester()
     {
@@ -84,7 +65,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     private void doTestEqQueriesAgainstStringIndex() throws Exception
     {
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
@@ -100,7 +81,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
                         assertTrue(results.hasNext());
-                        final long actualToken = results.next().get();
+                        final long actualToken = results.next().token().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                     assertFalse(results.hasNext());
@@ -116,12 +97,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
-                    results.skipTo(tokenToSkip);
+                    results.skipTo(SAITester.TEST_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(tokenToSkip)));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {
                         final long expectedToken = termsEnum.get(t).right.get(p);
-                        final long actualToken = results.next().get();
+                        final long actualToken = results.next().token().getLongValue();
                         assertEquals(expectedToken, actualToken);
                     }
                 }
@@ -144,11 +125,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     public void testUnsupportedOperator() throws Exception
     {
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
-        final List<Pair<ByteComparable, IntArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
+        final List<Pair<ByteComparable, LongArrayList>> termsEnum = buildTermsEnum(numTerms, numPostings);
 
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
-            searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance)).add(Operator.GT, UTF8Type.instance.decompose("a")), SSTableQueryContext.forTest(), false);
+            searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+                            .add(Operator.GT, UTF8Type.instance.decompose("a")), SSTableQueryContext.forTest(), false);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
         }
@@ -158,7 +140,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, IntArrayList>> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<Pair<ByteComparable, LongArrayList>> termsEnum) throws IOException
     {
         final int size = terms * postings;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
@@ -175,23 +157,25 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                                                                     size,
                                                                     0,
                                                                     Long.MAX_VALUE,
-                                                                    new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMinimumToken(), ByteBufferUtil.bytes(1)),
-                                                                    new BufferDecoratedKey(DatabaseDescriptor.getPartitioner().getMaximumToken(), ByteBufferUtil.bytes(2)),
+                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
+                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()),
                                                                     wrap(termsEnum.get(0).left),
                                                                     wrap(termsEnum.get(terms - 1).left),
                                                                     indexMetas);
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, indexContext, false))
         {
-            final LongArray.Factory factory = () -> LongArrays.identity().build();
-            Segment segment = new Segment(factory, factory, KEY_FETCHER, indexFiles, segmentMetadata, UTF8Type.instance);
-            final IndexSearcher searcher = IndexSearcher.open(segment, indexContext);
+            final IndexSearcher searcher = IndexSearcher.open(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY,
+                                                              indexFiles,
+                                                              segmentMetadata,
+                                                              indexDescriptor,
+                                                              SAITester.createIndexContext(index, UTF8Type.instance));
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
     }
 
-    private List<Pair<ByteComparable, IntArrayList>> buildTermsEnum(int terms, int postings)
+    private List<Pair<ByteComparable, LongArrayList>> buildTermsEnum(int terms, int postings)
     {
         return InvertedIndexBuilder.buildStringTermsEnum(terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
     }

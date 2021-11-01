@@ -30,6 +30,7 @@ import org.junit.rules.TemporaryFolder;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -39,6 +40,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.util.File;
@@ -200,7 +202,9 @@ public class KDTreeSegmentMergerTest extends SAITester
         IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                                 "test",
                                                                                 "test",
-                                                                                new SequenceBasedSSTableUniqueIdentifier(20)));
+                                                                                new SequenceBasedSSTableUniqueIdentifier(20)),
+                                                                 Murmur3Partitioner.instance,
+                                                                 SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
 
         try (NumericIndexWriter indexWriter = new NumericIndexWriter(indexDescriptor,
@@ -247,7 +251,10 @@ public class KDTreeSegmentMergerTest extends SAITester
         IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(temporaryFolder.newFolder()),
                                                                                 "test",
                                                                                 "test",
-                                                                                new SequenceBasedSSTableUniqueIdentifier(generation)));
+                                                                                new SequenceBasedSSTableUniqueIdentifier(generation)),
+                                                                 Murmur3Partitioner.instance,
+                                                                 SAITester.EMPTY_COMPARATOR);
+
         IndexContext indexContext = SAITester.createIndexContext("test", Int32Type.instance);
 
         final NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,

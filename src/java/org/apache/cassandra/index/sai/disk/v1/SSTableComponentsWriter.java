@@ -24,11 +24,11 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -43,8 +43,6 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private final NumericValuesWriter offsetWriter;
     private final MetadataWriter metadataWriter;
 
-    private DecoratedKey currentKey;
-
     private long currentKeyPartitionOffset;
 
     public SSTableComponentsWriter(IndexDescriptor indexDescriptor) throws IOException
@@ -53,27 +51,25 @@ public class SSTableComponentsWriter implements PerSSTableWriter
 
         this.metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
 
-        this.tokenWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null),
+        this.tokenWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES),
                                                    indexDescriptor.openPerSSTableOutput(IndexComponent.TOKEN_VALUES),
                                                    metadataWriter, false);
-        this.offsetWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.OFFSETS_VALUES, null),
+        this.offsetWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES),
                                                     indexDescriptor.openPerSSTableOutput(IndexComponent.OFFSETS_VALUES),
                                                     metadataWriter, true);
     }
 
     @Override
-    public void startPartition(DecoratedKey key, long position)
+    public void startPartition(long position)
     {
-        currentKey = key;
         currentKeyPartitionOffset = position;
     }
 
     @Override
-    public void nextRow() throws IOException
+    public void nextRow(PrimaryKey primaryKey) throws IOException
     {
-        recordCurrentTokenOffset((long) currentKey.getToken().getTokenValue(), currentKeyPartitionOffset);
+        recordCurrentTokenOffset(primaryKey.token().getLongValue(), currentKeyPartitionOffset);
     }
-
 
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
@@ -95,5 +91,4 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         tokenWriter.add(tokenValue);
         offsetWriter.add(keyOffset);
     }
-
 }

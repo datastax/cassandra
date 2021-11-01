@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.disk.v1.block;
+package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -53,7 +53,7 @@ public class NumericValuesWriter implements Closeable
                                boolean monotonic,
                                int blockSize) throws IOException
     {
-        this(indexDescriptor.version.fileNameFormatter().format(component, null),
+        this(indexDescriptor.componentName(component),
              indexDescriptor.openPerSSTableOutput(component),
              metadataWriter,
              monotonic,

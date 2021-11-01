@@ -28,16 +28,16 @@ import com.google.common.base.Preconditions;
 import io.micrometer.core.lang.NonNull;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.packed.DirectMonotonicReader;
 
 import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.trieSerializer;
 
@@ -188,6 +188,10 @@ public class SortedTermsWriter implements Closeable
             SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(trieFP, pointId, maxLength);
             sortedTermsMeta.write(output);
         }
+        finally
+        {
+            FileUtils.closeQuietly(trieWriter, trieOutput, termsOutput, offsetsWriter);
+        }
     }
 
     /**
@@ -211,5 +215,4 @@ public class SortedTermsWriter implements Closeable
         this.tempTerm = this.prevTerm;
         this.prevTerm = temp;
     }
-
 }

@@ -77,7 +77,7 @@ public class V1SearchableIndex implements SearchableIndex
 
             final MetadataSource source = MetadataSource.loadColumnMetadata(sstableContext.indexDescriptor, indexContext);
 
-            metadatas = SegmentMetadata.load(source, null);
+            metadatas = SegmentMetadata.load(source, sstableContext.indexDescriptor.primaryKeyFactory);
 
             for (SegmentMetadata metadata : metadatas)
             {
@@ -87,8 +87,8 @@ public class V1SearchableIndex implements SearchableIndex
             segments = segmentsBuilder.build();
             assert !segments.isEmpty();
 
-            this.minKey = metadatas.get(0).minKey;
-            this.maxKey = metadatas.get(metadatas.size() - 1).maxKey;
+            this.minKey = metadatas.get(0).minKey.partitionKey();
+            this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
 
             this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
             this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
@@ -186,8 +186,8 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(CELL_COUNT, metadata.numRows)
                    .column(MIN_SSTABLE_ROW_ID, metadata.minSSTableRowId)
                    .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
-                   .column(START_TOKEN, tokenFactory.toString(metadata.minKey.getToken()))
-                   .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.getToken()))
+                   .column(START_TOKEN, tokenFactory.toString(metadata.minKey.partitionKey().getToken()))
+                   .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.partitionKey().getToken()))
                    .column(MIN_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString())
                    .column(MAX_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString())
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());

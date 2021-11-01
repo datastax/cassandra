@@ -29,6 +29,15 @@ package org.apache.cassandra.index.sai.disk.format;
 public interface IndexFeatureSet
 {
     /**
+     * Returns whether the index supports row-awareness. Row-awareness means that the per-sstable
+     * index supports mapping rowID -> {@code PrimaryKey} where the {@code PrimaryKey} contains both
+     * partition key and clustering information.
+     *
+     * @return true if the index supports row-awareness
+     */
+    boolean isRowAware();
+
+    /**
      * The {@code Accumulator} is used to accumulate the {@code IndexFeatureSet} responses from
      * multiple sources. This will include all the SSTables included in a query and all the indexes
      * attached to those SSTables.
@@ -40,6 +49,7 @@ public interface IndexFeatureSet
      */
     public static class Accumulator
     {
+        boolean isRowAware = true;
         boolean complete = false;
 
         /**
@@ -50,6 +60,8 @@ public interface IndexFeatureSet
         public void accumulate(IndexFeatureSet indexFeatureSet)
         {
             assert !complete : "Cannot accumulate after complete has been called";
+            if (!indexFeatureSet.isRowAware())
+                isRowAware = false;
         }
 
         /**
@@ -63,6 +75,11 @@ public interface IndexFeatureSet
             complete = true;
             return new IndexFeatureSet()
             {
+                @Override
+                public boolean isRowAware()
+                {
+                    return isRowAware;
+                }
             };
         }
     }

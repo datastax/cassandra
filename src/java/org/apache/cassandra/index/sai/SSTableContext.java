@@ -19,18 +19,11 @@ package org.apache.cassandra.index.sai;
 
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.KeyFetcher;
-import org.apache.cassandra.index.sai.disk.v1.LongArray;
-import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
-import org.apache.cassandra.index.sai.disk.v1.block.BlockPackedReader;
-import org.apache.cassandra.index.sai.disk.v1.block.MonotonicBlockPackedReader;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesMeta;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -46,48 +39,34 @@ public class SSTableContext extends SharedCloseableImpl
 {
     public final SSTableReader sstable;
     public final IndexDescriptor indexDescriptor;
-    public final LongArray.Factory tokenReaderFactory;
-    public final LongArray.Factory offsetReaderFactory;
-    public final KeyFetcher keyFetcher;
+    public final PrimaryKeyMap.Factory primaryKeyMapFactory;
 
     private SSTableContext(SSTableReader sstable,
-                           LongArray.Factory tokenReaderFactory,
-                           LongArray.Factory offsetReaderFactory,
-                           KeyFetcher keyFetcher,
                            IndexDescriptor indexDescriptor,
+                           PrimaryKeyMap.Factory primaryKeyMapFactory,
                            Cleanup cleanup)
     {
         super(cleanup);
         this.sstable = sstable;
-        this.tokenReaderFactory = tokenReaderFactory;
-        this.offsetReaderFactory = offsetReaderFactory;
-        this.keyFetcher = keyFetcher;
         this.indexDescriptor = indexDescriptor;
+        this.primaryKeyMapFactory = primaryKeyMapFactory;
     }
 
     private SSTableContext(SSTableContext copy)
     {
         super(copy);
         this.sstable = copy.sstable;
-        this.tokenReaderFactory = copy.tokenReaderFactory;
-        this.offsetReaderFactory = copy.offsetReaderFactory;
         this.indexDescriptor = copy.indexDescriptor;
-        this.keyFetcher = copy.keyFetcher;
+        this.primaryKeyMapFactory = copy.primaryKeyMapFactory;
     }
 
     @SuppressWarnings("resource")
     public static SSTableContext create(SSTableReader sstable)
     {
         Ref<? extends SSTableReader> sstableRef = null;
-        FileHandle token = null;
-        FileHandle offset = null;
-        LongArray.Factory tokenReaderFactory;
-        LongArray.Factory offsetReaderFactory;
-        KeyFetcher keyFetcher;
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable.descriptor);
-        String offsetsComponentName = indexDescriptor.version.fileNameFormatter().format(IndexComponent.OFFSETS_VALUES, null);
-        String tokensComponentName = indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null);
+        PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
         try
         {
             sstableRef = sstable.tryRef();
@@ -97,20 +76,11 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-            NumericValuesMeta offsetsMeta = new NumericValuesMeta(source.get(offsetsComponentName));
-            NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokensComponentName));
+            primaryKeyMapFactory = indexDescriptor.newPrimaryKeyMapFactory(sstable);
 
-            token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
-            offset  = indexDescriptor.createPerSSTableFileHandle(IndexComponent.OFFSETS_VALUES);
+            Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 
-            tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-            offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
-            keyFetcher = new KeyFetcher(sstable);
-
-            Cleanup cleanup = new Cleanup(token, offset, sstableRef);
-
-            return new SSTableContext(sstable, tokenReaderFactory, offsetReaderFactory, keyFetcher, indexDescriptor, cleanup);
+            return new SSTableContext(sstable, indexDescriptor, primaryKeyMapFactory, cleanup);
         }
         catch (Throwable t)
         {
@@ -119,7 +89,7 @@ public class SSTableContext extends SharedCloseableImpl
                 sstableRef.release();
             }
 
-            throw Throwables.unchecked(Throwables.close(t, token, offset));
+            throw Throwables.unchecked(Throwables.close(t, primaryKeyMapFactory));
         }
     }
 
@@ -189,13 +159,12 @@ public class SSTableContext extends SharedCloseableImpl
 
     private static class Cleanup implements RefCounted.Tidy
     {
-        private final FileHandle token, offset;
+        private final PrimaryKeyMap.Factory primaryKeyMapFactory;
         private final Ref<? extends SSTableReader> sstableRef;
 
-        private Cleanup(FileHandle token, FileHandle offset, Ref<? extends SSTableReader> sstableRef)
+        private Cleanup(PrimaryKeyMap.Factory primaryKeyMapFactory, Ref<? extends SSTableReader> sstableRef)
         {
-            this.token = token;
-            this.offset = offset;
+            this.primaryKeyMapFactory = primaryKeyMapFactory;
             this.sstableRef = sstableRef;
         }
 
@@ -203,7 +172,7 @@ public class SSTableContext extends SharedCloseableImpl
         public void tidy()
         {
             Throwable t = sstableRef.ensureReleased(null);
-            t = Throwables.close(t, token, offset);
+            t = Throwables.close(t, primaryKeyMapFactory);
 
             Throwables.maybeFail(t);
         }

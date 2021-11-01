@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.disk.v1.block;
+package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 

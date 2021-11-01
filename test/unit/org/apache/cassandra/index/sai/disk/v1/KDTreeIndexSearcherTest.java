@@ -36,7 +36,6 @@ import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.ShortType;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -173,7 +172,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            assertEquals(0L, results.next().getLong());
+            assertEquals(0L, results.next().token().getLongValue());
         }
 
         try (RangeIterator results = indexSearcher.search(new Expression(SAITester.createIndexContext("meh", rawType))
@@ -211,7 +210,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, Token::get));
+            List<Long> actualTokenList = Lists.newArrayList(Iterators.transform(results, key -> key.token().getLongValue()));
             assertEquals(expectedTokenList, actualTokenList);
         }
 

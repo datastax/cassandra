@@ -27,10 +27,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Throwables;
 
-import static org.apache.cassandra.index.sai.disk.v1.OnDiskKeyProducer.NO_OFFSET;
-
 public class KeyFetcher
 {
+    public static final long NO_OFFSET = -1;
+
     private final SSTableReader sstable;
 
     public KeyFetcher(SSTableReader sstable)

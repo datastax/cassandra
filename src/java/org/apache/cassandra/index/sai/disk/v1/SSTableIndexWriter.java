@@ -30,7 +30,6 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -39,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -90,7 +90,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
-    public void addRow(DecoratedKey rowKey, long sstableRowId, Row row) throws IOException
+    public void addRow(PrimaryKey key, Row row, long sstableRowId) throws IOException
     {
         if (maybeAbort())
             return;
@@ -103,15 +103,15 @@ public class SSTableIndexWriter implements PerIndexWriter
                 while (valueIterator.hasNext())
                 {
                     ByteBuffer value = valueIterator.next();
-                    addTerm(TypeUtil.encode(value.duplicate(), indexContext.getValidator()), rowKey, sstableRowId, indexContext.getValidator());
+                    addTerm(TypeUtil.encode(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
                 }
             }
         }
         else
         {
-            ByteBuffer value = indexContext.getValueOf(rowKey, row, nowInSec);
+            ByteBuffer value = indexContext.getValueOf(key.partitionKey(), row, nowInSec);
             if (value != null)
-                addTerm(TypeUtil.encode(value.duplicate(), indexContext.getValidator()), rowKey, sstableRowId, indexContext.getValidator());
+                addTerm(TypeUtil.encode(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
         }
         maxSSTableRowId = sstableRowId;
     }
@@ -196,13 +196,13 @@ public class SSTableIndexWriter implements PerIndexWriter
         return true;
     }
 
-    private void addTerm(ByteBuffer term, DecoratedKey key, long sstableRowId, AbstractType<?> type) throws IOException
+    private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
         if (term.remaining() >= maxTermSize)
         {
             noSpamLogger.warn(indexContext.logMessage(TERM_OVERSIZE_MESSAGE),
                               indexContext.getColumnName(),
-                              indexContext.keyValidator().getString(key.getKey()),
+                              indexContext.keyValidator().getString(key.partitionKey().getKey()),
                               FBUtilities.prettyPrintMemory(term.remaining()),
                               FBUtilities.prettyPrintMemory(maxTermSize));
             return;
@@ -315,8 +315,8 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (segments.isEmpty())
             return;
 
-        DecoratedKey minKey = segments.get(0).minKey;
-        DecoratedKey maxKey = segments.get(segments.size() - 1).maxKey;
+        PrimaryKey minKey = segments.get(0).minKey;
+        PrimaryKey maxKey = segments.get(segments.size() - 1).maxKey;
 
         try (SegmentMerger segmentMerger = SegmentMerger.newSegmentMerger(indexContext.isLiteral());
              PerIndexFiles perIndexFiles = new PerIndexFiles(indexDescriptor, indexContext, true))
@@ -341,7 +341,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         try (MetadataWriter writer = new MetadataWriter(indexDescriptor.openPerIndexOutput(IndexComponent.META, indexContext)))
         {
-            SegmentMetadata.write(writer, segments, null);
+            SegmentMetadata.write(writer, segments);
         }
         catch (IOException e)
         {

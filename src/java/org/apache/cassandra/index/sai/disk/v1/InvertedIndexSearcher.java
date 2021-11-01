@@ -29,7 +29,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -47,9 +49,13 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final TermsReader reader;
     private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
 
-    InvertedIndexSearcher(Segment segment, IndexContext indexContext) throws IOException
+    InvertedIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+                          PerIndexFiles perIndexFiles,
+                          SegmentMetadata segmentMetadata,
+                          IndexDescriptor indexDescriptor,
+                          IndexContext indexContext) throws IOException
     {
-        super(segment, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
 
         long root = metadata.getIndexRoot(IndexComponent.TERMS_DATA);
         assert root >= 0;
@@ -76,7 +82,7 @@ public class InvertedIndexSearcher extends IndexSearcher
 
     @Override
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer)
+    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -86,9 +92,7 @@ public class InvertedIndexSearcher extends IndexSearcher
 
         final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
-
-        PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> reader.exactMatch(term, listener, context.queryContext))
-                                        : reader.exactMatch(term, listener, context.queryContext);
+        PostingList postingList = reader.exactMatch(term, listener, context.queryContext);
         return toIterator(postingList, context, defer);
     }
 

@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -35,6 +36,7 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -43,8 +45,10 @@ import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.lucene.store.IndexInput;
@@ -102,6 +106,11 @@ public class V1OnDiskFormat implements OnDiskFormat
 
     private static final IndexFeatureSet v1IndexFeatureSet = new IndexFeatureSet()
     {
+        @Override
+        public boolean isRowAware()
+        {
+            return false;
+        }
     };
 
     protected V1OnDiskFormat()
@@ -111,6 +120,12 @@ public class V1OnDiskFormat implements OnDiskFormat
     public IndexFeatureSet indexFeatureSet()
     {
         return v1IndexFeatureSet;
+    }
+
+    @Override
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    {
+        return new PartitionAwarePrimaryKeyFactory();
     }
 
     @Override
@@ -124,6 +139,12 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
                indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+    }
+
+    @Override
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    {
+        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
     }
 
     @Override
@@ -245,7 +266,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         return 2;
     }
 
-    private boolean isBuildCompletionMarker(IndexComponent indexComponent)
+    protected boolean isBuildCompletionMarker(IndexComponent indexComponent)
     {
         return indexComponent == IndexComponent.GROUP_COMPLETION_MARKER ||
                indexComponent == IndexComponent.COLUMN_COMPLETION_MARKER;

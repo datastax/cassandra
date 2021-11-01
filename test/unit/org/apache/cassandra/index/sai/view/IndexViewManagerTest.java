@@ -183,8 +183,8 @@ public class IndexViewManagerTest extends SAITester
             List<SSTableContext> flushed = sstables.stream().skip(3).limit(1).map(SSTableContext::create).collect(Collectors.toList());
 
             // concurrently update from both flush and compaction
-            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, true, false));
-            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, true, false));
+            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, true));
+            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, true));
 
             FBUtilities.waitOnFutures(Arrays.asList(compaction, flush));
 
@@ -209,6 +209,7 @@ public class IndexViewManagerTest extends SAITester
             compacted.forEach(group -> assertTrue(group.isCleanedUp()));
             flushed.forEach(group -> assertTrue(group.isCleanedUp()));
         }
+        sstables.forEach(sstable -> sstable.selfRef().release());
         executor.shutdown();
         executor.awaitTermination(1, TimeUnit.MINUTES);
     }

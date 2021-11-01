@@ -27,7 +27,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -46,9 +48,13 @@ public class KDTreeIndexSearcher extends IndexSearcher
     private final BKDReader bkdReader;
     private final QueryEventListener.BKDIndexEventListener perColumnEventListener;
 
-    KDTreeIndexSearcher(Segment segment, IndexContext indexContext) throws IOException
+    KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+                        PerIndexFiles perIndexFiles,
+                        SegmentMetadata segmentMetadata,
+                        IndexDescriptor indexDescriptor,
+                        IndexContext indexContext) throws IOException
     {
-        super(segment, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
 
         final long bkdPosition = metadata.getIndexRoot(IndexComponent.KD_TREE);
         assert bkdPosition >= 0;
@@ -71,7 +77,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     @Override
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer)
+    public RangeIterator search(Expression exp, SSTableQueryContext context, boolean defer) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -80,9 +86,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
         {
             final BKDReader.IntersectVisitor query = bkdQueryFrom(exp, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
             QueryEventListener.BKDIndexEventListener listener = MulticastQueryEventListeners.of(context.queryContext, perColumnEventListener);
-
-            PostingList postingList = defer ? new PostingList.DeferredPostingList(() -> bkdReader.intersect(query, listener, context.queryContext))
-                                            : bkdReader.intersect(query, listener, context.queryContext);
+            PostingList postingList = bkdReader.intersect(query, listener, context.queryContext);
             return toIterator(postingList, context, defer);
         }
         else

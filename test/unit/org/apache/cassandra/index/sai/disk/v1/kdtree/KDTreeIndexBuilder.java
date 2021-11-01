@@ -30,8 +30,7 @@ import java.util.stream.Stream;
 
 import org.junit.Assert;
 
-import com.carrotsearch.hppc.IntArrayList;
-import org.apache.cassandra.db.DecoratedKey;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -43,25 +42,22 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.KDTreeIndexSearcher;
-import org.apache.cassandra.index.sai.disk.v1.KeyFetcher;
-import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
-import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
-import org.apache.cassandra.index.sai.utils.LongArrays;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-import static org.apache.cassandra.Util.dk;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
@@ -69,32 +65,37 @@ import static org.junit.Assert.assertTrue;
 
 public class KDTreeIndexBuilder
 {
+    public static final PrimaryKeyMap TEST_PRIMARY_KEY_MAP = new PrimaryKeyMap()
+    {
+        private final PrimaryKey.Factory primaryKeyFactory = new PartitionAwarePrimaryKeyFactory();
+
+        @Override
+        public PrimaryKey primaryKeyFromRowId(long sstableRowId)
+        {
+            return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
+        }
+
+        @Override
+        public long rowIdFromPrimaryKey(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+    };
+    public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = (context) -> TEST_PRIMARY_KEY_MAP;
+
+
+    private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
+
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractIterator<Pair<ByteComparable, IntArrayList>> terms;
+    private final AbstractIterator<Pair<ByteComparable, LongArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
-    private final LongArray segmentRowIdToToken = LongArrays.identity().build();
-    private final LongArray segmentRowIdToOffset = LongArrays.identity().build();
-    private final KeyFetcher keyFetcher = new KeyFetcher(null) {
-        @Override
-        public DecoratedKey apply(RandomAccessReader reader, long keyOffset)
-        {
-            return dk(String.format("pkvalue_%07d", keyOffset));
-        }
-
-        @Override
-        public RandomAccessReader createReader()
-        {
-            return null;
-        }
-    };
-    private static final BigDecimal ONE_TENTH = BigDecimal.valueOf(1, 1);
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractIterator<Pair<ByteComparable, IntArrayList>> terms,
+                              AbstractIterator<Pair<ByteComparable, LongArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -115,7 +116,13 @@ public class KDTreeIndexBuilder
         final SegmentMetadata metadata;
 
         IndexContext columnContext = SAITester.createIndexContext("test", Int32Type.instance);
-        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor, columnContext, TypeUtil.fixedSizeOf(type), maxSegmentRowId, size, IndexWriterConfig.defaultConfig("test"), false))
+        try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
+                                                                columnContext,
+                                                                TypeUtil.fixedSizeOf(type),
+                                                                maxSegmentRowId,
+                                                                size,
+                                                                IndexWriterConfig.defaultConfig("test"),
+                                                                false))
         {
             final SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(pointValues);
             metadata = new SegmentMetadata(0,
@@ -123,8 +130,8 @@ public class KDTreeIndexBuilder
                                            minSegmentRowId,
                                            maxSegmentRowId,
                                            // min/max is unused for now
-                                           Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")),
-                                           Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")),
+                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
+                                           SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()),
                                            UTF8Type.instance.fromString("c"),
                                            UTF8Type.instance.fromString("d"),
                                            indexMetas);
@@ -132,8 +139,7 @@ public class KDTreeIndexBuilder
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(indexDescriptor, SAITester.createIndexContext("test", Int32Type.instance), false))
         {
-            Segment segment = new Segment(() -> segmentRowIdToToken, () -> segmentRowIdToOffset, keyFetcher, indexFiles, metadata, type);
-            IndexSearcher searcher = IndexSearcher.open(segment, columnContext);
+            IndexSearcher searcher = IndexSearcher.open(TEST_PRIMARY_KEY_MAP_FACTORY, indexFiles, metadata, indexDescriptor, columnContext);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
         }
@@ -233,22 +239,22 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractIterator<Pair<ByteComparable, LongArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, LongArrayList> computeNext()
             {
                 if (currentTerm++ >= size)
                 {
                     return endOfData();
                 }
 
-                IntArrayList postings = new IntArrayList();
+                LongArrayList postings = new LongArrayList();
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 

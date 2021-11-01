@@ -58,8 +58,9 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.utils.SuppressLeakCheck;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
@@ -81,6 +82,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.when;
 
+@SuppressLeakCheck(jira="STAR-974")
 public class NativeIndexDDLTest extends SAITester
 {
     private static final Injections.Counter NDI_CREATION_COUNTER = Injections.newCounter("IndexCreationCounter")
@@ -905,6 +907,9 @@ public class NativeIndexDDLTest extends SAITester
         // that are encryptable unless they have been removed because encrypted components aren't
         // checksum validated.
 
+        if (component == IndexComponent.PRIMARY_KEY_TRIE || component == IndexComponent.PRIMARY_KEY_BLOCKS || component == IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)
+            return;
+
         if (((component == IndexComponent.GROUP_COMPLETION_MARKER) ||
              (component == IndexComponent.COLUMN_COMPLETION_MARKER)) &&
             (corruptionType != CorruptionType.REMOVED))
@@ -935,7 +940,9 @@ public class NativeIndexDDLTest extends SAITester
         boolean expectedNumericState = !failedNumericIndex || isBuildCompletionMarker(component);
         boolean expectedLiteralState = !failedStringIndex || isBuildCompletionMarker(component);
 
-        assertEquals(expectedNumericState, verifyChecksum(numericIndexContext));
+        assertEquals("Checksum verification for " + component + " should be " + expectedNumericState + " but was " + !expectedNumericState,
+                     expectedNumericState,
+                     verifyChecksum(numericIndexContext));
         assertEquals(expectedLiteralState, verifyChecksum(stringIndexContext));
 
         if (rebuild)
