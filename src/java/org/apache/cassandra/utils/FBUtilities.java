@@ -1171,4 +1171,80 @@ public class FBUtilities
             throw new IllegalStateException(String.format("Unknown custom %s: %s" , what, customImpl));
         }
     }
+
+    /**
+     * A class containing some debug methods to be added and removed manually when debugging problems
+     * like failing unit tests.
+     */
+    public static final class Debug
+    {
+        public static final class ThreadInfo
+        {
+            private final String name;
+            private final boolean isDaemon;
+            private final StackTraceElement[] stack;
+
+            public ThreadInfo()
+            {
+                this(Thread.currentThread());
+            }
+
+            public ThreadInfo(Thread thread)
+            {
+                this.name =  thread.getName();
+                this.isDaemon = thread.isDaemon();
+                this.stack = thread.getStackTrace();
+            }
+
+        }
+        private static final Map<Object, ThreadInfo> stacks = new ConcurrentHashMap<>();
+
+        public static String getStackTrace()
+        {
+            return getStackTrace(new ThreadInfo());
+        }
+
+        public static String getStackTrace(Thread thread)
+        {
+            return getStackTrace(new ThreadInfo(thread));
+        }
+
+        public static String getStackTrace(ThreadInfo threadInfo)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Thread ")
+              .append(threadInfo.name)
+              .append(" (")
+              .append(threadInfo.isDaemon ? "daemon" : "non-daemon")
+              .append(")")
+              .append("\n");
+            for (StackTraceElement element : threadInfo.stack)
+            {
+                sb.append(element);
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+
+        /**
+         * Call this method for debugging purposes, when you want to save the current thread stack trace
+         * for the object specified in the parameter.
+         */
+        public static void addStackTrace(Object object)
+        {
+            stacks.put(object, new ThreadInfo());
+        }
+
+
+        /** Call this method to log a message that will print the stack trace that was saved
+         * in the last call of addStackTrace() and the current stack trace.
+         */
+        public static void logStackTrace(String message, Object object)
+        {
+            logger.info("{}\n{}\n****\n{}",
+                        message,
+                        getStackTrace(stacks.get(object)),
+                        getStackTrace());
+        }
+    }
 }

@@ -523,6 +523,26 @@ public final class PathUtils
         return toRealPath(parent).resolve(parent.relativize(file));
     }
 
+    /**
+     * @param path to check file szie
+     * @return file size or 0 if failed to get file size
+     */
+    public static long size(Path path)
+    {
+        try
+        {
+            return Files.size(path);
+        }
+        catch (IOException e)
+        {
+            return 0;
+        }
+    }
+
+    /**
+     * @param pathOrURI path or uri in string
+     * @return nio Path
+     */
     public static Path getPath(String pathOrURI)
     {
         try
