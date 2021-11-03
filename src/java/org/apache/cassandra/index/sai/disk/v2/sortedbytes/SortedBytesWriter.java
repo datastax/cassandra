@@ -37,26 +37,33 @@ import org.apache.lucene.util.packed.PackedLongValues;
 import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.trieSerializer;
 
 /**
- * Writes sorted bytes to be used by @see org.apache.cassandra.index.sai.disk.v2.sortedbytes.SortedBytesReader
+ * Writes sorted bytes for use with @see org.apache.cassandra.index.sai.disk.v2.sortedbytes.SortedBytesReader
  *
  * A trie for bytes -> point id lookup.
  *
  * A Lucene version 7.5 sorted doc values copy for point id -> bytes lookup.
+ *
+ * There are blocks of 16 sequentially prefix encoded terms addressed by a
+ * direct monotonic reader.
+ *
+ * Important implementation note: SAI blocked packed readers are slow,
+ * and Lucene MonotonicBlockPackedReader is slow.  Using them
+ * will cause this class to slow considerably.
  */
 public class SortedBytesWriter
 {
     static final int TERMS_DICT_BLOCK_SHIFT = 4;
     static final int TERMS_DICT_BLOCK_SIZE = 1 << TERMS_DICT_BLOCK_SHIFT;
     static final int TERMS_DICT_BLOCK_MASK = TERMS_DICT_BLOCK_SIZE - 1;
+    static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
 
-    private final IncrementalDeepTrieWriterPageAware trieWriter;
+    private final IncrementalDeepTrieWriterPageAware<Long> trieWriter;
     private final IndexOutput bytesOutput;
     private final IndexOutput offsetsOutput;
     private final BytesRefBuilder previous = new BytesRefBuilder();
     private final BytesRefBuilder temp = new BytesRefBuilder();
 
     private final long bytesStartFP;
-    static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
     private final PackedLongValues.Builder offsetsBuilder;
 
     private int maxLength = -1;
@@ -92,7 +99,7 @@ public class SortedBytesWriter
             throw new IllegalArgumentException("Bytes must be added in lexicographic ascending order.");
         }
 
-        trieWriter.add(termBC, new Long(pointId));
+        trieWriter.add(termBC, pointId);
 
         if ((pointId & TERMS_DICT_BLOCK_MASK) == 0)
         {
@@ -167,11 +174,7 @@ public class SortedBytesWriter
 
     public static int gatherBytes(ByteComparable term, BytesRefBuilder builder)
     {
-        return gatherBytes(term.asComparableBytes(ByteComparable.Version.OSS41), builder);
-    }
-
-    public static int gatherBytes(ByteSource byteSource, BytesRefBuilder builder)
-    {
+        ByteSource byteSource = term.asComparableBytes(ByteComparable.Version.OSS41);
         builder.clear();
         int length = 0;
         // gather the term bytes from the byteSource

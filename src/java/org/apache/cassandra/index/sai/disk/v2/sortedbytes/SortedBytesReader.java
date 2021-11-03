@@ -47,7 +47,6 @@ public class SortedBytesReader
 {
     private final SortedBytesWriter.Meta meta;
     private final FileHandle trieHandle;
-    private final BytesRef term;
     private final LongValues offsets;
     private long pointId = -1;
 
@@ -64,18 +63,21 @@ public class SortedBytesReader
         RandomAccessInput offsetSlice = offsetsInput.randomAccessSlice(0, offsetsInput.length());
 
         offsets = DirectMonotonicReader.getInstance(offsetsMeta, offsetSlice);
-
-        term = new BytesRef(meta.maxTermLength);
     }
 
     /**
-     * Returns the point id / ordinal of the target term, it not matching the next greater.
+     * Returns the point id / ordinal of the target term, if not matching the next greater.
      * @param term target term to lookup
-     * @return point id / ordinal or the target
+     * @return point id / ordinal of the target or -1 if not found
      * @throws IOException
      */
     public long seekToBytes(ByteComparable term) throws IOException
     {
+        if (term == null)
+        {
+            throw new IllegalArgumentException("term null");
+        }
+
         try (TrieRangeIterator reader = new TrieRangeIterator(trieHandle.instantiateRebufferer(),
                                                               meta.trieFP,
                                                               term,
@@ -94,15 +96,26 @@ public class SortedBytesReader
         }
     }
 
+    public class Context
+    {
+        private final BytesRef term = new BytesRef(meta.maxTermLength);
+    }
+
+    public Context createContext()
+    {
+        return new Context();
+    }
+
     /**
      * Look up the ByteComparable of a target point id
      *
      * @param target Point id to lookup
      * @param bytesInput Bytes input stream
+     * @param context Reusable object for each call
      * @return ByteComparable at the target point id
      * @throws IOException
      */
-    public ByteComparable seekExact(long target, IndexInput bytesInput) throws IOException
+    public ByteComparable seekExact(long target, IndexInput bytesInput, Context context) throws IOException
     {
         if (target < 0 || target >= meta.count)
         {
@@ -115,7 +128,7 @@ public class SortedBytesReader
         BytesRef term = null;
         do
         {
-            term = next(bytesInput);
+            term = next(bytesInput, context);
         } while (this.pointId < target);
         return fixedLength(term);
     }
@@ -125,7 +138,7 @@ public class SortedBytesReader
         return ByteComparable.fixedLength(bytes.bytes, bytes.offset, bytes.length);
     }
 
-    private BytesRef next(IndexInput bytesInput) throws IOException
+    private BytesRef next(IndexInput bytesInput, Context context) throws IOException
     {
         if (++pointId >= meta.count)
         {
@@ -133,8 +146,8 @@ public class SortedBytesReader
         }
         if ((pointId & TERMS_DICT_BLOCK_MASK) == 0L)
         {
-            term.length = bytesInput.readVInt();
-            bytesInput.readBytes(term.bytes, 0, term.length);
+            context.term.length = bytesInput.readVInt();
+            bytesInput.readBytes(context.term.bytes, 0, context.term.length);
         }
         else
         {
@@ -149,9 +162,9 @@ public class SortedBytesReader
             {
                 suffixLength += bytesInput.readVInt();
             }
-            term.length = prefixLength + suffixLength;
-            bytesInput.readBytes(term.bytes, prefixLength, suffixLength);
+            context.term.length = prefixLength + suffixLength;
+            bytesInput.readBytes(context.term.bytes, prefixLength, suffixLength);
         }
-        return term;
+        return context.term;
     }
 }
