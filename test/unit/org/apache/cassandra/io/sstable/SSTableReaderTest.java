@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -313,7 +312,7 @@ public class SSTableReaderTest
                 DecoratedKey dk = Util.dk(String.valueOf(j));
                 FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
                 DecoratedKey keyInDisk = sstable.decorateKey(ByteBufferUtil.readWithShortLength(file));
-                assert keyInDisk.equals(dk) : String.format("%s != %s in %s", keyInDisk, dk, file.getPath());
+                assert keyInDisk.equals(dk) : String.format("%s != %s in %s", keyInDisk, dk, file.getFile());
             }
 
             // check no false positives

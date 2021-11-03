@@ -580,7 +580,7 @@ public class StatsMetadata extends MetadataComponent
                                                                     "Files copied over using partial zero-copy " +
                                                                     "streaming in DSE are not currently supported.", in),
                                                       null,
-                                                      in instanceof FileDataInput ? ((FileDataInput) in).getPath() : null);
+                                                      in instanceof FileDataInput ? ((FileDataInput) in).getFile() : null);
             }
 
             if (version.hasIncrementalNodeSyncMetadata())

@@ -296,7 +296,7 @@ public class RandomAccessReaderTest
             try (FileHandle fh = builder.complete();
                  RandomAccessReader reader = fh.createReader())
             {
-                assertEquals(f.absolutePath(), reader.getPath().path());
+                assertEquals(f.absolutePath(), reader.getFile().path());
                 assertEquals(f.length(), reader.length());
                 assertEquals(f.length(), reader.bytesRemaining());
                 assertEquals(Math.min(Integer.MAX_VALUE, f.length()), reader.available());
@@ -334,7 +334,7 @@ public class RandomAccessReaderTest
              FileHandle fh = builder.complete();
              RandomAccessReader reader = fh.createReader())
         {
-            assertEquals(f.absolutePath(), reader.getPath().path());
+            assertEquals(f.absolutePath(), reader.getFile().path());
             assertEquals(expected.length(), reader.length());
 
             ByteBuffer b = ByteBufferUtil.read(reader, expected.length());

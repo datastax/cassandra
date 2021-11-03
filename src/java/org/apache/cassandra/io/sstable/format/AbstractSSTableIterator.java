@@ -139,7 +139,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
             catch (IOException e)
             {
                 sstable.markSuspect();
-                File filePath = file.getPath();
+                File filePath = file.getFile();
                 if (shouldCloseFile)
                 {
                     try
@@ -551,7 +551,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
         @Override
         public String toString()
         {
-            return file != null ? file.getPath().toString() : "null";
+            return file != null ? file.getFile().toString() : "null";
         }
     }
 

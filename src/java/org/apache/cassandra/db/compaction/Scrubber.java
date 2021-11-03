@@ -381,7 +381,7 @@ public class Scrubber implements Closeable
         OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(key),
                                                                         realm.metadata().comparator);
 
-        try (UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getPath().toString()))
+        try (UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getFile().toString()))
         {
             if (prevKey != null && prevKey.compareTo(key) > 0)
             {

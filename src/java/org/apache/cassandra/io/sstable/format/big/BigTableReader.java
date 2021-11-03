@@ -252,7 +252,7 @@ public class BigTableReader extends SSTableReader
         File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))
         {
-            path = in.getPath();
+            path = in.getFile();
             while (!in.isEOF())
             {
                 i++;
@@ -300,7 +300,7 @@ public class BigTableReader extends SSTableReader
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))
-                                    throw new AssertionError(String.format("%s != %s in %s", keyInDisk, key, fdi.getPath()));
+                                    throw new AssertionError(String.format("%s != %s in %s", keyInDisk, key, fdi.getFile()));
                             }
                         }
 

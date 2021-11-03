@@ -428,7 +428,7 @@ public class BufferedRandomAccessFileTest
              FileHandle fh = builder.complete();
              RandomAccessReader r = fh.createReader())
         {
-            assert tmpFile.equals(r.getPath());
+            assert tmpFile.equals(r.getFile());
 
             // Create a mark and move the rw there.
             final DataPosition mark = r.mark();
@@ -461,7 +461,7 @@ public class BufferedRandomAccessFileTest
         //write of a 0 length, but that is kind of a corner case
         expectException(() -> { w.write(generateByteArray(1)); return null; }, NullPointerException.class);
 
-        try (RandomAccessReader copy = RandomAccessReader.open(r.getPath()))
+        try (RandomAccessReader copy = RandomAccessReader.open(r.getFile()))
         {
             ByteBuffer contents = ByteBufferUtil.read(copy, (int) copy.length());
 

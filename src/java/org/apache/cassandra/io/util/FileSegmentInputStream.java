@@ -37,7 +37,7 @@ public class FileSegmentInputStream extends DataInputBuffer implements FileDataI
     }
 
     @Override
-    public File getPath()
+    public File getFile()
     {
         return filePath;
     }
@@ -62,7 +62,7 @@ public class FileSegmentInputStream extends DataInputBuffer implements FileDataI
         if (pos < 0 || pos > size())
             throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in partial mode",
                                                              pos,
-                                                             getPath(),
+                                                             getFile(),
                                                              size()));
 
 

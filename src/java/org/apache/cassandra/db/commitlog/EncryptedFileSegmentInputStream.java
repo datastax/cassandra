@@ -90,8 +90,8 @@ public class EncryptedFileSegmentInputStream extends FileSegmentInputStream impl
         if (buffer == null || bufferPos < 0 || bufferPos > buffer.capacity())
             throw new IllegalArgumentException(
                     String.format("Unable to seek to position %d in %s (%d bytes) in partial mode",
-                            position,
-                            getPath(),
+                                  position,
+                                  getFile(),
                             segmentOffset + expectedLength));
         buffer.position((int) bufferPos);
     }

@@ -69,12 +69,12 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
                 UnfilteredValidation.handleInvalid(sstable.metadata(), key, sstable, "partitionLevelDeletion="+partitionLevelDeletion.toString());
             DeserializationHelper helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
             SSTableSimpleIterator iterator = SSTableSimpleIterator.create(sstable.metadata(), file, sstable.header, helper, partitionLevelDeletion);
-            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, file.getPath(), iterator);
+            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, file.getFile(), iterator);
         }
         catch (IOException e)
         {
             sstable.markSuspect();
-            throw new CorruptSSTableException(e, file.getPath());
+            throw new CorruptSSTableException(e, file.getFile());
         }
     }
 
@@ -93,12 +93,12 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             SSTableSimpleIterator iterator = tombstoneOnly
                     ? SSTableSimpleIterator.createTombstoneOnly(sstable.metadata(), dfile, sstable.header, helper, partitionLevelDeletion)
                     : SSTableSimpleIterator.create(sstable.metadata(), dfile, sstable.header, helper, partitionLevelDeletion);
-            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, dfile.getPath(), iterator);
+            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, dfile.getFile(), iterator);
         }
         catch (IOException e)
         {
             sstable.markSuspect();
-            throw new CorruptSSTableException(e, dfile.getPath());
+            throw new CorruptSSTableException(e, dfile.getFile());
         }
     }
 

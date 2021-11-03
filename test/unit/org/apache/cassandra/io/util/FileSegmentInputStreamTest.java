@@ -60,7 +60,7 @@ public class FileSegmentInputStreamTest
         final String path = buffer.toString();
 
         FileSegmentInputStream reader = new FileSegmentInputStream(buffer.duplicate(), new File(path), offset);
-        assertEquals(path, reader.getPath().path());
+        assertEquals(path, reader.getFile().path());
 
         for (int i = offset; i < (size + offset); i += checkInterval)
         {
