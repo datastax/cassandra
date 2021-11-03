@@ -98,6 +98,18 @@ public final class SchemaConstants
     }
 
     /**
+     * Equivalent to {@link #isKeyspaceWithLocalStrategy(String)} but uses the provided keyspace metadata instead
+     * of getting the metadata from the schema manager
+     *
+     * @param keyspace the keyspace metadata to check
+     * @return if the provided keyspace uses local replication strategy
+     */
+    public static boolean isKeyspaceWithLocalStrategy(KeyspaceMetadata keyspace)
+    {
+        return isLocalSystemKeyspace(keyspace.name) || keyspace.params.replication.klass.equals(LocalStrategy.class);
+    }
+
+    /**
      * @return whether or not the keyspace is a replicated system ks (system_auth, system_traces, system_distributed)
      */
     public static boolean isReplicatedSystemKeyspace(String keyspaceName)
