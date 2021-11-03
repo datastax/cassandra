@@ -1892,9 +1892,9 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static void setAllDataFileLocation(File[] allDataFileLocation)
+    public static void setDataDirectories(File[] newDataDirectories)
     {
-        dataDirectories = allDataFileLocation;
+        dataDirectories = newDataDirectories;
     }
 
     /**
@@ -1947,10 +1947,9 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static void setCommitLogLocation(File value)
+    public static void setCommitLogLocation(File commitLogLocation)
     {
-        commitlogDirectory = value;
-        conf.commitlog_directory = value.path();
+        commitlogDirectory = commitLogLocation;
     }
 
     public static ParameterizedClass getCommitLogCompression()

@@ -189,6 +189,7 @@ public abstract class CommitLogStressTest
         try
         {
             DatabaseDescriptor.setCommitLogLocation(location);
+            DatabaseDescriptor.getRawConfig().commitlog_directory = location.path();
             CommitLog commitLog = new CommitLog(CommitLogArchiver.disabled()).start();
             testLog(commitLog);
             assert !failed;
@@ -196,6 +197,7 @@ public abstract class CommitLogStressTest
         finally
         {
             DatabaseDescriptor.setCommitLogLocation(originalDir);
+            DatabaseDescriptor.getRawConfig().commitlog_directory = originalDir.path();
         }
     }
 

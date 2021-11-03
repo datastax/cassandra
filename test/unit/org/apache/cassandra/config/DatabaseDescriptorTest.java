@@ -608,10 +608,10 @@ public class DatabaseDescriptorTest
     @Test
     public void testDataFileDirectoriesMinTotalSpaceInGB() throws IOException
     {
-        DatabaseDescriptor.setAllDataFileLocation(new File[] {});
+        DatabaseDescriptor.setDataDirectories(new File[] {});
         assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
 
-        DatabaseDescriptor.setAllDataFileLocation(new File[] { new File(temporaryFolder.newFolder("data"))});
+        DatabaseDescriptor.setDataDirectories(new File[] { new File(temporaryFolder.newFolder("data"))});
         assertTrue(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() > 0);
 
         Multiset<FileStore> fileStoreMultiset = HashMultiset.create();
