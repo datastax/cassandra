@@ -118,7 +118,7 @@ public class SortedBytesReader
      * @return ByteComparable at the target point id
      * @throws IOException
      */
-    public ByteComparable seekExact(long target, IndexInput bytesInput, Context context) throws IOException
+    public ByteComparable seekToPointId(long target, IndexInput bytesInput, Context context) throws IOException
     {
         if (target < 0 || target >= meta.count)
         {
