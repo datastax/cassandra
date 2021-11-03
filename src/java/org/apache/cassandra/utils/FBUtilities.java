@@ -1225,26 +1225,5 @@ public class FBUtilities
             }
             return sb.toString();
         }
-
-        /**
-         * Call this method for debugging purposes, when you want to save the current thread stack trace
-         * for the object specified in the parameter.
-         */
-        public static void addStackTrace(Object object)
-        {
-            stacks.put(object, new ThreadInfo());
-        }
-
-
-        /** Call this method to log a message that will print the stack trace that was saved
-         * in the last call of addStackTrace() and the current stack trace.
-         */
-        public static void logStackTrace(String message, Object object)
-        {
-            logger.info("{}\n{}\n****\n{}",
-                        message,
-                        getStackTrace(stacks.get(object)),
-                        getStackTrace());
-        }
     }
 }

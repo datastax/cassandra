@@ -18,19 +18,23 @@
 
 package org.apache.cassandra.schema;
 
-import java.util.Arrays;
-import java.util.Collection;
-
+import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SchemaConstantsTest
 {
+    @BeforeClass
+    public static void defineSchema() throws ConfigurationException
+    {
+        SchemaLoader.prepareServer();
+    }
+
     @Test
     public void testIsKeyspaceWithLocalStrategy()
     {
@@ -38,11 +42,8 @@ public class SchemaConstantsTest
         assertTrue(SchemaConstants.isKeyspaceWithLocalStrategy(SchemaManager.instance.getKeyspaceMetadata("system")));
         assertFalse(SchemaConstants.isKeyspaceWithLocalStrategy("non_existing"));
 
-        Mutation localKs = SchemaKeyspace.makeCreateKeyspaceMutation(KeyspaceMetadata.create("local_ks", KeyspaceParams.local()), FBUtilities.timestampMicros()).build();
-        Mutation simpleKs = SchemaKeyspace.makeCreateKeyspaceMutation(KeyspaceMetadata.create("simple_ks", KeyspaceParams.simple(3)), FBUtilities.timestampMicros()).build();
-        Collection<Mutation> mutations = Arrays.asList(localKs, simpleKs);
-        SchemaKeyspace.applyChanges(mutations);
-        SchemaManager.instance.reloadSchemaAndAnnounceVersion();
+        SchemaLoader.createKeyspace("local_ks", KeyspaceParams.local());
+        SchemaLoader.createKeyspace("simple_ks", KeyspaceParams.simple(3));
 
         assertTrue(SchemaConstants.isKeyspaceWithLocalStrategy("local_ks"));
         assertTrue(SchemaConstants.isKeyspaceWithLocalStrategy(SchemaManager.instance.getKeyspaceMetadata("local_ks")));
