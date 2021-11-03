@@ -35,7 +35,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 
 import static java.util.stream.Collectors.groupingBy;
@@ -148,13 +148,13 @@ final class HintsCatalog
 
     void fsyncDirectory()
     {
-        int fd = NativeLibrary.instance.tryOpenDirectory(hintsDirectory.toAbsolute());
+        int fd = INativeLibrary.instance.tryOpenDirectory(hintsDirectory.toAbsolute());
         if (fd != -1)
         {
             try
             {
                 SyncUtil.trySync(fd);
-                NativeLibrary.instance.tryCloseFD(fd);
+                INativeLibrary.instance.tryCloseFD(fd);
             }
             catch (FSError e) // trySync failed
             {

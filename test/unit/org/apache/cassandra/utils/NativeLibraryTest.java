@@ -44,7 +44,7 @@ public class NativeLibraryTest
     @Test
     public void testIsAvailable()
     {
-        Assert.assertTrue(NativeLibrary.instance.isAvailable());
+        Assert.assertTrue(INativeLibrary.instance.isAvailable());
     }
 
     @Test
@@ -54,11 +54,11 @@ public class NativeLibraryTest
 
         try (AsynchronousFileChannel channel = AsynchronousFileChannel.open(file.toPath()))
         {
-            Assert.assertTrue(NativeLibrary.instance.getfd(channel) > 0);
+            Assert.assertTrue(INativeLibrary.instance.getfd(channel) > 0);
 
-            FileDescriptor fileDescriptor = NativeLibrary.instance.getFileDescriptor(channel);
+            FileDescriptor fileDescriptor = INativeLibrary.instance.getFileDescriptor(channel);
             Assert.assertNotNull(fileDescriptor);
-            Assert.assertEquals(NativeLibrary.instance.getfd(channel), NativeLibrary.instance.getfd(fileDescriptor));
+            Assert.assertEquals(INativeLibrary.instance.getfd(channel), INativeLibrary.instance.getfd(fileDescriptor));
         }
     }
 
@@ -69,25 +69,25 @@ public class NativeLibraryTest
 
         try (FileChannel channel = FileChannel.open(file.toPath()))
         {
-            Assert.assertTrue(NativeLibrary.instance.getfd(channel) > 0);
+            Assert.assertTrue(INativeLibrary.instance.getfd(channel) > 0);
 
-            FileDescriptor fileDescriptor = NativeLibrary.instance.getFileDescriptor(channel);
+            FileDescriptor fileDescriptor = INativeLibrary.instance.getFileDescriptor(channel);
             Assert.assertNotNull(fileDescriptor);
-            Assert.assertEquals(NativeLibrary.instance.getfd(channel), NativeLibrary.instance.getfd(fileDescriptor));
+            Assert.assertEquals(INativeLibrary.instance.getfd(channel), INativeLibrary.instance.getfd(fileDescriptor));
         }
     }
 
     @Test
     public void testInvalidFileDescriptor()
     {
-        Assert.assertEquals(-1, NativeLibrary.instance.getfd((FileDescriptor) null));
+        Assert.assertEquals(-1, INativeLibrary.instance.getfd((FileDescriptor) null));
     }
 
     @Test
     public void testTryFcntlWithIllegalArgument()
     {
         int invalidFd = 199991;
-        Assert.assertEquals(-1, NativeLibrary.instance.tryFcntl(invalidFd, -1, -1));
+        Assert.assertEquals(-1, INativeLibrary.instance.tryFcntl(invalidFd, -1, -1));
     }
 
     @Test
@@ -95,33 +95,33 @@ public class NativeLibraryTest
     {
         File file = FileUtils.createDeletableTempFile("testOpenDirectory", "1");
 
-        int fd = NativeLibrary.instance.tryOpenDirectory(file.parent());
-        NativeLibrary.instance.tryCloseFD(fd);
+        int fd = INativeLibrary.instance.tryOpenDirectory(file.parent());
+        INativeLibrary.instance.tryCloseFD(fd);
     }
 
     @Test
     public void testOpenDirectoryWithIllegalArgument()
     {
         File file = FileUtils.createDeletableTempFile("testOpenDirectoryWithIllegalArgument", "1");
-        Assert.assertEquals(-1, NativeLibrary.instance.tryOpenDirectory(file.resolve("no_existing")));
+        Assert.assertEquals(-1, INativeLibrary.instance.tryOpenDirectory(file.resolve("no_existing")));
     }
 
     @Test
     public void testTrySyncWithIllegalArgument()
     {
-        NativeLibrary.instance.trySync(-1);
+        INativeLibrary.instance.trySync(-1);
 
         int invalidFd = 199991;
-        Assert.assertThrows(FSWriteError.class, () -> NativeLibrary.instance.trySync(invalidFd));
+        Assert.assertThrows(FSWriteError.class, () -> INativeLibrary.instance.trySync(invalidFd));
     }
 
     @Test
     public void testTryCloseFDWithIllegalArgument()
     {
-        NativeLibrary.instance.tryCloseFD(-1);
+        INativeLibrary.instance.tryCloseFD(-1);
 
         int invalidFd = 199991;
-        Assert.assertThrows(FSWriteError.class, () -> NativeLibrary.instance.tryCloseFD(invalidFd));
+        Assert.assertThrows(FSWriteError.class, () -> INativeLibrary.instance.tryCloseFD(invalidFd));
     }
 
     @Test
@@ -129,14 +129,14 @@ public class NativeLibraryTest
     {
         File file = FileUtils.createDeletableTempFile("testSkipCache", "1");
 
-        NativeLibrary.instance.trySkipCache(file, 0, 0);
-        NativeLibrary.instance.trySkipCache(file.resolve("no_existing"), 0, 0);
+        INativeLibrary.instance.trySkipCache(file, 0, 0);
+        INativeLibrary.instance.trySkipCache(file.resolve("no_existing"), 0, 0);
     }
 
     @Test
     public void getPid()
     {
-        long pid = NativeLibrary.instance.getProcessID();
+        long pid = INativeLibrary.instance.getProcessID();
         Assert.assertTrue(pid > 0);
     }
 }

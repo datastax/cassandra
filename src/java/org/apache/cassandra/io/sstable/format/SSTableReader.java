@@ -135,7 +135,7 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -2342,8 +2342,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 obsoletion.commit();
 
             // don't ideally want to dropPageCache for the file until all instances have been released
-            NativeLibrary.instance.trySkipCache(desc.fileFor(Component.DATA), 0, 0);
-            NativeLibrary.instance.trySkipCache(desc.fileFor(Component.PRIMARY_INDEX), 0, 0);
+            INativeLibrary.instance.trySkipCache(desc.fileFor(Component.DATA), 0, 0);
+            INativeLibrary.instance.trySkipCache(desc.fileFor(Component.PRIMARY_INDEX), 0, 0);
         }
 
         public String name()

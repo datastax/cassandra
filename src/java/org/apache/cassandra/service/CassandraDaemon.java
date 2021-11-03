@@ -23,13 +23,9 @@ import java.lang.management.MemoryPoolMXBean;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 import javax.management.remote.JMXConnectorServer;
@@ -85,7 +81,7 @@ import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.Mx4jTool;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.WindowsTimer;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -253,7 +249,7 @@ public class CassandraDaemon
 
         logSystemInfo();
 
-        NativeLibrary.instance.tryMlockall();
+        INativeLibrary.instance.tryMlockall();
 
         CommitLog.instance.start();
 
@@ -900,12 +896,12 @@ public class CassandraDaemon
     {
         public boolean isAvailable()
         {
-            return NativeLibrary.instance.isAvailable();
+            return INativeLibrary.instance.isAvailable();
         }
 
         public boolean isMemoryLockable()
         {
-            return NativeLibrary.instance.jnaMemoryLockable();
+            return INativeLibrary.instance.jnaMemoryLockable();
         }
     }
 
