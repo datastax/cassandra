@@ -48,7 +48,6 @@ public class SortedBytesReader
     private final SortedBytesWriter.Meta meta;
     private final FileHandle trieHandle;
     private final LongValues offsets;
-    private long pointId = -1;
 
     public SortedBytesReader(SortedBytesWriter.Meta meta,
                              FileHandle trieHandle,
@@ -99,6 +98,7 @@ public class SortedBytesReader
     public class Context
     {
         private final BytesRef term = new BytesRef(meta.maxTermLength);
+        private long pointId = -1;
     }
 
     public Context createContext()
@@ -124,12 +124,12 @@ public class SortedBytesReader
         final long blockIndex = target >>> TERMS_DICT_BLOCK_SHIFT;
         final long blockAddress = offsets.get(blockIndex);
         bytesInput.seek(blockAddress);
-        this.pointId = (blockIndex << TERMS_DICT_BLOCK_SHIFT) - 1;
+        context.pointId = (blockIndex << TERMS_DICT_BLOCK_SHIFT) - 1;
         BytesRef term = null;
         do
         {
             term = next(bytesInput, context);
-        } while (this.pointId < target);
+        } while (context.pointId < target);
         return fixedLength(term);
     }
 
@@ -140,11 +140,11 @@ public class SortedBytesReader
 
     private BytesRef next(IndexInput bytesInput, Context context) throws IOException
     {
-        if (++pointId >= meta.count)
+        if (++context.pointId >= meta.count)
         {
             return null;
         }
-        if ((pointId & TERMS_DICT_BLOCK_MASK) == 0L)
+        if ((context.pointId & TERMS_DICT_BLOCK_MASK) == 0L)
         {
             context.term.length = bytesInput.readVInt();
             bytesInput.readBytes(context.term.bytes, 0, context.term.length);
