@@ -22,6 +22,8 @@ package org.apache.cassandra.index.sai.disk.v2.sortedbytes;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import com.google.common.collect.AbstractIterator;
 
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
@@ -36,13 +38,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * Thread-unsafe term -> long trie range iterator.
  * The payload may be changed to something else.
  */
-public class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> extends Walker<Concrete>
+@NotThreadSafe
+class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> extends Walker<Concrete>
 {
-    protected final ByteSource limit;
-    protected IterationPosition stack;
-    protected long next;
-    final TrieTermsDictionaryReader.TransitionBytesCollector collector = new TrieTermsDictionaryReader.TransitionBytesCollector();
-    final boolean inclEnd;
+    private final ByteSource limit;
+    private final TrieTermsDictionaryReader.TransitionBytesCollector collector = new TrieTermsDictionaryReader.TransitionBytesCollector();
+    private final boolean inclEnd;
+    private IterationPosition stack;
+    private long next;
+    private boolean first = true;
 
     public static class IterationPosition
     {
@@ -84,8 +88,6 @@ public class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> ext
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }
 
-    boolean first = true;
-
     public Iterator<Pair<ByteSource, Long>> iterator()
     {
         return new AbstractIterator<Pair<ByteSource, Long>>()
@@ -118,7 +120,7 @@ public class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> ext
         return SizedInts.read(contents, payloadPos, bytes);
     }
 
-    protected long nextPayloadedNode()
+    private long nextPayloadedNode()
     {
         if (first)
         {
@@ -193,7 +195,7 @@ public class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> ext
         }
     }
 
-    protected long advanceNode()
+    private long advanceNode()
     {
         long child;
         int transitionByte;
