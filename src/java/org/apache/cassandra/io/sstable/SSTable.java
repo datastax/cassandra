@@ -87,10 +87,22 @@ public abstract class SSTable
 
     public interface SSTableWatcher
     {
+        /**
+         * Discover extra components before reading TOC file
+         *
+         * @param descriptor sstable descriptor for current sstable
+         */
         default void discoverComponents(Descriptor descriptor)
         {
         }
 
+        /**
+         * Discover extra components before opening sstable
+         *
+         * @param descriptor sstable descriptor for current sstable
+         * @param existing existing sstable components
+         * @return all discovered sstable components
+         */
         default Set<Component> discoverComponents(Descriptor descriptor, Set<Component> existing)
         {
             return existing;
