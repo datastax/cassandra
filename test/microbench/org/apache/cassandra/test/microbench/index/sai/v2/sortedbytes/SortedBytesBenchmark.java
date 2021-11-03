@@ -108,7 +108,6 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @Setup(Level.Trial)
     public void perTrialSetup2() throws IOException
     {
-
         try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.KD_TREE);
              IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.TERMS_DATA);
              IndexOutputWriter blockFPWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.KD_TREE_POSTING_LISTS))
@@ -215,9 +214,10 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void bytesSeekToPointID(Blackhole bh) throws IOException
     {
+        SortedBytesReader.Context context = sortedBytesReader.createContext();
         for (int i = 0; i < NUM_INVOCATIONS;)
         {
-            bh.consume(sortedBytesReader.seekExact(i, bytesInput));
+            bh.consume(sortedBytesReader.seekExact(i, bytesInput, context));
             i += skippingDistance;
         }
     }

@@ -226,9 +226,10 @@ public class SortedBytesTest extends SaiRandomizedTest
             SortedBytesReader reader = new SortedBytesReader(meta,
                                                              trieHandle,
                                                              blockFPInput);
+            SortedBytesReader.Context context = reader.createContext();
             for (int x = 0; x < terms.size(); x++)
             {
-                ByteComparable term = reader.seekExact(x, bytesInput);
+                ByteComparable term = reader.seekExact(x, bytesInput, context);
 
                 byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
                 assertArrayEquals(terms.get(x), bytes);
@@ -243,9 +244,10 @@ public class SortedBytesTest extends SaiRandomizedTest
             SortedBytesReader reader = new SortedBytesReader(meta,
                                                              trieHandle,
                                                              blockFPInput);
+            SortedBytesReader.Context context = reader.createContext();
             for (int x = terms.size() - 1; x >= 0; x--)
             {
-                ByteComparable term = reader.seekExact(x, bytesInput);
+                ByteComparable term = reader.seekExact(x, bytesInput, context);
 
                 byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
                 assertArrayEquals(terms.get(x), bytes);
@@ -260,10 +262,11 @@ public class SortedBytesTest extends SaiRandomizedTest
             SortedBytesReader reader = new SortedBytesReader(meta,
                                                              trieHandle,
                                                              blockFPInput);
+            SortedBytesReader.Context context = reader.createContext();
             for (int x = 0; x < terms.size(); x++)
             {
                 int target = nextInt(0, terms.size());
-                ByteComparable term = reader.seekExact(target, bytesInput);
+                ByteComparable term = reader.seekExact(target, bytesInput, context);
 
                 byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
                 assertArrayEquals(terms.get(target), bytes);
