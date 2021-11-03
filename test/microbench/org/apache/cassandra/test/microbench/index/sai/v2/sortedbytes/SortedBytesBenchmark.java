@@ -217,7 +217,7 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
         SortedBytesReader.Context context = sortedBytesReader.createContext();
         for (int i = 0; i < NUM_INVOCATIONS;)
         {
-            bh.consume(sortedBytesReader.seekExact(i, bytesInput, context));
+            bh.consume(sortedBytesReader.seekToPointId(i, bytesInput, context));
             i += skippingDistance;
         }
     }
