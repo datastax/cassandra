@@ -241,29 +241,6 @@ public final class Throwables
         return accumulate;
     }
 
-    public static Throwable closeNonNull(Throwable accumulate, AutoCloseable... closeables)
-    {
-        for (AutoCloseable closeable : closeables)
-            accumulate = closeNonNull(accumulate, closeable);
-        return accumulate;
-    }
-
-    public static Throwable closeNonNull(Throwable accumulate, AutoCloseable closeable)
-    {
-        if (closeable == null)
-            return accumulate;
-
-        try
-        {
-            closeable.close();
-        }
-        catch (Throwable t)
-        {
-            accumulate = merge(accumulate, t);
-        }
-        return accumulate;
-    }
-
     public static Optional<IOException> extractIOExceptionCause(Throwable t)
     {
         if (t instanceof IOException)

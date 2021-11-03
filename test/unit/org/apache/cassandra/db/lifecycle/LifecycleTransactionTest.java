@@ -20,6 +20,8 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.After;
@@ -34,12 +36,12 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState.Action;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction.ReaderState;
-import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
 import org.apache.cassandra.utils.concurrent.Transactional.AbstractTransactional.State;
+import org.awaitility.Awaitility;
 
 import static com.google.common.base.Predicates.in;
 import static com.google.common.collect.ImmutableList.copyOf;
@@ -206,6 +208,19 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
             failed = true;
         }
         Assert.assertTrue(failed);
+    }
+
+    @Test
+    public void testRescheduleFailedDeletions()
+    {
+        AtomicLong counter = new AtomicLong(0);
+        DefaultLogTransaction.failedDeletions.add(counter::incrementAndGet);
+
+        LifecycleTransaction.rescheduleFailedDeletions();
+        Awaitility.await("failed deletion").atMost(10, TimeUnit.SECONDS)
+                  .until(() -> counter.get() == 1);
+
+        Assert.assertEquals(0, DefaultLogTransaction.failedDeletions.size());
     }
 
     private static void testBadUpdate(LifecycleTransaction txn, SSTableReader update, boolean original)

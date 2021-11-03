@@ -102,14 +102,6 @@ public interface StorageProvider
      */
     File createDirectory(String dir, DirectoryType type);
 
-    /**
-     * Create directory for the given path
-     *
-     * @param dir the directory path to create
-     * @return the actual directory path; or null if directory can't be created
-     */
-    File createDirectory(File dir);
-
     class DefaultProvider implements StorageProvider
     {
         @Override
@@ -136,13 +128,6 @@ public interface StorageProvider
             File ret = new File(dir);
             PathUtils.createDirectoriesIfNotExists(ret.toPath());
             return ret;
-        }
-
-        @Override
-        public File createDirectory(File dir)
-        {
-            PathUtils.createDirectoriesIfNotExists(dir.toPath());
-            return dir;
         }
     }
 }

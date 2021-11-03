@@ -115,7 +115,7 @@ final class DefaultLogTransaction extends LogTransaction
     // and delete will fail (on Windows) until it is (we only force the unmapping on SUN VMs).
     // Additionally, we need to make sure to delete the data file first, so on restart the others
     // will be recognized as GCable.
-    private static final Queue<Runnable> failedDeletions = new ConcurrentLinkedQueue<>();
+    protected static final Queue<Runnable> failedDeletions = new ConcurrentLinkedQueue<>();
 
     DefaultLogTransaction(OperationType opType)
     {

@@ -587,7 +587,9 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
     private static DefaultLogTransaction createLogTransaction(OperationType type, TableMetadataRef metadata)
     {
-        return (DefaultLogTransaction) LogTransactionsFactory.instance.createLogTransaction(type, metadata);
+        DefaultLogTransaction txn = (DefaultLogTransaction) LogTransactionsFactory.instance.createLogTransaction(type, metadata);
+        assertEquals(type, txn.opType());
+        return txn;
     }
 
     @Test
