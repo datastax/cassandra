@@ -51,6 +51,8 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * of unfinished leftovers when a transaction is completed, or aborted, or when
  * we clean up on start-up.
  *
+ * Note: this is used by {@link DefaultLogTransaction}
+ *
  * @see LogTransaction
  */
 final class LogFile implements AutoCloseable

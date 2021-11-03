@@ -42,6 +42,8 @@ import org.apache.cassandra.utils.INativeLibrary;
  * partial records in case we crashed after writing to one replica but
  * before compliting the write to another replica.
  *
+ * Note: this is used by {@link DefaultLogTransaction}
+ *
  * @see LogFile
  */
 final class LogReplica implements AutoCloseable
