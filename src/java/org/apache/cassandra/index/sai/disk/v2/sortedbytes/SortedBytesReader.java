@@ -95,6 +95,9 @@ public class SortedBytesReader
         }
     }
 
+    /**
+     * Reusable context object for seekExact calls
+     */
     public class Context
     {
         private final BytesRef term = new BytesRef(meta.maxTermLength);
