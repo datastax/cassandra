@@ -1,10 +1,4 @@
 /*
- * All changes to the original code are Copyright DataStax, Inc.
- *
- * Please see the included license file for details.
- */
-
-/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -35,7 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
@@ -52,16 +46,16 @@ public class IndexViewManager
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexViewManager.class);
     
-    private final ColumnContext context;
+    private final IndexContext context;
     private final AtomicReference<View> view = new AtomicReference<>();
 
-    public IndexViewManager(ColumnContext context)
+    public IndexViewManager(IndexContext context)
     {
         this(context, Collections.emptySet());
     }
 
     @VisibleForTesting
-    IndexViewManager(ColumnContext context, Collection<SSTableIndex> indices)
+    IndexViewManager(IndexContext context, Collection<SSTableIndex> indices)
     {
         this.context = context;
         this.view.set(new View(context, indices));

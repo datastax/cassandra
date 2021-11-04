@@ -46,6 +46,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -62,11 +63,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
                                         RowFilter.FilterElement filterOperation,
+                                        IndexFeatureSet indexFeatureSet,
                                         long executionQuotaMs)
     {
         this.command = command;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, filterOperation, queryContext, tableQueryMetrics);
+        this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet, queryContext, tableQueryMetrics);
     }
 
     @Override

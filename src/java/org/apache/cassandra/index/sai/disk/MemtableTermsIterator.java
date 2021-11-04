@@ -122,12 +122,12 @@ public class MemtableTermsIterator implements TermsIterator
         return current.left;
     }
 
-    long getMaxSSTableRowId()
+    public long getMaxSSTableRowId()
     {
         return maxSSTableRowId;
     }
 
-    long getMinSSTableRowId()
+    public long getMinSSTableRowId()
     {
         return minSSTableRowId;
     }

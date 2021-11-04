@@ -26,12 +26,14 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
+import org.apache.cassandra.index.sai.disk.v1.KeyFetcher;
+import org.apache.cassandra.index.sai.disk.v1.LongArray;
+import org.apache.cassandra.index.sai.disk.v1.OnDiskKeyProducer;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.LongArray;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -59,10 +61,10 @@ public class PostingListRangeIterator extends RangeIterator
 
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
     private final SSTableQueryContext queryContext;
-    private final IndexComponents components;
 
     private final PostingList postingList;
-    private final SSTableContext.KeyFetcher keyFetcher;
+    private final KeyFetcher keyFetcher;
+    private final IndexContext indexContext;
     private final IndexSearcher.SearcherContext context;
     private final LongArray segmentRowIdToToken;
     private final LongArray segmentRowIdToOffset;
@@ -80,18 +82,18 @@ public class PostingListRangeIterator extends RangeIterator
      * immediately so the posting list size can be used.
      */
     public PostingListRangeIterator(IndexSearcher.SearcherContext context,
-                                    SSTableContext.KeyFetcher keyFetcher,
-                                    IndexComponents components)
+                                    KeyFetcher keyFetcher,
+                                    IndexContext indexContext)
     {
-        super(context.minToken(), context.maxToken(), context.count());
+        super(context.minToken, context.maxToken, context.count());
 
         this.keyFetcher = keyFetcher;
         this.segmentRowIdToToken = context.segmentRowIdToToken;
         this.segmentRowIdToOffset = context.segmentRowIdToOffset;
+        this.indexContext = indexContext;
         this.postingList = context.postingList;
         this.context = context;
         this.queryContext = context.context;
-        this.components = components;
     }
 
     @Override
@@ -128,7 +130,7 @@ public class PostingListRangeIterator extends RangeIterator
         {
             //TODO We aren't tidying up resources here
             if (!(t instanceof AbortedOperationException))
-                logger.error(components.logMessage("Unable to provide next token!"), t);
+                logger.error(indexContext.logMessage("Unable to provide next token!"), t);
 
             throw Throwables.cleaned(t);
         }
@@ -140,7 +142,7 @@ public class PostingListRangeIterator extends RangeIterator
         if (logger.isTraceEnabled())
         {
             final long exhaustedInMills = timeToExhaust.stop().elapsed(TimeUnit.MILLISECONDS);
-            logger.trace(components.logMessage("PostinListRangeIterator exhausted after {} ms"), exhaustedInMills);
+            logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), exhaustedInMills);
         }
 
         postingList.close();

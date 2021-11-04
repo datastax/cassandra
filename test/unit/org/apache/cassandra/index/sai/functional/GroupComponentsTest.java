@@ -57,7 +57,7 @@ public class GroupComponentsTest extends SAITester
 
         // index files are released but not removed
         cfs.invalidate(true, false);
-        Assert.assertTrue(index.getContext().getView().getIndexes().isEmpty());
+        Assert.assertTrue(index.getIndexContext().getView().getIndexes().isEmpty());
         for (Component component : components)
             Assert.assertTrue(sstable.descriptor.fileFor(component).exists());
     }
