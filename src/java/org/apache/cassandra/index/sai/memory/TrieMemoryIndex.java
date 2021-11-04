@@ -43,7 +43,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -80,16 +80,16 @@ public class TrieMemoryIndex extends MemoryIndex
     };
 
 
-    public TrieMemoryIndex(ColumnContext columnContext)
+    public TrieMemoryIndex(IndexContext indexContext)
     {
-        super(columnContext);
+        super(indexContext);
         //TODO Do we need to follow a setting for this?
         this.data = new MemtableTrie<>(BufferType.OFF_HEAP);
-        this.clusteringComparator = columnContext.clusteringComparator();
+        this.clusteringComparator = indexContext.clusteringComparator();
         this.primaryKeysReducer = new PrimaryKeysReducer();
         // MemoryIndex is per-core, so analyzer should be thread-safe..
-        this.analyzerFactory = columnContext.getAnalyzerFactory();
-        this.validator = columnContext.getValidator();
+        this.analyzerFactory = indexContext.getAnalyzerFactory();
+        this.validator = indexContext.getValidator();
         this.isLiteral = TypeUtil.isLiteral(validator);
     }
 

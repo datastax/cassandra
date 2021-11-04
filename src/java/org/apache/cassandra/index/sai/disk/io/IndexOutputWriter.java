@@ -24,6 +24,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.lucene.store.IndexOutput;
 
@@ -34,7 +35,7 @@ public class IndexOutputWriter extends IndexOutput
     private final SequentialWriter out;
     private boolean closed;
 
-    IndexOutputWriter(SequentialWriter out)
+    public IndexOutputWriter(SequentialWriter out)
     {
         super(out.getPath(), out.getPath());
         this.out = out;
@@ -53,7 +54,7 @@ public class IndexOutputWriter extends IndexOutput
     @Override
     public long getChecksum()
     {
-        return ((IndexComponents.ChecksumWriter)out).getChecksum();
+        return ((IndexFileUtils.ChecksumWriter)out).getChecksum();
     }
 
     @Override
