@@ -663,7 +663,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             if (dropData)
             {
                 data.dropSSTables();
-                LifecycleTransaction.waitForDeletions();
 
                 indexManager.dropAllIndexes();
             }
