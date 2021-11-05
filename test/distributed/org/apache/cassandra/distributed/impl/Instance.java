@@ -708,7 +708,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                             throw new RuntimeException("Unable to bind, run the following in a termanl and try again:\nfor subnet in $(seq 0 5); do for id in $(seq 0 5); do sudo ifconfig lo0 alias \"127.0.$subnet.$id\"; done; done;", e);
                         throw e;
                     }
-                    StorageService.instance.removeShutdownHook();
+                    JVMStabilityInspector.removeShutdownHooks();
 
                     Gossiper.waitToSettle();
                 }
@@ -851,7 +851,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
             if (config.has(GOSSIP) || config.has(NETWORK))
             {
-                StorageService.instance.shutdownServer();
+                JVMStabilityInspector.removeShutdownHooks();
             }
 
             error = parallelRun(error, executor, StorageService.instance::disableAutoCompaction);
