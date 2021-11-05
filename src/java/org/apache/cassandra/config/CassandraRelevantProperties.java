@@ -161,6 +161,11 @@ public enum CassandraRelevantProperties
 
     CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings", "false"),
 
+    /**
+     * To provide custom implementation to prioritize compaction tasks in UCS
+     */
+    UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+
     //cassandra properties (without the "cassandra." prefix)
 
     /**
@@ -342,6 +347,32 @@ public enum CassandraRelevantProperties
         {
             throw new ConfigurationException(String.format("Invalid value for system property: " +
                                                            "expected integer value but got '%s'", value));
+        }
+    };
+
+    private static final PropertyConverter<Long> LONG_CONVERTER = value ->
+    {
+        try
+        {
+            return Long.decode(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected integer value but got '%s'", value));
+        }
+    };
+
+    private static final PropertyConverter<Double> DOUBLE_CONVERTER = value ->
+    {
+        try
+        {
+            return Double.parseDouble(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected double value but got '%s'", value));
         }
     };
 

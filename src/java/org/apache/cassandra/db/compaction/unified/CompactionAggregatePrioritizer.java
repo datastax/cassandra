@@ -27,6 +27,8 @@ import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_COMPACTION_AGGREGATE_PRIORITIZER;
+
 /**
  * Used to provide custom implementation to prioritize compaction tasks in UCS
  */
@@ -34,10 +36,9 @@ public interface CompactionAggregatePrioritizer
 {
     Logger logger = LoggerFactory.getLogger(CompactionAggregatePrioritizer.class);
 
-    String CUSTOM_COMPACTION_AGGREGATE_PRIORITIZER = Controller.PREFIX + "custom_compaction_aggregate_prioritizer";
-    CompactionAggregatePrioritizer instance = System.getProperty(CUSTOM_COMPACTION_AGGREGATE_PRIORITIZER) == null
+    CompactionAggregatePrioritizer instance = !UCS_COMPACTION_AGGREGATE_PRIORITIZER.isPresent()
                              ? new DefaultCompactionAggregatePrioritizer()
-                             : FBUtilities.instantiate(System.getProperty(CUSTOM_COMPACTION_AGGREGATE_PRIORITIZER), "compaction aggregate prioritizer");
+                             : FBUtilities.instantiate(UCS_COMPACTION_AGGREGATE_PRIORITIZER.getString(), "compaction aggregate prioritizer");
 
     /**
      * Maybe sort the provided pending compaction aggregates
