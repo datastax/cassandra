@@ -20,6 +20,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.assertj.core.api.Assertions;
@@ -316,6 +318,6 @@ public class FileUtilsTest
 
     private boolean compareFile(Path left, Path right) throws IOException
     {
-        return Arrays.compare(Files.readAllBytes(left), Files.readAllBytes(right)) == 0;
+        return FastByteOperations.compareUnsigned(ByteBuffer.wrap(Files.readAllBytes(left)), ByteBuffer.wrap(Files.readAllBytes(right))) == 0;
     }
 }
