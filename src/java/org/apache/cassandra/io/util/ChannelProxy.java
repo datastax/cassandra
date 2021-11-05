@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 public final class ChannelProxy extends SharedCloseableImpl
 {
     private final String filePath;
-    private final FileChannel channel;
+    public final FileChannel channel;
 
     public static FileChannel openChannel(File file)
     {

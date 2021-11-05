@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -58,6 +57,10 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.bkd.BKDWriter;
 
+import static java.lang.invoke.MethodHandles.dropArguments;
+import static java.lang.invoke.MethodHandles.lookup;
+import static java.lang.invoke.MethodType.methodType;
+
 /**
  * //TODO Need to consider how we handle encryption in OS
  * The {@link Component}s that storage-attached indexing attaches to an SSTable.
@@ -66,7 +69,7 @@ import org.apache.lucene.util.bkd.BKDWriter;
  */
 public class IndexComponents
 {
-    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    private static final Logger logger = LoggerFactory.getLogger(lookup().lookupClass());
 
     public static final String TYPE_PREFIX = "SAI";
     private static final String PER_SSTABLE_FILE_NAME_FORMAT = TYPE_PREFIX + "_%s.db";
@@ -492,6 +495,7 @@ public class IndexComponents
         try (final FileHandle.Builder builder = new FileHandle.Builder(file.absolutePath()))
         {
             final FileHandle fileHandle = builder.complete();
+
             final RandomAccessReader randomReader = fileHandle.createReader();
 
             return IndexInputReader.create(randomReader, fileHandle::close);
