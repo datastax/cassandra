@@ -144,12 +144,6 @@ public class Descriptor
         return filePaths.computeIfAbsent(component, c -> component.getFile(baseFileURI));
     }
 
-    @Deprecated // use fileFor to create File, this will fail on custom file system
-    public String filenameFor(Component component)
-    {
-        return baseFileURI + separator + component.name();
-    }
-
     public String baseFileUri()
     {
         return baseFileURI;

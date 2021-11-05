@@ -195,7 +195,7 @@ public abstract class SSTable
 
     public String getFilename()
     {
-        return descriptor.filenameFor(Component.DATA);
+        return getDataFile().path();
     }
 
     public File getDataFile()
