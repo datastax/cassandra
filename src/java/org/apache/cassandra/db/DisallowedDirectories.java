@@ -78,7 +78,7 @@ public class DisallowedDirectories implements DisallowedDirectoriesMBean
      */
     public static File maybeMarkUnreadable(File path)
     {
-        if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_blacklisting_directory)
+        if (!DatabaseDescriptor.supportsBlacklistingDirectory())
             return null;
 
         File directory = getDirectory(path);
@@ -99,7 +99,7 @@ public class DisallowedDirectories implements DisallowedDirectoriesMBean
      */
     public static File maybeMarkUnwritable(File path)
     {
-        if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_blacklisting_directory)
+        if (!DatabaseDescriptor.supportsBlacklistingDirectory())
             return null;
 
         File directory = getDirectory(path);

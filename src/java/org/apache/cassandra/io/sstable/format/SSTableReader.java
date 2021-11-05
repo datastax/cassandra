@@ -2302,7 +2302,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 return;
             }
 
-            if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_sstable_read_meter)
+            if (!DatabaseDescriptor.supportsSSTableReadMeter())
             {
                 readMeter = new RestorableMeter();
                 readMeterSyncFuture = NULL;

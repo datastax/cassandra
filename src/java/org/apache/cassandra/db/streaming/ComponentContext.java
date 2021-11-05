@@ -57,7 +57,7 @@ public class ComponentContext implements AutoCloseable
 
     public static ComponentContext create(Descriptor descriptor)
     {
-        if (!DatabaseDescriptor.getRawConfig().storage_flags.supports_hardlinks_for_entire_sstable_streaming)
+        if (!DatabaseDescriptor.supportsHardlinksForEntireSSTableStreaming())
             return new ComponentContext(Collections.emptyMap(), ComponentManifest.create(descriptor));
 
         Map<Component, File> hardLinks = new HashMap<>(1);

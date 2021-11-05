@@ -386,7 +386,7 @@ final class DefaultLogTransaction extends LogTransaction
         @Override
         public void commit()
         {
-            if (onlineTxn && DatabaseDescriptor.getRawConfig().storage_flags.supports_sstable_read_meter)
+            if (onlineTxn && DatabaseDescriptor.supportsSSTableReadMeter())
                 SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
 
             synchronized (lock)

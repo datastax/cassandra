@@ -2801,6 +2801,26 @@ public class DatabaseDescriptor
         return conf.streaming_connections_per_host;
     }
 
+    public static boolean supportsSSTableReadMeter()
+    {
+        return conf.storage_flags.supports_sstable_read_meter;
+    }
+
+    public static boolean supportsBlacklistingDirectory()
+    {
+        return conf.storage_flags.supports_blacklisting_directory;
+    }
+
+    public static boolean supportsHardlinksForEntireSSTableStreaming()
+    {
+        return conf.storage_flags.supports_hardlinks_for_entire_sstable_streaming;
+    }
+
+    public static boolean nettyZerocopyEnabled()
+    {
+        return conf.netty_zerocopy_enabled;
+    }
+
     public static boolean streamEntireSSTables()
     {
         return conf.stream_entire_sstables;

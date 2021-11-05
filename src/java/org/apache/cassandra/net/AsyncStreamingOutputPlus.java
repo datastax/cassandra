@@ -178,7 +178,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
      */
     public long writeFileToChannel(FileChannel file, StreamRateLimiter limiter) throws IOException
     {
-        if (channel.pipeline().get(SslHandler.class) != null || !DatabaseDescriptor.getRawConfig().netty_zerocopy_enabled)
+        if (channel.pipeline().get(SslHandler.class) != null || !DatabaseDescriptor.nettyZerocopyEnabled())
             // each batch is loaded into ByteBuffer, 64kb is more BufferPool friendly.
             return writeFileToChannel(file, limiter, 1 << 16);
         else
