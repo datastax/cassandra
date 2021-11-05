@@ -28,14 +28,15 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.File;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_NATIVE_LIBRARY;
+
 public interface INativeLibrary
 {
     static final Logger logger = LoggerFactory.getLogger(INativeLibrary.class);
 
-    String CUSTOM_NATIVE_LIBRARY = "cassandra.custom_native_library";
-    INativeLibrary instance = System.getProperty(CUSTOM_NATIVE_LIBRARY) == null
+    INativeLibrary instance = !CUSTOM_NATIVE_LIBRARY.isPresent()
                              ? new NativeLibrary()
-                             : FBUtilities.instantiate(System.getProperty(CUSTOM_NATIVE_LIBRARY), "native library");
+                             : FBUtilities.instantiate(CUSTOM_NATIVE_LIBRARY.getString(), "native library");
 
     public enum OSType
     {

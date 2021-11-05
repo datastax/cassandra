@@ -176,6 +176,11 @@ public enum CassandraRelevantProperties
      */
     REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
 
+    /**
+     * custom native library for os access
+     */
+    CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
+
     //cassandra properties (without the "cassandra." prefix)
 
     /**
