@@ -1203,7 +1203,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             long maxBytesOnDisk = 0;
             long minBytesOnDisk = Long.MAX_VALUE;
             List<SSTableReader> sstables = new ArrayList<>();
-            try (LifecycleTransaction txn = LifecycleTransaction.offline( OperationType.FLUSH, metadata))
+            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.FLUSH, metadata))
             {
                 List<Flushing.FlushRunnable> flushRunnables = null;
                 List<SSTableMultiWriter> flushResults = null;
