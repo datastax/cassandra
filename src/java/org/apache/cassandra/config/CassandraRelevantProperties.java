@@ -197,7 +197,12 @@ public enum CassandraRelevantProperties
     /**
      * Which class to use for creating guardrails
      */
-    CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class");
+    CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
+
+    /**
+     * Whether to disable auto-compaction
+     */
+    DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

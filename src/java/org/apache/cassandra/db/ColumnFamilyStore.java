@@ -114,6 +114,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -121,10 +122,6 @@ import static org.apache.cassandra.utils.Throwables.perform;
 public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner, CompactionRealm
 {
     private static final Logger logger = LoggerFactory.getLogger(ColumnFamilyStore.class);
-
-    private static final String DISABLED_AUTO_COMPACTION_PROPERTY_NAME = "cassandra.disabled_auto_compaction";
-    private static final boolean DISABLED_AUTO_COMPACTION = Boolean.getBoolean(DISABLED_AUTO_COMPACTION_PROPERTY_NAME);
-
     /*
     We keep a pool of threads for each data directory, size of each pool is memtable_flush_writers.
     When flushing we start a Flush runnable in the flushExecutor. Flush calculates how to split the
@@ -469,10 +466,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                         CompactionStrategyContainer.ReloadReason.FULL);
         getTracker().subscribe(strategyContainer);
 
-        if (!storageHandler.enableAutoCompaction() || DISABLED_AUTO_COMPACTION)
+        if (!storageHandler.enableAutoCompaction() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
         {
             logger.info("Strategy driven background compactions for {} are disabled: storage handler={}, {}={}",
-                        metadata, storageHandler.enableAutoCompaction(), DISABLED_AUTO_COMPACTION_PROPERTY_NAME, DISABLED_AUTO_COMPACTION);
+                        metadata, storageHandler.enableAutoCompaction(), DISABLED_AUTO_COMPACTION_PROPERTY.getKey(),
+                        DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean());
             this.strategyContainer.disable();
         }
 
