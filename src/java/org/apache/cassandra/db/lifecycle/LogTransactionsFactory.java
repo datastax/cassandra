@@ -24,6 +24,8 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_TRANSACTIONS_FACTORY;
+
 /**
  * Factory to create instances used during log transaction processing:
  * - {@link LogTransaction}: tracks sstable files invovled in a transastion cross sstable.
@@ -35,10 +37,9 @@ public interface LogTransactionsFactory
 {
     Logger logger = LoggerFactory.getLogger(LogTransactionsFactory.class);
 
-    String LOG_TRANSACTIONS_FACTORY = "cassandra.log_transactions_factory";
-    LogTransactionsFactory instance = System.getProperty(LOG_TRANSACTIONS_FACTORY) == null
+    LogTransactionsFactory instance = !LOG_TRANSACTIONS_FACTORY.isPresent()
                                       ? new DefaultLogTransactionsFactory()
-                                      : FBUtilities.instantiate(System.getProperty(LOG_TRANSACTIONS_FACTORY), "log transactions factory");
+                                      : FBUtilities.instantiate(LOG_TRANSACTIONS_FACTORY.getString(), "log transactions factory");
 
     /**
      * Create {@link LogTransaction} that tracks sstable files involved in a transaction across sstables:

@@ -153,6 +153,11 @@ public enum CassandraRelevantProperties
     GOSSIPER_QUARANTINE_DELAY("cassandra.gossip_quarantine_delay_ms"),
 
     /**
+     * Factory to create instances used during log transaction processing
+     */
+    LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
+
+    /**
      * When doing a host replacement its possible that the gossip state is "empty" meaning that the endpoint is known
      * but the current state isn't known.  If the host replacement is needed to repair this state, this property must
      * be true.
