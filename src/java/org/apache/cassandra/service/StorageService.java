@@ -331,7 +331,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public volatile VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(TokenMetadataProvider.instance.getTokenMetadata().partitioner);
 
-    private Thread drainOnShutdown = null;
     private volatile boolean isShutdown = false;
     private final List<Runnable> preShutdownHooks = new ArrayList<>();
     private final List<Runnable> postShutdownHooks = new ArrayList<>();
@@ -980,7 +979,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         // daemon threads, like our executors', continue to run while shutdown hooks are invoked
-        drainOnShutdown = NamedThreadFactory.createThread(new WrappedRunnable()
+        Thread drainOnShutdown = NamedThreadFactory.createThread(new WrappedRunnable()
         {
             @Override
             public void runMayThrow() throws InterruptedException, ExecutionException, IOException
@@ -1001,7 +1000,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
             }
         }, "StorageServiceShutdownHook");
-        Runtime.getRuntime().addShutdownHook(drainOnShutdown);
+        JVMStabilityInspector.registerShutdownHook(drainOnShutdown, this::onShutdownHookRemoved);
 
         replacing = isReplacing();
 
@@ -1108,12 +1107,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * In the event of forceful termination we need to remove the shutdown hook to prevent hanging (OOM for instance)
      */
-    public void removeShutdownHook()
+    public void onShutdownHookRemoved()
     {
         PathUtils.clearOnExitThreads();
-
-        if (drainOnShutdown != null)
-            Runtime.getRuntime().removeShutdownHook(drainOnShutdown);
     }
 
     private boolean shouldBootstrap()
@@ -7089,15 +7085,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Disabling rejection of requests on tokens outside owned ranges");
 
         DatabaseDescriptor.setRejectOutOfTokenRangeRequests(enabled);
-    }
-
-    @VisibleForTesting
-    public void shutdownServer()
-    {
-        if (drainOnShutdown != null)
-        {
-            Runtime.getRuntime().removeShutdownHook(drainOnShutdown);
-        }
     }
 
     @Override
