@@ -171,6 +171,11 @@ public enum CassandraRelevantProperties
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
 
+    /**
+     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     */
+    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+
     //cassandra properties (without the "cassandra." prefix)
 
     /**

@@ -23,7 +23,6 @@ import java.util.Collection;
 
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
@@ -32,23 +31,24 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER;
+
 /**
  * The handler of the storage of sstables, and possibly other files such as txn logs.
  * <p/>
  * If sstables are stored on the local disk, then this handler is a thin wrapper of {@link Directories.SSTableLister},
  * but for sstables stored remotely, for example on S3, then the handler may need to perform more
  * work, such as selecting only part of the remote sstables available, or adding new ones when offline compaction
- * has run. This behaviour can be implemented in a sub-class that can be set with {@link this#REMOTE_STORAGE_HANDLER}.
+ * has run. This behaviour can be implemented in a sub-class that can be set with {@link #remoteStorageHandler}.
  * <p/>
  * Local sytem tables will always use the default storage handler, {@link DefaultStorageHandler}
- * whereas user tables will use {@link this#REMOTE_STORAGE_HANDLER} if one is set, or the default handler if none
+ * whereas user tables will use {@link #remoteStorageHandler} if one is set, or the default handler if none
  * has been set.
  * <p/>
  */
 public abstract class StorageHandler
 {
-    private final static String REMOTE_STORAGE_HANDLER = Config.PROPERTY_PREFIX + "remote_storage_handler";
-    private final static String remoteStorageHandler = System.getProperty(REMOTE_STORAGE_HANDLER, null);
+    private final static String remoteStorageHandler = REMOTE_STORAGE_HANDLER.getString();
 
     public enum ReloadReason
     {
