@@ -139,7 +139,7 @@ public class Descriptor
         return String.format("%s.%s%s", fileFor(component), UUIDGen.getTimeUUID(), TMP_EXT);
     }
 
-    public File fileFor(Component component) ///tmp/ks/cf-ec18ace26ea84f0d95f9afa23ee6ae2e/nb-1-big
+    public File fileFor(Component component)
     {
         return filePaths.computeIfAbsent(component, c -> component.getFile(baseFileURI));
     }

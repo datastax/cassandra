@@ -40,7 +40,6 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  */
 public final class ChannelProxy extends SharedCloseableImpl
 {
-    private final String filePath;
     private final File file;
 
     private final FileChannel channel;
@@ -66,7 +65,6 @@ public final class ChannelProxy extends SharedCloseableImpl
     {
         super(new Cleanup(file.path(), channel));
 
-        this.filePath = file.path();
         this.file = file;
         this.channel = channel;
     }
@@ -75,7 +73,6 @@ public final class ChannelProxy extends SharedCloseableImpl
     {
         super(copy);
 
-        this.filePath = copy.filePath;
         this.file = copy.file;
         this.channel = copy.channel;
     }
@@ -126,7 +123,7 @@ public final class ChannelProxy extends SharedCloseableImpl
 
     public String filePath()
     {
-        return filePath;
+        return file.path();
     }
 
     public File getFile()
@@ -143,7 +140,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -155,7 +152,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -167,7 +164,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -179,7 +176,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -191,6 +188,6 @@ public final class ChannelProxy extends SharedCloseableImpl
     @Override
     public String toString()
     {
-        return filePath().toString();
+        return filePath();
     }
 }

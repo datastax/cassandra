@@ -288,7 +288,6 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     @Test
     public void testReplayLogic() throws IOException
     {
-        // Assert.assertEquals(0, DatabaseDescriptor.getCDCLogLocation().listFiles().length);
         String table_name = createTable("CREATE TABLE %s (idx int, data text, primary key(idx)) WITH cdc=true;");
         Integer originalCDCSize = DatabaseDescriptor.getCDCSpaceInMB();
 

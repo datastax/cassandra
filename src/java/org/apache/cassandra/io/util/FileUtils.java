@@ -239,7 +239,7 @@ public final class FileUtils
         catch (IOException e)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Could not copy file" + from + " to " + to, e);
+                logger.trace("Could not copy file " + from + " to " + to, e);
         }
     }
 
@@ -252,7 +252,7 @@ public final class FileUtils
         catch (IOException e)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Could not copy file" + from + " to " + to, e);
+                logger.trace("Could not copy file " + from + " to " + to, e);
         }
     }
 
@@ -792,21 +792,21 @@ public final class FileUtils
     /**
      * Deletes the specified directory if it is empty
      *
-     * @param path the path to the directory
+     * @param file the path to the directory
      */
-    public static void deleteDirectoryIfEmpty(File path) throws IOException
+    public static void deleteDirectoryIfEmpty(File file) throws IOException
     {
-        Preconditions.checkArgument(path.isDirectory(), String.format("%s is not a directory", path));
+        Preconditions.checkArgument(file.isDirectory(), String.format("%s is not a directory", file));
 
         try
         {
-            logger.info("Deleting directory {}", path);
-            Files.delete(path.toPath());
+            logger.info("Deleting directory {}", file);
+            Files.delete(file.toPath());
         }
         catch (DirectoryNotEmptyException e)
         {
-            String content = Arrays.stream(path.tryList()).map(File::name).collect(Collectors.joining(", "));
-            logger.warn("Cannot delete the directory {} as it is not empty. (Content: {})", path, content);
+            String content = Arrays.stream(file.tryList()).map(File::name).collect(Collectors.joining(", "));
+            logger.warn("Cannot delete the directory {} as it is not empty. (Content: {})", file, content);
         }
     }
 

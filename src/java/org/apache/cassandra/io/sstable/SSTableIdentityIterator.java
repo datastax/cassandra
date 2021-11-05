@@ -42,19 +42,19 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     private final SSTableReader sstable;
     private final DecoratedKey key;
     private final DeletionTime partitionLevelDeletion;
-    private final File filename;
+    private final File file;
 
     protected final SSTableSimpleIterator iterator;
     private final Row staticRow;
 
     public SSTableIdentityIterator(SSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
-                                   File filename, SSTableSimpleIterator iterator) throws IOException
+                                   File file, SSTableSimpleIterator iterator) throws IOException
     {
         super();
         this.sstable = sstable;
         this.key = key;
         this.partitionLevelDeletion = partitionLevelDeletion;
-        this.filename = filename;
+        this.file = file;
         this.iterator = iterator;
         this.staticRow = iterator.readStaticRow();
     }
@@ -141,14 +141,14 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         catch (IndexOutOfBoundsException e)
         {
             sstable.markSuspect();
-            throw new CorruptSSTableException(e, filename);
+            throw new CorruptSSTableException(e, file);
         }
         catch (IOError e)
         {
             if (e.getCause() instanceof IOException)
             {
                 sstable.markSuspect();
-                throw new CorruptSSTableException((Exception)e.getCause(), filename);
+                throw new CorruptSSTableException((Exception)e.getCause(), file);
             }
             else
             {
@@ -166,14 +166,14 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         catch (IndexOutOfBoundsException e)
         {
             sstable.markSuspect();
-            throw new CorruptSSTableException(e, filename);
+            throw new CorruptSSTableException(e, file);
         }
         catch (IOError e)
         {
             if (e.getCause() instanceof IOException)
             {
                 sstable.markSuspect();
-                throw new CorruptSSTableException((Exception)e.getCause(), filename);
+                throw new CorruptSSTableException((Exception)e.getCause(), file);
             }
             else
             {
@@ -194,9 +194,9 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         // creator is responsible for closing file when finished
     }
 
-    public File getPath()
+    public File getFile()
     {
-        return filename;
+        return file;
     }
 
     public EncodingStats stats()

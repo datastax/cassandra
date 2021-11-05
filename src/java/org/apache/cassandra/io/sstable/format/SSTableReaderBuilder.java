@@ -214,13 +214,13 @@ public abstract class SSTableReaderBuilder
         }
     }
 
-    public static IFilter loadBloomFilter(File path, boolean oldFormat)
+    public static IFilter loadBloomFilter(File file, boolean oldFormat)
     {
-        if (path.exists())
+        if (file.exists())
         {
-            logger.debug("Loading bloom filter from {}", path);
+            logger.debug("Loading bloom filter from {}", file);
             IFilter filter = null;
-            try (FileInputStreamPlus stream = path.newInputStream())
+            try (FileInputStreamPlus stream = file.newInputStream())
             {
                 filter = BloomFilter.serializer.deserialize(stream, oldFormat);
                 return filter;
@@ -235,7 +235,7 @@ public abstract class SSTableReaderBuilder
         }
         else
         {
-            logger.error("Bloom filter {} not found", path);
+            logger.error("Bloom filter {} not found", file);
         }
         return null;
     }
@@ -302,11 +302,10 @@ public abstract class SSTableReaderBuilder
         public SSTableReader build()
         {
             assert dfile == null && ifile == null && summary == null && bf == null;
-            File dataFilePath = descriptor.fileFor(Component.DATA);
-            long fileLength = dataFilePath.length();
-            logger.info("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
+            File dataFile = descriptor.fileFor(Component.DATA);
+            logger.info("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(dataFile.length()));
 
-            initSummary(dataFilePath, components, statsMetadata);
+            initSummary(dataFile, components, statsMetadata);
 
             boolean compression = components.contains(Component.COMPRESSION_INFO);
             try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);

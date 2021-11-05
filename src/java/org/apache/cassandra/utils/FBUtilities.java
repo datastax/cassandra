@@ -1197,7 +1197,6 @@ public class FBUtilities
             }
 
         }
-        private static final Map<Object, ThreadInfo> stacks = new ConcurrentHashMap<>();
 
         public static String getStackTrace()
         {

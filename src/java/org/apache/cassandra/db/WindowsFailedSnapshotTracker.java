@@ -62,8 +62,8 @@ public class WindowsFailedSnapshotTracker
                         // Skip folders that aren't a subset of temp or a data folder. We don't want people to accidentally
                         // delete something important by virtue of adding something invalid to the .toDelete file.
                         boolean validFolder = FileUtils.isSubDirectory(new File(System.getenv("TEMP")), f);
-                        for (File s : DatabaseDescriptor.getAllDataFileLocations())
-                            validFolder |= FileUtils.isSubDirectory(s, f);
+                        for (File file : DatabaseDescriptor.getAllDataFileLocations())
+                            validFolder |= FileUtils.isSubDirectory(file, f);
 
                         if (!validFolder)
                         {

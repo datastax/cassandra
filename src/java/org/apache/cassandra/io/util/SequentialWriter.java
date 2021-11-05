@@ -37,7 +37,7 @@ import static org.apache.cassandra.utils.Throwables.merge;
 public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional
 {
     // absolute path to the given file
-    private final File filePath;
+    private final File file;
 
     // Offset for start of buffer relative to underlying file
     protected long bufferOffset;
@@ -166,7 +166,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         this.strictFlushing = strictFlushing;
         this.fchannel = (FileChannel)channel;
 
-        this.filePath = file;
+        this.file = file;
 
         this.option = option;
     }
@@ -327,7 +327,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     public File getFile()
     {
-        return filePath;
+        return file;
     }
 
     protected void resetBuffer()

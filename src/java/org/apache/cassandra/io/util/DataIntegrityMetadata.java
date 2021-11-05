@@ -42,7 +42,7 @@ public class DataIntegrityMetadata
         private final ChecksumType checksumType;
         private final RandomAccessReader reader;
         public final int chunkSize;
-        private final File dataFilename;
+        private final File dataFile;
 
         public ChecksumValidator(Descriptor descriptor) throws IOException
         {
@@ -51,11 +51,11 @@ public class DataIntegrityMetadata
                  descriptor.fileFor(Component.DATA));
         }
 
-        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, File dataFilename) throws IOException
+        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, File dataFile) throws IOException
         {
             this.checksumType = checksumType;
             this.reader = reader;
-            this.dataFilename = dataFilename;
+            this.dataFile = dataFile;
             chunkSize = reader.readInt();
         }
 
@@ -64,7 +64,7 @@ public class DataIntegrityMetadata
         {
             this.checksumType = checksumType;
             this.reader = reader;
-            this.dataFilename = null;
+            this.dataFile = null;
             this.chunkSize = chunkSize;
         }
 
@@ -85,7 +85,7 @@ public class DataIntegrityMetadata
             int current = (int) checksumType.of(bytes, start, end);
             int actual = reader.readInt();
             if (current != actual)
-                throw new IOException("Corrupted File : " + dataFilename);
+                throw new IOException("Corrupted File : " + dataFile);
         }
 
         /**
@@ -99,7 +99,7 @@ public class DataIntegrityMetadata
             int current = (int) checksumType.of(buffer);
             int actual = reader.readInt();
             if (current != actual)
-                throw new IOException("Corrupted File : " + dataFilename);
+                throw new IOException("Corrupted File : " + dataFile);
         }
 
         public void close()
