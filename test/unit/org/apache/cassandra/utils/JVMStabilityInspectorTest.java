@@ -163,4 +163,26 @@ public class JVMStabilityInspectorTest
             JVMStabilityInspector.replaceKiller(originalKiller);
         }
     }
+
+    @Test
+    public void testShutdownHookRemoved()
+    {
+        class TestShutdownHook {
+            boolean shutdownHookRemoved = false;
+            
+            private void onHookRemoved()
+            {
+                shutdownHookRemoved = true;
+            }
+
+            private void shutdownHook()
+            {
+            }
+        }
+        
+        TestShutdownHook testShutdownHook = new TestShutdownHook();
+        JVMStabilityInspector.registerShutdownHook(new Thread(() -> testShutdownHook.shutdownHook()), () -> testShutdownHook.onHookRemoved());
+        JVMStabilityInspector.removeShutdownHooks();
+        assertTrue(testShutdownHook.shutdownHookRemoved);
+    }
 }

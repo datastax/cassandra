@@ -19,7 +19,7 @@ package org.apache.cassandra.utils;
 /**
  * An interface implemented to kill the JVM abnormally.
  *
- * It's currently implemented by {@link JVMStabilityInspector}
+ * It's currently implemented by {@link JVMStabilityInspector.Killer}
  * or tests.
  */
 public interface JVMKiller

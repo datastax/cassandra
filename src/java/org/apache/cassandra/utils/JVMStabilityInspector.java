@@ -52,12 +52,18 @@ public final class JVMStabilityInspector
 
     private static Object lock = new Object();
     private static boolean printingHeapHistogram;
-    private static volatile Consumer<Throwable> diskHandler = JVMStabilityInspector::inspectDiskError;
-    private static volatile Function<String, Consumer<Throwable>> commitLogHandler = JVMStabilityInspector::createDefaultCommitLogErrorHandler;
+    private static volatile Consumer<Throwable> diskHandler;
+    private static volatile Function<String, Consumer<Throwable>> commitLogHandler;
     private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
 
     // It is used for unit test
     public static OnKillHook killerHook;
+
+    static
+    {
+        setDiskErrorHandler(JVMStabilityInspector::inspectDiskError);
+        setCommitLogErrorHandler(JVMStabilityInspector::createDefaultCommitLogErrorHandler);
+    }
 
     private JVMStabilityInspector() {}
 
@@ -233,7 +239,7 @@ public final class JVMStabilityInspector
         }
 
         if (err != null)
-            logger.error("Got error when removing shutdown hook(s): {}", err.getMessage(), err);
+            logger.error("Got error(s) when removing shutdown hook(s): {}", err.getMessage(), err);
 
         shutdownHooks.clear();
     }
