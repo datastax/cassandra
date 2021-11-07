@@ -224,6 +224,9 @@ public enum CassandraRelevantProperties
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
 
+    /** Watcher used when opening sstables to discover extra components, eg. archive component */
+    CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
+
     /**
      * Whether to disable auto-compaction
      */

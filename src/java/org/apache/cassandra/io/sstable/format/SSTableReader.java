@@ -103,6 +103,7 @@ import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -481,7 +482,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     private static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
-        components = sstableWatcher.discoverComponents(descriptor, components);
+        components = SSTableWatcher.instance.discoverComponents(descriptor, components);
 
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
@@ -542,7 +543,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                       boolean validate,
                                       boolean isOffline)
     {
-        components = sstableWatcher.discoverComponents(descriptor, components);
+        components = SSTableWatcher.instance.discoverComponents(descriptor, components);
 
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;

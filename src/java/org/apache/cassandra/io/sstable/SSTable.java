@@ -80,35 +80,6 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_SPOOL_SIZE = 100000;
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
 
-    /**
-     * Watcher used when opening sstables to discover extra components, eg. archive component
-     */
-    public static volatile SSTableWatcher sstableWatcher = new SSTableWatcher() {};
-
-    public interface SSTableWatcher
-    {
-        /**
-         * Discover extra components before reading TOC file
-         *
-         * @param descriptor sstable descriptor for current sstable
-         */
-        default void discoverComponents(Descriptor descriptor)
-        {
-        }
-
-        /**
-         * Discover extra components before opening sstable
-         *
-         * @param descriptor sstable descriptor for current sstable
-         * @param existing existing sstable components
-         * @return all discovered sstable components
-         */
-        default Set<Component> discoverComponents(Descriptor descriptor, Set<Component> existing)
-        {
-            return existing;
-        }
-    }
-
     public final Descriptor descriptor;
     public final Set<Component> components;
     public final boolean compression;
@@ -279,7 +250,7 @@ public abstract class SSTable
         {
             try
             {
-                sstableWatcher.discoverComponents(desc);
+                SSTableWatcher.instance.discoverComponents(desc);
                 return readTOC(desc);
             }
             catch (FileNotFoundException | NoSuchFileException e)

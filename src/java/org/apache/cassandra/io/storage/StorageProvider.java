@@ -97,7 +97,7 @@ public interface StorageProvider
     /**
      * Create directory for the given path and type, either locally or remotely if any remote storage parameters are passed in.
      *
-     * @param dir the directory path to create
+     * @param dir the directory absolute path to create
      * @param type the type of directory to create
      * @return the actual directory path, which can be either local or remote; or null if directory can't be created
      */
