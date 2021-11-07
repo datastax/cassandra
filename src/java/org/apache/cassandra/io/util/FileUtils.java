@@ -242,7 +242,8 @@ public final class FileUtils
     {
         try
         {
-            Files.copy(from.toPath(), to.toPath());
+            if (from.exists())
+                Files.copy(from.toPath(), to.toPath());
         }
         catch (IOException e)
         {
