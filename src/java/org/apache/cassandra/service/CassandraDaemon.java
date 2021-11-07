@@ -23,6 +23,7 @@ import java.lang.management.MemoryPoolMXBean;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -520,12 +521,19 @@ public class CassandraDaemon
             if (!dataFileLocation.exists())
                 continue;
 
-            File[] keyspaceDirectories = dataFileLocation.tryList(p -> SchemaConstants.isLocalSystemKeyspace(p.name()));
+            List<File> keyspaceDirectories = new ArrayList<>();
+            dataFileLocation.forEach(f -> {
+                if (SchemaConstants.isLocalSystemKeyspace(f.name()))
+                    keyspaceDirectories.add(f);
+            });
 
             for (File keyspaceDirectory : keyspaceDirectories)
             {
-                File[] tableDirectories = keyspaceDirectory.tryList(f -> f.isDirectory()
-                                                                         && !SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.contains(f.name()));
+                List<File> tableDirectories = new ArrayList<>();
+                keyspaceDirectory.forEach(f -> {
+                    if (f.isDirectory() && !SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.contains(f.name()))
+                        tableDirectories.add(f);
+                });
 
                 for (File tableDirectory : tableDirectories)
                 {
