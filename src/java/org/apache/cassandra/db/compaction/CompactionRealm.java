@@ -80,7 +80,7 @@ public interface CompactionRealm
     }
 
     /**
-     * @return the replication factor for this table.
+     * @return the replication factor for keyspace that this table belongs to.
      */
     int getKeyspaceReplicationFactor();
 
