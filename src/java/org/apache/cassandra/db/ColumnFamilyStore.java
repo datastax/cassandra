@@ -290,6 +290,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         ExecutorUtils.shutdownAndWait(timeout, unit, executors);
     }
 
+    public boolean isReadyToServeData()
+    {
+        return storageHandler.isReady();
+    }
+
     public void reload()
     {
         // metadata object has been mutated directly. make all the members jibe with new settings.
