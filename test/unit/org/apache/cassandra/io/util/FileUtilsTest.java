@@ -255,11 +255,6 @@ public class FileUtilsTest
 
         Path to = tmpDir.resolve("c.txt");
         Assert.assertFalse(Files.exists(to));
-
-        FileUtils.createHardLinkWithoutConfirm(from.toString(), to.toString());
-        compareFile(from, to);
-        Assert.assertEquals(2, Files.getAttribute(from, "unix:nlink"));
-        Assert.assertEquals(2, Files.getAttribute(to, "unix:nlink"));
     }
 
     @Test

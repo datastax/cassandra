@@ -212,11 +212,6 @@ public final class FileUtils
         }
     }
 
-    public static void createHardLinkWithoutConfirm(String from, String to)
-    {
-        createHardLinkWithoutConfirm(new File(from), new File(to));
-    }
-
     public static void createHardLinkWithoutConfirm(File from, File to)
     {
         try
