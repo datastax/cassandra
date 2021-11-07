@@ -43,7 +43,7 @@ public interface StorageProvider
 
     StorageProvider instance = !CUSTOM_STORAGE_PROVIDER.isPresent()
         ? new DefaultProvider()
-        : FBUtilities.instantiate(CUSTOM_STORAGE_PROVIDER.getString(), "storage provider");
+        : FBUtilities.construct(CUSTOM_STORAGE_PROVIDER.getString(), "storage provider");
 
     enum DirectoryType
     {

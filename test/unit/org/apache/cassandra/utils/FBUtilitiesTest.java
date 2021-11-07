@@ -45,10 +45,8 @@ import org.apache.cassandra.dht.*;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.storage.StorageProvider;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -229,14 +227,6 @@ public class FBUtilitiesTest
         {
             executor.shutdown();
         }
-    }
-
-    @Test
-    public void testInstantiate()
-    {
-        StorageProvider defaultProvider = FBUtilities.instantiate(StorageProvider.DefaultProvider.class.getName(), "DefaultProvider");
-        assertTrue(defaultProvider instanceof StorageProvider.DefaultProvider);
-        assertNotEquals(defaultProvider, StorageProvider.instance);
     }
 
     @Test

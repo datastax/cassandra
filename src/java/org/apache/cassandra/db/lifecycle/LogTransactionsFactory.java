@@ -39,7 +39,7 @@ public interface LogTransactionsFactory
 
     LogTransactionsFactory instance = !LOG_TRANSACTIONS_FACTORY.isPresent()
                                       ? new DefaultLogTransactionsFactory()
-                                      : FBUtilities.instantiate(LOG_TRANSACTIONS_FACTORY.getString(), "log transactions factory");
+                                      : FBUtilities.construct(LOG_TRANSACTIONS_FACTORY.getString(), "log transactions factory");
 
     /**
      * Create {@link LogTransaction} that tracks sstable files involved in a transaction across sstables:

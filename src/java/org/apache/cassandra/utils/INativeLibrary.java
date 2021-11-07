@@ -36,7 +36,7 @@ public interface INativeLibrary
 
     INativeLibrary instance = !CUSTOM_NATIVE_LIBRARY.isPresent()
                              ? new NativeLibrary()
-                             : FBUtilities.instantiate(CUSTOM_NATIVE_LIBRARY.getString(), "native library");
+                             : FBUtilities.construct(CUSTOM_NATIVE_LIBRARY.getString(), "native library");
 
     public enum OSType
     {

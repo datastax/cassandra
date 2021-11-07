@@ -38,7 +38,7 @@ public interface CompactionAggregatePrioritizer
 
     CompactionAggregatePrioritizer instance = !UCS_COMPACTION_AGGREGATE_PRIORITIZER.isPresent()
                              ? new DefaultCompactionAggregatePrioritizer()
-                             : FBUtilities.instantiate(UCS_COMPACTION_AGGREGATE_PRIORITIZER.getString(), "compaction aggregate prioritizer");
+                             : FBUtilities.construct(UCS_COMPACTION_AGGREGATE_PRIORITIZER.getString(), "compaction aggregate prioritizer");
 
     /**
      * Maybe sort the provided pending compaction aggregates
