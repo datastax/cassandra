@@ -315,9 +315,9 @@ public class SSTableMetadataViewer
         }
     }
 
-    private void printSStableMetadata(String fname, boolean scan) throws IOException
+    private void printSStableMetadata(File dataFile, boolean scan) throws IOException
     {
-        Descriptor descriptor = Descriptor.fromFilename(fname);
+        Descriptor descriptor = Descriptor.fromFilename(dataFile.name());
         Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer()
                 .deserialize(descriptor, EnumSet.allOf(MetadataType.class));
         ValidationMetadata validation = (ValidationMetadata) metadata.get(MetadataType.VALIDATION);
@@ -326,7 +326,7 @@ public class SSTableMetadataViewer
         CompressionMetadata compression = null;
         File compressionFile = descriptor.fileFor(Component.COMPRESSION_INFO);
         if (compressionFile.exists())
-            compression = CompressionMetadata.create(compressionFile);
+            compression = CompressionMetadata.create(dataFile);
         SerializationHeader.Component header = (SerializationHeader.Component) metadata
                 .get(MetadataType.HEADER);
 
@@ -533,7 +533,7 @@ public class SSTableMetadataViewer
             File sstable = new File(fname);
             if (sstable.exists())
             {
-                metawriter.printSStableMetadata(sstable.absolutePath(), fullScan);
+                metawriter.printSStableMetadata(sstable, fullScan);
             }
             else
             {
