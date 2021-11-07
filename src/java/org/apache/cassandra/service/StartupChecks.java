@@ -364,7 +364,7 @@ public class StartupChecks
             }
 
             // if directories exist verify their permissions
-            if (!Directories.verifyFullPermissions(dir, dir.toString()))
+            if (!Directories.verifyFullPermissions(dir))
                 throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
                                            "Insufficient permissions on directory " + dir);
         }

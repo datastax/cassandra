@@ -113,29 +113,28 @@ public class Directories
      * the details if it does not.
      *
      * @param dir File object of the directory.
-     * @param dataDir String representation of the directory's location
      * @return status representing Cassandra's RWX permissions to the supplied folder location.
      */
-    public static boolean verifyFullPermissions(File dir, String dataDir)
+    public static boolean verifyFullPermissions(File dir)
     {
         if (!dir.isDirectory())
         {
-            logger.error("Not a directory {}", dataDir);
+            logger.error("Not a directory {}", dir);
             return false;
         }
         else if (!FileAction.hasPrivilege(dir, FileAction.X))
         {
-            logger.error("Doesn't have execute permissions for {} directory", dataDir);
+            logger.error("Doesn't have execute permissions for {} directory", dir);
             return false;
         }
         else if (!FileAction.hasPrivilege(dir, FileAction.R))
         {
-            logger.error("Doesn't have read permissions for {} directory", dataDir);
+            logger.error("Doesn't have read permissions for {} directory", dir);
             return false;
         }
         else if (dir.exists() && !FileAction.hasPrivilege(dir, FileAction.W))
         {
-            logger.error("Doesn't have write permissions for {} directory", dataDir);
+            logger.error("Doesn't have write permissions for {} directory", dir);
             return false;
         }
 

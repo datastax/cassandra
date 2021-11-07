@@ -245,7 +245,7 @@ public class SSTableImporter
                 {
                     throw new RuntimeException(String.format("Directory %s does not exist", path));
                 }
-                if (!Directories.verifyFullPermissions(dir, path))
+                if (!Directories.verifyFullPermissions(dir))
                 {
                     throw new RuntimeException("Insufficient permissions on directory " + path);
                 }
