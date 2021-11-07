@@ -171,7 +171,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                 for (SSTableReader reader : transaction.originals())
                 {
                     RowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE);
-                    INativeLibrary.instance.trySkipCache(reader.descriptor.fileFor(Component.DATA), 0, index == null ? 0 : index.position);
+                    INativeLibrary.instance.trySkipCache(reader.getDataFile(), 0, index == null ? 0 : index.position);
                 }
             }
             else
