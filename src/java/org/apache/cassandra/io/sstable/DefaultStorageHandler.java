@@ -70,7 +70,7 @@ public class DefaultStorageHandler extends StorageHandler
     }
 
     @Override
-    public void withReloadingDisabled(Runnable runnable)
+    public void runWithReloadingDisabled(Runnable runnable)
     {
         // by default no sstables are loaded, so we just need to execute the runnable
         runnable.run();

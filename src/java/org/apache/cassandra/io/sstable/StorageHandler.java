@@ -26,6 +26,7 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -121,7 +122,7 @@ public abstract class StorageHandler
      *
      * @param runnable the operation to execute.
      */
-    public abstract void withReloadingDisabled(Runnable runnable);
+    public abstract void runWithReloadingDisabled(Runnable runnable);
 
     /**
      * Called when the CFS is unloaded, this needs to perform any cleanup.
@@ -143,7 +144,7 @@ public abstract class StorageHandler
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
         {
-            throw new RuntimeException("Unable to find correct constructor for " + remoteStorageHandler, e);
+            throw new ConfigurationException("Unable to find correct constructor for " + remoteStorageHandler, e);
         }
     }
 }

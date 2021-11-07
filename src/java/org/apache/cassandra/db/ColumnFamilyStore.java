@@ -40,7 +40,6 @@ import com.google.common.collect.*;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.*;
 
-import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -93,7 +92,6 @@ import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
 import org.apache.cassandra.io.sstable.SSTableUniqueIdentifierFactory;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.Sampler.Sample;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
@@ -662,7 +660,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         strategyContainer.shutdown();
         SystemKeyspace.removeTruncationRecord(metadata.id);
 
-        storageHandler.withReloadingDisabled(() -> {
+        storageHandler.runWithReloadingDisabled(() -> {
             if (dropData)
             {
                 data.dropSSTables();
@@ -2486,7 +2484,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
         };
 
-        storageHandler.withReloadingDisabled(() -> {
+        storageHandler.runWithReloadingDisabled(() -> {
             if (storageHandler.enableAutoCompaction()) // compactions are running in process
                 runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
             else
