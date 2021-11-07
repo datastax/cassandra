@@ -535,6 +535,9 @@ public final class PathUtils
         }
         catch (IOException e)
         {
+            // it's possible that between the time that the caller has checked if the file exists and the time it retrieves the creation time,
+            // the file is actually deleted. File.length() returns a positive value only if the file is valid, otherwise it returns 0L, here
+            // we do the same
             return 0;
         }
     }
