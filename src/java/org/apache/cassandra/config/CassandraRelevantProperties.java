@@ -220,6 +220,11 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
 
     /**
+     * Used to support directory creation for different file system and remote/local conversion
+     */
+    CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
+
+    /**
      * Whether to disable auto-compaction
      */
     DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction");

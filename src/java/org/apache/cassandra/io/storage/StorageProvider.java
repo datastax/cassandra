@@ -31,6 +31,8 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STORAGE_PROVIDER;
+
 /**
  * The storage provider is used to support directory creation and remote/local conversion for remote storage.
  * The default implementation {@link DefaultProvider} is based on local file system.
@@ -39,10 +41,9 @@ public interface StorageProvider
 {
     Logger logger = LoggerFactory.getLogger(StorageProvider.class);
 
-    String CUSTOM_STORAGE_PROVIDER = "cassandra.custom_storage_provider";
-    StorageProvider instance = System.getProperty(CUSTOM_STORAGE_PROVIDER) == null
+    StorageProvider instance = !CUSTOM_STORAGE_PROVIDER.isPresent()
         ? new DefaultProvider()
-        : FBUtilities.instantiate(System.getProperty(CUSTOM_STORAGE_PROVIDER), "storage provider");
+        : FBUtilities.instantiate(CUSTOM_STORAGE_PROVIDER.getString(), "storage provider");
 
     enum DirectoryType
     {
@@ -59,14 +60,14 @@ public interface StorageProvider
         TEMP("temp_directory"),
         OTHERS("other_directory");
 
-        final String what;
+        final String name;
 
         final boolean readable;
         final boolean writable;
 
-        DirectoryType(String what)
+        DirectoryType(String name)
         {
-            this.what = what;
+            this.name = name;
             this.readable = true;
             this.writable = true;
         }
