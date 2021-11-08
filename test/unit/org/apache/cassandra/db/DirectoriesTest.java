@@ -43,6 +43,7 @@ import java.util.stream.Stream;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -296,6 +297,17 @@ public class DirectoriesTest
         }
         catch (IOException ignore) {}
         return file;
+    }
+
+    @Test
+    public void testVerifyFullPermissions() throws IOException
+    {
+        Assert.assertFalse(Directories.verifyFullPermissions(new File("non_directory.txt")));
+
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+        File dir = new File(tmpDir, "sub_dir");
+        dir.tryCreateDirectories();
+        Assert.assertTrue(Directories.verifyFullPermissions(dir));
     }
 
     @Test
