@@ -105,14 +105,11 @@ public abstract class StorageHandler
     public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
-     * This method determines if the backing storage handles supports background compactions,
-     * the default behavior for local sstables.
+     * This method determines if the backing storage handles is remote storage
      * <p/>
-     * If sstables are remote, compaction can be done offline, in which case this method should return false.
-     * <p/>
-     * @return true if auto-compaction is supported by storage handler, false otherwise
+     * @return true if storage handler is remote
      */
-    public abstract boolean supportsAutoCompactions();
+    public abstract boolean isRemote();
 
     /**
      * This method will run the operation specified by the {@link Runnable} passed it
