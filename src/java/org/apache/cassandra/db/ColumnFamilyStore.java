@@ -2486,10 +2486,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         };
 
         storageHandler.runWithReloadingDisabled(() -> {
-            if (strategyContainer.isEnabled()) // compactions are running in process
-                runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
-            else
-                truncateRunnable.run(); // compactions are running out of process
+            runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
         });
 
         viewManager.build();
