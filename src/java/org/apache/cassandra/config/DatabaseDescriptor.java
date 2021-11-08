@@ -1852,6 +1852,12 @@ public class DatabaseDescriptor
         return localSystemDataFileDirectory != null;
     }
 
+    @VisibleForTesting
+    public static void setSpecificLocationForLocalSystemData(File systemDir)
+    {
+        localSystemDataFileDirectory = systemDir;
+    }
+
     /**
      * Returns the locations where the local system keyspaces data should be stored.
      *
