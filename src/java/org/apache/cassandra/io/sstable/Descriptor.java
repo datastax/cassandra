@@ -19,8 +19,6 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -67,7 +65,6 @@ public class Descriptor
 
     private final String baseFileURI;
     private final String filenamePart;
-    private final ConcurrentMap<Component, File> filePaths;
 
     /**
      * A descriptor that assumes CURRENT_VERSION.
@@ -109,8 +106,6 @@ public class Descriptor
         if (!locationURI.endsWith(java.io.File.separator))
             locationURI = locationURI + java.io.File.separatorChar;
         baseFileURI = locationURI + filenamePart;
-
-        filePaths = new ConcurrentHashMap<>();
     }
 
     public Descriptor withGeneration(SSTableUniqueIdentifier newGeneration)
@@ -141,7 +136,7 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return filePaths.computeIfAbsent(component, c -> component.getFile(baseFileURI));
+        return component.getFile(baseFileURI);
     }
 
     public String baseFileUri()
