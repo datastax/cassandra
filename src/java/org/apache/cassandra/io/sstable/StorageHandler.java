@@ -116,9 +116,9 @@ public abstract class StorageHandler
     /**
      * This method will run the operation specified by the {@link Runnable} passed it
      * whilst guaranteeing the guarantees that no sstable will be loaded or unloaded
-     * whilst this operation is running. In other words, the storage handler must not
-     * change the status of the tracker, or try to load any sstable as long as this
-     * operation is executing.
+     * whilst this operation is running, by waiting for in-progress operation to complete.
+     * In other words, the storage handler must not change the status of the tracker,
+     * or try to load any sstable as long as this operation is executing.
      *
      * @param runnable the operation to execute.
      */
