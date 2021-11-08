@@ -51,9 +51,9 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * of unfinished leftovers when a transaction is completed, or aborted, or when
  * we clean up on start-up.
  *
- * Note: this is used by {@link DefaultLogTransaction}
+ * Note: this is used by {@link LogTransaction}
  *
- * @see LogTransaction
+ * @see AbstractLogTransaction
  */
 final class LogFile implements AutoCloseable
 {
@@ -409,7 +409,7 @@ final class LogFile implements AutoCloseable
         // we sort the files in ascending update time order so that the last update time
         // stays the same even if we only partially delete files, see comment in isInvalid()
         existingFiles.sort(Comparator.comparingLong(File::lastModified));
-        existingFiles.forEach(DefaultLogTransaction::delete);
+        existingFiles.forEach(LogTransaction::delete);
     }
 
     /**

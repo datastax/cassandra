@@ -117,12 +117,12 @@ class Helpers
             assert !reader.isReplaced();
     }
 
-    static Throwable markObsolete(List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable markObsolete(List<AbstractLogTransaction.Obsoletion> obsoletions, Throwable accumulate)
     {
         if (obsoletions == null || obsoletions.isEmpty())
             return accumulate;
 
-        for (LogTransaction.Obsoletion obsoletion : obsoletions)
+        for (AbstractLogTransaction.Obsoletion obsoletion : obsoletions)
         {
             try
             {
@@ -137,8 +137,8 @@ class Helpers
     }
 
     static Throwable prepareForObsoletion(Iterable<SSTableReader> readers,
-                                          LogTransaction txnLogs,
-                                          List<LogTransaction.Obsoletion> obsoletions,
+                                          AbstractLogTransaction txnLogs,
+                                          List<AbstractLogTransaction.Obsoletion> obsoletions,
                                           Tracker tracker,
                                           Throwable accumulate)
     {
@@ -146,12 +146,12 @@ class Helpers
         return txnLogs.prepareForObsoletion(readers, obsoletions, tracker, accumulate);
     }
 
-    static Throwable abortObsoletion(List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable abortObsoletion(List<AbstractLogTransaction.Obsoletion> obsoletions, Throwable accumulate)
     {
         if (obsoletions == null || obsoletions.isEmpty())
             return accumulate;
 
-        for (LogTransaction.Obsoletion obsoletion : obsoletions)
+        for (AbstractLogTransaction.Obsoletion obsoletion : obsoletions)
         {
             try
             {

@@ -17,47 +17,33 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_TRANSACTIONS_FACTORY;
-
-/**
- * Factory to create instances used during log transaction processing:
- * - {@link LogTransaction}: tracks sstable files invovled in a transastion cross sstable.
- * - {@link LogAwareFileLister}: list files which are not removed by log transactions
- * - {@link LogFileCleaner}: removes any leftovers from unfinished log transactions
- * - {@link FailedTransactionDeletionHandler}: retries failed log transaction deletions
- */
-public interface LogTransactionsFactory
+final class LogTransactionsFactory implements ILogTransactionsFactory
 {
-    Logger logger = LoggerFactory.getLogger(LogTransactionsFactory.class);
+    @Override
+    public AbstractLogTransaction createLogTransaction(OperationType operationType, TableMetadataRef metadata)
+    {
+        logger.debug("Creating a transaction for {} on {}", operationType, metadata);
+        return new LogTransaction(operationType);
+    }
 
-    LogTransactionsFactory instance = !LOG_TRANSACTIONS_FACTORY.isPresent()
-                                      ? new DefaultLogTransactionsFactory()
-                                      : FBUtilities.construct(LOG_TRANSACTIONS_FACTORY.getString(), "log transactions factory");
+    @Override
+    public ILogAwareFileLister createLogAwareFileLister()
+    {
+        return new LogAwareFileLister();
+    }
 
-    /**
-     * Create {@link LogTransaction} that tracks sstable files involved in a transaction across sstables:
-     */
-    LogTransaction createLogTransaction(OperationType operationType, TableMetadataRef metadata);   // FIXME NPE, check usage
+    @Override
+    public ILogFileCleaner createLogFileCleaner()
+    {
+        return new LogFileCleaner();
+    }
 
-    /**
-     * Create {@link LogAwareFileLister} that lists files which are not removed by log transactions in a folder.
-     */
-    LogAwareFileLister createLogAwareFileLister();
-
-    /**
-     * Create {@link LogFileCleaner} that removes any leftovers from unfinished log transactions as indicated by any transaction log files
-     */
-    LogFileCleaner createLogFileCleaner();
-
-    /**
-     * Create {@link FailedTransactionDeletionHandler} used to retry failed log transaction deletions
-     */
-    FailedTransactionDeletionHandler createFailedTransactionDeletionHandler();
+    @Override
+    public FailedTransactionDeletionHandler createFailedTransactionDeletionHandler()
+    {
+        return LogTransaction::rescheduleFailedDeletions;
+    }
 }

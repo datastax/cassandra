@@ -110,7 +110,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
     private final Tracker tracker;
     // The transaction logs keep track of new and old sstable files
-    private final LogTransaction log;
+    private final AbstractLogTransaction log;
     // the original readers this transaction was opened over, and that it guards
     // (no other transactions may operate over these readers concurrently)
     private final Set<SSTableReader> originals = new HashSet<>();
@@ -127,7 +127,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     private final State staged = new State();
 
     // the tidier and their readers, to be used for marking readers obsoleted during a commit
-    private List<LogTransaction.Obsoletion> obsoletions;
+    private List<AbstractLogTransaction.Obsoletion> obsoletions;
 
     // commit/rollback hooks
     private List<Runnable> commitHooks = new ArrayList<>();
@@ -167,7 +167,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     LifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<? extends SSTableReader> readers)
     {
         this.tracker = tracker;
-        this.log = LogTransactionsFactory.instance.createLogTransaction(operationType, tracker.metadata);
+        this.log = ILogTransactionsFactory.instance.createLogTransaction(operationType, tracker.metadata);
         for (SSTableReader reader : readers)
         {
             originals.add(reader);
@@ -176,7 +176,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         }
     }
 
-    public LogTransaction log()
+    public AbstractLogTransaction log()
     {
         return log;
     }
@@ -621,7 +621,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public static boolean removeUnfinishedLeftovers(List<File> directories)
     {
         // List<Path> directories
-        LogFileCleaner cleaner = LogTransactionsFactory.instance.createLogFileCleaner();
+        ILogFileCleaner cleaner = ILogTransactionsFactory.instance.createLogFileCleaner();
         for (File dir : directories)
             cleaner.list(dir);
 
@@ -642,7 +642,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
      */
     public static List<File> getFiles(Path folder, BiPredicate<File, Directories.FileType> filter, Directories.OnTxnErr onTxnErr)
     {
-        return LogTransactionsFactory.instance.createLogAwareFileLister().list(folder, filter, onTxnErr);
+        return ILogTransactionsFactory.instance.createLogAwareFileLister().list(folder, filter, onTxnErr);
     }
 
     /**
@@ -651,7 +651,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
      */
     public static void rescheduleFailedDeletions()
     {
-        LogTransactionsFactory.instance.createFailedTransactionDeletionHandler().rescheduleFailedDeletions();
+        ILogTransactionsFactory.instance.createFailedTransactionDeletionHandler().rescheduleFailedDeletions();
     }
 
     /**

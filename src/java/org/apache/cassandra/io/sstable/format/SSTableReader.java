@@ -74,7 +74,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.lifecycle.LogTransaction;
+import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -1607,7 +1607,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * multiple times is usually buggy (see exceptions in Tracker.unmarkCompacting and removeOldSSTablesSize).
      */
-    public void markObsolete(LogTransaction.ReaderTidier tidier)
+    public void markObsolete(AbstractLogTransaction.ReaderTidier tidier)
     {
         if (logger.isTraceEnabled())
             logger.trace("Marking {} compacted", getFilename());
@@ -2281,7 +2281,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // sstable have been released
         private WeakReference<ScheduledFuture<?>> readMeterSyncFuture = NULL;
         // shared state managing if the logical sstable has been compacted; this is used in cleanup
-        private volatile LogTransaction.ReaderTidier obsoletion;
+        private volatile AbstractLogTransaction.ReaderTidier obsoletion;
 
         GlobalTidy(final SSTableReader reader)
         {

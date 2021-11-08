@@ -214,13 +214,13 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
     public void testRescheduleFailedDeletions()
     {
         AtomicLong counter = new AtomicLong(0);
-        DefaultLogTransaction.failedDeletions.add(counter::incrementAndGet);
+        LogTransaction.failedDeletions.add(counter::incrementAndGet);
 
         LifecycleTransaction.rescheduleFailedDeletions();
         Awaitility.await("failed deletion").atMost(10, TimeUnit.SECONDS)
                   .until(() -> counter.get() == 1);
 
-        Assert.assertEquals(0, DefaultLogTransaction.failedDeletions.size());
+        Assert.assertEquals(0, LogTransaction.failedDeletions.size());
     }
 
     private static void testBadUpdate(LifecycleTransaction txn, SSTableReader update, boolean original)

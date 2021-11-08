@@ -39,7 +39,7 @@ import org.apache.cassandra.utils.FBUtilities;
 /**
  * A decoded line in a transaction log file replica.
  *
- * Note: this is used by {@link DefaultLogTransaction}
+ * Note: this is used by {@link LogTransaction}
  *
  * @see LogReplica and LogFile.
  */
