@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable;
 
 import java.util.Collection;
+import java.util.Collections;
 
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
@@ -52,9 +53,10 @@ public class DefaultStorageHandler extends StorageHandler
     }
 
     @Override
-    public void reloadSSTables(ReloadReason reason)
+    public Collection<SSTableReader> reloadSSTables(ReloadReason reason)
     {
         // no op for local storage
+        return Collections.emptySet();
     }
 
     @Override

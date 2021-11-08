@@ -143,6 +143,11 @@ public abstract class SSTable
         return metadata.get();
     }
 
+    public TableMetadataRef metadataRef()
+    {
+        return metadata;
+    }
+
     public IPartitioner getPartitioner()
     {
         return metadata().partitioner;

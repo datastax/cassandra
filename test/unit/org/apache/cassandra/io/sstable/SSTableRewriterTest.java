@@ -580,7 +580,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         truncate(cfs);
         cfs.disableAutoCompaction();
         SSTableReader s = writeFile(cfs, 1000);
-        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UNKNOWN, cfs.metadata, s))
+        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UNKNOWN, s))
         {
             SSTableSplitter splitter = new SSTableSplitter(cfs, txn, 10);
             splitter.split();

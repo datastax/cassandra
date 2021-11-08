@@ -136,9 +136,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     /**
      * construct a Transaction for use in an offline operation
      */
-    public static LifecycleTransaction offline(OperationType operationType, TableMetadataRef metadata, SSTableReader reader)
+    public static LifecycleTransaction offline(OperationType operationType, SSTableReader reader)
     {
-        return offline(operationType, metadata, singleton(reader));
+        return offline(operationType, reader.metadataRef(), singleton(reader));
     }
 
     /**

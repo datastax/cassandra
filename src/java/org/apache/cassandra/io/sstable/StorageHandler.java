@@ -100,8 +100,10 @@ public abstract class StorageHandler
      * Reload any sstables that may have been created and not yet loaded. This is normally
      * a no-op for the default local storage, but for remote storage implementations it
      * signals that sstables need to be refreshed.
+     *
+     * @return the sstables that were loaded
      */
-    public abstract void reloadSSTables(ReloadReason reason);
+    public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
      * This method determines if the {@link ColumnFamilyStore} should perform background compactions,

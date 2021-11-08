@@ -502,7 +502,7 @@ public class ScrubTest
             if (sstable.last.compareTo(sstable.first) < 0)
                 sstable.last = sstable.first;
 
-            try (LifecycleTransaction scrubTxn = LifecycleTransaction.offline(OperationType.SCRUB, cfs.metadata, sstable);
+            try (LifecycleTransaction scrubTxn = LifecycleTransaction.offline(OperationType.SCRUB, sstable);
                  Scrubber scrubber = new Scrubber(cfs, scrubTxn, false, true))
             {
                 scrubber.scrub();

@@ -18,7 +18,6 @@
  */
 package org.apache.cassandra.tools;
 
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -218,7 +217,7 @@ public class StandaloneScrubber
             {
                 for (SSTableReader sstable : sstables)
                 {
-                    try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, cfs.metadata, sstable))
+                    try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, sstable))
                     {
                         txn.obsoleteOriginals(); // make sure originals are deleted and avoid NPE if index is missing, CASSANDRA-9591
                         try (Scrubber scrubber = new Scrubber(cfs, txn, options.skipCorrupted, handler, !options.noValidate, options.reinserOverflowedTTL))
