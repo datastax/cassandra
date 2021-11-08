@@ -120,6 +120,7 @@ public interface StorageProvider
         @Override
         public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, String keyspaceName, Directories.DataDirectory[] dirs)
         {
+            // data directories are already created in DatabadeDescriptor#createAllDirectories
             return dirs;
         }
 
