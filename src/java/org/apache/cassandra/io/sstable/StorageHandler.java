@@ -23,7 +23,6 @@ import java.util.Collection;
 
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -106,14 +105,14 @@ public abstract class StorageHandler
     public abstract Collection<SSTableReader> reloadSSTables(ReloadReason reason);
 
     /**
-     * This method determines if the {@link ColumnFamilyStore} should perform background compactions,
+     * This method determines if the backing storage handles supports background compactions,
      * the default behavior for local sstables.
      * <p/>
      * If sstables are remote, compaction can be done offline, in which case this method should return false.
      * <p/>
-     * @return true if auto-compaction should be enabled, false otherwise
+     * @return true if auto-compaction is supported by storage handler, false otherwise
      */
-    public abstract boolean enableAutoCompaction();
+    public abstract boolean supportsAutoCompactions();
 
     /**
      * This method will run the operation specified by the {@link Runnable} passed it

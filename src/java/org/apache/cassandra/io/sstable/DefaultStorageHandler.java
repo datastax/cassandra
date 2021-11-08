@@ -66,7 +66,7 @@ public class DefaultStorageHandler extends StorageHandler
     }
 
     @Override
-    public boolean enableAutoCompaction()
+    public boolean supportsAutoCompactions()
     {
         return true;
     }

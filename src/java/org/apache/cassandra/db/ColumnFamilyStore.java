@@ -469,10 +469,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                         CompactionStrategyContainer.ReloadReason.FULL);
         getTracker().subscribe(strategyContainer);
 
-        if (!storageHandler.enableAutoCompaction() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
+        if (!storageHandler.supportsAutoCompactions() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
         {
             logger.info("Strategy driven background compactions for {} are disabled: storage handler={}, {}={}",
-                        metadata, storageHandler.enableAutoCompaction(), DISABLED_AUTO_COMPACTION_PROPERTY.getKey(),
+                        metadata, storageHandler.supportsAutoCompactions(), DISABLED_AUTO_COMPACTION_PROPERTY.getKey(),
                         DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean());
             this.strategyContainer.disable();
         }
@@ -2485,7 +2485,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         };
 
         storageHandler.runWithReloadingDisabled(() -> {
-            if (storageHandler.enableAutoCompaction()) // compactions are running in process
+            if (storageHandler.supportsAutoCompactions()) // compactions are running in process
                 runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
             else
                 truncateRunnable.run(); // compactions are running out of process
