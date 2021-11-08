@@ -276,6 +276,11 @@ public class FileUtilsTest
         compareFile(from, to);
         Assert.assertEquals(1, Files.getAttribute(from, "unix:nlink"));
         Assert.assertEquals(1, Files.getAttribute(to, "unix:nlink"));
+
+        File nonExisting = new File(from.resolveSibling("non_existing.txt"));
+        to = tmpDir.resolve("d.txt");
+        FileUtils.copyWithOutConfirm(nonExisting, new File(to));
+        Assert.assertFalse(new File(to).exists());
     }
 
     private File createFolder(File folder, String additionalName)

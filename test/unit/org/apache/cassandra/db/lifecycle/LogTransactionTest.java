@@ -19,7 +19,10 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.spi.FileSystemProvider;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -42,6 +45,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
@@ -58,6 +62,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.AlwaysPresentFilter;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
 import org.apache.cassandra.utils.concurrent.Transactional;
+import org.mockito.Mockito;
 
 import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.assertNull;
@@ -1058,6 +1063,30 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
         // make sure to run the tidier to avoid any leaks in the logs
         tidier.commit();
+    }
+
+    @Test
+    public void testDeleteNonExistingFile()
+    {
+        File nonExisting = new File("a/b/c.txt");
+        Assert.assertFalse(nonExisting.exists());
+        DefaultLogTransaction.delete(nonExisting);
+    }
+
+    @Test
+    public void testDeleteWithIOException() throws IOException
+    {
+        File file = Mockito.mock(File.class);
+        Path path = Mockito.mock(Path.class);
+        FileSystem fs = Mockito.mock(FileSystem.class);
+        FileSystemProvider fsp = Mockito.mock(FileSystemProvider.class);
+
+        Mockito.when(file.toPath()).thenReturn(path);
+        Mockito.when(path.getFileSystem()).thenReturn(fs);
+        Mockito.when(fs.provider()).thenReturn(fsp);
+        Mockito.doThrow(new IOException("mock exception")).when(fsp).delete(path);
+
+        Assert.assertThrows(FSWriteError.class, () -> DefaultLogTransaction.delete(file));
     }
 
     @Test
