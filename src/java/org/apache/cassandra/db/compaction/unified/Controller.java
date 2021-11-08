@@ -786,13 +786,13 @@ public abstract class Controller
 
     public long getMaxLevelSize(int index, long minSize)
     {
-        int F = getFanout(index);
+        int fanout = getFanout(index);
         double survivalFactor = getSurvivalFactor(index);
         double baseSize = minSize;
         if (minSize == 0)
-            baseSize = getBaseSstableSize(F);
+            baseSize = getBaseSstableSize(fanout);
 
-        return (long) Math.floor(baseSize * F * survivalFactor);
+        return (long) Math.floor(baseSize * fanout * survivalFactor);
     }
 
     public long getMaxL0Size()
