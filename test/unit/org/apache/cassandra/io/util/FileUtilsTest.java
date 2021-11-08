@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.Random;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -244,7 +245,7 @@ public class FileUtilsTest
     @Test
     public void testCreateHardLinkWithoutConfirm() throws Throwable
     {
-        Assert.assertTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
+        Assume.assumeTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
 
         Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
 
@@ -260,7 +261,7 @@ public class FileUtilsTest
     @Test
     public void testCopyWithOutConfirm() throws Throwable
     {
-        Assert.assertTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
+        Assume.assumeTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
 
         Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
 

@@ -62,6 +62,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -255,12 +256,24 @@ public class SSTableFlushObserverTest
      * Test {@link SSTableFlushObserver} with {@link RangeTombstoneMarker}.
      */
     @Test
-    public void testWithRangeTombstoneMarkers()
+    public void testWithRangeTombstoneMarkersWithCompression()
+    {
+        testWithRangeTombstoneMarkers(true);
+    }
+
+    @Test
+    public void testWithRangeTombstoneMarkersWithoutCompression()
+    {
+        testWithRangeTombstoneMarkers(false);
+    }
+
+    public void testWithRangeTombstoneMarkers(boolean compression)
     {
         TableMetadata metadata = TableMetadata.builder(KS_NAME, "flush_observer_range_tombstone_markers")
                                               .addPartitionKeyColumn("id", UTF8Type.instance)
                                               .addClusteringColumn("name", UTF8Type.instance)
                                               .addRegularColumn("age", Int32Type.instance)
+                                              .compression(compression ? CompressionParams.DEFAULT : CompressionParams.noCompression())
                                               .build();
 
         DeletionTime dt = new DeletionTime(now, nowInSec);

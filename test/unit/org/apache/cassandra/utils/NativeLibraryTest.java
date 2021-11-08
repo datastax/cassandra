@@ -23,6 +23,7 @@ import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
+import java.util.Arrays;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -39,6 +40,12 @@ public class NativeLibraryTest
     public static void init()
     {
         DatabaseDescriptor.toolInitialization();
+    }
+
+    @Test
+    public void testIsOs()
+    {
+        Assert.assertTrue(Arrays.stream(INativeLibrary.OSType.values()).anyMatch(INativeLibrary.instance::isOS));
     }
 
     @Test
@@ -131,6 +138,10 @@ public class NativeLibraryTest
 
         INativeLibrary.instance.trySkipCache(file, 0, 0);
         INativeLibrary.instance.trySkipCache(file.resolve("no_existing"), 0, 0);
+
+        // non-existing FD
+        INativeLibrary.instance.trySkipCache(-1, 0, 0L, "non-existing file");
+        INativeLibrary.instance.trySkipCache(-1, 0, 0, "non-existing file");
     }
 
     @Test

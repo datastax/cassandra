@@ -67,6 +67,7 @@ import org.mockito.Mockito;
 import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.assertNull;
 import static junit.framework.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -1007,7 +1008,24 @@ public class LogTransactionTest extends AbstractTransactionalTest
         }), false);
     }
 
+    @Test
+    public void testUnparsableFirstRecordThrows()
+    {
+        assertThatThrownBy(() -> {
+            testCorruptRecord((t, s) -> t.logFiles().forEach(f -> {
+                List<String> lines = FileUtils.readLines(f);
+                lines.add(0, "add:[a,b,c][12345678]");
+                FileUtils.replace(f, lines.toArray(new String[lines.size()]));
+            }), false, Directories.OnTxnErr.THROW);
+        }).hasCauseInstanceOf(DefaultLogTransaction.CorruptTransactionLogException.class);
+    }
+
     private static void testCorruptRecord(BiConsumer<DefaultLogTransaction, SSTableReader> modifier, boolean isRecoverable) throws IOException
+    {
+        testCorruptRecord(modifier, isRecoverable, Directories.OnTxnErr.IGNORE);
+    }
+
+    private static void testCorruptRecord(BiConsumer<DefaultLogTransaction, SSTableReader> modifier, boolean isRecoverable, Directories.OnTxnErr onTxnErr) throws IOException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
@@ -1038,7 +1056,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         Set<File> oldFiles = getAllFilePaths(sstableOld, true);
 
         //This should filter as in progress since the last record is corrupt
-        assertFiles(newFiles, getTemporaryFiles(dataFolder));
+        assertFiles(newFiles, getTemporaryFiles(dataFolder, onTxnErr));
         assertFiles(oldFiles, getFinalFiles(dataFolder));
 
         if (isRecoverable)
@@ -1380,6 +1398,11 @@ public class LogTransactionTest extends AbstractTransactionalTest
         return listFiles(folder, Directories.FileType.TEMPORARY);
     }
 
+    static Set<File> getTemporaryFiles(File folder, Directories.OnTxnErr onTxnErr)
+    {
+        return listFiles(folder, onTxnErr, Directories.FileType.TEMPORARY);
+    }
+
     static Set<File> getFinalFiles(File folder)
     {
         return listFiles(folder, Directories.FileType.FINAL);
@@ -1387,9 +1410,14 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
     static Set<File> listFiles(File folder, Directories.FileType... types)
     {
+        return listFiles(folder, Directories.OnTxnErr.IGNORE, types);
+    }
+
+    static Set<File> listFiles(File folder, Directories.OnTxnErr onTxnErr, Directories.FileType... types)
+    {
         Collection<Directories.FileType> match = Arrays.asList(types);
         return LogTransactionsFactory.instance.createLogAwareFileLister()
-                                              .list(folder.toPath(), (file, type) -> match.contains(type), Directories.OnTxnErr.IGNORE)
+                                              .list(folder.toPath(), (file, type) -> match.contains(type), onTxnErr)
                                               .stream()
                                               .map(File::toCanonical)
                                               .collect(Collectors.toSet());
