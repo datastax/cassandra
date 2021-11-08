@@ -317,7 +317,7 @@ public class SSTableMetadataViewer
 
     private void printSStableMetadata(File dataFile, boolean scan) throws IOException
     {
-        Descriptor descriptor = Descriptor.fromFilename(dataFile.name());
+        Descriptor descriptor = Descriptor.fromFilename(dataFile);
         Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer()
                 .deserialize(descriptor, EnumSet.allOf(MetadataType.class));
         ValidationMetadata validation = (ValidationMetadata) metadata.get(MetadataType.VALIDATION);
