@@ -440,7 +440,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         Memtable initialMemtable = null;
         if (DatabaseDescriptor.isDaemonInitialized())
             initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
-        data = new Tracker(this, metadata, initialMemtable, loadSSTables);
+        data = new Tracker(this, initialMemtable, loadSSTables);
 
         // Note that this needs to happen before we load the first sstables, or the global sstable tracker will not
         // be notified on the initial loading.

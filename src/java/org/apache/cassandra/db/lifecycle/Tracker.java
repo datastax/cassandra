@@ -79,14 +79,27 @@ public class Tracker
 
     /**
      * @param columnFamilyStore column family store for the table
-     * @param metadata metadata for the table
      * @param memtable Initial Memtable. Can be null.
      * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
      */
-    public Tracker(@Nullable ColumnFamilyStore columnFamilyStore, TableMetadataRef metadata, Memtable memtable, boolean loadsstables)
+    public Tracker(ColumnFamilyStore columnFamilyStore, Memtable memtable, boolean loadsstables)
     {
-        this.cfstore = columnFamilyStore;
-        this.metadata = metadata;
+        this.cfstore = Objects.requireNonNull(columnFamilyStore);
+        this.metadata = columnFamilyStore.metadata;
+        this.view = new AtomicReference<>();
+        this.loadsstables = loadsstables;
+        this.reset(memtable);
+    }
+
+    /**
+     * @param metadata metadata reference for the table
+     * @param memtable Initial Memtable. Can be null.
+     * @param loadsstables true to indicate to load SSTables (TODO: remove as this is only accessed from 2i)
+     */
+    public Tracker(TableMetadataRef metadata, Memtable memtable, boolean loadsstables)
+    {
+        this.cfstore = null;
+        this.metadata = Objects.requireNonNull(metadata);
         this.view = new AtomicReference<>();
         this.loadsstables = loadsstables;
         this.reset(memtable);
@@ -94,7 +107,7 @@ public class Tracker
 
     public static Tracker newDummyTracker(TableMetadataRef metadata)
     {
-        return new Tracker(null, metadata, null, false);
+        return new Tracker(metadata, null, false);
     }
 
     public LifecycleTransaction tryModify(SSTableReader sstable, OperationType operationType)

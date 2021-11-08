@@ -286,7 +286,7 @@ public class LifecycleTransactionTest extends AbstractTransactionalTest
 
         private static Tracker tracker(ColumnFamilyStore cfs, List<SSTableReader> readers)
         {
-            Tracker tracker = new Tracker(cfs, cfs.metadata, cfs.createMemtable(new AtomicReference<>(CommitLogPosition.NONE)), false);
+            Tracker tracker = new Tracker(cfs, cfs.createMemtable(new AtomicReference<>(CommitLogPosition.NONE)), false);
             tracker.addInitialSSTables(readers);
             return tracker;
         }
