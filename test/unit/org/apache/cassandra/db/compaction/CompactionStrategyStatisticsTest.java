@@ -38,6 +38,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.db.compaction.unified.CompactionAggregatePrioritizer;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
@@ -53,6 +54,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 /**
@@ -95,9 +97,12 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
         when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
-        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
+        when(controller.getMaxLevelSize(anyInt(), anyLong())).thenCallRealMethod();
+        when(controller.areL0ShardsEnabled()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.aggregatePrioritizer()).thenReturn(CompactionAggregatePrioritizer.instance);
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
@@ -155,9 +160,12 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenReturn(F);
         when(controller.getThreshold(anyInt())).thenReturn(T);
         when(controller.getMinSstableSizeBytes()).thenReturn(minSize);
-        when(controller.getSurvivalFactor()).thenReturn(1.0);
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSize);
+        when(controller.getMaxLevelSize(anyInt(), anyLong())).thenCallRealMethod();
+        when(controller.areL0ShardsEnabled()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.aggregatePrioritizer()).thenReturn(CompactionAggregatePrioritizer.instance);
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
