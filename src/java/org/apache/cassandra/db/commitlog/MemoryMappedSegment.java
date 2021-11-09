@@ -30,6 +30,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SimpleCachedBufferPool;
 import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 
 /*
@@ -51,7 +52,7 @@ public class MemoryMappedSegment extends CommitLogSegment
         int firstSync = buffer.position();
         buffer.putInt(firstSync + 0, 0);
         buffer.putInt(firstSync + 4, 0);
-        fd = NativeLibrary.getfd(channel);
+        fd = NativeLibrary.instance.getfd(channel);
     }
 
     @Override
@@ -96,7 +97,7 @@ public class MemoryMappedSegment extends CommitLogSegment
         {
             throw new FSWriteError(e, getPath());
         }
-        NativeLibrary.trySkipCache(fd, startMarker, nextMarker, logFile.absolutePath());
+        INativeLibrary.instance.trySkipCache(fd, startMarker, nextMarker, logFile.absolutePath());
     }
 
     @Override

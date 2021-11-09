@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -84,6 +85,9 @@ public class DisallowedDirectories implements DisallowedDirectoriesMBean
      */
     public static File maybeMarkUnreadable(File path)
     {
+        if (!DatabaseDescriptor.supportsBlacklistingDirectory())
+            return null;
+
         File directory = getDirectory(path);
         if (instance.unreadableDirectories.add(directory))
         {
@@ -102,6 +106,9 @@ public class DisallowedDirectories implements DisallowedDirectoriesMBean
      */
     public static File maybeMarkUnwritable(File path)
     {
+        if (!DatabaseDescriptor.supportsBlacklistingDirectory())
+            return null;
+
         File directory = getDirectory(path);
         if (instance.unwritableDirectories.add(directory))
         {

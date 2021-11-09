@@ -49,6 +49,7 @@ import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -282,7 +283,7 @@ public class DirectoriesTest
         for (Component c : DatabaseDescriptor.getSelectedSSTableFormat().uploadComponents())
         {
             File f = desc.fileFor(c);
-            f.createFileIfNotExists();
+            assert f.createFileIfNotExists();
             components.add(f);
         }
         return components;
@@ -480,6 +481,17 @@ public class DirectoriesTest
         }
         catch (IOException ignore) {}
         return file;
+    }
+
+    @Test
+    public void testVerifyFullPermissions() throws IOException
+    {
+        Assert.assertFalse(Directories.verifyFullPermissions(new File("non_directory.txt")));
+
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+        File dir = new File(tmpDir, "sub_dir");
+        dir.tryCreateDirectories();
+        Assert.assertTrue(Directories.verifyFullPermissions(dir));
     }
 
     @Test
@@ -886,30 +898,28 @@ public class DirectoriesTest
     public void testDataDirectoriesIterator() throws IOException
     {
         Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
-        Path subDir_1 = Files.createDirectory(tmpDir.resolve("a"));
-        Path subDir_2 = Files.createDirectory(tmpDir.resolve("b"));
-        Path subDir_3 = Files.createDirectory(tmpDir.resolve("c"));
+        File subDir_1 = new File(Files.createDirectory(tmpDir.resolve("a")));
+        File subDir_2 = new File(Files.createDirectory(tmpDir.resolve("b")));
+        File subDir_3 = new File(Files.createDirectory(tmpDir.resolve("c")));
 
-        DataDirectories directories = new DataDirectories(new String[]{subDir_1.toString(), subDir_2.toString()},
-                                                          new String[]{subDir_3.toString()});
+        DataDirectories directories = new DataDirectories(new File[]{subDir_1, subDir_2}, new File[]{subDir_3});
 
         Iterator<DataDirectory> iter = directories.iterator();
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_1)), iter.next());
+        assertEquals(new DataDirectory(subDir_1), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_2)), iter.next());
+        assertEquals(new DataDirectory(subDir_2), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_3)), iter.next());
+        assertEquals(new DataDirectory(subDir_3), iter.next());
         assertFalse(iter.hasNext());
 
-        directories = new DataDirectories(new String[]{subDir_1.toString(), subDir_2.toString()},
-                                                          new String[]{subDir_1.toString()});
+        directories = new DataDirectories(new File[]{subDir_1, subDir_2}, new File[]{subDir_1});
 
         iter = directories.iterator();
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_1)), iter.next());
+        assertEquals(new DataDirectory(subDir_1), iter.next());
         assertTrue(iter.hasNext());
-        assertEquals(new DataDirectory(new File(subDir_2)), iter.next());
+        assertEquals(new DataDirectory(subDir_2), iter.next());
         assertFalse(iter.hasNext());
     }
 
