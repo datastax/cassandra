@@ -17,15 +17,12 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import java.io.BufferedInputStream;
 import java.io.Closeable;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collection;
@@ -85,6 +82,7 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -877,7 +875,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
     {
-        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
+        try (FileInputStreamPlus stream = descriptor.fileFor(Component.FILTER).newInputStream())
         {
             return BloomFilter.serializer.deserialize(stream, oldBfFormat);
         }
@@ -957,7 +955,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         IFilter bf = null;
         if (SSTableReader.shouldLoadBloomFilter(descriptor, components, currentFPChance, desiredFPChance))
-            bf = SSTableReaderBuilder.loadBloomFilter(Paths.get(descriptor.filenameFor(Component.FILTER)), descriptor.version.hasOldBfFormat());
+            bf = SSTableReaderBuilder.loadBloomFilter(descriptor.fileFor(Component.FILTER), descriptor.version.hasOldBfFormat());
 
         boolean recreateBloomFilter = bf == null && SSTableReader.mayRecreateBloomFilter(descriptor, components, currentFPChance, isOffline, desiredFPChance);
         if (recreateBloomFilter)
@@ -988,7 +986,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
         catch (IOException e)
         {
-            throw new CorruptSSTableException(e, descriptor.filenameFor(Component.STATS));
+            throw new CorruptSSTableException(e, descriptor.fileFor(Component.STATS));
         }
 
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
@@ -1009,7 +1007,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             System.exit(1);
         }
 
-        long fileLength = descriptor.filenameFor(Component.DATA).length();
+        long fileLength = descriptor.fileFor(Component.DATA).length();
         logger.debug("Opening {} ({})", descriptor, FBUtilities.prettyPrintMemory(fileLength));
 
         FileHandle dataFH = null;
@@ -1068,7 +1066,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         }
         catch (IOException e)
         {
-            throw new CorruptSSTableException(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH), descriptor.filenameFor(Component.DATA));
+            throw new CorruptSSTableException(Throwables.close(e, bloomFilter, rowIdxFH, partitionIndex, dataFH), descriptor.fileFor(Component.DATA));
         }
     }
 }
