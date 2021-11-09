@@ -31,6 +31,7 @@ import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -76,9 +77,9 @@ public class BigTableScrubber extends SortedTableScrubber<BigTableReader> implem
     }
 
     @Override
-    protected UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, String filename)
+    protected UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, File file)
     {
-        return options.checkData && !isIndex ? UnfilteredRowIterators.withValidation(iter, filename) : iter;
+        return options.checkData && !isIndex ? UnfilteredRowIterators.withValidation(iter, file) : iter;
     }
 
     @Override

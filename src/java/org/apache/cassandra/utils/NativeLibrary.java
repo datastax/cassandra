@@ -20,6 +20,7 @@ package org.apache.cassandra.utils;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.TimeUnit;
 
@@ -35,22 +36,14 @@ import org.apache.cassandra.io.FSWriteError;
 import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORE_MISSING_NATIVE_FILE_HINTS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.OS_ARCH;
 import static org.apache.cassandra.config.CassandraRelevantProperties.OS_NAME;
-import static org.apache.cassandra.utils.NativeLibrary.OSType.AIX;
-import static org.apache.cassandra.utils.NativeLibrary.OSType.LINUX;
-import static org.apache.cassandra.utils.NativeLibrary.OSType.MAC;
+import static org.apache.cassandra.utils.INativeLibrary.OSType.AIX;
+import static org.apache.cassandra.utils.INativeLibrary.OSType.LINUX;
+import static org.apache.cassandra.utils.INativeLibrary.OSType.MAC;
 
-public final class NativeLibrary
+public class NativeLibrary implements INativeLibrary
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeLibrary.class);
     private static final boolean REQUIRE = !IGNORE_MISSING_NATIVE_FILE_HINTS.getBoolean();
-
-    public enum OSType
-    {
-        LINUX,
-        MAC,
-        AIX,
-        OTHER;
-    }
 
     public static final OSType osType;
 
@@ -77,6 +70,7 @@ public final class NativeLibrary
 
     private static final Field FILE_DESCRIPTOR_FD_FIELD;
     private static final Field FILE_CHANNEL_FD_FIELD;
+    private static final Field FILE_ASYNC_CHANNEL_FD_FIELD;
 
     static
     {
@@ -84,6 +78,7 @@ public final class NativeLibrary
         try
         {
             FILE_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(Class.forName("sun.nio.ch.FileChannelImpl"), "fd");
+            FILE_ASYNC_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(Class.forName("sun.nio.ch.AsynchronousFileChannelImpl"), "fdObj");
         }
         catch (ClassNotFoundException e)
         {
@@ -127,7 +122,7 @@ public final class NativeLibrary
         }
     }
 
-    private NativeLibrary() {}
+    NativeLibrary() {}
 
     /**
      * @return the detected OSType of the Operating System running the JVM using crude string matching
@@ -163,21 +158,26 @@ public final class NativeLibrary
         }
     }
 
-    /**
-     * Checks if the library has been successfully linked.
-     * @return {@code true} if the library has been successfully linked, {@code false} otherwise.
-     */
-    public static boolean isAvailable()
+    @Override
+    public boolean isOS(INativeLibrary.OSType type)
+    {
+        return osType == type;
+    }
+
+    @Override
+    public boolean isAvailable()
     {
         return wrappedLibrary.isAvailable();
     }
 
-    public static boolean jnaMemoryLockable()
+    @Override
+    public boolean jnaMemoryLockable()
     {
         return jnaLockable;
     }
 
-    public static void tryMlockall()
+    @Override
+    public void tryMlockall()
     {
         try
         {
@@ -208,15 +208,15 @@ public final class NativeLibrary
         }
     }
 
-    public static void trySkipCache(String path, long offset, long len)
+    @Override
+    public void trySkipCache(File f, long offset, long len)
     {
-        File f = new File(path);
         if (!f.exists())
             return;
 
         try (FileInputStreamPlus fis = new FileInputStreamPlus(f))
         {
-            trySkipCache(getfd(fis.getChannel()), offset, len, path);
+            trySkipCache(getfd(fis.getChannel()), offset, len, f.path());
         }
         catch (IOException e)
         {
@@ -224,21 +224,23 @@ public final class NativeLibrary
         }
     }
 
-    public static void trySkipCache(int fd, long offset, long len, String path)
+    @Override
+    public void trySkipCache(int fd, long offset, long len, String fileName)
     {
         if (len == 0)
-            trySkipCache(fd, 0, 0, path);
+            trySkipCache(fd, 0, 0, fileName);
 
         while (len > 0)
         {
             int sublen = (int) Math.min(Integer.MAX_VALUE, len);
-            trySkipCache(fd, offset, sublen, path);
+            trySkipCache(fd, offset, sublen, fileName);
             len -= sublen;
             offset -= sublen;
         }
     }
 
-    public static void trySkipCache(int fd, long offset, int len, String path)
+    @Override
+    public void trySkipCache(int fd, long offset, int len, String fileName)
     {
         if (fd < 0)
             return;
@@ -250,12 +252,12 @@ public final class NativeLibrary
                 int result = wrappedLibrary.callPosixFadvise(fd, offset, len, POSIX_FADV_DONTNEED);
                 if (result != 0)
                     NoSpamLogger.log(
-                            logger,
-                            NoSpamLogger.Level.WARN,
-                            10,
-                            TimeUnit.MINUTES,
-                            "Failed trySkipCache on file: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
-                            path);
+                    logger,
+                    NoSpamLogger.Level.WARN,
+                    10,
+                    TimeUnit.MINUTES,
+                    "Failed trySkipCache on file: {} Error: " + wrappedLibrary.callStrerror(result).getString(0),
+                    fileName);
             }
         }
         catch (UnsatisfiedLinkError e)
@@ -272,7 +274,8 @@ public final class NativeLibrary
         }
     }
 
-    public static int tryFcntl(int fd, int command, int flags)
+    @Override
+    public int tryFcntl(int fd, int command, int flags)
     {
         // fcntl return value may or may not be useful, depending on the command
         int result = -1;
@@ -297,8 +300,10 @@ public final class NativeLibrary
         return result;
     }
 
-    public static int tryOpenDirectory(String path)
+    @Override
+    public int tryOpenDirectory(File file)
     {
+        String path = file.path();
         int fd = -1;
 
         try
@@ -321,7 +326,8 @@ public final class NativeLibrary
         return fd;
     }
 
-    public static void trySync(int fd)
+    @Override
+    public void trySync(int fd)
     {
         if (fd == -1)
             return;
@@ -348,7 +354,8 @@ public final class NativeLibrary
         }
     }
 
-    public static void tryCloseFD(int fd)
+    @Override
+    public void tryCloseFD(int fd)
     {
         if (fd == -1)
             return;
@@ -375,7 +382,35 @@ public final class NativeLibrary
         }
     }
 
-    public static int getfd(FileChannel channel)
+    @Override
+    public int getfd(AsynchronousFileChannel channel)
+    {
+        try
+        {
+            return getfd((FileDescriptor) FILE_ASYNC_CHANNEL_FD_FIELD.get(channel));
+        }
+        catch (IllegalArgumentException|IllegalAccessException e)
+        {
+            logger.warn("Unable to read fd field from FileChannel");
+        }
+        return -1;
+    }
+
+    @Override
+    public FileDescriptor getFileDescriptor(AsynchronousFileChannel channel)
+    {
+        try
+        {
+            return (FileDescriptor) FILE_ASYNC_CHANNEL_FD_FIELD.get(channel);
+        }
+        catch (IllegalArgumentException | IllegalAccessException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public int getfd(FileChannel channel)
     {
         try
         {
@@ -394,7 +429,8 @@ public final class NativeLibrary
      * @param descriptor - FileDescriptor objec to get fd from
      * @return file descriptor, -1 or error
      */
-    public static int getfd(FileDescriptor descriptor)
+    @Override
+    public int getfd(FileDescriptor descriptor)
     {
         try
         {
@@ -415,7 +451,8 @@ public final class NativeLibrary
     /**
      * @return the PID of the JVM or -1 if we failed to get the PID
      */
-    public static long getProcessID()
+    @Override
+    public long getProcessID()
     {
         try
         {
@@ -434,7 +471,8 @@ public final class NativeLibrary
         return -1;
     }
 
-    public static FileDescriptor getFileDescriptor(FileChannel channel)
+    @Override
+    public FileDescriptor getFileDescriptor(FileChannel channel)
     {
         try
         {
