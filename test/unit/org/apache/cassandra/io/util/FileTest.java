@@ -24,6 +24,7 @@ import java.io.StringWriter;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -384,5 +385,36 @@ public class FileTest
         ByteBuffer buf = ByteBuffer.allocate(buf1.array().length + buf2.array().length);
         buf.put(buf1.array()).put(buf2.array());
         Assertions.assertThat(Files.readAllBytes(f.toPath())).isEqualTo(buf.array());
+    }
+    
+    @Test
+    public void testCopy() throws IOException
+    {
+        File file = new File(dir, "a");
+        file.toJavaIOFile().createNewFile();
+        Assert.assertTrue(file.exists());
+
+        File newFile = new File(dir, "b");
+        Assert.assertFalse(newFile.exists());
+
+        file.copy(newFile, StandardCopyOption.COPY_ATTRIBUTES);
+        Assert.assertTrue(newFile.exists());
+    }
+
+    @Test
+    public void testResolve()
+    {
+        File file = new File("somewhere/a/");
+        Assert.assertEquals(new File("somewhere/a/b"), file.resolve(new File("b")));
+        Assert.assertEquals(new File("somewhere/a/b"), file.resolve("b"));
+
+        Assert.assertEquals(new File("somewhere/b"), file.resolveSibling("b"));
+    }
+
+    @Test
+    public void testRelative()
+    {
+        File file = new File("somewhere/a/");
+        Assert.assertEquals(new File("../b"), file.relativize(new File("somewhere/b")));
     }
 }

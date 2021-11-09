@@ -32,6 +32,7 @@ import java.util.UUID;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -96,6 +97,16 @@ public class StorageServiceServerTest
         // stopping the client.
         //StorageService.instance.decommission();
         StorageService.instance.stopClient();
+    }
+
+    @Test
+    public void testRegularMode() throws ConfigurationException
+    {
+        for (File path : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            // verify that storage directories are there.
+            assertTrue(path.exists());
+        }
     }
 
     @Test

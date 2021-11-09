@@ -639,7 +639,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
         Set<SSTableReader> compacting = Sets.newHashSet(s);
         try (ISSTableScanner scanner = compacting.iterator().next().getScanner();
              CompactionController controller = new CompactionController(cfs, compacting, 0);
-             LifecycleTransaction txn = offline ? LifecycleTransaction.offline(OperationType.UNKNOWN, compacting)
+             LifecycleTransaction txn = offline ? LifecycleTransaction.offline(OperationType.UNKNOWN, cfs.metadata, compacting)
                                        : cfs.getTracker().tryModify(compacting, OperationType.UNKNOWN);
              SSTableRewriter rewriter = new SSTableRewriter(txn, 100, 10000000, false, true);
              CompactionIterator ci = new CompactionIterator(COMPACTION, singletonList(scanner), controller, nowInSeconds(), nextTimeUUID())

@@ -192,7 +192,19 @@ public enum CassandraRelevantProperties
     /** Which class to use for failure detection */
     CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
     CUSTOM_GUARDRAILS_CONFIG_PROVIDER_CLASS("cassandra.custom_guardrails_config_provider_class"),
+    /**
+     * custom native library for os access
+     */
+    CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
+    /** Watcher used when opening sstables to discover extra components, eg. archive component */
+    CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
+
+    /**
+     * Used to support directory creation for different file system and remote/local conversion
+     */
+    CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
+
     /** Which class to use for token metadata provider */
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
@@ -206,6 +218,10 @@ public enum CassandraRelevantProperties
     DETERMINISM_SSTABLE_COMPRESSION_DEFAULT("cassandra.sstable_compression_default", "true"),
     DETERMINISM_UNSAFE_UUID_NODE("cassandra.unsafe.deterministicuuidnode"),
     DIAGNOSTIC_SNAPSHOT_INTERVAL_NANOS("cassandra.diagnostic_snapshot_interval_nanos", "60000000000"),
+    /**
+     * Whether to disable auto-compaction
+     */
+    DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction"),
     DISABLE_AUTH_CACHES_REMOTE_CONFIGURATION("cassandra.disable_auth_caches_remote_configuration"),
     /** properties to disable certain behaviours for testing */
     DISABLE_GOSSIP_ENDPOINT_REMOVAL("cassandra.gossip.disable_endpoint_removal"),
@@ -365,6 +381,10 @@ public enum CassandraRelevantProperties
      * will set it automatically to {@link CassandraRelevantProperties#LOG_DIR} + "/audit".
      */
     LOG_DIR_AUDIT("cassandra.logdir.audit"),
+    /**
+     * Factory to create instances used during log transaction processing
+     */
+    LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
     /** Loosen the definition of "empty" for gossip state, for use during host replacements if things go awry */
     LOOSE_DEF_OF_EMPTY_ENABLED(Config.PROPERTY_PREFIX + "gossiper.loose_empty_enabled"),
     MAX_CONCURRENT_RANGE_REQUESTS("cassandra.max_concurrent_range_requests"),
@@ -426,6 +446,11 @@ public enum CassandraRelevantProperties
     READS_THRESHOLDS_COORDINATOR_DEFENSIVE_CHECKS_ENABLED("cassandra.reads.thresholds.coordinator.defensive_checks_enabled"),
     RELEASE_VERSION("cassandra.releaseVersion"),
     RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),
+    /**
+     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     */
+    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+
     REPAIR_CLEANUP_INTERVAL_SECONDS("cassandra.repair_cleanup_interval_seconds", convertToString(Ints.checkedCast(TimeUnit.MINUTES.toSeconds(10)))),
     REPAIR_DELETE_TIMEOUT_SECONDS("cassandra.repair_delete_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_FAIL_TIMEOUT_SECONDS("cassandra.repair_fail_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
@@ -572,12 +597,19 @@ public enum CassandraRelevantProperties
     UCS_ADAPTIVE_STARTING_SCALING_PARAMETER("unified_compaction.adaptive_starting_scaling_parameter", "0"),
     UCS_ADAPTIVE_THRESHOLD("unified_compaction.adaptive_threshold", "0.15"),
     UCS_BASE_SHARD_COUNT("unified_compaction.base_shard_count", "4"),
+    /**
+     * To provide custom implementation to prioritize compaction tasks in UCS
+     */
+    UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+
     UCS_DATASET_SIZE_OPTION_GB("unified_compaction.dataset_size_in_gb"),
+    UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
     UCS_MAX_SPACE_OVERHEAD_OPTION("unified_compaction.max_space_overhead", "0.2"),
     UCS_MIN_SSTABLE_SIZE_OPTION_MB("unified_compaction.min_sstable_size_in_mb", "100"),
     UCS_NUM_SHARDS_OPTION("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
     UCS_SCALING_PARAMETER("unified_compaction.scaling_parameters", "T4"),
+    UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
     UCS_STATIC_SCALING_PARAMETERS_OPTION("unified_compaction.static_scaling_parameters", "2"),
     UCS_SURVIVAL_FACTOR("unified_compaction.survival_factor", "1"),
     UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "1GiB"),

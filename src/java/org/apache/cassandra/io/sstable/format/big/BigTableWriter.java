@@ -280,7 +280,7 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
             }
             catch (IOException e)
             {
-                throw new FSWriteError(e, writer.getPath());
+                throw new FSWriteError(e, writer.getFile());
             }
             long indexEnd = writer.position();
 
@@ -315,7 +315,7 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
             // truncate index file
             long position = writer.position();
             writer.prepareToCommit();
-            FileUtils.truncate(writer.getPath(), position);
+            FileUtils.truncate(writer.getFile(), position);
 
             // save summary
             summary.prepareToCommit();

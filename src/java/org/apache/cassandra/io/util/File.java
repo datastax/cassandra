@@ -23,12 +23,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.channels.FileChannel;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths; // checkstyle: permit this import
+import java.nio.file.*;
 import java.util.Objects;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -259,6 +254,47 @@ public class File implements Comparable<File>
     public void move(File to)
     {
         PathUtils.rename(toPathForRead(), to.toPathForWrite());
+    }
+
+    public void copy(File target, StandardCopyOption options)
+    {
+        PathUtils.copy(toPathForRead(), target.toPathForWrite(), options);
+    }
+
+    /**
+     * Constructs a relative path between this path and a given path.
+     */
+    public File relativize(File other)
+    {
+        Path relative = toPathForRead().relativize(other.toPathForRead());
+        return new File(relative);
+    }
+
+    /**
+     * Resolves give path against this path's parent path
+     */
+    public File resolveSibling(String path)
+    {
+        Path sibling = toPathForRead().resolveSibling(path);
+        return new File(sibling);
+    }
+
+    /**
+     * Resolves give path against this path
+     */
+    public File resolve(String path)
+    {
+        Path sibling = toPathForRead().resolve(path);
+        return new File(sibling);
+    }
+
+    /**
+     * Resolves give path against this path
+     */
+    public File resolve(File path)
+    {
+        Path sibling = toPathForRead().resolve(path.toPathForRead());
+        return new File(sibling);
     }
 
     /**
@@ -716,6 +752,11 @@ public class File implements Comparable<File>
         if (this.path == null || that.path == null)
             return this.path == null && that.path == null ? 0 : this.path == null ? -1 : 1;
         return this.path.compareTo(that.path);
+    }
+
+    public URI toUri()
+    {
+        return Objects.requireNonNull(path).toUri();
     }
 
     public java.io.File toJavaIOFile()

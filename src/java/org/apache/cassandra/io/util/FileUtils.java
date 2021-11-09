@@ -51,8 +51,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
@@ -235,12 +235,13 @@ public final class FileUtils
     {
         try
         {
-            Files.copy(from.toPath(), to.toPath());
+            if (from.exists())
+                Files.copy(from.toPath(), to.toPath());
         }
         catch (IOException e)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Could not copy file" + from + " to " + to, e);
+                logger.trace("Could not copy file " + from + " to " + to, e);
         }
     }
 
@@ -267,7 +268,11 @@ public final class FileUtils
 
     public static void truncate(String path, long size)
     {
-        File file = new File(path);
+        truncate(new File(path), size);
+    }
+
+    public static void truncate(File file, long size)
+    {
         try (FileChannel channel = file.newReadWriteChannel())
         {
             channel.truncate(size);
@@ -741,24 +746,6 @@ public final class FileUtils
         file.delete();
     }
 
-    @Deprecated
-    public static void renameWithOutConfirm(String from, String to)
-    {
-        new File(from).tryMove(new File(to));
-    }
-
-    @Deprecated
-    public static void renameWithConfirm(String from, String to)
-    {
-        renameWithConfirm(new File(from), new File(to));
-    }
-
-    @Deprecated
-    public static void renameWithConfirm(File from, File to)
-    {
-        from.move(to);
-    }
-
     /**
      * Private constructor as the class contains only static methods.
      */
@@ -775,15 +762,15 @@ public final class FileUtils
      * @param source the directory containing the files to move
      * @param target the directory where the files must be moved
      */
-    public static void moveRecursively(Path source, Path target) throws IOException
+    public static void moveRecursively(File source, File target) throws IOException
     {
         logger.info("Moving {} to {}" , source, target);
 
-        if (Files.isDirectory(source))
+        if (source.isDirectory())
         {
-            Files.createDirectories(target);
+            target.tryCreateDirectories();
 
-            for (File f : new File(source).tryList())
+            for (File f : source.tryList())
             {
                 String fileName = f.name();
                 moveRecursively(source.resolve(fileName), target.resolve(fileName));
@@ -793,40 +780,56 @@ public final class FileUtils
         }
         else
         {
-            if (Files.exists(target))
+            if (target.exists())
             {
                 logger.warn("Cannot move the file {} to {} as the target file already exists." , source, target);
             }
             else
             {
-                Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES);
-                Files.delete(source);
+                source.copy(target, StandardCopyOption.COPY_ATTRIBUTES);
+                source.delete();
             }
         }
+    }
+
+    @VisibleForTesting
+    @Deprecated
+    public static void moveRecursively(Path source, Path target) throws IOException
+    {
+        moveRecursively(new File(source), new File(target));
     }
 
     /**
      * Deletes the specified directory if it is empty
      *
-     * @param path the path to the directory
+     * @param file the path to the directory
      */
-    public static void deleteDirectoryIfEmpty(Path path) throws IOException
+    public static void deleteDirectoryIfEmpty(File file) throws IOException
     {
-        Preconditions.checkArgument(Files.isDirectory(path), String.format("%s is not a directory", path));
+        Preconditions.checkArgument(file.isDirectory(), String.format("%s is not a directory", file));
 
         try
         {
-            logger.info("Deleting directory {}", path);
-            Files.delete(path);
+            logger.info("Deleting directory {}", file);
+            Files.delete(file.toPath());
         }
         catch (DirectoryNotEmptyException e)
         {
-            try (Stream<Path> paths = Files.list(path))
-            {
-                String content = paths.map(p -> p.getFileName().toString()).collect(Collectors.joining(", "));
-
-                logger.warn("Cannot delete the directory {} as it is not empty. (Content: {})", path, content);
-            }
+            String content = Arrays.stream(file.tryList()).map(File::name).collect(Collectors.joining(", "));
+            logger.warn("Cannot delete the directory {} as it is not empty. (Content: {})", file, content);
         }
+    }
+
+    @VisibleForTesting
+    @Deprecated
+    public static void deleteDirectoryIfEmpty(Path path) throws IOException
+    {
+        deleteDirectoryIfEmpty(new File(path));
+    }
+
+    @Deprecated
+    public static long size(Path path)
+    {
+        return PathUtils.size(path);
     }
 }

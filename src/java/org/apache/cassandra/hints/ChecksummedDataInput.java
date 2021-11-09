@@ -25,8 +25,8 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.NativeLibrary;
 
 /**
  * A {@link RandomAccessReader} wrapper that calculates the CRC in place.
@@ -222,7 +222,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
 
     public void tryUncacheRead()
     {
-        NativeLibrary.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getPath());
+        INativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getFile().toString());
     }
 
     private void updateCrc()
@@ -246,9 +246,9 @@ public class ChecksummedDataInput extends RebufferingInputStream
         channel.close();
     }
 
-    protected String getPath()
+    protected File getFile()
     {
-        return channel.filePath();
+        return channel.getFile();
     }
 
     public ChannelProxy getChannel()

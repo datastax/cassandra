@@ -135,19 +135,19 @@ public abstract class AbstractFilesystemOwnershipCheckTest
         return childDir;
     }
 
-    private static FileSystemOwnershipCheck checker(Supplier<Iterable<String>> dirs)
+    private static FileSystemOwnershipCheck checker(Supplier<Iterable<File>> dirs)
     {
         return new FileSystemOwnershipCheck(dirs);
     }
 
     private static FileSystemOwnershipCheck checker(File...dirs)
     {
-        return checker(() -> Arrays.stream(dirs).map(File::absolutePath).collect(Collectors.toList()));
+        return checker(() -> Arrays.asList(dirs));
     }
 
     private static FileSystemOwnershipCheck checker(String...dirs)
     {
-        return checker(() -> Arrays.asList(dirs));
+        return checker(() -> Arrays.stream(dirs).map(File::new).collect(Collectors.toList()));
     }
 
     public static String makeRandomString(int length)

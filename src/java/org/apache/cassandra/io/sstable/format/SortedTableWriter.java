@@ -170,7 +170,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
         }
 
         if (lastWrittenKey != null && lastWrittenKey.compareTo(key) >= 0)
-            throw new RuntimeException(String.format("Last written key %s >= current key %s, writing into %s", lastWrittenKey, key, getFilename()));
+            throw new RuntimeException(String.format("Last written key %s >= current key %s, writing into %s", lastWrittenKey, key, getDataFile()));
 
         return true;
     }

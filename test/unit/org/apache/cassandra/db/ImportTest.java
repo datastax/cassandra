@@ -236,7 +236,7 @@ public class ImportTest extends CQLTester
             sstable.selfRef().release();
             for (File f : sstable.descriptor.directory.tryList())
             {
-                if (f.toString().contains(sstable.descriptor.baseFile().toString()))
+                if (f.toUri().toString().contains(sstable.descriptor.baseFileUri()))
                 {
                     System.out.println("move " + f.toPath() + " to " + backupdir);
                     File moveFileTo = new File(backupdir, f.name());

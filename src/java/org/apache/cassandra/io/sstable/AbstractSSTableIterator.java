@@ -44,6 +44,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
@@ -141,7 +142,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             catch (IOException e)
             {
                 sstable.markSuspect();
-                String filePath = file.getPath();
+                File filePath = file.getFile();
                 if (shouldCloseFile)
                 {
                     try
