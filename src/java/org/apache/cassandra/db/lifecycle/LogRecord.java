@@ -49,6 +49,8 @@ import org.apache.cassandra.utils.FBUtilities;
 /**
  * A decoded line in a transaction log file replica.
  *
+ * Note: this is used by {@link LogTransaction}
+ *
  * @see LogReplica and LogFile.
  */
 final class LogRecord
@@ -161,8 +163,8 @@ final class LogRecord
 
     public static LogRecord make(Type type, SSTable table)
     {
-        String absoluteTablePath = absolutePath(table.descriptor.baseFile());
-        return make(type, getExistingFiles(absoluteTablePath), table.getAllFilePaths().size(), absoluteTablePath);
+        String absoluteTablePath = table.descriptor.baseFileUri() + Component.separator;
+        return make(type, getExistingFiles(absoluteTablePath), table.getComponentSize(), absoluteTablePath);
     }
 
     public static Map<SSTable, LogRecord> make(Type type, Iterable<SSTableReader> tables)
@@ -170,7 +172,7 @@ final class LogRecord
         // contains a mapping from sstable absolute path (everything up until the 'Data'/'Index'/etc part of the filename) to the sstable
         Map<String, SSTable> absolutePaths = new HashMap<>();
         for (SSTableReader table : tables)
-            absolutePaths.put(absolutePath(table.descriptor.baseFile()), table);
+            absolutePaths.put(table.descriptor.baseFileUri() + Component.separator, table);
 
         // maps sstable base file name to the actual files on disk
         Map<String, List<File>> existingFiles = getExistingFiles(absolutePaths.keySet());
@@ -180,14 +182,9 @@ final class LogRecord
             List<File> filesOnDisk = entry.getValue();
             String baseFileName = entry.getKey();
             SSTable sstable = absolutePaths.get(baseFileName);
-            records.put(sstable, make(type, filesOnDisk, sstable.getAllFilePaths().size(), baseFileName));
+            records.put(sstable, make(type, filesOnDisk, sstable.getComponentSize(), baseFileName));
         }
         return records;
-    }
-
-    private static String absolutePath(File baseFile)
-    {
-        return baseFile.withSuffix(String.valueOf(Component.separator)).canonicalPath();
     }
 
     public LogRecord withExistingFiles(List<File> existingFiles)
@@ -293,7 +290,7 @@ final class LogRecord
 
     public static List<File> getExistingFiles(String absoluteFilePath)
     {
-        File file = new File(absoluteFilePath);
+        File file = new File(PathUtils.getPath(absoluteFilePath));
         File[] files = file.parent().tryList((dir, name) -> name.startsWith(file.name()));
         // files may be null if the directory does not exist yet, e.g. when tracking new files
         return files == null ? Collections.emptyList() : Arrays.asList(files);
@@ -312,10 +309,10 @@ final class LogRecord
         Map<File, TreeSet<String>> dirToFileNamePrefix = new HashMap<>();
         for (String absolutePath : absoluteFilePaths)
         {
-            Path fullPath = new File(absolutePath).toPath();
-            Path path = fullPath.getParent();
-            if (path != null)
-                dirToFileNamePrefix.computeIfAbsent(new File(path), (k) -> new TreeSet<>()).add(fullPath.getFileName().toString());
+            File file = new File(PathUtils.getPath(absolutePath));
+            File parent = file.parent();
+            if (parent != null)
+                dirToFileNamePrefix.computeIfAbsent(parent, (k) -> new TreeSet<>()).add(file.name());
         }
 
         BiPredicate<File, String> ff = (dir, name) -> {
@@ -327,8 +324,8 @@ final class LogRecord
             String baseName = dirSet.floor(name);
             if (baseName != null && name.startsWith(baseName))
             {
-                String absolutePath = new File(dir, baseName).path();
-                fileMap.computeIfAbsent(absolutePath, k -> new ArrayList<>()).add(new File(dir, name));
+                String absolutePath = dir.resolve(baseName).toUri().toString();
+                fileMap.computeIfAbsent(absolutePath, k -> new ArrayList<>()).add(dir.resolve(name));
             }
             return false;
         };
@@ -353,7 +350,7 @@ final class LogRecord
 
     boolean isInFolder(Path folder)
     {
-        return absolutePath.isPresent() && PathUtils.isContained(folder, new File(absolutePath.get()).toPath());
+        return absolutePath.isPresent() && PathUtils.isContained(folder, new File(PathUtils.getPath(absolutePath.get())).toPath());
     }
 
     String absolutePath()

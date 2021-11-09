@@ -50,10 +50,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentManagerCDC.class);
     private final CDCSizeTracker cdcSizeTracker;
 
-    public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
+    public CommitLogSegmentManagerCDC(final CommitLog commitLog, File storageDirectory)
     {
         super(commitLog, storageDirectory);
-        cdcSizeTracker = new CDCSizeTracker(this, new File(DatabaseDescriptor.getCDCLogLocation()));
+        cdcSizeTracker = new CDCSizeTracker(this, DatabaseDescriptor.getCDCLogLocation());
     }
 
     @Override
@@ -93,7 +93,7 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         if (bytesToFree <= 0)
             return 0;
 
-        File cdcDir = new File(DatabaseDescriptor.getCDCLogLocation());
+        File cdcDir = DatabaseDescriptor.getCDCLogLocation();
         Preconditions.checkState(cdcDir.isDirectory(), "The CDC directory does not exist.");
         File[] files = cdcDir.tryList(f -> CommitLogDescriptor.isValid(f.name()));
         if (files == null || files.length == 0)

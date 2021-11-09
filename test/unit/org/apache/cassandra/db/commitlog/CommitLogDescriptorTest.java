@@ -113,7 +113,7 @@ public class CommitLogDescriptorTest
         // Put some extra data in the stream.
         buf.putDouble(0.1);
         buf.flip();
-        FileDataInput input = new FileSegmentInputStream(buf, "input", 0);
+        FileDataInput input = new FileSegmentInputStream(buf, new File("input"), 0);
         CommitLogDescriptor read = CommitLogDescriptor.readHeader(input, neverEnabledEncryption);
         Assert.assertEquals("Descriptor length", length, input.getFilePointer());
         Assert.assertEquals("Descriptors", desc, read);
