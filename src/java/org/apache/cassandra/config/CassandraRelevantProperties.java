@@ -231,6 +231,8 @@ public enum CassandraRelevantProperties
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
     /** In_JVM dtest property indicating that the test should use "latest" configuration */
     DTEST_JVM_DTESTS_USE_LATEST("jvm_dtests.latest"),
+    /** Which class to use for dynamic snitch severity values */
+    DYNAMIC_SNITCH_SEVERITY_PROVIDER("cassandra.dynamic_snitch_severity_provider"),
     ENABLE_DC_LOCAL_COMMIT("cassandra.enable_dc_local_commit", "true"),
     ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER("cassandra.enable_guardrails_for_anonymous_user", "true"),
     /**
