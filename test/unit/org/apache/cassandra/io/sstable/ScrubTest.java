@@ -494,7 +494,7 @@ public class ScrubTest
             List<String> keys = Arrays.asList("t", "a", "b", "z", "c", "y", "d");
             Descriptor desc = cfs.newSSTableDescriptor(tempDataDir);
 
-            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
                  SSTableTxnWriter writer = new SSTableTxnWriter(txn, createTestWriter(desc, keys.size(), cfs, txn)))
             {
                 for (String k : keys)

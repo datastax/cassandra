@@ -65,7 +65,9 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * of unfinished leftovers when a transaction is completed, or aborted, or when
  * we clean up on start-up.
  *
- * @see LogTransaction
+ * Note: this is used by {@link LogTransaction}
+ *
+ * @see AbstractLogTransaction
  */
 @NotThreadSafe
 final class LogFile implements AutoCloseable
@@ -391,8 +393,7 @@ final class LogFile implements AutoCloseable
     private void maybeCreateReplica(SSTable sstable)
     {
         File directory = sstable.descriptor.directory;
-        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
-        replicas.maybeCreateReplica(directory, fileName, onDiskRecords);
+        replicas.maybeCreateReplica(directory, getFileName(), onDiskRecords);
     }
 
     void addRecord(LogRecord record)
@@ -532,7 +533,7 @@ final class LogFile implements AutoCloseable
     }
 
     @VisibleForTesting
-    List<String> getFilePaths()
+    List<File> getFilePaths()
     {
         return replicas.getFilePaths();
     }
