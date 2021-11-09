@@ -399,6 +399,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         return ByteBuffer.wrap(toWrap);
     }
 
+    private int getCDCRawCount()
+    {
+        return DatabaseDescriptor.getCDCLogLocation().tryList().length;
+    }
+
     private void expectCurrentCDCState(CDCState expectedState)
     {
         CDCState currentState = CommitLog.instance.segmentManager.allocatingFrom().getCDCState();

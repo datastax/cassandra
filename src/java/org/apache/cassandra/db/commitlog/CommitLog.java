@@ -173,7 +173,7 @@ public class CommitLog implements CommitLogMBean
 
     public File[] getUnmanagedFiles()
     {
-        File[] files = new File(segmentManager.storageDirectory).tryList(unmanagedFilesFilter);
+        File[] files = segmentManager.storageDirectory.tryList(unmanagedFilesFilter);
         if (files == null)
             return new File[0];
         return files;
@@ -559,7 +559,7 @@ public class CommitLog implements CommitLogMBean
         segmentManager.stopUnsafe(deleteSegments);
         CommitLogSegment.resetReplayLimit();
         if (DatabaseDescriptor.isCDCEnabled() && deleteSegments)
-            for (File f : new File(DatabaseDescriptor.getCDCLogLocation()).tryList())
+            for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
                 f.delete();
     }
 
@@ -575,7 +575,7 @@ public class CommitLog implements CommitLogMBean
 
     public static long freeDiskSpace()
     {
-        return PathUtils.tryGetSpace(new File(DatabaseDescriptor.getCommitLogLocation()).toPath(), FileStore::getTotalSpace);
+        return PathUtils.tryGetSpace(DatabaseDescriptor.getCommitLogLocation().toPath(), FileStore::getTotalSpace);
     }
 
     @VisibleForTesting

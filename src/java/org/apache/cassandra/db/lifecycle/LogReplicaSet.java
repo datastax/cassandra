@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,11 +42,13 @@ import org.apache.cassandra.utils.Throwables;
  * A set of log replicas. This class mostly iterates over replicas when writing or reading,
  * ensuring consistency among them and hiding replication details from LogFile.
  *
+ * Note: this is used by {@link LogTransaction}
+ *
  * @see LogReplica
  * @see LogFile
  */
 @NotThreadSafe
-public class LogReplicaSet implements AutoCloseable
+final class LogReplicaSet implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(LogReplicaSet.class);
 
@@ -282,8 +285,8 @@ public class LogReplicaSet implements AutoCloseable
     }
 
     @VisibleForTesting
-    List<String> getFilePaths()
+    List<File> getFilePaths()
     {
-        return replicas().stream().map(LogReplica::file).map(File::path).collect(Collectors.toList());
+        return replicas().stream().map(LogReplica::file).collect(Collectors.toList());
     }
 }

@@ -89,7 +89,7 @@ public abstract class CommitLogStressTest
     public static int rateLimit = 0;
     public static int runTimeMs = 10000;
 
-    public static String location = DatabaseDescriptor.getCommitLogLocation() + "/stress";
+    public static File location = DatabaseDescriptor.getCommitLogLocation().resolve("stress");
 
     public static int hash(int hash, ByteBuffer bytes)
     {
@@ -140,10 +140,9 @@ public abstract class CommitLogStressTest
     @Before
     public void cleanDir() throws IOException
     {
-        File dir = new File(location);
-        if (dir.isDirectory())
+        if (location.isDirectory())
         {
-            File[] files = dir.tryList();
+            File[] files = location.tryList();
 
             for (File f : files)
                 if (!f.tryDelete())
@@ -151,7 +150,7 @@ public abstract class CommitLogStressTest
         }
         else
         {
-            dir.tryCreateDirectory();
+            location.tryCreateDirectory();
         }
     }
 
@@ -194,11 +193,12 @@ public abstract class CommitLogStressTest
 
     private void testLog() throws IOException, InterruptedException
     {
-        String originalDir = DatabaseDescriptor.getCommitLogLocation();
+        File originalDir = DatabaseDescriptor.getCommitLogLocation();
         try
         {
             DatabaseDescriptor.setCommitLogLocation(location);
             DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            DatabaseDescriptor.getRawConfig().commitlog_directory = location.path();
             CommitLog commitLog = new CommitLog(CommitLogArchiver.disabled()).start();
             testLog(commitLog);
             assert !failed;
@@ -207,6 +207,7 @@ public abstract class CommitLogStressTest
         {
             DatabaseDescriptor.setCommitLogLocation(originalDir);
             DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            DatabaseDescriptor.getRawConfig().commitlog_directory = originalDir.path();
         }
     }
 
@@ -271,7 +272,7 @@ public abstract class CommitLogStressTest
         System.out.println("Stopped. Replaying... ");
         System.out.flush();
         Reader reader = new Reader();
-        File[] files = new File(location).tryList();
+        File[] files = location.tryList();
 
         DummyHandler handler = new DummyHandler();
         reader.readAllFiles(handler, files);
@@ -309,7 +310,7 @@ public abstract class CommitLogStressTest
         commitLog.segmentManager.awaitManagementTasksCompletion();
 
         long combinedSize = 0;
-        for (File f : new File(commitLog.segmentManager.storageDirectory).tryList())
+        for (File f : commitLog.segmentManager.storageDirectory.tryList())
         {
             combinedSize += f.length();
         }
