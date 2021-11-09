@@ -94,7 +94,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
     @SuppressWarnings({"resource", "RedundantSuppression"}) // log and writer closed during doPostCleanup
     public static SSTableTxnWriter create(ColumnFamilyStore cfs, Descriptor descriptor, long keyCount, long repairedAt, TimeUUID pendingRepair, boolean isTransient, SerializationHeader header)
     {
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
         SSTableMultiWriter writer = cfs.createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, header, txn);
         return new SSTableTxnWriter(txn, writer);
     }
@@ -111,7 +111,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
     {
 
         ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
         SSTableMultiWriter writer;
         try
         {
@@ -139,7 +139,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
                                           SSTable.Owner owner)
     {
         // if the column family store does not exist, we create a new default SSTableMultiWriter to use:
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, metadata);
         SSTableMultiWriter writer = SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, null, 0, header, indexGroups, txn, owner);
         return new SSTableTxnWriter(txn, writer);
     }

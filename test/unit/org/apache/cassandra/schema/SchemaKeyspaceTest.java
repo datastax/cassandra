@@ -286,4 +286,19 @@ public class SchemaKeyspaceTest
         executeOnceInternal(query, testKS, testTable);
         SchemaKeyspace.fetchNonSystemKeyspaces();
     }
+
+    @Test
+    public void testIsKeyspaceWithLocalStrategy()
+    {
+        assertTrue(Schema.isKeyspaceWithLocalStrategy("system"));
+        assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("system")));
+        assertFalse(Schema.isKeyspaceWithLocalStrategy("non_existing"));
+
+        SchemaLoader.createKeyspace("local_ks", KeyspaceParams.local());
+        SchemaLoader.createKeyspace("simple_ks", KeyspaceParams.simple(3));
+
+        assertTrue(Schema.isKeyspaceWithLocalStrategy("local_ks"));
+        assertTrue(Schema.isKeyspaceWithLocalStrategy(Schema.instance.getKeyspaceMetadata("local_ks")));
+        assertFalse(Schema.isKeyspaceWithLocalStrategy("simple_ks"));
+    }
 }

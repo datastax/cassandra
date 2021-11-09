@@ -148,7 +148,7 @@ public class SSTableZeroCopyWriterTest
         Descriptor desc = store.newSSTableDescriptor(dir);
         TableMetadataRef metadata = Schema.instance.getTableMetadataRef(desc);
 
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM, metadata);
         Set<Component> componentsToWrite = new HashSet<>(desc.getFormat().uploadComponents());
         if (!metadata.getLocal().params.compression.isEnabled())
             componentsToWrite.remove(Components.COMPRESSION_INFO);

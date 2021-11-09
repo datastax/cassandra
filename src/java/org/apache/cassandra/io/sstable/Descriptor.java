@@ -37,6 +37,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataSerializer;
 import org.apache.cassandra.io.sstable.metadata.MetadataSerializer;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.Pair;
 
@@ -96,6 +97,7 @@ public class Descriptor
     private final int hashCode;
     private final String prefix;
     private final File baseFile;
+    private final String baseFileURI;
 
     /**
      * A descriptor that assumes CURRENT_VERSION.
@@ -140,23 +142,24 @@ public class Descriptor
 
         // directory is unnecessary for hashCode, and for simulator consistency we do not include it
         hashCode = Objects.hashCode(version, id, ksname, cfname);
-    }
 
-    private String tmpFilenameFor(Component component)
-    {
-        return fileFor(component) + TMP_EXT;
+        String locationURI = directory.toUri().toString();
+        if (!locationURI.endsWith(java.io.File.separator))
+            locationURI = locationURI + java.io.File.separatorChar;
+        baseFileURI = locationURI + prefix;
     }
 
     public File tmpFileFor(Component component)
     {
-        return new File(directory.toPath().resolve(tmpFilenameFor(component)));
+        File file = StorageProvider.instance.getLocalPath(fileFor(component));
+        return file.resolveSibling(file.name() + TMP_EXT);
     }
 
     private String tmpFilenameForStreaming(Component component)
     {
         // Use UUID to handle concurrent streamings on the same sstable.
         // TMP_EXT allows temp file to be removed by {@link ColumnFamilyStore#scrubDataDirectories}
-        return String.format("%s.%s%s", filenameFor(component), nextTimeUUID(), TMP_EXT);
+        return String.format("%s.%s%s", fileFor(component), nextTimeUUID(), TMP_EXT);
     }
 
     /**
@@ -174,7 +177,7 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return new File(directory.toPath().resolve(filenameFor(component)));
+        return component.getFile(baseFileUri());
     }
 
     public File baseFile()
@@ -187,6 +190,11 @@ public class Descriptor
         buff.append(version).append(separator);
         buff.append(id.toString());
         buff.append(separator).append(version.format.name());
+    }
+
+    public String baseFileUri()
+    {
+        return baseFileURI;
     }
 
     public String relativeFilenameFor(Component component)
@@ -463,7 +471,7 @@ public class Descriptor
     @Override
     public String toString()
     {
-        return baseFile().absolutePath();
+        return baseFileUri();
     }
 
     @Override

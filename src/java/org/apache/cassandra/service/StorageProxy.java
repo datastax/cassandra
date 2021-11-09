@@ -1935,7 +1935,9 @@ public class StorageProxy implements StorageProxyMBean
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
-        if (!isSafeToPerformRead(group.queries))
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(group.metadata());
+
+        if (!cfs.isReadyToServeData() && !systemKeyspaceQuery(group.queries))
         {
             metrics.readMetrics.unavailables.mark();
             metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();

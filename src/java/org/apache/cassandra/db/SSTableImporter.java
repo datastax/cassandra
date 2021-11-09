@@ -266,7 +266,7 @@ public class SSTableImporter
             if (sstable != null)
                 sstable.selfRef().release();
         }
-        return targetDirectory == null ? cfs.getDirectories().getWriteableLocationToLoadFile(descriptor.baseFile()) : targetDirectory;
+        return targetDirectory == null ? cfs.getDirectories().getWriteableLocationToLoadFile(new File(descriptor.baseFileUri())) : targetDirectory;
     }
 
     /**
@@ -287,7 +287,7 @@ public class SSTableImporter
                 {
                     throw new RuntimeException(String.format("Directory %s does not exist", path));
                 }
-                if (!Directories.verifyFullPermissions(dir, path))
+                if (!Directories.verifyFullPermissions(dir))
                 {
                     throw new RuntimeException("Insufficient permissions on directory " + path);
                 }
