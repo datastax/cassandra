@@ -95,18 +95,18 @@ public class FileSystemOwnershipCheck implements StartupCheck
     static final String INVALID_PROPERTY_VALUE                  = "invalid or missing value for property '%s'";
     static final String READ_EXCEPTION                          = "error when checking for fs ownership file";
 
-    private final Supplier<Iterable<String>> dirs;
+    private final Supplier<Iterable<File>> dirs;
 
     FileSystemOwnershipCheck()
     {
         this(() -> Iterables.concat(Arrays.asList(DatabaseDescriptor.getAllDataFileLocations()),
                                     Arrays.asList(DatabaseDescriptor.getCommitLogLocation(),
                                                   DatabaseDescriptor.getSavedCachesLocation(),
-                                                  DatabaseDescriptor.getHintsDirectory().absolutePath())));
+                                                  DatabaseDescriptor.getHintsDirectory())));
     }
 
     @VisibleForTesting
-    FileSystemOwnershipCheck(Supplier<Iterable<String>> dirs)
+    FileSystemOwnershipCheck(Supplier<Iterable<File>> dirs)
     {
         this.dirs = dirs;
     }
@@ -134,11 +134,11 @@ public class FileSystemOwnershipCheck implements StartupCheck
         Map<Path, Properties> foundProperties = new HashMap<>();
 
         // Step 1: Traverse the filesystem from each target dir upward, looking for marker files
-        for (String dataDir : dirs.get())
+        for (File dataDir : dirs.get())
         {
             logger.info("Checking for fs ownership details in file hierarchy for {}", dataDir);
             int foundFiles = 0;
-            Path dir = File.getPath(dataDir).normalize();
+            Path dir = dataDir.toPath().normalize();
             do
             {
                 File tokenFile = resolve(dir, tokenFilename);
@@ -163,7 +163,7 @@ public class FileSystemOwnershipCheck implements StartupCheck
                 dir = dir.getParent();
             } while (dir != null);
 
-            foundPerTargetDir.put(dataDir, foundFiles);
+            foundPerTargetDir.put(dataDir.toString(), foundFiles);
         }
 
         // If a marker file couldn't be found for every target directory, error.

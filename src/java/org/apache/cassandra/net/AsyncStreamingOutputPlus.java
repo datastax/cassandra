@@ -33,6 +33,7 @@ import io.netty.channel.DefaultFileRegion;
 import io.netty.channel.FileRegion;
 import io.netty.channel.WriteBufferWaterMark;
 import io.netty.handler.ssl.SslHandler;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.SharedDefaultFileRegion.SharedFileChannel;
@@ -156,8 +157,8 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus implements 
      */
     public long writeFileToChannel(FileChannel file, RateLimiter limiter) throws IOException
     {
-        if (channel.pipeline().get(SslHandler.class) != null)
-            // each batch is loaded into ByteBuffer, 64KiB is more BufferPool friendly.
+        if (channel.pipeline().get(SslHandler.class) != null || !DatabaseDescriptor.nettyZerocopyEnabled())
+            // each batch is loaded into ByteBuffer, 64kb is more BufferPool friendly.
             return writeFileToChannel(file, limiter, 1 << 16);
         else
             // write files in 1MiB chunks, since there may be blocking work performed to fetch it from disk,

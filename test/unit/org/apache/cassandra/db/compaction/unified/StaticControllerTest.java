@@ -25,11 +25,16 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SHARED_STORAGE;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.when;
 
 public class StaticControllerTest extends ControllerTest
 {
@@ -62,23 +67,44 @@ public class StaticControllerTest extends ControllerTest
     }
 
     @Test
+    public void testSurvivalFactorForSharedStorage()
+    {
+        try (WithProperties ignore = new WithProperties().set(UCS_SHARED_STORAGE, true))
+        {
+            final int rf = 3;
+            when(cfs.getKeyspaceReplicationFactor()).thenReturn(rf);
+
+            Controller controller = Controller.fromOptions(cfs,  new HashMap<>());
+            assertNotNull(controller);
+            assertNotNull(controller.toString());
+
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR / rf, controller.getSurvivalFactor(0), epsilon);
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(1), epsilon);
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(2), epsilon);
+
+            assertThatThrownBy(() -> controller.getSurvivalFactor(-1)).isInstanceOf(IllegalArgumentException.class);
+
+        }
+    }
+
+    @Test
     public void testStartShutdown()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, CompactionAggregatePrioritizer.instance);
         super.testStartShutdown(controller);
     }
 
     @Test
     public void testShutdownNotStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, CompactionAggregatePrioritizer.instance);
         super.testShutdownNotStarted(controller);
     }
 
     @Test(expected = IllegalStateException.class)
     public void testStartAlreadyStarted()
     {
-        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTOR, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, CompactionAggregatePrioritizer.instance);
         super.testStartAlreadyStarted(controller);
     }
 
