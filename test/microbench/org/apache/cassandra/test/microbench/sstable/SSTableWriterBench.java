@@ -97,7 +97,7 @@ public class SSTableWriterBench extends AbstractSSTableBench
     @Setup(Level.Invocation)
     public void setupInvocation() throws Exception
     {
-        txn = LifecycleTransaction.offline(OperationType.WRITE);
+        txn = LifecycleTransaction.offline(OperationType.WRITE, table.metadata);
         tableWriter = createWriter(table, getFormat(formatName), txn);
     }
 

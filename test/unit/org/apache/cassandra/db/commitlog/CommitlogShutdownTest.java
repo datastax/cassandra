@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -103,7 +102,7 @@ public class CommitlogShutdownTest
             Assert.assertFalse("An unused segment is left after drain: " + segment.getName()
                                + ", dirty tables: " + segment.dirtyString()
                                + ", total segments: " + CommitLog.instance.segmentManager.getActiveSegments().size()
-                               + ", commit log files: " + Arrays.toString(new File(DatabaseDescriptor.getCommitLogLocation()).listFiles()),
+                               + ", commit log files: " + Arrays.toString(DatabaseDescriptor.getCommitLogLocation().tryList()),
                                segment.isUnused());
         }
     }
