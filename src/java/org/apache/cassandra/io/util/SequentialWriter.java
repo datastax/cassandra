@@ -36,8 +36,6 @@ import static org.apache.cassandra.utils.Throwables.merge;
  */
 public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional
 {
-    // absolute path to the given file
-    private final String filePath;
     private final File file;
 
     // Offset for start of buffer relative to underlying file
@@ -168,7 +166,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         this.fchannel = (FileChannel)channel;
 
         this.file = file;
-        this.filePath = file.absolutePath();
 
         this.option = option;
     }
@@ -196,7 +193,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 
@@ -250,7 +247,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
         if (runPostFlush != null)
             runPostFlush.accept(getLastFlushOffset());
@@ -321,13 +318,8 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
-    }
-
-    public String getPath()
-    {
-        return filePath;
     }
 
     public File getFile()
@@ -382,7 +374,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
 
         bufferOffset = truncateTarget;
@@ -403,7 +395,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 

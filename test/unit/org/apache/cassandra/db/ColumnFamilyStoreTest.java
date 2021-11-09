@@ -579,12 +579,12 @@ public class ColumnFamilyStoreTest
         assertThat(baseTableFile).isNotEqualTo(indexTableFile);
         assertThat(Directories.isSecondaryIndexFolder(new File(indexTableFile).parent())).isTrue();
 
-        Set<String> originalFiles = new HashSet<>();
+        Set<File> originalFiles = new HashSet<>();
         Iterables.toList(cfs.concatWithIndexes()).stream()
                  .flatMap(c -> c.getLiveSSTables().stream().map(t -> t.descriptor.fileFor(Components.DATA)))
-                 .forEach(e -> originalFiles.add(e.toString()));
-        assertThat(originalFiles.stream().anyMatch(f -> f.endsWith(indexTableFile))).isTrue();
-        assertThat(originalFiles.stream().anyMatch(f -> f.endsWith(baseTableFile))).isTrue();
+                 .forEach(originalFiles::add);
+        assertThat(originalFiles.stream().anyMatch(f -> f.toString().endsWith(indexTableFile))).isTrue();
+        assertThat(originalFiles.stream().anyMatch(f -> f.toString().endsWith(baseTableFile))).isTrue();
     }
 
     private void createSnapshotAndDelete(String ks, String table, boolean writeData)

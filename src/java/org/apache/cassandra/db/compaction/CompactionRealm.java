@@ -83,6 +83,11 @@ public interface CompactionRealm extends SSTableReader.Owner
     }
 
     /**
+     * @return the replication factor for keyspace that this table belongs to.
+     */
+    int getKeyspaceReplicationFactor();
+
+    /**
      * @return the partitioner used by this table.
      */
     default IPartitioner getPartitioner()
