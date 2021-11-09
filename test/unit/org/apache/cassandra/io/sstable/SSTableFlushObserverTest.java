@@ -101,7 +101,7 @@ public class SSTableFlushObserverTest
                      .addRegularColumn("age", Int32Type.instance)
                      .addRegularColumn("height", LongType.instance)
                      .build();
-        String sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0];
+        String sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0].toString();
         directory = new File(sstableDirectory + File.pathSeparator() + KS_NAME + File.pathSeparator() + CF_NAME);
         directory.deleteOnExit();
 
@@ -114,7 +114,7 @@ public class SSTableFlushObserverTest
     @Test
     public void testFlushObserver() throws Exception
     {
-        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION))
+        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION, TableMetadataRef.forOfflineTools(cfm)))
         {
             FlushObserver observer = new FlushObserver();
 
@@ -193,7 +193,7 @@ public class SSTableFlushObserverTest
     @Test
     public void testFailedInitialization() throws Exception
     {
-        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION))
+        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION, TableMetadataRef.forOfflineTools(cfm)))
         {
             FlushObserver observer1 = new FlushObserver();
             FlushObserver observer2 = new FlushObserver();

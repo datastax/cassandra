@@ -44,6 +44,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Answers;
@@ -120,7 +121,7 @@ public class BaseCompactionStrategyTest
                                               .addPartitionKeyColumn("pk", AsciiType.instance)
                                               .build();
 
-        dataTracker = Tracker.newDummyTracker();
+        dataTracker = Tracker.newDummyTracker(TableMetadataRef.forOfflineTools(metadata));
         repairedAt = System.currentTimeMillis();
         partitioner = DatabaseDescriptor.getPartitioner();
         splitter = partitioner.splitter().orElse(null);

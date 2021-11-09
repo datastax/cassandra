@@ -134,7 +134,7 @@ public class DataResurrectionCheck implements StartupCheck
         }
         else
         {
-            String[] dataFileLocations = DatabaseDescriptor.getLocalSystemKeyspacesDataFileLocations();
+            File[] dataFileLocations = DatabaseDescriptor.getLocalSystemKeyspacesDataFileLocations();
             assert dataFileLocations.length != 0;
             heartbeatFile = new File(dataFileLocations[0], DEFAULT_HEARTBEAT_FILE);
         }

@@ -328,7 +328,7 @@ public class BufferedRandomAccessFileTest
     public void testGetPath() throws IOException
     {
         SequentialWriter file = createTempFile("brafGetPath");
-        assert file.getPath().contains("brafGetPath");
+        assert file.getFile().toString().contains("brafGetPath");
         file.finish();
     }
 
@@ -416,7 +416,7 @@ public class BufferedRandomAccessFileTest
         try (FileHandle fh = new FileHandle.Builder(tmpFile).complete();
              RandomAccessReader r = fh.createReader())
         {
-            assert tmpFile.path().equals(r.getPath());
+            assert tmpFile.equals(r.getFile());
 
             // Create a mark and move the rw there.
             final DataPosition mark = r.mark();
@@ -437,7 +437,7 @@ public class BufferedRandomAccessFileTest
         w.write(data);
         w.finish();
 
-        final RandomAccessReader r = RandomAccessReader.open(new File(w.getPath()));
+        final RandomAccessReader r = RandomAccessReader.open(w.getFile());
 
         r.close(); // closing to test read after close
 
@@ -449,7 +449,7 @@ public class BufferedRandomAccessFileTest
         //write of a 0 length, but that is kind of a corner case
         expectException(() -> { w.write(generateByteArray(1)); return null; }, AssertionError.class);
 
-        try (RandomAccessReader copy = RandomAccessReader.open(new File(r.getPath())))
+        try (RandomAccessReader copy = RandomAccessReader.open(r.getFile()))
         {
             ByteBuffer contents = ByteBufferUtil.read(copy, (int) copy.length());
 
@@ -526,7 +526,7 @@ public class BufferedRandomAccessFileTest
         file.sync(); // flushing file to the disk
 
         // read-only copy of the file, with fixed file length
-        final RandomAccessReader copy = RandomAccessReader.open(new File(file.getPath()));
+        final RandomAccessReader copy = RandomAccessReader.open(file.getFile());
 
         copy.seek(copy.length());
         assertTrue(copy.bytesRemaining() == 0 && copy.isEOF());

@@ -255,7 +255,7 @@ public class ClearSnapshotTest extends CQLTester
     }
 
     private void rewriteManifest(String tableId,
-                                 String[] dataDirs,
+                                 File[] dataDirs,
                                  String keyspace,
                                  String tableName,
                                  String snapshotName,
@@ -267,11 +267,11 @@ public class ClearSnapshotTest extends CQLTester
         manifestWithEphemeralFlag.serializeToJsonFile(new File(manifestPath));
     }
 
-    private Path findManifest(String[] dataDirs, String keyspace, String tableId, String tableName, String snapshotName)
+    private Path findManifest(File[] dataDirs, String keyspace, String tableId, String tableName, String snapshotName)
     {
-        for (String dataDir : dataDirs)
+        for (File dataDir : dataDirs)
         {
-            Path manifest = Paths.get(dataDir)
+            Path manifest = Paths.get(dataDir.toString())
                                  .resolve(keyspace)
                                  .resolve(format("%s-%s", tableName, tableId))
                                  .resolve("snapshots")

@@ -494,7 +494,7 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
             }
 
             // Identify the process on the load: we use both the PID and class loader hash.
-            long pid = NativeLibrary.getProcessID();
+            long pid = INativeLibrary.instance.getProcessID();
             if (pid < 0)
                 pid = new Random(currentTimeMillis()).nextLong();
             updateWithLong(hasher, pid);
