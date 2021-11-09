@@ -63,6 +63,7 @@ import static org.apache.cassandra.utils.FBUtilities.parseKernelVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class FBUtilitiesTest
@@ -398,5 +399,11 @@ public class FBUtilitiesTest
         Semver kernelVersion = FBUtilities.getKernelVersion();
         assertThat(kernelVersion).isGreaterThan(new Semver("0.0.0", Semver.SemverType.LOOSE));
         assertThat(kernelVersion).isLessThan(new Semver("100.0.0", Semver.SemverType.LOOSE));
+    }
+    
+    public void testDebug()
+    {
+        String trace = FBUtilities.Debug.getStackTrace();
+        assertTrue(trace.contains("testDebug"));
     }
 }

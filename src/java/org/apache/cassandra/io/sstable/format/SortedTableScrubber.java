@@ -253,7 +253,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         return newInOrderSstable;
     }
 
-    protected abstract UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, String filename);
+    protected abstract UnfilteredRowIterator withValidation(UnfilteredRowIterator iter, File file);
 
     @Override
     @VisibleForTesting
@@ -290,7 +290,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         // that one row is out of order, it will stop returning them. The remaining rows will be sorted and added
         // to the outOfOrder set that will be later written to a new SSTable.
         try (OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(key), realm.metadata().comparator);
-             UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getPath()))
+             UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getFile()))
         {
             if (prevKey != null && prevKey.compareTo(key) > 0)
             {
