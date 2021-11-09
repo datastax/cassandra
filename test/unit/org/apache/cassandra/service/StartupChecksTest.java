@@ -93,7 +93,7 @@ public class StartupChecksTest
         for (File dataDir : Directories.getKSChildDirectories(SchemaConstants.SYSTEM_KEYSPACE_NAME))
             dataDir.deleteRecursive();
 
-        File dataDir = new File(DatabaseDescriptor.getAllDataFileLocations()[0]);
+        File dataDir = DatabaseDescriptor.getAllDataFileLocations()[0];
         sstableDir = Paths.get(dataDir.absolutePath(), "Keyspace1", "Standard1");
         Files.createDirectories(sstableDir);
 
@@ -140,7 +140,7 @@ public class StartupChecksTest
 
         // and in the system directory as of CASSANDRA-17777
         new File(backupDir).deleteRecursive();
-        File dataDir = new File(DatabaseDescriptor.getAllDataFileLocations()[0]);
+        File dataDir = DatabaseDescriptor.getAllDataFileLocations()[0];
         Path systemDir = Paths.get(dataDir.absolutePath(), "system", "InvalidSystemDirectory");
         Files.createDirectories(systemDir);
         copyInvalidLegacySSTables(systemDir);
@@ -298,9 +298,9 @@ public class StartupChecksTest
 
     private void testKernelBug1057843Check(String fsType, DiskAccessMode diskAccessMode, Semver kernelVersion, boolean expectToFail) throws Exception
     {
-        String commitLogLocation = Files.createTempDirectory("testKernelBugCheck").toString();
+        File commitLogLocation =new File(Files.createTempDirectory("testKernelBugCheck"));
 
-        String savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
+        File savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
         DiskAccessMode savedCommitLogWriteDiskAccessMode = DatabaseDescriptor.getCommitLogWriteDiskAccessMode();
         Semver savedKernelVersion = FBUtilities.getKernelVersion();
         try
@@ -310,7 +310,7 @@ public class StartupChecksTest
             DatabaseDescriptor.initializeCommitLogDiskAccessMode();
             assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(diskAccessMode);
             FBUtilities.setKernelVersionSupplier(() -> kernelVersion);
-            withPathOverriddingFileSystem(Map.of(commitLogLocation, fsType), () -> {
+            withPathOverriddingFileSystem(Map.of(commitLogLocation.path(), fsType), () -> {
                 if (expectToFail)
                     assertThatExceptionOfType(StartupException.class).isThrownBy(() -> StartupChecks.checkKernelBug1057843.execute(options));
                 else

@@ -190,6 +190,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
+                txn.trackNewAttachedIndexFiles(sstable);
             }
 
             return false;
@@ -340,7 +341,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             if (isFullRebuild)
                 throw new RuntimeException(logMessage(String.format("%s are dropped, will stop index build.", droppedIndexes)));
             else
-                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFile());
+                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFileUri());
         }
 
         return existing;

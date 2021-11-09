@@ -231,7 +231,7 @@ public class JVMStabilityInspectorThrowableTest extends TestBaseImpl
 
         private CorruptSSTableException throwCorrupted()
         {
-            throw new CorruptSSTableException(new IOException("failed to get position"), descriptor.baseFile());
+            throw new CorruptSSTableException(new IOException("failed to get position"), descriptor.baseFileUri());
         }
 
         private FSError throwFSError()
