@@ -40,7 +40,7 @@ import com.google.common.collect.Lists;
 import org.apache.commons.io.IOUtils;
 
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.jboss.byteman.agent.install.Install;
 import org.jboss.byteman.agent.submit.Submit;
 import org.jboss.byteman.rule.helper.Helper;
@@ -109,7 +109,7 @@ public class Injections
      */
     private static Long getProcessId()
     {
-        long pid = NativeLibrary.getProcessID();
+        long pid = INativeLibrary.instance.getProcessID();
         if (pid >= 0)
             return pid;
 

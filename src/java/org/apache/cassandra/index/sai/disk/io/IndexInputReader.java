@@ -54,7 +54,7 @@ public class IndexInputReader extends IndexInput
 
     private IndexInputReader(RandomAccessReader input, Runnable doOnClose, long offset, long length)
     {
-        super(input.getPath());
+        super(input.getFile().toString());
         this.input = input;
         this.doOnClose = doOnClose;
         this.offset = offset;
@@ -98,7 +98,65 @@ public class IndexInputReader extends IndexInput
     @Override
     public void readBytes(byte[] bytes, int off, int len) throws IOException
     {
-        input.readFully(bytes, off, len);
+        try
+        {
+            input.readFully(bytes, off, len);
+        }
+        catch (CorruptBlockException ex)
+        {
+            throw new CorruptIndexException(input.getFile().toString(), "Corrupted block", ex);
+        }
+    }
+
+    /**
+     * Using {@link RandomAccessReader#readShort()} directly is faster than {@link DataInput#readShort()} which calls
+     * {@link DataInput#readByte()} one by one
+     */
+    @Override
+    public short readShort() throws IOException
+    {
+        try
+        {
+            return input.readShort();
+        }
+        catch (CorruptBlockException ex)
+        {
+            throw new CorruptIndexException(input.getFile().toString(), "Corrupted block", ex);
+        }
+    }
+
+    /**
+     * Using {@link RandomAccessReader#readInt()} directly is faster than {@link DataInput#readInt()} which
+     * calls {@link DataInput#readByte()} one by one
+     */
+    @Override
+    public int readInt() throws IOException
+    {
+        try
+        {
+            return input.readInt();
+        }
+        catch (CorruptBlockException ex)
+        {
+            throw new CorruptIndexException(input.getFile().toString(), "Corrupted block", ex);
+        }
+    }
+
+    /**
+     * Using {@link RandomAccessReader#readLong()} directly is faster than {@link DataInput#readLong()} which
+     * calls {@link DataInput#readByte()} one by one
+     */
+    @Override
+    public long readLong() throws IOException
+    {
+        try
+        {
+            return input.readLong();
+        }
+        catch (CorruptBlockException ex)
+        {
+            throw new CorruptIndexException(input.getFile().toString(), "Corrupted block", ex);
+        }
     }
 
     @Override

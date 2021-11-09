@@ -52,6 +52,7 @@ import org.apache.cassandra.utils.ClassLoadingTestNonAssignable;
 import org.apache.cassandra.utils.ClassLoadingTestSupport;
 import org.assertj.core.api.Assertions;
 import org.mockito.MockedStatic;
+import org.apache.cassandra.io.util.File;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
@@ -854,12 +855,12 @@ public class DatabaseDescriptorTest
         ParameterizedClass savedCompression = DatabaseDescriptor.getCommitLogCompression();
         EncryptionContext savedEncryptionContexg = DatabaseDescriptor.getEncryptionContext();
         Config.DiskAccessMode savedCommitLogDOS = DatabaseDescriptor.getCommitLogWriteDiskAccessMode();
-        String savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
+        File savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
 
         try
         {
             // block size available
-            DatabaseDescriptor.setCommitLogLocation(Files.createTempDirectory("testCommitLogDiskAccessMode").toString());
+            DatabaseDescriptor.setCommitLogLocation(new File(Files.createTempDirectory("testCommitLogDiskAccessMode")));
 
             // no encryption or compression
             DatabaseDescriptor.setCommitLogCompression(null);
@@ -958,10 +959,10 @@ public class DatabaseDescriptorTest
     @Test
     public void testDataFileDirectoriesMinTotalSpaceInGB() throws IOException
     {
-        DatabaseDescriptor.getRawConfig().data_file_directories = new String[]{};
+        DatabaseDescriptor.setDataDirectories(new File[] {});
         assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
 
-        DatabaseDescriptor.getRawConfig().data_file_directories = new String[] { temporaryFolder.newFolder("data").toString() };
+        DatabaseDescriptor.setDataDirectories(new File[] { new File(temporaryFolder.newFolder("data"))});
         assertTrue(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() > 0);
 
         Multiset<FileStore> fileStoreMultiset = HashMultiset.create();
