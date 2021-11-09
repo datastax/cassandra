@@ -63,9 +63,9 @@ public class SnapshotLoader
         this(DatabaseDescriptor.getAllDataFileLocations());
     }
 
-    public SnapshotLoader(String[] dataDirectories)
+    public SnapshotLoader(File[] dataDirectories)
     {
-        this(Arrays.stream(dataDirectories).map(File::getPath).collect(Collectors.toList()));
+        this(Arrays.stream(dataDirectories).map(File::toPath).collect(Collectors.toList()));
     }
 
     public SnapshotLoader(Collection<Path> dataDirs)

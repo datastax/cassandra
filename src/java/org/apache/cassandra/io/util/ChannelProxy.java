@@ -25,7 +25,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
@@ -54,11 +54,6 @@ public final class ChannelProxy extends SharedCloseableImpl
         {
             throw new RuntimeException(e);
         }
-    }
-
-    public ChannelProxy(String path)
-    {
-        this (new File(path));
     }
 
     public ChannelProxy(File file)
@@ -120,7 +115,7 @@ public final class ChannelProxy extends SharedCloseableImpl
      */
     public final ChannelProxy newChannel()
     {
-        return new ChannelProxy(filePath);
+        return new ChannelProxy(file);
     }
 
     public ChannelProxy sharedCopy()
@@ -130,7 +125,12 @@ public final class ChannelProxy extends SharedCloseableImpl
 
     public String filePath()
     {
-        return filePath;
+        return file.path();
+    }
+
+    public File getFile()
+    {
+        return file;
     }
 
     public File file()
@@ -147,7 +147,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -159,7 +159,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -171,7 +171,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -183,13 +183,13 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
     public int getFileDescriptor()
     {
-        return NativeLibrary.getfd(channel);
+        return INativeLibrary.instance.getfd(channel);
     }
 
     @Override

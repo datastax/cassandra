@@ -26,12 +26,19 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 
+import java.util.Collections;
+
+/**
+ * Mutable SSTable components and their hardlinks to avoid concurrent sstable component modification
+ * during entire-sstable-streaming.
+ */
 public class ComponentContext implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(ComponentContext.class);
@@ -47,6 +54,9 @@ public class ComponentContext implements AutoCloseable
 
     public static ComponentContext create(SSTable sstable)
     {
+        if (!DatabaseDescriptor.supportsHardlinksForEntireSSTableStreaming())
+            return new ComponentContext(Collections.emptyMap(), ComponentManifest.create(sstable));
+
         Descriptor descriptor = sstable.descriptor;
         Map<Component, File> hardLinks = new HashMap<>(1);
 
