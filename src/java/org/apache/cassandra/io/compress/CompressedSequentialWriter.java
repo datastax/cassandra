@@ -115,7 +115,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
     }
 
@@ -194,7 +194,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
         if (toWrite == buffer)
             buffer.position(uncompressedLength);
@@ -269,7 +269,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new CorruptBlockException(getPath(), chunkOffset, chunkSize, e);
+                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize, e);
             }
 
             CRC32 checksum = new CRC32();
@@ -280,19 +280,19 @@ public class CompressedSequentialWriter extends SequentialWriter
             fchannel.read(crcCheckBuffer);
             crcCheckBuffer.flip();
             if (crcCheckBuffer.getInt() != (int) checksum.getValue())
-                throw new CorruptBlockException(getPath(), chunkOffset, chunkSize);
+                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize);
         }
         catch (CorruptBlockException e)
         {
-            throw new CorruptSSTableException(e, getPath());
+            throw new CorruptSSTableException(e, getFile());
         }
         catch (EOFException e)
         {
-            throw new CorruptSSTableException(new CorruptBlockException(getPath(), chunkOffset, chunkSize), getPath());
+            throw new CorruptSSTableException(new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize), getFile());
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
 
         // Mark as dirty so we can guarantee the newly buffered bytes won't be lost on a rebuffer
@@ -315,7 +315,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 
@@ -332,7 +332,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new FSReadError(e, getPath());
+                throw new FSReadError(e, getFile());
             }
         }
     }

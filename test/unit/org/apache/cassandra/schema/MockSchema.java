@@ -357,9 +357,8 @@ public class MockSchema
     public static void cleanup()
     {
         // clean up data directory which are stored as data directory/keyspace/data files
-        for (String dirName : DatabaseDescriptor.getAllDataFileLocations())
+        for (File dir : DatabaseDescriptor.getAllDataFileLocations())
         {
-            File dir = new File(dirName);
             if (!dir.exists())
                 continue;
             String[] children = dir.tryListNames();

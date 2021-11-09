@@ -67,6 +67,7 @@ import org.apache.cassandra.io.sstable.indexsummary.IndexSummarySupport;
 import org.apache.cassandra.io.sstable.keycache.KeyCache;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -168,10 +169,10 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         if (ifile == null)
             return null;
 
-        String path = null;
+        File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))
         {
-            path = in.getPath();
+            path = in.getFile();
             while (!in.isEOF())
             {
                 ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
@@ -286,10 +287,10 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         // is lesser than the first key of next interval (and in that case we must return the position of the first key
         // of the next interval).
         int i = 0;
-        String path = null;
+        File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))
         {
-            path = in.getPath();
+            path = in.getFile();
             while (!in.isEOF())
             {
                 i++;
@@ -334,7 +335,7 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))
-                                    throw new AssertionError(String.format("%s != %s in %s", keyInDisk, key, fdi.getPath()));
+                                    throw new AssertionError(String.format("%s != %s in %s", keyInDisk, key, fdi.getFile()));
                             }
                         }
 

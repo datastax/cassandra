@@ -19,10 +19,8 @@ package org.apache.cassandra.io.sstable;
 
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -178,6 +176,11 @@ public abstract class SSTable
         return metadata.get();
     }
 
+    public TableMetadataRef metadataRef()
+    {
+        return metadata;
+    }
+
     public IPartitioner getPartitioner()
     {
         return metadata().partitioner;
@@ -190,7 +193,12 @@ public abstract class SSTable
 
     public String getFilename()
     {
-        return descriptor.fileFor(Components.DATA).absolutePath();
+        return getDataFile().path();
+    }
+
+    public File getDataFile()
+    {
+        return descriptor.fileFor(Components.DATA);
     }
 
     public String getColumnFamilyName()
@@ -208,12 +216,9 @@ public abstract class SSTable
         return descriptor.id;
     }
 
-    public List<String> getAllFilePaths()
+    public int getComponentSize()
     {
-        List<String> ret = new ArrayList<>(components.size());
-        for (Component component : components)
-            ret.add(descriptor.fileFor(component).absolutePath());
-        return ret;
+        return components.size();
     }
 
     /**
