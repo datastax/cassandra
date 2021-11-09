@@ -33,13 +33,8 @@ import com.codahale.metrics.ExponentiallyDecayingReservoir;
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.net.LatencySubscribers;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -281,7 +276,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
     @VisibleForTesting
     public void updateScores() // this is expensive
     {
-        if (!StorageService.instance.isInitialized())
+        if (!DynamicSnitchSeverityProvider.instance.isReady())
             return;
         if (!registered)
         {
@@ -377,23 +372,16 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
 
     public static void addSeverity(double severity)
     {
-        Gossiper.instance.addLocalApplicationState(ApplicationState.SEVERITY, StorageService.instance.valueFactory.severity(severity));
+        DynamicSnitchSeverityProvider.instance.setSeverity(FBUtilities.getBroadcastAddressAndPort(), severity);
     }
 
     @VisibleForTesting
     public static double getSeverity(InetAddressAndPort endpoint)
     {
-        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (state == null)
-            return 0.0;
-
-        VersionedValue event = state.getApplicationState(ApplicationState.SEVERITY);
-        if (event == null)
-            return 0.0;
-
-        return Double.parseDouble(event.value);
+        return DynamicSnitchSeverityProvider.instance.getSeverity(endpoint);
     }
 
+    @Override
     public double getSeverity()
     {
         return getSeverity(FBUtilities.getBroadcastAddressAndPort());
