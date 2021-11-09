@@ -53,6 +53,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class FBUtilitiesTest
@@ -362,5 +363,12 @@ public class FBUtilitiesTest
             Assert.assertEquals(value, FBUtilities.parseHumanReadable(vBin, sep, unit), getDelta(value));
             Assert.assertEquals(value, FBUtilities.parseHumanReadable(vDec, sep, unit), getDelta(value));
         }
+    }
+
+    @Test
+    public void testDebug()
+    {
+        String trace = FBUtilities.Debug.getStackTrace();
+        assertTrue(trace.contains("testDebug"));
     }
 }

@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.Checksum;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.utils.ChecksumType;
 
 public class DataIntegrityMetadata
@@ -32,6 +33,7 @@ public class DataIntegrityMetadata
         private final ChecksumType checksumType;
         private final RandomAccessReader reader;
         public final int chunkSize;
+        private final File dataFile;
 
         public ChecksumValidator(File dataFile, File crcFile) throws IOException
         {
@@ -40,11 +42,21 @@ public class DataIntegrityMetadata
                  dataFile.absolutePath());
         }
 
-        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, String dataFilename) throws IOException
+        public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, File dataFile) throws IOException
         {
             this.checksumType = checksumType;
             this.reader = reader;
+            this.dataFile = dataFile;
             chunkSize = reader.readInt();
+        }
+
+        @VisibleForTesting
+        protected ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, int chunkSize)
+        {
+            this.checksumType = checksumType;
+            this.reader = reader;
+            this.dataFile = null;
+            this.chunkSize = chunkSize;
         }
 
         public void seek(long offset)
@@ -64,7 +76,7 @@ public class DataIntegrityMetadata
             int calculatedValue = (int) checksumType.of(bytes, start, end);
             int storedValue = reader.readInt();
             if (calculatedValue != storedValue)
-                throw new IOException(String.format("Corrupted file: integrity check (%s) failed for %s: %d != %d", checksumType.name(), reader.getPath(), storedValue, calculatedValue));
+                throw new IOException(String.format("Corrupted file: integrity check (%s) failed for %s: %d != %d", checksumType.name(), dataFile, storedValue, calculatedValue));
         }
 
         /**
@@ -78,7 +90,7 @@ public class DataIntegrityMetadata
             int calculatedValue = (int) checksumType.of(buffer);
             int storedValue = reader.readInt();
             if (calculatedValue != storedValue)
-                throw new IOException(String.format("Corrupted file: integrity check (%s) failed for %s: %d != %d", checksumType.name(), reader.getPath(), storedValue, calculatedValue));
+                throw new IOException(String.format("Corrupted file: integrity check (%s) failed for %s: %d != %d", checksumType.name(), dataFile, storedValue, calculatedValue));
         }
 
         public void close()

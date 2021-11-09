@@ -99,6 +99,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     private final CompactionRealm realm;
     private final boolean partitionSSTablesByTokenRange;
     private final Supplier<DiskBoundaries> boundariesSupplier;
+    private final boolean enableAutoCompaction;
 
     /**
      * Performs mutual exclusion on the variables below
@@ -141,17 +142,19 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     public static int TWCS_BUCKET_COUNT_MAX = 128;
 
 
-    public CompactionStrategyManager(CompactionStrategyFactory strategyFactory)
+    public CompactionStrategyManager(CompactionStrategyFactory strategyFactory, boolean enableAutoCompaction)
     {
         this(strategyFactory,
              () -> strategyFactory.getRealm().getDiskBoundaries(),
-             strategyFactory.getRealm().getPartitioner().splitter().isPresent());
+             strategyFactory.getRealm().getPartitioner().splitter().isPresent(),
+             enableAutoCompaction);
     }
 
     @VisibleForTesting
     public CompactionStrategyManager(CompactionStrategyFactory strategyFactory,
                                      Supplier<DiskBoundaries> boundariesSupplier,
-                                     boolean partitionSSTablesByTokenRange)
+                                     boolean partitionSSTablesByTokenRange,
+                                     boolean enableAutoCompaction)
     {
         AbstractStrategyHolder.DestinationRouter router = new AbstractStrategyHolder.DestinationRouter()
         {
@@ -166,6 +169,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             }
         };
 
+        this.enableAutoCompaction = enableAutoCompaction;
         realm = strategyFactory.getRealm();
 
         transientRepairs = new PendingRepairHolder(realm, strategyFactory, router, true);
@@ -186,9 +190,10 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     public static CompactionStrategyContainer create(@Nullable CompactionStrategyContainer previous,
                                                      CompactionStrategyFactory strategyFactory,
                                                      CompactionParams compactionParams,
-                                                     CompactionStrategyContainer.ReloadReason reason)
+                                                     CompactionStrategyContainer.ReloadReason reason,
+                                                     boolean enableAutoCompaction)
     {
-        CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory);
+        CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory, enableAutoCompaction);
         csm.reload(previous != null ? previous : csm, compactionParams, reason);
         return csm;
     }
@@ -255,7 +260,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     @Override
     public boolean isEnabled()
     {
-        return enabled && isActive;
+        return enableAutoCompaction && enabled && isActive;
     }
 
     @Override
@@ -485,7 +490,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     private void doReload(CompactionStrategyContainer previous, CompactionParams compactionParams, ReloadReason reason)
     {
         boolean updateDiskBoundaries = currentBoundaries == null || currentBoundaries.isOutOfDate();
-        boolean enabledOnReload = CompactionStrategyFactory.enableCompactionOnReload(previous, compactionParams, reason);
+        boolean enabledOnReload = CompactionStrategyFactory.enableCompactionOnReload(previous, compactionParams, reason) && enableAutoCompaction;
 
         logger.debug("Recreating compaction strategy for {}.{}, reason: {}, params updated: {}, disk boundaries updated: {}, enabled: {}, params: {} -> {}, metadataParams: {}",
                      realm.getKeyspaceName(), realm.getTableName(), reason, !compactionParams.equals(params), updateDiskBoundaries, enabledOnReload, params, compactionParams, metadataParams);

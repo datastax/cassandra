@@ -34,6 +34,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -280,7 +281,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public void markObsolete(Runnable tidier)
+    public void markObsolete(AbstractLogTransaction.ReaderTidier tidier)
     {
         delegate.markObsolete(tidier);
     }
@@ -646,9 +647,15 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public List<String> getAllFilePaths()
+    public Set<Component> getComponents()
     {
-        return delegate.getAllFilePaths();
+        return delegate.getComponents();
+    }
+
+    @Override
+    public int getComponentSize()
+    {
+        return delegate.getComponentSize();
     }
 
     @Override

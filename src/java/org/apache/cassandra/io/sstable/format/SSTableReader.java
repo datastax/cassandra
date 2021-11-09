@@ -63,6 +63,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -93,6 +94,7 @@ import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -112,8 +114,8 @@ import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -420,6 +422,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                                      boolean validate,
                                      boolean isOffline)
     {
+        components = SSTableWatcher.instance.discoverComponents(descriptor, components);
         SSTableReaderLoadingBuilder<?, ?> builder = descriptor.getFormat().getReaderFactory().loadingBuilder(descriptor, metadata, components);
 
         return builder.build(owner, validate, !isOffline);
@@ -944,7 +947,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * <p>
      * Calling it multiple times is usually buggy.
      */
-    public void markObsolete(Runnable tidier)
+    public void markObsolete(AbstractLogTransaction.ReaderTidier tidier)
     {
         if (logger.isTraceEnabled())
             logger.trace("Marking {} compacted", getFilename());
@@ -1669,7 +1672,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         // sstable have been released
         private WeakReference<ScheduledFuture<?>> readMeterSyncFuture = NULL;
         // shared state managing if the logical sstable has been compacted; this is used in cleanup
-        private volatile Runnable obsoletion;
+        private volatile AbstractLogTransaction.ReaderTidier obsoletion;
 
         GlobalTidy(final SSTableReader reader)
         {
@@ -1687,6 +1690,13 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             if (!TRACK_ACTIVITY || SchemaConstants.isLocalSystemKeyspace(desc.ksname) || DatabaseDescriptor.isClientOrToolInitialized())
             {
                 readMeter = null;
+                readMeterSyncFuture = NULL;
+                return;
+            }
+
+            if (!DatabaseDescriptor.supportsSSTableReadMeter())
+            {
+                readMeter = new RestorableMeter();
                 readMeterSyncFuture = NULL;
                 return;
             }
@@ -1721,11 +1731,11 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             lookup.remove(desc);
 
             if (obsoletion != null)
-                obsoletion.run();
+                obsoletion.commit();
 
             // don't ideally want to dropPageCache for the file until all instances have been released
             for (Component c : desc.discoverComponents())
-                NativeLibrary.trySkipCache(desc.fileFor(c).absolutePath(), 0, 0);
+                INativeLibrary.instance.trySkipCache(desc.fileFor(c), 0, 0);
         }
 
         @Override

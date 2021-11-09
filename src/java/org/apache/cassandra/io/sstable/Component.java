@@ -30,6 +30,10 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components.Types;
 
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
+
 /**
  * SSTables are made up of multiple components in separate files. Components are
  * identified by a type and an id, but required unique components (such as the Data
@@ -221,6 +225,17 @@ public class Component
     public boolean isValidFor(Descriptor descriptor)
     {
         return type.formatClass.isAssignableFrom(descriptor.version.format.getClass());
+    }
+
+    public File getFile(String absolutePath)
+    {
+        File ret;
+        if (absolutePath.lastIndexOf(separator) != (absolutePath.length() - 1))
+            ret = new File(PathUtils.getPath(absolutePath + separator + name));
+        else
+            ret = new File(PathUtils.getPath(absolutePath + name));
+
+        return StorageProvider.instance.withOpenOptions(ret, this);
     }
 
     @Override

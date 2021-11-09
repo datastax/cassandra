@@ -398,6 +398,8 @@ public class Config
     @Replaces(oldName = "max_mutation_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
     public DataStorageSpec.IntKibibytesBound max_mutation_size;
 
+    public StorageFlagsConfig storage_flags = new StorageFlagsConfig();
+
     // Change-data-capture logs
     public boolean cdc_enabled = false;
     // When true, new CDC mutations are rejected/blocked when reaching max CDC storage.
@@ -680,6 +682,7 @@ public class Config
     public volatile boolean automatic_sstable_upgrade = false;
     public volatile int max_concurrent_automatic_sstable_upgrades = 1;
     public boolean stream_entire_sstables = true;
+    public boolean netty_zerocopy_enabled = true;
 
     public volatile boolean skip_stream_disk_space_check = false;
 

@@ -37,6 +37,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataSerializer;
 import org.apache.cassandra.io.sstable.metadata.MetadataSerializer;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.Pair;
 
@@ -97,6 +98,9 @@ public class Descriptor
     private final String prefix;
     private final File baseFile;
 
+    private final String baseFileURI;
+    private final String filenamePart;
+
     /**
      * A descriptor that assumes CURRENT_VERSION.
      */
@@ -149,14 +153,15 @@ public class Descriptor
 
     public File tmpFileFor(Component component)
     {
-        return new File(directory.toPath().resolve(tmpFilenameFor(component)));
+        File file = StorageProvider.instance.getLocalPath(fileFor(component));
+        return file.resolveSibling(file.name() + TMP_EXT);
     }
 
     private String tmpFilenameForStreaming(Component component)
     {
         // Use UUID to handle concurrent streamings on the same sstable.
         // TMP_EXT allows temp file to be removed by {@link ColumnFamilyStore#scrubDataDirectories}
-        return String.format("%s.%s%s", filenameFor(component), nextTimeUUID(), TMP_EXT);
+        return String.format("%s.%s%s", fileFor(component), nextTimeUUID(), TMP_EXT);
     }
 
     /**
@@ -174,7 +179,7 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return new File(directory.toPath().resolve(filenameFor(component)));
+        return component.getFile(baseFileUri());
     }
 
     public File baseFile()
@@ -189,6 +194,11 @@ public class Descriptor
         buff.append(separator).append(version.format.name());
     }
 
+    public String baseFileUri()
+    {
+        return baseFileURI;
+    }
+
     public String relativeFilenameFor(Component component)
     {
         final StringBuilder buff = new StringBuilder();
@@ -197,9 +207,7 @@ public class Descriptor
             buff.append(directory.name()).append(File.pathSeparator());
         }
 
-        appendFileName(buff);
-        buff.append(separator).append(component.name());
-        return buff.toString();
+        return buff.append(filenamePart).append(separator).append(component.name()).toString();
     }
 
     public SSTableFormat<?, ?> getFormat()
@@ -463,7 +471,7 @@ public class Descriptor
     @Override
     public String toString()
     {
-        return baseFile().absolutePath();
+        return baseFileUri();
     }
 
     @Override

@@ -208,7 +208,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     {
         @SuppressWarnings({"resource", "RedundantSuppression"})  // all writers are closed in close()
         SequentialWriter writer = componentWriters.get(component.name);
-        logger.info("Writing component {} to {} length {}", component, writer.getPath(), prettyPrintMemory(size));
+        logger.info("Writing component {} to {} length {}", component, writer.getFile(), prettyPrintMemory(size));
 
         if (in instanceof AsyncStreamingInputPlus)
             write((AsyncStreamingInputPlus) in, size, writer);
@@ -218,7 +218,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
 
     private void write(AsyncStreamingInputPlus in, long size, SequentialWriter writer) throws ClosedChannelException
     {
-        logger.info("Block Writing component to {} length {}", writer.getPath(), prettyPrintMemory(size));
+        logger.info("Block Writing component to {} length {}", writer.getFile(), prettyPrintMemory(size));
 
         try
         {
@@ -238,7 +238,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, writer.getPath());
+            throw new FSWriteError(e, writer.getFile());
         }
     }
 }

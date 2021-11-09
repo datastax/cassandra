@@ -262,6 +262,24 @@ public enum CassandraRelevantProperties
     GOSSIPER_QUARANTINE_DELAY("cassandra.gossip_quarantine_delay_ms"),
     GOSSIPER_SKIP_WAITING_TO_SETTLE("cassandra.skip_wait_for_gossip_to_settle", "-1"),
     GOSSIP_DISABLE_THREAD_VALIDATION("cassandra.gossip.disable_thread_validation"),
+    /**
+     * Factory to create instances used during log transaction processing
+     */
+    LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
+    /**
+     * To provide custom implementation to prioritize compaction tasks in UCS
+     */
+    UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+
+    /**
+     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     */
+    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+
+    /**
+     * custom native library for os access
+     */
+    CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
 
     /**
      * Delay before checking if gossip is settled.
@@ -608,6 +626,18 @@ public enum CassandraRelevantProperties
                 prev = next;
         }
     }
+    /**
+     * Used to support directory creation for different file system and remote/local conversion
+     */
+    CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
+
+    /** Watcher used when opening sstables to discover extra components, eg. archive component */
+    CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
+
+    /**
+     * Whether to disable auto-compaction
+     */
+    DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction"),
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
@@ -986,6 +1016,19 @@ public enum CassandraRelevantProperties
         {
             throw new ConfigurationException(String.format("Invalid value for system property: " +
                                                            "expected floating point value but got '%s'", value));
+        }
+    };
+
+    private static final PropertyConverter<Double> DOUBLE_CONVERTER = value ->
+    {
+        try
+        {
+            return Double.parseDouble(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected double value but got '%s'", value));
         }
     };
 
