@@ -28,8 +28,9 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
-import org.apache.cassandra.index.sai.disk.v2.sortedbytes.SortedBytesReader;
-import org.apache.cassandra.index.sai.disk.v2.sortedbytes.SortedBytesWriter;
+import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
+import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
+import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.test.microbench.index.sai.v1.AbstractOnDiskBenchmark;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -72,9 +73,10 @@ import org.openjdk.jmh.infra.Blackhole;
 @Measurement(iterations = 1, timeUnit = TimeUnit.MICROSECONDS)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Thread)
-public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
+public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
 {
-    private static final int NUM_INVOCATIONS = 1_000_000;
+    private static final int NUM_ROWS = 1_000_000;
+    private static final int NUM_INVOCATIONS = 1_000; // must be <= (NUM_ROWS / max(skippingDistance))
 
     @Param({ "1", "10", "100", "1000"})
     public int skippingDistance;
@@ -83,8 +85,8 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     private int[] rowIds;
     private long[] tokenValues;
     FileHandle trieFile;
-    IndexInput bytesInput, blockFPInput;
-    SortedBytesReader sortedBytesReader;
+    IndexInput termsData, blockFPInput;
+    SortedTermsReader sortedTermsReader;
     Path luceneDir;
     Directory directory;
     DirectoryReader luceneReader;
@@ -93,17 +95,17 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @Override
     public int numRows()
     {
-        return NUM_INVOCATIONS;
+        return NUM_ROWS;
     }
 
     @Override
     public int numPostings()
     {
-        return NUM_INVOCATIONS;
+        return NUM_ROWS;
     }
 
-    SortedBytesWriter.Meta meta = null;
-    byte[][] bcIntBytes = new byte[NUM_INVOCATIONS][];
+    SortedTermsMeta meta = null;
+    byte[][] bcIntBytes = new byte[NUM_ROWS][];
 
     @Setup(Level.Trial)
     public void perTrialSetup2() throws IOException
@@ -112,11 +114,10 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
              IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.TERMS_DATA);
              IndexOutputWriter blockFPWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.KD_TREE_POSTING_LISTS))
         {
-            SortedBytesWriter writer = new SortedBytesWriter(trieWriter,
-                                                             bytesWriter,
-                                                             blockFPWriter);
+            SortedTermsWriter writer = new SortedTermsWriter(bytesWriter, blockFPWriter, trieWriter
+            );
 
-            for (int x = 0; x < NUM_INVOCATIONS; x++)
+            for (int x = 0; x < NUM_ROWS; x++)
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(x);
                 ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
@@ -137,7 +138,7 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
         Document document = new Document();
 
         int i = 0;
-        for (int x = 0; x < NUM_INVOCATIONS; x++)
+        for (int x = 0; x < NUM_ROWS; x++)
         {
             document.clear();
             byte[] bytes = new byte[4];
@@ -150,7 +151,7 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
         indexWriter.close();
     }
 
-    byte[][] luceneBytes = new byte[NUM_INVOCATIONS][];
+    byte[][] luceneBytes = new byte[NUM_ROWS][];
 
     @Override
     public void beforeInvocation() throws Throwable
@@ -158,16 +159,16 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
         // rowIdToToken.findTokenRowID keeps track of last position, so it must be per-benchmark-method-invocation.
         rowIdToToken = openRowIdToTokenReader();
 
-        rowIds = new int[NUM_INVOCATIONS];
-        tokenValues = new long[NUM_INVOCATIONS];
+        rowIds = new int[NUM_ROWS];
+        tokenValues = new long[NUM_ROWS];
 
         trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE);
-        bytesInput = indexDescriptor.openPerSSTableInput(IndexComponent.TERMS_DATA);
+        termsData = indexDescriptor.openPerSSTableInput(IndexComponent.TERMS_DATA);
         blockFPInput = indexDescriptor.openPerSSTableInput(IndexComponent.KD_TREE_POSTING_LISTS);
 
-        sortedBytesReader = new SortedBytesReader(meta,
-                                                  trieFile,
-                                                  blockFPInput);
+        sortedTermsReader = new SortedTermsReader(termsData,
+                                                  blockFPInput, trieFile, meta
+        );
 
         luceneReader = DirectoryReader.open(directory);
         LeafReaderContext context = luceneReader.leaves().get(0);
@@ -179,7 +180,7 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     public void afterInvocation() throws Throwable
     {
         luceneReader.close();
-        bytesInput.close();
+        termsData.close();
         blockFPInput.close();
         rowIdToToken.close();
         trieFile.close();
@@ -188,7 +189,7 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput})
-    public void luceneBytesSeekToPointID(Blackhole bh) throws IOException
+    public void luceneSeekToPointID(Blackhole bh) throws IOException
     {
         for (int i = 0; i < NUM_INVOCATIONS;)
         {
@@ -200,37 +201,52 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput})
-    public void luceneBytesSeekToTerm(Blackhole bh) throws IOException
+    public void luceneSeekToTerm(Blackhole bh) throws IOException
     {
-        for (int i = 0; i < NUM_INVOCATIONS;)
+        for (int i = 0; i < NUM_INVOCATIONS; i++)
         {
-            bh.consume(columnASortedDocValues.lookupTerm(new BytesRef(luceneBytes[i])));
-            i += skippingDistance;
+            bh.consume(columnASortedDocValues.lookupTerm(new BytesRef(luceneBytes[i * skippingDistance])));
         }
     }
 
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput})
-    public void bytesSeekToPointID(Blackhole bh) throws IOException
+    public void advance(Blackhole bh) throws IOException
     {
-        SortedBytesReader.Context context = sortedBytesReader.createContext();
-        for (int i = 0; i < NUM_INVOCATIONS;)
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
-            bh.consume(sortedBytesReader.seekToPointId(i, bytesInput, context));
-            i += skippingDistance;
+            for (int i = 0; i < NUM_INVOCATIONS; i++)
+            {
+                cursor.advance();
+                bh.consume(cursor.term());
+            }
         }
     }
 
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput})
-    public void bytesSeekToTerm(Blackhole bh) throws IOException
+    public void seekToPointID(Blackhole bh) throws IOException
     {
-        for (int i = 0; i < NUM_INVOCATIONS;)
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
-            bh.consume(sortedBytesReader.seekToBytes(ByteComparable.fixedLength(this.bcIntBytes[i])));
-            i += skippingDistance;
+            for (int i = 0; i < NUM_INVOCATIONS; i++)
+            {
+                cursor.seekToPointId((long) i * skippingDistance);
+                bh.consume(cursor.term());
+            }
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(NUM_INVOCATIONS)
+    @BenchmarkMode({ Mode.Throughput})
+    public void seekToTerm(Blackhole bh) throws IOException
+    {
+        for (int i = 0; i < NUM_INVOCATIONS; i++)
+        {
+            bh.consume(sortedTermsReader.getPointId(ByteComparable.fixedLength(this.bcIntBytes[i * skippingDistance])));
         }
     }
 
@@ -239,22 +255,20 @@ public class SortedBytesBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void get(Blackhole bh)
     {
-        for (int i = 0; i < NUM_INVOCATIONS;)
+        for (int i = 0; i < NUM_INVOCATIONS; i++)
         {
-            bh.consume(rowIdToToken.get(rowIds[i]));
-            i += skippingDistance;
+            bh.consume(rowIdToToken.get(rowIds[i * skippingDistance]));
         }
     }
 
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput})
-    public void findTokenRowID(Blackhole bh)
+    public void longArrayFindTokenRowID(Blackhole bh)
     {
-        for (int i = 0; i < NUM_INVOCATIONS;)
+        for (int i = 0; i < NUM_INVOCATIONS; i++)
         {
-            bh.consume(rowIdToToken.findTokenRowID(tokenValues[i]));
-            i += skippingDistance;
+            bh.consume(rowIdToToken.findTokenRowID(tokenValues[i * skippingDistance]));
         }
     }
 }
