@@ -169,6 +169,33 @@ public class SortedTermsTest extends SaiRandomizedTest
 
                 x++;
             }
+
+            // assert we don't increase the point id beyond one point after the last item
+            assertEquals(cursor.pointId(), terms.size());
+            assertFalse(cursor.advance());
+            assertEquals(cursor.pointId(), terms.size());
+        });
+    }
+
+    @Test
+    public void testReset() throws Exception
+    {
+        IndexDescriptor descriptor = newIndexDescriptor();
+
+        List<byte[]> terms = new ArrayList<>();
+        SortedTermsMeta meta = writeTerms(descriptor, terms);
+
+        withSortedTermsCursor(descriptor, meta, cursor ->
+        {
+            assertTrue(cursor.advance());
+            assertTrue(cursor.advance());
+            String term1 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            cursor.reset();
+            assertTrue(cursor.advance());
+            assertTrue(cursor.advance());
+            String term2 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            assertEquals(term1, term2);
+            assertEquals(1, cursor.pointId());
         });
     }
 
@@ -220,8 +247,21 @@ public class SortedTermsTest extends SaiRandomizedTest
                 assertArrayEquals(terms.get(target), bytes);
             }
         });
+    }
 
+    @Test
+    public void testSeekToPointIdOutOfRange() throws Exception
+    {
+        IndexDescriptor descriptor = newIndexDescriptor();
 
+        List<byte[]> terms = new ArrayList<>();
+        SortedTermsMeta meta = writeTerms(descriptor, terms);
+
+        withSortedTermsCursor(descriptor, meta, cursor ->
+        {
+            assertThrows(IndexOutOfBoundsException.class, () -> cursor.seekToPointId(-2));
+            assertThrows(IndexOutOfBoundsException.class, () -> cursor.seekToPointId(Long.MAX_VALUE));
+        });
     }
 
     private SortedTermsMeta writeTerms(IndexDescriptor descriptor, List<byte[]> terms) throws IOException
