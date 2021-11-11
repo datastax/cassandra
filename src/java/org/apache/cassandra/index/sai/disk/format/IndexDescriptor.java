@@ -46,10 +46,8 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.store.IndexInput;
@@ -483,7 +481,7 @@ public class IndexDescriptor
     private File tmpFileFor(IndexComponent component)
     {
         return onDiskPerSSTableTemporaryFileMap.computeIfAbsent(component,
-                                                                c -> new File(tmpFilenameFor(component, null)));
+                                                                c -> createFile(component, null, true));
     }
 
     private File tmpFileFor(IndexComponent component, IndexContext indexContext)
@@ -494,30 +492,8 @@ public class IndexDescriptor
 
     private File createFile(IndexComponent component, IndexContext indexContext, boolean temporary)
     {
-        String filename = temporary ? tmpFilenameFor(component, indexContext) : filenameFor(component, indexContext);
-        File file = new File(PathUtils.getPath(filename));
-        return StorageProvider.instance.withOpenOptions(file,
-                                                        new Component(Component.Type.CUSTOM,
-                                                                      version.fileNameFormatter().format(component,
-                                                                                                         indexContext)));
-    }
-
-    private String tmpFilenameFor(IndexComponent component, IndexContext indexContext)
-    {
-        return filenameFor(component, indexContext) + TMP_EXTENSION;
-    }
-
-    private String filenameFor(IndexComponent component, IndexContext indexContext)
-    {
-        StringBuilder stringBuilder = new StringBuilder();
-        if (descriptor.baseFileUri().lastIndexOf(Component.separator) != (descriptor.baseFileUri().length() - 1))
-            stringBuilder.append(descriptor.baseFileUri())
-                         .append(Component.separator)
-                         .append(version.fileNameFormatter().format(component, indexContext));
-        else
-            stringBuilder.append(descriptor.baseFileUri())
-                         .append(version.fileNameFormatter().format(component, indexContext));
-        return stringBuilder.toString();
+        Component customComponent = new Component(Component.Type.CUSTOM, version.fileNameFormatter().format(component, indexContext));
+        return temporary ? descriptor.tmpFileFor(customComponent) : descriptor.fileFor(customComponent);
     }
 
     private void deleteComponent(File file)
