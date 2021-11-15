@@ -113,9 +113,8 @@ public class SortedTermsReader
      * Complexity of this operation is O(log n).
      *
      * @param term target term to lookup
-     * @throws IOException if a read of the internal on-disk trie fails
      */
-    public long getPointId(@Nonnull ByteComparable term) throws IOException
+    public long getPointId(@Nonnull ByteComparable term)
     {
         Preconditions.checkNotNull(term, "term null");
 
@@ -281,7 +280,10 @@ public class SortedTermsReader
                 termsData.seek(blockAddress);
                 pointId = (blockIndex << TERMS_DICT_BLOCK_SHIFT) - 1;
                 while (pointId < target)
-                    advance();
+                {
+                    boolean advanced = advance();
+                    assert advanced : "unexpected eof";   // must return true because target is in range
+                }
             }
         }
 
