@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.sortedbytes;
+package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
 
 import java.nio.ByteBuffer;
@@ -39,7 +39,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * The payload may be changed to something else.
  */
 @NotThreadSafe
-class TrieRangeIterator<Concrete extends TrieRangeIterator<Concrete>> extends Walker<Concrete>
+class TrieRangeIterator extends Walker<TrieRangeIterator>
 {
     private final ByteSource limit;
     private final TrieTermsDictionaryReader.TransitionBytesCollector collector = new TrieTermsDictionaryReader.TransitionBytesCollector();
