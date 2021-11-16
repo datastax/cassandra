@@ -296,7 +296,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                                        ThrowingConsumer<SortedTermsReader> testCode) throws IOException
     {
         try (FileHandle trieHandle = descriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE);
-             IndexInput termsData = descriptor.openPerSSTableInput(IndexComponent.TERMS_DATA);
+             FileHandle termsData = descriptor.createPerSSTableFileHandle(IndexComponent.TERMS_DATA);
              IndexInput blockFPInput = descriptor.openPerSSTableInput(IndexComponent.KD_TREE_POSTING_LISTS))
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockFPInput, trieHandle, meta);

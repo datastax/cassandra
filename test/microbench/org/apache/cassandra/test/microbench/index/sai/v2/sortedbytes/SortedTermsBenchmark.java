@@ -84,8 +84,8 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     protected LongArray rowIdToToken;
     private int[] rowIds;
     private long[] tokenValues;
-    FileHandle trieFile;
-    IndexInput termsData, blockFPInput;
+    FileHandle trieFile, termsData;
+    IndexInput blockFPInput;
     SortedTermsReader sortedTermsReader;
     Path luceneDir;
     Directory directory;
@@ -163,7 +163,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         tokenValues = new long[NUM_ROWS];
 
         trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE);
-        termsData = indexDescriptor.openPerSSTableInput(IndexComponent.TERMS_DATA);
+        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TERMS_DATA);
         blockFPInput = indexDescriptor.openPerSSTableInput(IndexComponent.KD_TREE_POSTING_LISTS);
 
         sortedTermsReader = new SortedTermsReader(termsData,

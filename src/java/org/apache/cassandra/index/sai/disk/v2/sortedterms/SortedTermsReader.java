@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 import java.io.IOException;
 import java.util.Iterator;
 
+import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -72,30 +73,27 @@ import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWrit
 @ThreadSafe
 public class SortedTermsReader
 {
-
-    private final IndexInput termsData;
+    private final FileHandle termsData;
     private final SortedTermsMeta meta;
     private final FileHandle termsTrie;
     private final LongValues blockOffsets;
-
-    private final long termsDataStartFP; // file pointer to the start of the terms data
 
     /**
      * Creates a new reader based on its data components.
      * <p>
      * It does not own the components, so you must close them separately after you're done with the reader.
-     * @param termsData a sequence of prefix-compressed blocks each storing a fixed number of terms
+     * @param termsData handle to the file with a sequence of prefix-compressed blocks
+     *                  each storing a fixed number of terms
      * @param termsDataBlockOffsets file containing an encoded sequence of the file offsets pointing to the blocks
      * @param termsTrie handle to the file storing the trie with the term-to-point-id mapping
      * @param meta metadata object created earlier by the writer
      */
-    public SortedTermsReader(@Nonnull IndexInput termsData,
+    public SortedTermsReader(@Nonnull FileHandle termsData,
                              @Nonnull IndexInput termsDataBlockOffsets,
                              @Nonnull FileHandle termsTrie,
                              @Nonnull SortedTermsMeta meta) throws IOException
     {
         this.termsData = termsData;
-        this.termsDataStartFP = termsData.getFilePointer();
         this.termsTrie = termsTrie;
         this.meta = meta;
 
@@ -163,7 +161,7 @@ public class SortedTermsReader
     @NotThreadSafe
     public class Cursor implements AutoCloseable
     {
-        private final IndexInput termsData;
+        private final IndexInputReader termsData;
 
         // The term the cursor currently points to. Initially empty.
         private final BytesRef currentTerm;
@@ -171,10 +169,9 @@ public class SortedTermsReader
         // The point id the cursor currently points to. -1 means before the first item.
         private long pointId = -1;
 
-        Cursor(IndexInput termsData) throws IOException
+        Cursor(FileHandle termsData)
         {
-            this.termsData = termsData.clone();  // clone needed to get our own file pointer independently of other Cursors
-            this.termsData.seek(termsDataStartFP);
+            this.termsData = IndexInputReader.create(termsData);
             this.currentTerm = new BytesRef(meta.maxTermLength);
         }
 
@@ -208,14 +205,14 @@ public class SortedTermsReader
         }
 
         /**
-         * Moves the cursor to the next term and reads it into the current term buffer.
+         * Advances the cursor to the next term and reads it into the current term buffer.
          * <p>
          * If there are no more available terms, clears the term buffer and the cursor's position will point to the
          * one behind the last item.
          * <p>
          * This method has constant time complexity.
          *
-         * @return true if the cursor was moved successfully, false if end of file was reached
+         * @return true if the cursor was advanced successfully, false if the end of file was reached
          * @throws IOException if a read from the terms file fails
          */
         public boolean advance() throws IOException
@@ -269,7 +266,7 @@ public class SortedTermsReader
 
             if (target == -1 || target == meta.count)
             {
-                termsData.seek(termsDataStartFP);   // matters only if target is -1
+                termsData.seek(0);   // matters only if target is -1
                 pointId = target;
                 currentTerm.length = 0;
             }
