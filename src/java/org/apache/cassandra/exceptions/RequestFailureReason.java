@@ -18,11 +18,13 @@
 package org.apache.cassandra.exceptions;
 
 import java.io.IOException;
+import java.util.function.ToIntFunction;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.max;
@@ -30,21 +32,27 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 public enum RequestFailureReason
 {
-    UNKNOWN                  (0),
-    READ_TOO_MANY_TOMBSTONES (1),
-    TIMEOUT                  (2),
-    INCOMPATIBLE_SCHEMA      (3),
-    READ_SIZE                (4),
-    NODE_DOWN                (5),
-    INDEX_NOT_AVAILABLE      (6);
+    UNKNOWN(0, 0),
+    READ_TOO_MANY_TOMBSTONES(1, 1),
+    TIMEOUT(2, 2),
+    INCOMPATIBLE_SCHEMA(3, 3),
+    READ_SIZE(4, 4),
+    NODE_DOWN(5, 8),
+    INDEX_NOT_AVAILABLE(6, 9),
+    UNKNOWN_COLUMN(7, 5),
+    UNKNOWN_TABLE(8, 6),
+    REMOTE_STORAGE_FAILURE(9, 7),
+    ;
 
     public static final Serializer serializer = new Serializer();
 
     public final int code;
+    public final int ccCode;
 
-    RequestFailureReason(int code)
+    RequestFailureReason(int code, int ccCode)
     {
         this.code = code;
+        this.ccCode = ccCode;
     }
 
     public int codeForNativeProtocol()
@@ -54,35 +62,41 @@ public enum RequestFailureReason
         return code;
     }
 
-    private static final RequestFailureReason[] codeToReasonMap;
-
-    static
+    private static RequestFailureReason[] makeCodeMapping(ToIntFunction<RequestFailureReason> mappingFunction)
     {
         RequestFailureReason[] reasons = values();
 
         int max = -1;
         for (RequestFailureReason r : reasons)
-            max = max(r.code, max);
+            max = max(mappingFunction.applyAsInt(r), max);
 
         RequestFailureReason[] codeMap = new RequestFailureReason[max + 1];
 
         for (RequestFailureReason reason : reasons)
         {
-            if (codeMap[reason.code] != null)
+            if (codeMap[mappingFunction.applyAsInt(reason)] != null)
                 throw new RuntimeException("Two RequestFailureReason-s that map to the same code: " + reason.code);
             codeMap[reason.code] = reason;
         }
 
-        codeToReasonMap = codeMap;
+        return codeMap;
     }
 
-    public static RequestFailureReason fromCode(int code)
+    private static final RequestFailureReason[] codeToReasonMap = makeCodeMapping(r -> r.code);
+    private static final RequestFailureReason[] ccCodeToReasonMap = makeCodeMapping(r -> r.ccCode);
+
+    public static RequestFailureReason fromCode(int code, int version)
     {
+        assert version >= VERSION_40;
+
         if (code < 0)
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
+        if (version >= MessagingService.VERSION_SG_10)
+            return code < ccCodeToReasonMap.length ? ccCodeToReasonMap[code] : UNKNOWN;
+        else
+            return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
     }
 
     public static RequestFailureReason forException(Throwable t)
@@ -105,19 +119,25 @@ public enum RequestFailureReason
         public void serialize(RequestFailureReason reason, DataOutputPlus out, int version) throws IOException
         {
             assert version >= VERSION_40;
-            out.writeUnsignedVInt32(reason.code);
+            if (version >= MessagingService.VERSION_SG_10)
+                out.writeUnsignedVInt32(reason.ccCode);
+            else
+                out.writeUnsignedVInt32(reason.code);
         }
 
         public RequestFailureReason deserialize(DataInputPlus in, int version) throws IOException
         {
             assert version >= VERSION_40;
-            return fromCode(in.readUnsignedVInt32());
+            return fromCode(in.readUnsignedVInt32(), version);
         }
 
         public long serializedSize(RequestFailureReason reason, int version)
         {
             assert version >= VERSION_40;
-            return VIntCoding.computeVIntSize(reason.code);
+            if (version >= MessagingService.VERSION_SG_10)
+                return VIntCoding.computeVIntSize(reason.ccCode);
+            else
+                return VIntCoding.computeVIntSize(reason.code);
         }
     }
 }

@@ -35,6 +35,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.MD5Digest;
 
@@ -97,7 +98,7 @@ public class ErrorMessage extends Message.Response
                             for (int i = 0; i < failure; i++)
                             {
                                 InetAddress endpoint = CBUtil.readInetAddr(body);
-                                RequestFailureReason failureReason = RequestFailureReason.fromCode(body.readUnsignedShort());
+                                RequestFailureReason failureReason = RequestFailureReason.fromCode(body.readUnsignedShort(), MessagingService.current_version); // TODO make sure this is ok - we use different code for CC and different for OSS
                                 builder.put(InetAddressAndPort.getByAddress(endpoint), failureReason);
                             }
                             failureReasonByEndpoint = builder.build();
