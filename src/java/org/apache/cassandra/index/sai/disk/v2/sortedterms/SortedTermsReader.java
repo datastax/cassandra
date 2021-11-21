@@ -20,26 +20,23 @@ package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
 import java.io.IOException;
 import java.util.Iterator;
-
-import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
-import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.lucene.store.ByteArrayIndexInput;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.RandomAccessInput;
-import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.packed.DirectMonotonicReader;
-
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.base.Preconditions;
 
-import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter.DIRECT_MONOTONIC_BLOCK_SHIFT;
+import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
+import org.apache.cassandra.index.sai.disk.v1.LongArray;
+import org.apache.cassandra.index.sai.disk.v1.block.MonotonicBlockPackedReader;
+import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesMeta;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.lucene.util.BytesRef;
+
 import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter.TERMS_DICT_BLOCK_MASK;
 import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter.TERMS_DICT_BLOCK_SHIFT;
 
@@ -76,7 +73,7 @@ public class SortedTermsReader
     private final FileHandle termsData;
     private final SortedTermsMeta meta;
     private final FileHandle termsTrie;
-    private final LongValues blockOffsets;
+    private final LongArray.Factory blockOffsetsFactory;
 
     /**
      * Creates a new reader based on its data components.
@@ -84,25 +81,21 @@ public class SortedTermsReader
      * It does not own the components, so you must close them separately after you're done with the reader.
      * @param termsData handle to the file with a sequence of prefix-compressed blocks
      *                  each storing a fixed number of terms
-     * @param termsDataBlockOffsets file containing an encoded sequence of the file offsets pointing to the blocks
+     * @param termsDataBlockOffsets handle to the file containing an encoded sequence of the file offsets pointing to the blocks
      * @param termsTrie handle to the file storing the trie with the term-to-point-id mapping
      * @param meta metadata object created earlier by the writer
+     * @param blockOffsetsMeta metadata object for the block offsets
      */
     public SortedTermsReader(@Nonnull FileHandle termsData,
-                             @Nonnull IndexInput termsDataBlockOffsets,
+                             @Nonnull FileHandle termsDataBlockOffsets,
                              @Nonnull FileHandle termsTrie,
-                             @Nonnull SortedTermsMeta meta) throws IOException
+                             @Nonnull SortedTermsMeta meta,
+                             @Nonnull NumericValuesMeta blockOffsetsMeta) throws IOException
     {
         this.termsData = termsData;
         this.termsTrie = termsTrie;
         this.meta = meta;
-
-        ByteArrayIndexInput offsestMetaInput = new ByteArrayIndexInput("", meta.offsetMetaBytes);
-
-        DirectMonotonicReader.Meta offsetsMeta =
-                DirectMonotonicReader.loadMeta(offsestMetaInput, meta.offsetBlockCount, DIRECT_MONOTONIC_BLOCK_SHIFT);
-        RandomAccessInput offsetSlice = termsDataBlockOffsets.randomAccessSlice(0, termsDataBlockOffsets.length());
-        this.blockOffsets = DirectMonotonicReader.getInstance(offsetsMeta, offsetSlice);
+        this.blockOffsetsFactory = new MonotonicBlockPackedReader(termsDataBlockOffsets, blockOffsetsMeta);
     }
 
     /**
@@ -146,9 +139,9 @@ public class SortedTermsReader
      * The cursor is valid as long this object hasn't been closed.
      * You must close the cursor when you no longer need it.
      */
-    public @Nonnull Cursor openCursor() throws IOException
+    public @Nonnull Cursor openCursor(SSTableQueryContext context) throws IOException
     {
-        return new Cursor(termsData);
+        return new Cursor(termsData, blockOffsetsFactory, context);
     }
 
     /**
@@ -162,6 +155,7 @@ public class SortedTermsReader
     public class Cursor implements AutoCloseable
     {
         private final IndexInputReader termsData;
+        private final LongArray blockOffsets;
 
         // The term the cursor currently points to. Initially empty.
         private final BytesRef currentTerm;
@@ -169,9 +163,10 @@ public class SortedTermsReader
         // The point id the cursor currently points to. -1 means before the first item.
         private long pointId = -1;
 
-        Cursor(FileHandle termsData)
+        Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory, SSTableQueryContext context)
         {
             this.termsData = IndexInputReader.create(termsData);
+            this.blockOffsets = new LongArray.DeferredLongArray(() -> blockOffsetsFactory.openTokenReader(0, context));
             this.currentTerm = new BytesRef(meta.maxTermLength);
         }
 
@@ -297,6 +292,5 @@ public class SortedTermsReader
         {
             this.termsData.close();
         }
-
     }
 }
