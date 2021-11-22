@@ -115,11 +115,11 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @Setup(Level.Trial)
     public void perTrialSetup2() throws IOException
     {
-        try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PARTITION_KEY_TRIE);
-             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PARTITION_KEY_BLOCKS);
+        try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
+             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
              MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PARTITION_KEY_BLOCK_OFFSETS, null),
-                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PARTITION_KEY_BLOCK_OFFSETS),
+             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null),
+                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                          metadataWriter, true))
         {
             SortedTermsWriter writer = new SortedTermsWriter(bytesWriter, blockFPWriter, trieWriter);
@@ -170,10 +170,10 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         tokenValues = new long[NUM_ROWS];
 
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PARTITION_KEY_BLOCK_OFFSETS, null)));
+        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null)));
 
-        trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PARTITION_KEY_TRIE);
-        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PARTITION_KEY_BLOCKS);
+        trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
+        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
         blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE_POSTING_LISTS);
 
         sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, meta, blockOffsetMeta);
