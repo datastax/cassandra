@@ -25,9 +25,14 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
+import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
+import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
+import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
@@ -46,7 +51,6 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -84,8 +88,9 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     protected LongArray rowIdToToken;
     private int[] rowIds;
     private long[] tokenValues;
-    FileHandle trieFile, termsData;
-    IndexInput blockFPInput;
+    FileHandle trieFile;
+    FileHandle termsData;
+    FileHandle blockOffsets;
     SortedTermsReader sortedTermsReader;
     Path luceneDir;
     Directory directory;
@@ -110,12 +115,14 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @Setup(Level.Trial)
     public void perTrialSetup2() throws IOException
     {
-        try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.KD_TREE);
-             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.TERMS_DATA);
-             IndexOutputWriter blockFPWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.KD_TREE_POSTING_LISTS))
+        try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
+             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
+             MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
+             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null),
+                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+                                                                         metadataWriter, true))
         {
-            SortedTermsWriter writer = new SortedTermsWriter(bytesWriter, blockFPWriter, trieWriter
-            );
+            SortedTermsWriter writer = new SortedTermsWriter(bytesWriter, blockFPWriter, trieWriter);
 
             for (int x = 0; x < NUM_ROWS; x++)
             {
@@ -162,13 +169,14 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         rowIds = new int[NUM_ROWS];
         tokenValues = new long[NUM_ROWS];
 
-        trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE);
-        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TERMS_DATA);
-        blockFPInput = indexDescriptor.openPerSSTableInput(IndexComponent.KD_TREE_POSTING_LISTS);
+        MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
+        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null)));
 
-        sortedTermsReader = new SortedTermsReader(termsData,
-                                                  blockFPInput, trieFile, meta
-        );
+        trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
+        termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
+        blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE_POSTING_LISTS);
+
+        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, meta, blockOffsetMeta);
 
         luceneReader = DirectoryReader.open(directory);
         LeafReaderContext context = luceneReader.leaves().get(0);
@@ -181,7 +189,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     {
         luceneReader.close();
         termsData.close();
-        blockFPInput.close();
+        blockOffsets.close();
         rowIdToToken.close();
         trieFile.close();
     }
@@ -214,7 +222,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void advance(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -229,7 +237,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void seekToPointID(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {

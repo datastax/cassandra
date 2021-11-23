@@ -19,14 +19,13 @@
 package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
 import java.io.IOException;
-
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
-import org.apache.cassandra.index.sai.disk.io.RAMIndexOutput;
+import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
 import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -34,10 +33,6 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.packed.DirectMonotonicWriter;
-import org.apache.lucene.util.packed.PackedInts;
-import org.apache.lucene.util.packed.PackedLongValues;
-
 
 import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.trieSerializer;
 
@@ -75,13 +70,12 @@ public class SortedTermsWriter
 
     private final IncrementalDeepTrieWriterPageAware<Long> trieWriter;
     private final IndexOutput termsOutput;
-    private final IndexOutput offsetsOutput;
+    private final NumericValuesWriter offsetsWriter;
 
     private BytesRefBuilder prevTerm = new BytesRefBuilder();
     private BytesRefBuilder tempTerm = new BytesRefBuilder();
 
     private final long bytesStartFP;
-    private final PackedLongValues.Builder offsetsBuilder;
 
     private int maxLength = -1;
     private long pointId = 0;
@@ -97,15 +91,13 @@ public class SortedTermsWriter
      * @param trieWriter where to write the trie that maps the terms to point ids
      */
     public SortedTermsWriter(@Nonnull IndexOutput termsData,
-                             @Nonnull IndexOutput termsDataBlockOffsets,
+                             @Nonnull NumericValuesWriter termsDataBlockOffsets,
                              @Nonnull IndexOutputWriter trieWriter)
     {
         this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter());
         this.termsOutput = termsData;
         this.bytesStartFP = termsData.getFilePointer();
-        this.offsetsOutput = termsDataBlockOffsets;
-
-        offsetsBuilder = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
+        this.offsetsWriter = termsDataBlockOffsets;
     }
 
     /**
@@ -142,7 +134,7 @@ public class SortedTermsWriter
     {
         if ((pointId & TERMS_DICT_BLOCK_MASK) == 0)
         {
-            offsetsBuilder.add(termsOutput.getFilePointer() - bytesStartFP);
+            offsetsWriter.add(termsOutput.getFilePointer() - bytesStartFP);
 
             termsOutput.writeVInt(term.length);
             termsOutput.writeBytes(term.bytes, term.offset, term.length);
@@ -170,32 +162,8 @@ public class SortedTermsWriter
      */
     public @Nonnull SortedTermsMeta finish() throws IOException
     {
-        RAMIndexOutput meta = new RAMIndexOutput("SortedTermsMeta");
-        long blockCount = writeOffsets(meta);
-
         final long trieFP = this.trieWriter.complete();
-        return new SortedTermsMeta(trieFP, pointId, maxLength, meta.getBytes(), blockCount);
-    }
-
-
-    /**
-     * Writes the block offsets earlier added to the <code>offsetBuilder</code> to <code>offsetsOutput</code>.
-     *
-     * @return the number of offsets (== number of blocks)
-     */
-    private long writeOffsets(RAMIndexOutput meta) throws IOException
-    {
-        PackedLongValues offsets = offsetsBuilder.build();
-
-        // DirectMonotonicReader is much faster than MonotonicBlockPackedReader
-        DirectMonotonicWriter offsetsWriter =
-            DirectMonotonicWriter.getInstance(meta, offsetsOutput, offsets.size(), DIRECT_MONOTONIC_BLOCK_SHIFT);
-
-        for (int x = 0; x < offsets.size(); x++)
-            offsetsWriter.add(offsets.get(x));
-
-        offsetsWriter.finish();
-        return offsets.size();
+        return new SortedTermsMeta(trieFP, pointId, maxLength);
     }
 
     /**

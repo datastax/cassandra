@@ -27,15 +27,11 @@ public class SortedTermsMeta
     /** Number of terms */
     public final long count;
     public final int maxTermLength;
-    public final byte[] offsetMetaBytes;
-    public final long offsetBlockCount;
 
-    public SortedTermsMeta(long trieFP, long count, int maxTermLength, byte[] offsetMetaBytes, long offsetBlockCount)
+    public SortedTermsMeta(long trieFP, long count, int maxTermLength)
     {
         this.trieFP = trieFP;
         this.count = count;
         this.maxTermLength = maxTermLength;
-        this.offsetMetaBytes = offsetMetaBytes;
-        this.offsetBlockCount = offsetBlockCount;
     }
 }
