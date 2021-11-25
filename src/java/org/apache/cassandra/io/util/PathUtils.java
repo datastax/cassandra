@@ -26,6 +26,15 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileStore;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -41,23 +50,25 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.RateLimiter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import net.openhft.chronicle.core.util.ThrowingFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
@@ -65,11 +76,8 @@ import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
 import static java.nio.file.StandardOpenOption.WRITE;
 import static java.util.Collections.unmodifiableSet;
-
 import static org.apache.cassandra.config.CassandraRelevantProperties.USE_NIX_RECURSIVE_DELETE;
 import static org.apache.cassandra.utils.Throwables.merge;
-
-import net.openhft.chronicle.core.util.ThrowingFunction;
 
 /**
  * Vernacular: tryX means return false or 0L on any failure; XIfNotY means propagate any exceptions besides those caused by Y
@@ -432,6 +440,49 @@ public final class PathUtils
 
         // The directory is now empty so now it can be smoked
         delete(path, rateLimiter);
+    }
+
+    /**
+     * Recursively delete the content of the directory, but not the directory itself.
+     * @param dirPath directory for which content should be deleted
+     */
+    public static void deleteContent(Path dirPath)
+    {
+        if (isDirectory(dirPath))
+            forEach(dirPath, PathUtils::deleteRecursive);
+    }
+
+    /**
+     * List all paths in this directory
+     * @param dirPath directory for which to list all paths
+     * @return list of all paths contained in the given directory
+     */
+    public static List<Path> listPaths(Path dirPath)
+    {
+        return listPaths(dirPath, p -> true);
+    }
+
+    /**
+     * List paths in this directory that match the filter
+     * @param dirPath directory for which to list all paths matching the given filter
+     * @param filter predicate used to filter paths
+     * @return filtered list of paths contained in the given directory
+     */
+    public static List<Path> listPaths(Path dirPath, Predicate<Path> filter)
+    {
+        try (Stream<Path> stream = Files.list(dirPath))
+        {
+            return (consistentDirectoryListings ? stream.sorted() : stream).filter(filter).collect(Collectors.toList());
+        }
+        catch(NotDirectoryException | NoSuchFileException ex)
+        {
+            // Don't throw if the file does not exist or is not a directory
+            return ImmutableList.of();
+        }
+        catch(IOException ex)
+        {
+            throw new FSReadError(ex, dirPath);
+        }
     }
 
     /**
