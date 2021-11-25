@@ -24,6 +24,11 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -138,9 +143,6 @@ public class File implements Comparable<File>
      */
     public File(Path path)
     {
-        if (path != null && path.getFileSystem() != filesystem)
-            throw new IllegalArgumentException("Incompatible file system; path FileSystem (" + path.getFileSystem() + ") is not the same reference (" + filesystem + ")");
-
         this.path = path;
     }
 
