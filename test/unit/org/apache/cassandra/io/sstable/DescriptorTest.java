@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.IOException;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
@@ -45,7 +44,7 @@ public class DescriptorTest
     private final String cfId = ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(UUID.randomUUID()));
     private final File tempDataDir;
 
-    public DescriptorTest() throws IOException
+    public DescriptorTest()
     {
         // create CF directories, one without CFID and one with it
         tempDataDir = FileUtils.createTempFile("DescriptorTest", null).parent();
@@ -108,6 +107,8 @@ public class DescriptorTest
         assertEquals(original.version, desc.version);
         assertEquals(original.id, desc.id);
         assertEquals(Components.DATA, pair.right);
+
+        assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));
     }
 
     @Test
@@ -133,7 +134,12 @@ public class DescriptorTest
                                };
 
         for (String fileName : fileNames)
-            assertNotNull(Descriptor.fromFileWithComponent(new File(fileName), false).left);
+        {
+            Descriptor descriptor = Descriptor.fromFileWithComponent(new File(fileName), false).left;
+            assertNotNull(descriptor);
+            assertNotNull(fileName, Descriptor.componentFromFile(new File(fileName)));
+            assertNotNull(fileName, Descriptor.validFilenameWithComponent(fileName));
+        }
     }
 
     @Test
@@ -151,7 +157,9 @@ public class DescriptorTest
             {
                 Descriptor d = Descriptor.fromFile(new File(name));
                 Assert.fail(name);
-            } catch (Throwable e) {
+            }
+            catch (Exception e)
+            {
                 //good
             }
         }
