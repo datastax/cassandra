@@ -223,7 +223,6 @@ public class BKDReaderTest extends NdiRandomizedTest
 
         final PostingList intersection = reader.intersect(buildQuery(queryMin, queryMax), NO_OP_BKD_LISTENER, new QueryContext());
 
-        assertThat(intersection, is(instanceOf(MergePostingList.class)));
         long expectedRowID = queryMin;
         for (long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {

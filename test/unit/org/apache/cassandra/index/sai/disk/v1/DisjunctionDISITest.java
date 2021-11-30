@@ -35,7 +35,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 
-public class MergePostingListTest extends NdiRandomizedTest
+public class DisjunctionDISITest extends NdiRandomizedTest
 {
     @Test
     public void shouldMergeInterleavedPostingLists() throws IOException
@@ -48,7 +48,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 3, 6 }),
                 new ArrayPostingList(new int[]{ 3, 5, 6 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
 
         assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 2, 3, 4, 5, 6 }), merged);
     }
@@ -61,7 +61,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 8, 9, 11 }),
                 new ArrayPostingList(new int[]{ 15 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
 
         assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 6, 8, 9, 11, 15 }), merged);
     }
@@ -71,7 +71,8 @@ public class MergePostingListTest extends NdiRandomizedTest
     {
         final PriorityQueue<PostingList.PeekablePostingList> lists = newPriorityQueue(new ArrayPostingList(new int[]{ 1, 4, 6 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
+
 
         assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 4, 6 }), merged);
     }
@@ -82,7 +83,8 @@ public class MergePostingListTest extends NdiRandomizedTest
         final PriorityQueue<PostingList.PeekablePostingList> lists = newPriorityQueue(new ArrayPostingList(new int[]{ 0 }),
                                                                                       new ArrayPostingList(new int[]{ 0 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
+
 
         assertPostingListEquals(new ArrayPostingList(new int[]{ 0 }), merged);
     }
@@ -95,7 +97,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 2, 3, 8 }),
                 new ArrayPostingList(new int[]{ 3, 5, 9 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
         final PostingList expected = new ArrayPostingList(new int[]{ 1, 2, 3, 5, 8, 9, 10 });
 
         assertEquals(expected.advance(9),
@@ -116,7 +118,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 3, 6 }),
                 new ArrayPostingList(new int[]{ 3, 5, 6 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
 
         assertEquals(2, merged.advance(2));
         assertEquals(4, merged.advance(4));
@@ -134,7 +136,7 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 3, 6 }),
                 new ArrayPostingList(new int[]{ 3, 5, 6 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
 
         assertEquals(2, merged.advance(2));
         assertEquals(3, merged.nextPosting());
@@ -155,7 +157,8 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 1, 2 }),
                 new ArrayPostingList(new int[]{ 3 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
+
         assertEquals(1, merged.nextPosting());
         assertEquals(2, merged.advance(2));
         assertEquals(3, merged.nextPosting());
@@ -168,7 +171,8 @@ public class MergePostingListTest extends NdiRandomizedTest
                 new ArrayPostingList(new int[]{ 2 }),
                 new ArrayPostingList(new int[]{ 1, 3, 4 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
+
         assertEquals(1, merged.nextPosting());
         assertEquals(3, merged.advance(3));
         assertEquals(4, merged.advance(4));
@@ -180,7 +184,8 @@ public class MergePostingListTest extends NdiRandomizedTest
         final PriorityQueue<PostingList.PeekablePostingList> lists = newPriorityQueue(new ArrayPostingList(new int[]{ 1, 1, 2, 2, 2, 2, 5, 5 }),
                                                                                       new ArrayPostingList(new int[]{ 1, 2, 2, 3, 3, 4, 4, 5 }));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
+
         assertEquals(1, merged.nextPosting());
         assertEquals(2, merged.nextPosting());
         assertEquals(3, merged.advance(3));
@@ -230,7 +235,7 @@ public class MergePostingListTest extends NdiRandomizedTest
             splitPostingLists.add(new ArrayPostingList(Ints.toArray(split)).peekable());
         }
 
-        final PostingList merge = MergePostingList.merge(splitPostingLists);
+        final PostingList merge = DisjunctionDISI.create(splitPostingLists);
         final PostingList expected = new ArrayPostingList(postingsWithoutDuplicates);
 
         final List<PostingListAdvance> actions = new ArrayList<>();
@@ -296,7 +301,7 @@ public class MergePostingListTest extends NdiRandomizedTest
 
         final PriorityQueue<PostingList.PeekablePostingList> lists = newPriorityQueue(new ArrayPostingList(postings1), new ArrayPostingList(postings2));
 
-        final PostingList merged = MergePostingList.merge(lists);
+        final PostingList merged = DisjunctionDISI.create(lists);
 
         // tokens are equal row IDs in this test case
         for (int targetRowID : mergedPostings)

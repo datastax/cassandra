@@ -428,7 +428,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                 if (logger.isTraceEnabled())
                     logger.trace(indexComponents.logMessage("[{}] Intersection completed in {} microseconds. {} leaf and internal posting lists hit."),
                                  indexFile.path(), elapsedMicros, postingLists.size());
-                return MergePostingList.merge(postingLists, () -> FileUtils.close(postingsInput, postingsSummaryInput));
+                return DisjunctionDISI.create(postingLists, () -> FileUtils.close(postingsInput, postingsSummaryInput));
             }
         }
 

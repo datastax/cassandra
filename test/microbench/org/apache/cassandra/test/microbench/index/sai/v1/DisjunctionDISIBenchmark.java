@@ -21,10 +21,8 @@ package org.apache.cassandra.test.microbench.index.sai.v1;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -32,7 +30,7 @@ import java.util.stream.IntStream;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
+import org.apache.cassandra.index.sai.disk.v1.DisjunctionDISI;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -50,7 +48,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3)
 @Measurement(iterations = 5)
 @State(Scope.Thread)
-public class MergePostingListBenchmark
+public class DisjunctionDISIBenchmark
 {
     List<int[]> splitPostingLists = new ArrayList<>();
     PostingList merge;
@@ -77,12 +75,12 @@ public class MergePostingListBenchmark
     @Setup(Level.Invocation)
     public void mergePostings()
     {
-        final PriorityQueue<PostingList.PeekablePostingList> lists = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        final List<PostingList> lists = new ArrayList<>();
         for (int[] postings : splitPostingLists)
         {
-            lists.add(new ArrayPostingList(postings).peekable());
+            lists.add(new ArrayPostingList(postings));
         }
-        merge = MergePostingList.merge(lists);
+        merge = DisjunctionDISI.create(lists, null);
     }
 
     @Benchmark

@@ -149,7 +149,7 @@ public class OneDimBKDPostingsWriter implements TraversingBKDReader.IndexTreeTra
             for (Integer leaf : leaves)
                 postingLists.add(new PackedLongsPostingList(leafToPostings.get(leaf)).peekable());
 
-            final PostingList mergedPostingList = MergePostingList.merge(postingLists);
+            final PostingList mergedPostingList = DisjunctionDISI.create(postingLists);
             final long postingFilePosition = postingsWriter.write(mergedPostingList);
             // During compaction we could end up with an empty postings due to deletions.
             // The writer will return a fp of -1 if no postings were written.
