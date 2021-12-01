@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
@@ -31,16 +32,12 @@ import java.util.stream.Collectors;
 import javax.management.openmbean.CompositeData;
 
 import com.google.common.collect.Lists;
-
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.Sampler;
-import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.Util;
 
@@ -51,29 +48,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Includes test cases for both the 'toppartitions' command and its successor 'profileload'
- */
-public class TopPartitionsTest
+public class TopPartitionsTest extends CQLTester
 {
-    public static String KEYSPACE = TopPartitionsTest.class.getSimpleName().toLowerCase();
-    public static String TABLE = "test";
-
-    @BeforeClass
-    public static void loadSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE, KeyspaceParams.simple(1));
-        executeInternal(format("CREATE TABLE %s.%s (k text, c text, v text, PRIMARY KEY (k, c))", KEYSPACE, TABLE));
-    }
-
     @Test
     public void testServiceTopPartitionsNoArg() throws Exception
     {
         BlockingQueue<Map<String, List<CompositeData>>> q = new ArrayBlockingQueue<>(1);
         ColumnFamilyStore.all();
-        Executors.newCachedThreadPool().execute(() ->
-        {
+        Executors.newCachedThreadPool().execute(() -> {
             try
             {
                 q.put(StorageService.instance.samplePartitions(null, 1000, 100, 10, Lists.newArrayList("READS", "WRITES")));
@@ -86,8 +68,8 @@ public class TopPartitionsTest
         Thread.sleep(100);
         SystemKeyspace.persistLocalMetadata();
         Map<String, List<CompositeData>> result = q.poll(5, TimeUnit.SECONDS);
-        List<CompositeData> cd = result.get("WRITES");
-        assertEquals(1, cd.size());
+        List<CompositeData> cds = result.get("WRITES").stream().filter(cd -> Objects.equals(cd.get("table"), "system." + SystemKeyspace.LOCAL)).collect(Collectors.toList());
+        assertEquals(1, cds.size());
     }
 
     @Test
@@ -103,20 +85,21 @@ public class TopPartitionsTest
     @Test
     public void testTopPartitionsRowTombstoneAndSSTableCount() throws Exception
     {
+        createTable("CREATE TABLE %s (k text, c text, v text, PRIMARY KEY (k, c))");
         int count = 10;
-        ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(KEYSPACE, TABLE);
+        ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(KEYSPACE, currentTable());
         cfs.disableAutoCompaction();
 
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'a', 'a')", KEYSPACE, TABLE));
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'b', 'a')", KEYSPACE, TABLE));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'a', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'b', 'a')", KEYSPACE, currentTable()));
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'c', 'a')", KEYSPACE, TABLE));
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('b', 'b', 'b')", KEYSPACE, TABLE));
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'c', 'c')", KEYSPACE, TABLE));
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'd', 'a')", KEYSPACE, TABLE));
-        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'e', 'a')", KEYSPACE, TABLE));
-        executeInternal(format("DELETE FROM %s.%s WHERE k='a' AND c='a'", KEYSPACE, TABLE));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'c', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('b', 'b', 'b')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'c', 'c')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'd', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'e', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("DELETE FROM %s.%s WHERE k='a' AND c='a'", KEYSPACE, currentTable()));
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         // test multi-partition read
@@ -124,7 +107,7 @@ public class TopPartitionsTest
         cfs.beginLocalSampling("READ_TOMBSTONE_COUNT", count, 240000);
         cfs.beginLocalSampling("READ_SSTABLE_COUNT", count, 240000);
 
-        executeInternal(format("SELECT * FROM %s.%s", KEYSPACE, TABLE));
+        executeInternal(format("SELECT * FROM %s.%s", KEYSPACE, currentTable()));
         Thread.sleep(2000); // simulate waiting before finishing sampling
 
         List<CompositeData> rowCounts = cfs.finishLocalSampling("READ_ROW_COUNT", count);
@@ -157,9 +140,9 @@ public class TopPartitionsTest
         cfs.beginLocalSampling("READ_TOMBSTONE_COUNT", count, 240000);
         cfs.beginLocalSampling("READ_SSTABLE_COUNT", count, 240000);
 
-        executeInternal(format("SELECT * FROM %s.%s WHERE k='a'", KEYSPACE, TABLE));
-        executeInternal(format("SELECT * FROM %s.%s WHERE k='b'", KEYSPACE, TABLE));
-        executeInternal(format("SELECT * FROM %s.%s WHERE k='c'", KEYSPACE, TABLE));
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='a'", KEYSPACE, currentTable()));
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='b'", KEYSPACE, currentTable()));
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='c'", KEYSPACE, currentTable()));
         Thread.sleep(2000); // simulate waiting before finishing sampling
 
         rowCounts = cfs.finishLocalSampling("READ_ROW_COUNT", count);
