@@ -30,9 +30,9 @@ import org.junit.Test;
 import org.apache.cassandra.cache.CacheSize;
 import org.apache.cassandra.cache.ICache;
 import org.apache.cassandra.cache.InstrumentingCache;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.service.CacheService;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
 import static org.junit.Assert.assertEquals;
 
 public class CacheMetricsTest
@@ -42,20 +42,20 @@ public class CacheMetricsTest
     @AfterClass
     public static void teardown()
     {
-        CassandraRelevantProperties.USE_MICROMETER.reset();
+        USE_MICROMETER.reset();
     }
 
     @Test
     public void testCodahaleCacheMetrics()
     {
-        CassandraRelevantProperties.USE_MICROMETER.setBoolean(false);
+        USE_MICROMETER.setBoolean(false);
         testCacheMetrics();
     }
 
     @Test
     public void testMicrometerCacheMetrics()
     {
-        CassandraRelevantProperties.USE_MICROMETER.setBoolean(true);
+        USE_MICROMETER.setBoolean(true);
         testCacheMetrics();
     }
 

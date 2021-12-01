@@ -226,7 +226,7 @@ public class BatchlogManagerTest
             long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
 
             if (i == 500)
-                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2),
+                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata.id,
                                                     timestamp,
                                                     CommitLogPosition.NONE);
 

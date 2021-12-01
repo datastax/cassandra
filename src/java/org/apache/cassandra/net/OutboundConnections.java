@@ -36,12 +36,12 @@ import com.carrotsearch.hppc.ObjectObjectHashMap;
 import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.config.CassandraRelevantProperties.OTCP_LARGE_MESSAGE_THRESHOLD;
-import static org.apache.cassandra.gms.Gossiper.instance;
 import static org.apache.cassandra.net.FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionType.URGENT_MESSAGES;
@@ -311,9 +311,9 @@ public class OutboundConnections
                     continue;
 
                 if (cur.small == prev.small && cur.large == prev.large && cur.urgent == prev.urgent
-                    && !instance.isKnownEndpoint(connections.template.to))
+                    && !Nodes.isKnownEndpoint(connections.template.to))
                 {
-                    logger.info("Closing outbound connections to {}, as inactive and not known by Gossiper",
+                    logger.info("Closing outbound connections to {}, as inactive and not known",
                                 connections.template.to);
                     // close entirely if no traffic and the endpoint is unknown
                     messagingService.closeOutboundNow(connections);

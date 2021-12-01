@@ -50,6 +50,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE;
 import static org.junit.Assert.*;
 
 /**
@@ -66,6 +67,7 @@ public class PropertyFileSnitchTest
     @BeforeClass
     public static void setupDD()
     {
+        NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
     }
 
