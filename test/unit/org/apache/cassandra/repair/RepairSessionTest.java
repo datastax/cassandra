@@ -46,6 +46,7 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TimeUUID;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
@@ -55,6 +56,7 @@ public class RepairSessionTest
     @BeforeClass
     public static void initDD()
     {
+        NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
     }
 
