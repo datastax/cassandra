@@ -42,6 +42,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.nodes.NodeInfo;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.Backoff;
@@ -281,7 +283,7 @@ public abstract class RepairMessage
             return ErrorHandling.RETRY;
         // Repair in mixed mode isn't fully supported, but also not activally blocked... so in the common case all participants
         // will be on the same version as this instance, so can avoid the lookup from gossip
-        CassandraVersion remoteVersion = ctx.gossiper().getReleaseVersion(from);
+        CassandraVersion remoteVersion = Nodes.peers().getOpt(from).map(NodeInfo::getReleaseVersion).orElse(null);
         if (remoteVersion == null)
         {
             if (VERB_TIMEOUT_VERSIONS.containsKey(verb))
