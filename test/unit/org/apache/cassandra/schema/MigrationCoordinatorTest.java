@@ -61,6 +61,7 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.internal.creation.MockSettingsImpl;
 
 import static com.google.common.util.concurrent.Futures.getUnchecked;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -85,6 +86,7 @@ public class MigrationCoordinatorTest
 
     static
     {
+        NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
         try
         {
             EP1 = InetAddressAndPort.getByName("10.0.0.1");
