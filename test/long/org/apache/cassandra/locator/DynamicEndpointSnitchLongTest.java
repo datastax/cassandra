@@ -31,11 +31,13 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 public class DynamicEndpointSnitchLongTest
 {
     static
     {
+        NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
     }
 
