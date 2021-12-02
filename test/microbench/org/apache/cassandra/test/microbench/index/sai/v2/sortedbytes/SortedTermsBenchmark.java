@@ -109,7 +109,6 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         return NUM_ROWS;
     }
 
-    SortedTermsMeta meta = null;
     byte[][] bcIntBytes = new byte[NUM_ROWS][];
 
     @Setup(Level.Trial)
@@ -120,10 +119,13 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
              MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
              NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null),
                                                                          indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
-                                                                         metadataWriter, true))
+                                                                         metadataWriter, true);
+             SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCKS, null),
+                                                              metadataWriter,
+                                                              bytesWriter,
+                                                              blockFPWriter,
+                                                              trieWriter))
         {
-            SortedTermsWriter writer = new SortedTermsWriter(bytesWriter, blockFPWriter, trieWriter);
-
             for (int x = 0; x < NUM_ROWS; x++)
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(x);
@@ -132,8 +134,6 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
                 bcIntBytes[x] = bytes;
                 writer.add(ByteComparable.fixedLength(bytes));
             }
-
-            meta = writer.finish();
         }
 
         // create the lucene index
@@ -171,12 +171,12 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
 
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
         NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null)));
-
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCKS, null)));
         trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
         termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
         blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE_POSTING_LISTS);
 
-        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, meta, blockOffsetMeta);
+        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
 
         luceneReader = DirectoryReader.open(directory);
         LeafReaderContext context = luceneReader.leaves().get(0);
