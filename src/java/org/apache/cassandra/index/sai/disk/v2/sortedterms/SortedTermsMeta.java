@@ -18,6 +18,11 @@
 
 package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
+import java.io.IOException;
+
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
+
 /**
  * Metadata produced by {@link SortedTermsWriter}, needed by {@link SortedTermsReader}.
  */
@@ -28,10 +33,24 @@ public class SortedTermsMeta
     public final long count;
     public final int maxTermLength;
 
+    public SortedTermsMeta(IndexInput input) throws IOException
+    {
+        this.trieFP = input.readLong();
+        this.count = input.readLong();
+        this.maxTermLength = input.readInt();
+    }
+
     public SortedTermsMeta(long trieFP, long count, int maxTermLength)
     {
         this.trieFP = trieFP;
         this.count = count;
         this.maxTermLength = maxTermLength;
+    }
+
+    public void write(IndexOutput output) throws IOException
+    {
+        output.writeLong(trieFP);
+        output.writeLong(count);
+        output.writeInt(maxTermLength);
     }
 }

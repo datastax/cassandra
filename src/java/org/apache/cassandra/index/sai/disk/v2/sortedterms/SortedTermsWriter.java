@@ -18,14 +18,18 @@
 
 package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
+import java.io.Closeable;
 import java.io.IOException;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
 
+import io.micrometer.core.lang.NonNull;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -33,6 +37,7 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.packed.DirectMonotonicReader;
 
 import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.trieSerializer;
 
@@ -53,7 +58,7 @@ import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryRea
  * @see org.apache.cassandra.index.sai.disk.v2.sortedterms
  */
 @NotThreadSafe
-public class SortedTermsWriter
+public class SortedTermsWriter implements Closeable
 {
     // The TERMS_DICT_ constants allow for quickly determining the id of the current block based on a point id
     // or to check if we are exactly at the beginning of the block.
@@ -69,8 +74,11 @@ public class SortedTermsWriter
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
 
     private final IncrementalDeepTrieWriterPageAware<Long> trieWriter;
+    private final IndexOutput trieOutput;
     private final IndexOutput termsOutput;
     private final NumericValuesWriter offsetsWriter;
+    private final String componentName;
+    private final MetadataWriter metadataWriter;
 
     private BytesRefBuilder prevTerm = new BytesRefBuilder();
     private BytesRefBuilder tempTerm = new BytesRefBuilder();
@@ -86,15 +94,24 @@ public class SortedTermsWriter
      * It does not own the components, so you must close the components by yourself
      * after you're done with the writer.
      *
+     * @param componentName the component name for the SortedTermsMeta
+     * @param metadataWriter the MetadataWriter for storing the SortedTermsMeta
      * @param termsData where to write the prefix-compressed terms data
      * @param termsDataBlockOffsets  where to write the offsets of each block of terms data
      * @param trieWriter where to write the trie that maps the terms to point ids
      */
-    public SortedTermsWriter(@Nonnull IndexOutput termsData,
+    public SortedTermsWriter(@NonNull String componentName,
+                             @NonNull MetadataWriter metadataWriter,
+                             @Nonnull IndexOutput termsData,
                              @Nonnull NumericValuesWriter termsDataBlockOffsets,
-                             @Nonnull IndexOutputWriter trieWriter)
+                             @Nonnull IndexOutputWriter trieWriter) throws IOException
     {
+        this.componentName = componentName;
+        this.metadataWriter = metadataWriter;
+        this.trieOutput = trieWriter;
+        SAICodecUtils.writeHeader(this.trieOutput);
         this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter());
+        SAICodecUtils.writeHeader(termsData);
         this.termsOutput = termsData;
         this.bytesStartFP = termsData.getFilePointer();
         this.offsetsWriter = termsDataBlockOffsets;
@@ -160,10 +177,17 @@ public class SortedTermsWriter
      * Does not close the output streams.
      * No more writes are allowed.
      */
-    public @Nonnull SortedTermsMeta finish() throws IOException
+    @Override
+    public void close() throws IOException
     {
-        final long trieFP = this.trieWriter.complete();
-        return new SortedTermsMeta(trieFP, pointId, maxLength);
+        try (IndexOutput output = metadataWriter.builder(componentName))
+        {
+            final long trieFP = this.trieWriter.complete();
+            SAICodecUtils.writeFooter(trieOutput);
+            SAICodecUtils.writeFooter(termsOutput);
+            SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(trieFP, pointId, maxLength);
+            sortedTermsMeta.write(output);
+        }
     }
 
     /**

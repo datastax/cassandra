@@ -31,10 +31,12 @@ import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.block.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesMeta;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter.TERMS_DICT_BLOCK_MASK;
@@ -94,6 +96,10 @@ public class SortedTermsReader
     {
         this.termsData = termsData;
         this.termsTrie = termsTrie;
+        try (IndexInput trieInput = IndexInputReader.create(termsTrie))
+        {
+            SAICodecUtils.validate(trieInput);
+        }
         this.meta = meta;
         this.blockOffsetsFactory = new MonotonicBlockPackedReader(termsDataBlockOffsets, blockOffsetsMeta);
     }
@@ -155,6 +161,7 @@ public class SortedTermsReader
     public class Cursor implements AutoCloseable
     {
         private final IndexInputReader termsData;
+        private final long termsDataFp;
         private final LongArray blockOffsets;
 
         // The term the cursor currently points to. Initially empty.
@@ -163,9 +170,11 @@ public class SortedTermsReader
         // The point id the cursor currently points to. -1 means before the first item.
         private long pointId = -1;
 
-        Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory, SSTableQueryContext context)
+        Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory, SSTableQueryContext context) throws IOException
         {
             this.termsData = IndexInputReader.create(termsData);
+            SAICodecUtils.validate(this.termsData);
+            this.termsDataFp = this.termsData.getFilePointer();
             this.blockOffsets = new LongArray.DeferredLongArray(() -> blockOffsetsFactory.openTokenReader(0, context));
             this.currentTerm = new BytesRef(meta.maxTermLength);
         }
@@ -261,7 +270,7 @@ public class SortedTermsReader
 
             if (target == -1 || target == meta.count)
             {
-                termsData.seek(0);   // matters only if target is -1
+                termsData.seek(termsDataFp);   // matters only if target is -1
                 pointId = target;
                 currentTerm.length = 0;
             }
@@ -269,7 +278,7 @@ public class SortedTermsReader
             {
                 final long blockIndex = target >>> TERMS_DICT_BLOCK_SHIFT;
                 final long blockAddress = blockOffsets.get(blockIndex);
-                termsData.seek(blockAddress);
+                termsData.seek(blockAddress + termsDataFp);
                 pointId = (blockIndex << TERMS_DICT_BLOCK_SHIFT) - 1;
                 while (pointId < target)
                 {
