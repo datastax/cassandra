@@ -61,7 +61,7 @@ public enum IndexComponent
     /**
      * Partition key token value for rows including row tombstone and static row. (access key is rowId)
      *
-     * V1
+     * V1 V2
      */
     TOKEN_VALUES("TokenValues"),
     /**
@@ -71,6 +71,24 @@ public enum IndexComponent
      * V1
      */
     OFFSETS_VALUES("OffsetsValues"),
+    /**
+     * An on-disk trie containing the primary keys used for looking up the rowId from a partition key
+     *
+     * V2
+     */
+    PRIMARY_KEY_TRIE("PrimaryKeyTrie"),
+    /**
+     * Prefix-compressed blocks of primary keys used for rowId to partition key lookups
+     *
+     * V2
+     */
+    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks"),
+    /**
+     * Encoded sequence of offsets to primary key blocks
+     *
+     * V2
+     */
+    PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
     /**
      * Stores per-sstable metadata.
      *
