@@ -388,7 +388,7 @@ public class DatabaseDescriptor
         }
     }
 
-    private static void setConfig(Config config)
+    public static void setConfig(Config config)
     {
         conf = config;
     }
