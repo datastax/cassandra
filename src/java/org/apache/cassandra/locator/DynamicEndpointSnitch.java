@@ -426,4 +426,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
     {
         return subsnitch.validate(datacenters, racks);
     }
+
+    @Override
+    public InetAddressAndPort getPreferredAddress(InetAddressAndPort remoteEndpoint)
+    {
+        return subsnitch.getPreferredAddress(remoteEndpoint);
+    }
 }
