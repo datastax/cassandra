@@ -59,10 +59,25 @@ public enum OperationType
     KEY_CACHE_SAVE("Key cache save", false, 6),
     ROW_CACHE_SAVE("Row cache save", false, 6),
     COUNTER_CACHE_SAVE("Counter cache save", false, 6),
-    INDEX_SUMMARY("Index summary redistribution", false, 6);
+    INDEX_SUMMARY("Index summary redistribution", false, 6),
+    // FIXME STAR-979: Need to review values of `writesData` and `priority` for the operations below
+    // that were added by the rebase of CC on OSS 5.0
+    RESTORE("Restore", false, 6),
+    // operations used for sstables on remote storage
+    REMOTE_RELOAD("Remote reload", false, 6, true), // reload locally sstables that already exist remotely
+    REMOTE_COMPACTION("Remote compaction", false, 6, true), // no longer used, kept for backward compatibility
+    TRUNCATE_TABLE("Table truncated", false, 6),
+    DROP_TABLE("Table dropped", false, 6),
+    REMOVE_UNREADEABLE("Remove unreadable sstables", false, 6),
+    REGION_BOOTSTRAP("Region Bootstrap", false, 6),
+    REGION_DECOMMISSION("Region Decommission", false, 6),
+    REGION_REPAIR("Region Repair", false, 6),
+    SSTABLE_DISCARD("Local-only sstable discard", false, 6, true);
 
     public final String type;
     public final String fileName;
+    /** true if the transaction of this type should NOT be uploaded remotely */
+    public final boolean localOnly;
 
     /**
      * For purposes of calculating space for interim compactions in flight, whether or not this OperationType is expected
@@ -78,10 +93,16 @@ public enum OperationType
 
     OperationType(String type, boolean writesData, int priority)
     {
+        this(type, writesData, priority, false);
+    }
+
+    OperationType(String type, boolean writesData, int priority, boolean localOnly)
+    {
         this.type = type;
         this.fileName = type.toLowerCase().replace(" ", "");
         this.writesData = writesData;
         this.priority = priority;
+        this.localOnly = localOnly;
     }
 
     public static OperationType fromFileName(String fileName)
@@ -93,11 +114,18 @@ public enum OperationType
         throw new IllegalArgumentException("Invalid fileName for operation type: " + fileName);
     }
 
+    public boolean isCacheSave()
+    {
+        return this == COUNTER_CACHE_SAVE || this == KEY_CACHE_SAVE || this == ROW_CACHE_SAVE;
+    }
+
     public String toString()
     {
         return type;
     }
 
+    public static final Predicate<OperationType> EXCEPT_VALIDATIONS = o -> o != VALIDATION;
+    public static final Predicate<OperationType> COMPACTIONS_ONLY = o -> o == COMPACTION || o == TOMBSTONE_COMPACTION;
     public static final Predicate<OperationType> REWRITES_SSTABLES = o -> o == COMPACTION || o == CLEANUP || o == SCRUB ||
                                                                           o == TOMBSTONE_COMPACTION || o == ANTICOMPACTION ||
                                                                           o == UPGRADE_SSTABLES || o == RELOCATE ||
