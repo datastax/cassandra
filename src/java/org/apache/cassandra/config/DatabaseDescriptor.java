@@ -152,7 +152,7 @@ public class DatabaseDescriptor
     private static boolean clientInitialized;
     private static boolean toolInitialized;
     private static boolean daemonInitialized;
-    private static boolean enableMemtableInitialization;
+    private static boolean enableMemtableAndCommitLog;
     
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
@@ -301,16 +301,17 @@ public class DatabaseDescriptor
     }
 
     /**
-     * Enables memtable initialization via {@link org.apache.cassandra.db.ColumnFamilyStore}.
+     * Enables lifecycle transactions via {@link org.apache.cassandra.db.lifecycle.Tracker} and
+     * memtable via {@link org.apache.cassandra.db.ColumnFamilyStore}.
      */
-    public static void setEnableMemtableInitialization()
+    public static void setEnableMemtableAndCommitLog()
     {
-        enableMemtableInitialization = true;
+        enableMemtableAndCommitLog = true;
     }
     
-    public static boolean enableMemtableInitialization()
+    public static boolean enableMemtableAndCommitLog()
     {
-        return daemonInitialized || enableMemtableInitialization;
+        return daemonInitialized || enableMemtableAndCommitLog;
     }
 
     public static Config getRawConfig()
