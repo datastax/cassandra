@@ -581,6 +581,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return directories;
     }
 
+    public StorageHandler getStorageHandler()
+    {
+        return storageHandler;
+    }
+
     public List<String> getDataPaths() throws IOException
     {
         List<String> dataPaths = new ArrayList<>();
