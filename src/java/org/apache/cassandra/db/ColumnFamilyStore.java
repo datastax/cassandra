@@ -438,7 +438,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         // Create Memtable only on online
         Memtable initialMemtable = null;
-        if (DatabaseDescriptor.isDaemonInitialized())
+        if (DatabaseDescriptor.enableMemtableInitialization())
             initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         data = new Tracker(this, initialMemtable, loadSSTables);
 
