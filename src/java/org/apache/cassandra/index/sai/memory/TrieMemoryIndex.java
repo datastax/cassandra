@@ -30,6 +30,8 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongConsumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +41,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -49,8 +52,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -61,13 +64,12 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
-    private final AbstractType<?> validator;
-    private final boolean isLiteral;
-    private final Object writeLock = new Object();
+
+    private ByteBuffer minTerm;
+    private ByteBuffer maxTerm;
+    private ReentrantLock writeLock = new ReentrantLock();
 
     private static final FastThreadLocal<Integer> lastQueueSize = new FastThreadLocal<Integer>()
     {
@@ -77,28 +79,31 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     };
 
-
     public TrieMemoryIndex(IndexContext indexContext)
     {
         super(indexContext);
-        //TODO Do we need to follow a setting for this?
-        this.data = new MemtableTrie<>(BufferType.OFF_HEAP);
+        this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.primaryKeysReducer = new PrimaryKeysReducer();
-        // MemoryIndex is per-core, so analyzer should be thread-safe..
-        this.analyzerFactory = indexContext.getAnalyzerFactory();
-        this.validator = indexContext.getValidator();
-        this.isLiteral = TypeUtil.isLiteral(validator);
     }
 
-    @Override
-    public long add(DecoratedKey key, Clustering clustering, ByteBuffer value)
+    public void add(DecoratedKey key,
+                    Clustering clustering,
+                    ByteBuffer value,
+                    LongConsumer onHeapAllocationsTracker,
+                    LongConsumer offHeapAllocationsTracker)
     {
-        synchronized (writeLock)
+        boolean locked = writeLock.tryLock();
+        if (!locked)
         {
-            AbstractAnalyzer analyzer = analyzerFactory.create();
+            writeLock.lock();
+        }
+
+        try
+        {
+            AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
             try
             {
-                value = TypeUtil.encode(value, validator);
+                value = TypeUtil.encode(value, indexContext.getValidator());
                 analyzer.reset(value.duplicate());
                 final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
                 final long initialSizeOnHeap = data.sizeOnHeap();
@@ -126,37 +131,22 @@ public class TrieMemoryIndex extends MemoryIndex
                     }
                     catch (MemtableTrie.SpaceExhaustedException e)
                     {
-                        //TODO Handle this properly
-                        throw new RuntimeException(e);
+                        Throwables.throwAsUncheckedException(e);
                     }
                 }
 
-                return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
+                onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+                                                (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+                offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
             }
             finally
             {
                 analyzer.end();
             }
         }
-    }
-
-    @Override
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("Searching memtable index on expression '{}'...", expression);
-
-        switch (expression.getOp())
+        finally
         {
-            case MATCH:
-            case EQ:
-            case CONTAINS_KEY:
-            case CONTAINS_VALUE:
-                return exactMatch(expression);
-            case RANGE:
-                return rangeMatch(expression, keyRange);
-            default:
-                throw new IllegalArgumentException("Unsupported expression: " + expression);
+            writeLock.unlock();
         }
     }
 
@@ -181,17 +171,104 @@ public class TrieMemoryIndex extends MemoryIndex
         };
     }
 
+    @Override
+    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace("Searching memtable index on expression '{}'...", expression);
+
+        switch (expression.getOp())
+        {
+            case MATCH:
+            case EQ:
+            case CONTAINS_KEY:
+            case CONTAINS_VALUE:
+                return exactMatch(expression);
+            case RANGE:
+                return rangeMatch(expression, keyRange);
+            default:
+                throw new IllegalArgumentException("Unsupported expression: " + expression);
+        }
+    }
+
+    public RangeIterator exactMatch(Expression expression)
+    {
+        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
+        final PrimaryKeys primaryKeys = data.get(prefix);
+        if (primaryKeys == null)
+        {
+            return RangeIterator.empty();
+        }
+        return new KeyRangeIterator(primaryKeys.keys());
+    }
+
+    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        ByteComparable lowerBound, upperBound;
+        boolean lowerInclusive, upperInclusive;
+        if (expression.lower != null)
+        {
+            lowerBound = encode(expression.lower.value.encoded);
+            lowerInclusive = expression.lower.inclusive;
+        }
+        else
+        {
+            lowerBound = ByteComparable.EMPTY;
+            lowerInclusive = false;
+        }
+
+        if (expression.upper != null)
+        {
+            upperBound = encode(expression.upper.value.encoded);
+            upperInclusive = expression.upper.inclusive;
+        }
+        else
+        {
+            upperBound = null;
+            upperInclusive = false;
+        }
+
+        Collector cd = new Collector(keyRange);
+
+        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(pk -> cd.processContent(pk));
+
+        if (cd.mergedKeys.isEmpty())
+        {
+            return RangeIterator.empty();
+        }
+
+        lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
+        return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
+    }
+
+    public ByteBuffer getMinTerm()
+    {
+        return minTerm;
+    }
+
+    public ByteBuffer getMaxTerm()
+    {
+        return maxTerm;
+    }
+
+    private void setMinMaxTerm(ByteBuffer term)
+    {
+        assert term != null;
+
+        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator());
+        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator());
+    }
+
     private ByteComparable encode(ByteBuffer input)
     {
-        return isLiteral ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
-                         : version -> TypeUtil.asComparableBytes(input, validator, version);
+        return indexContext.isLiteral() ? version -> append(ByteSource.of(input, version), ByteSource.TERMINATOR)
+                                        : version -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), version);
     }
 
     private ByteComparable decode(ByteComparable term)
     {
-        return isLiteral ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
-                         : term;
-
+        return indexContext.isLiteral() ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
+                                        : term;
     }
 
     private ByteSource append(ByteSource src, int lastByte)
@@ -215,18 +292,29 @@ public class TrieMemoryIndex extends MemoryIndex
         };
     }
 
-    private RangeIterator exactMatch(Expression expression)
+    class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
-        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
-        final PrimaryKeys primaryKeys = data.get(prefix);
-        if (primaryKeys == null)
+        private final LongAdder heapAllocations = new LongAdder();
+
+        @Override
+        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
         {
-            return RangeIterator.empty();
+            if (existing == null)
+            {
+                existing = new PrimaryKeys();
+                heapAllocations.add(existing.unsharedHeapSize());
+            }
+            heapAllocations.add(existing.add(neww));
+            return existing;
         }
-        return new KeyRangeIterator(primaryKeys.keys());
+
+        long heapAllocations()
+        {
+            return heapAllocations.longValue();
+        }
     }
 
-    public static class Collector
+    class Collector
     {
         PrimaryKey minimumKey = null;
         PrimaryKey maximumKey = null;
@@ -277,67 +365,6 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
             return;
-        }
-    }
-
-    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-    {
-        ByteComparable lowerBound, upperBound;
-        boolean lowerInclusive, upperInclusive;
-        if (expression.lower != null)
-        {
-            lowerBound = encode(expression.lower.value.encoded);
-            lowerInclusive = expression.lower.inclusive;
-        }
-        else
-        {
-            lowerBound = ByteComparable.EMPTY;
-            lowerInclusive = false;
-        }
-
-        if (expression.upper != null)
-        {
-            upperBound = encode(expression.upper.value.encoded);
-            upperInclusive = expression.upper.inclusive;
-        }
-        else
-        {
-            upperBound = null;
-            upperInclusive = false;
-        }
-
-        Collector cd = new Collector(keyRange);
-
-        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(pk -> cd.processContent(pk));
-
-        if (cd.mergedKeys.isEmpty())
-        {
-            return RangeIterator.empty();
-        }
-
-        lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
-        return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
-    }
-
-    private class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
-    {
-        private final LongAdder heapAllocations = new LongAdder();
-
-        @Override
-        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
-        {
-            if (existing == null)
-            {
-                existing = new PrimaryKeys();
-                heapAllocations.add(existing.unsharedHeapSize());
-            }
-            heapAllocations.add(existing.add(neww));
-            return existing;
-        }
-
-        long heapAllocations()
-        {
-            return heapAllocations.longValue();
         }
     }
 }

@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.UUIDGen;
 import org.openjdk.jmh.annotations.Level;
@@ -98,10 +99,10 @@ public abstract class AbstractTrieMemoryIndexBenchmark
         integerOptions.put(IndexTarget.TARGET_OPTION_NAME, INTEGER_COLUMN);
 
         IndexMetadata stringMetadata = IndexMetadata.fromSchemaMetadata(STRING_INDEX, IndexMetadata.Kind.CUSTOM, stringOptions);
-        stringContext = new IndexContext(table, stringMetadata);
+        stringContext = new IndexContext(table, stringMetadata, MockSchema.newCFS(table));
 
         IndexMetadata integerMetadata = IndexMetadata.fromSchemaMetadata(INTEGER_INDEX, IndexMetadata.Kind.CUSTOM, integerOptions);
-        integerContext = new IndexContext(table, integerMetadata);
+        integerContext = new IndexContext(table, integerMetadata, MockSchema.newCFS(table));
     }
 
 

@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
@@ -255,7 +256,7 @@ public class SegmentMergerTest extends SAITester
         IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, table.partitioner, table.comparator);
         assertTrue(indexDescriptor.isPerSSTableBuildComplete());
         IndexMetadata index = table.indexes.get(indexName).get();
-        IndexContext indexContext = new IndexContext(table, index);
+        IndexContext indexContext = new IndexContext(table, index, MockSchema.newCFS(table));
         assertTrue(indexDescriptor.isPerIndexBuildComplete(indexContext));
         final MetadataSource source = MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
         return SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);

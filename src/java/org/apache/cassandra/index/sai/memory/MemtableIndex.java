@@ -19,29 +19,59 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.memtable.ShardBoundaries;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
+import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.concurrent.OpOrder;
+
+import static java.util.function.Function.identity;
 
 public class MemtableIndex
 {
-    private final MemoryIndex index;
+    private final ShardBoundaries boundaries;
+    private final MemoryIndex[] rangeIndexes;
+    private final AbstractType<?> validator;
+    private final ClusteringComparator clusteringComparator;
     private final LongAdder writeCount = new LongAdder();
-    private final LongAdder estimatedMemoryUsed = new LongAdder();
+    private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
+    private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
 
     public MemtableIndex(IndexContext indexContext)
     {
-        this.index = new TrieMemoryIndex(indexContext);
+        this.boundaries = indexContext.owner().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
+        this.validator = indexContext.getValidator();
+        this.clusteringComparator = indexContext.comparator();
+        for (int shard = 0; shard < boundaries.shardCount(); shard++)
+        {
+            this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext);
+        }
     }
 
     public long writeCount()
@@ -49,9 +79,14 @@ public class MemtableIndex
         return writeCount.sum();
     }
 
-    public long estimatedMemoryUsed()
+    public long estimatedOnHeapMemoryUsed()
     {
-        return estimatedMemoryUsed.sum();
+        return estimatedOnHeapMemoryUsed.sum();
+    }
+
+    public long estimatedOffHeapMemoryUsed()
+    {
+        return estimatedOffHeapMemoryUsed.sum();
     }
 
     public boolean isEmpty()
@@ -59,34 +94,141 @@ public class MemtableIndex
         return getMinTerm() == null;
     }
 
+    // Returns the minimum indexed term in the combined memory indexes.
+    // This can be null if the indexed memtable was empty. Users of the
+    // {@code MemtableIndex} requiring a non-null minimum term should
+    // use the {@link MemtableIndex#isEmpty} method.
+    @Nullable
     public ByteBuffer getMinTerm()
     {
-        return index.getMinTerm();
+        return Arrays.stream(rangeIndexes)
+                     .map(MemoryIndex::getMinTerm)
+                     .filter(Objects::nonNull)
+                     .min(Comparator.comparing(identity(), validator))
+                     .orElse(null);
     }
 
+    // Returns the mmaximum indexed term in the combined memory indexes.
+    // This can be null if the indexed memtable was empty. Users of the
+    // {@code MemtableIndex} requiring a non-null maximum term should
+    // use the {@link MemtableIndex#isEmpty} method.
+    @Nullable
     public ByteBuffer getMaxTerm()
     {
-        return index.getMaxTerm();
+        return Arrays.stream(rangeIndexes)
+                     .map(MemoryIndex::getMaxTerm)
+                     .filter(Objects::nonNull)
+                     .max(Comparator.comparing(identity(), validator))
+                     .orElse(null);
     }
 
-    public long index(DecoratedKey key, Clustering clustering, ByteBuffer value)
+    public void index(DecoratedKey key, Clustering clustering, ByteBuffer value, Memtable memtable, OpOrder.Group opGroup)
     {
         if (value == null || value.remaining() == 0)
-            return 0;
+            return;
 
-        long ram = index.add(key, clustering, value);
+        rangeIndexes[boundaries.getShardForKey(key)].add(key,
+                                                         clustering,
+                                                         value,
+                                                         allocatedBytes -> {
+                                                             memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                             estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                         },
+                                                         allocatedBytes -> {
+                                                             memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                             estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                         });
         writeCount.increment();
-        estimatedMemoryUsed.add(ram);
-        return ram;
     }
 
     public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        return index.search(expression, keyRange);
+        RangeConcatIterator.Builder builder = RangeConcatIterator.builder();
+
+        for (MemoryIndex index : rangeIndexes)
+        {
+            builder.add(index.search(expression, keyRange));
+        }
+        return builder.build();
     }
 
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    /**
+     * NOTE: returned data may contain partition key not within the provided min and max which are only used to find
+     * corresponding subranges. We don't do filtering here to avoid unnecessary token comparison. In case of JBOD,
+     * min/max should align exactly at token boundaries. In case of tiered-storage, keys within min/max may not
+     * belong to the given sstable.
+     *
+     * @param min minimum partition key used to find min subrange
+     * @param max maximum partition key used to find max subrange
+     *
+     * @return iterator of indexed term to primary keys mapping in sorted by indexed term and primary key.
+     */
+    public Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
     {
-        return index.iterator();
+        int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
+        int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
+
+        List<Iterator<Pair<ByteComparable, PrimaryKeys>>> rangeLists = new ArrayList<>(maxSubrange - minSubrange + 1);
+        for (int i = minSubrange; i <= maxSubrange; i++)
+            rangeLists.add(rangeIndexes[i].iterator());
+
+        return MergeIterator.get(rangeLists, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
+                                 new PrimaryKeysMergeReducer(rangeIndexes.length, clusteringComparator));
+    }
+
+    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<PrimaryKey>>>
+    {
+        private final Pair<ByteComparable, PrimaryKeys>[] toMerge;
+        private final int size;
+        private final Comparator<PrimaryKey> comparator;
+
+        @SuppressWarnings("unchecked")
+        PrimaryKeysMergeReducer(int size, ClusteringComparator clusteringComparator)
+        {
+            this.toMerge = new Pair[size];
+            this.size = size;
+            this.comparator = (o1, o2) -> {
+                if (!o1.partitionKey().equals(o2.partitionKey()))
+                    return o1.partitionKey().compareTo(o2.partitionKey());
+                return clusteringComparator.compare(o1.clustering(), o2.clustering());
+            };
+        }
+
+        @Override
+        public void reduce(int idx, Pair<ByteComparable, PrimaryKeys> current)
+        {
+            toMerge[idx] = current;
+        }
+
+        @Override
+        public Pair<ByteComparable, Iterator<PrimaryKey>> getReduced()
+        {
+            ByteComparable term = getTerm();
+
+            List<Iterator<PrimaryKey>> keyIterators = new ArrayList<>(size);
+            for (Pair<ByteComparable, PrimaryKeys> p : toMerge)
+                if (p != null && p.right != null && !p.right.isEmpty())
+                    keyIterators.add(p.right.iterator());
+
+            Iterator<PrimaryKey> primaryKeys = MergeIterator.get(keyIterators, comparator, Reducer.getIdentity());
+            return Pair.create(term, primaryKeys);
+        }
+
+        @Override
+        public void onKeyChange()
+        {
+            for (int i = 0; i < size; i++)
+                toMerge[i] = null;
+        }
+
+        private ByteComparable getTerm()
+        {
+            for (Pair<ByteComparable, PrimaryKeys> p : toMerge)
+            {
+                if (p != null)
+                    return p.left;
+            }
+            throw new IllegalStateException("Term must exist in IndexMemtable.");
+        }
     }
 }
