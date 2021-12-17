@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.disk.v1.block;
+package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 
 import java.util.Arrays;
@@ -66,7 +66,7 @@ public class NumericValuesTest extends SaiRandomizedTest
 
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
 
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
 
         try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
              LongArray reader = monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta).open()
@@ -93,7 +93,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         writeTokens(false, indexDescriptor, array, prev -> prev + nextInt(2, 100));
 
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
 
         try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
@@ -129,7 +129,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         writeTokens(false, indexDescriptor, new long[length], prev -> 1000L);
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
 
         try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
@@ -152,7 +152,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         writeTokens(false, indexDescriptor, array, prev -> prev + nextInt(1, 100));
 
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
 
         try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES))
         {
@@ -188,7 +188,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         writeTokens(monotonic, indexDescriptor, array, prev -> monotonic ? prev + nextInt(100) : nextInt(100));
 
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.TOKEN_VALUES, null)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
 
         try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
              LongArray reader = (monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta)

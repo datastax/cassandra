@@ -62,6 +62,7 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -103,6 +104,7 @@ public class IndexContext
     private final IndexWriterConfig indexWriterConfig;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
+    private final PrimaryKey.Factory primaryKeyFactory;
 
     public IndexContext(TableMetadata tableMeta, IndexMetadata config)
     {
@@ -128,6 +130,8 @@ public class IndexContext
         this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                     ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                     : this.analyzerFactory;
+
+        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(tableMeta.comparator);
 
         logger.info(logMessage("Initialized column context with index writer config: {}"),
                 this.indexWriterConfig.toString());
@@ -156,10 +160,10 @@ public class IndexContext
         this.indexWriterConfig = indexWriterConfig;
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
         this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
-
         this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(options)
                                     ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options)
                                     : this.analyzerFactory;
+        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
     }
 
     public IndexContext(TableMetadata table, ColumnMetadata column)
@@ -180,6 +184,7 @@ public class IndexContext
         this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(options)
                                     ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options)
                                     : this.analyzerFactory;
+        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
     }
 
     public AbstractType<?> keyValidator()
@@ -187,7 +192,12 @@ public class IndexContext
         return partitionKeyType;
     }
 
-    public ClusteringComparator clusteringComparator()
+    public PrimaryKey.Factory keyFactory()
+    {
+        return primaryKeyFactory;
+    }
+
+    public ClusteringComparator comparator()
     {
         return clusteringComparator;
     }
@@ -300,9 +310,9 @@ public class IndexContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate, boolean rename)
+    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, validate, rename);
+        return viewManager.update(oldSSTables, newSSTables, validate);
     }
 
     public ColumnMetadata getDefinition()
@@ -533,7 +543,7 @@ public class IndexContext
      * @return the indexes that are built on the given SSTables on the left and corrupted indexes'
      * corresponding contexts on the right
      */
-    public Pair<Set<SSTableIndex>, Set<SSTableContext>> getBuiltIndexes(Collection<SSTableContext> sstableContexts, boolean validate, boolean rename)
+    public Pair<Set<SSTableIndex>, Set<SSTableContext>> getBuiltIndexes(Collection<SSTableContext> sstableContexts, boolean validate)
     {
         Set<SSTableIndex> valid = new HashSet<>(sstableContexts.size());
         Set<SSTableContext> invalid = new HashSet<>();

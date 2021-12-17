@@ -33,9 +33,11 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 
 /**
@@ -46,6 +48,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final IndexDescriptor indexDescriptor;
+    private final PrimaryKey.Factory primaryKeyFactory;
     private final Collection<StorageAttachedIndex> indices;
     private final Collection<PerIndexWriter> perIndexWriters;
     private final PerSSTableWriter perSSTableWriter;
@@ -71,6 +74,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       boolean perIndexComponentsOnly) throws IOException
     {
         this.indexDescriptor = indexDescriptor;
+        this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
         this.indices = indices;
         this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
         this.perIndexWriters = indices.stream().map(i -> indexDescriptor.newPerIndexWriter(i,
@@ -97,9 +101,10 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         if (aborted) return;
         
         currentKey = key;
+
         try
         {
-            perSSTableWriter.startPartition(key, position);
+            perSSTableWriter.startPartition(position);
         }
         catch (Throwable t)
         {
@@ -112,22 +117,14 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
     {
         if (aborted) return;
-        
+
+        // Ignore range tombstones...
+        if (!unfiltered.isRow())
+            return;
+
         try
         {
-            // Ignore range tombstones...
-            if (unfiltered.isRow())
-            {
-                perSSTableWriter.nextRow();
-                rowMapping.add(currentKey, unfiltered, sstableRowId);
-
-                for (PerIndexWriter w : perIndexWriters)
-                {
-                    w.addRow(currentKey, sstableRowId, (Row) unfiltered);
-                }
-
-                sstableRowId++;
-            }
+            addRow((Row)unfiltered);
         }
         catch (Throwable t)
         {
@@ -152,15 +149,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         try
         {
-            perSSTableWriter.nextRow();
-            rowMapping.add(currentKey, staticRow, sstableRowId);
-
-            for (PerIndexWriter perIndexWriter : perIndexWriters)
-            {
-                perIndexWriter.addRow(currentKey, sstableRowId, staticRow);
-            }
-
-            sstableRowId++;
+            addRow(staticRow);
         }
         catch (Throwable t)
         {
@@ -246,5 +235,18 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             // If the token/offset files have already been written successfully, they can be reused later. 
             perSSTableWriter.abort(accumulator);
         }
+    }
+
+    private void addRow(Row row) throws IOException, MemtableTrie.SpaceExhaustedException
+    {
+        PrimaryKey primaryKey = primaryKeyFactory.create(currentKey, row.clustering());
+        perSSTableWriter.nextRow(primaryKey);
+        rowMapping.add(primaryKey, sstableRowId);
+
+        for (PerIndexWriter w : perIndexWriters)
+        {
+            w.addRow(primaryKey, row, sstableRowId);
+        }
+        sstableRowId++;
     }
 }

@@ -34,7 +34,7 @@ public interface PerIndexWriter
     /**
      * Adds a row to this index.
      */
-    void addRow(DecoratedKey rowKey, long ssTableRowId, Row row) throws IOException;
+    void addRow(PrimaryKey key, Row row, long sstableRowId) throws IOException;
 
     /**
      * Builds on-disk index data structures from accumulated data, moves them all to the filesystem, and fsync created files.

@@ -23,6 +23,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 
@@ -63,8 +64,9 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
 
         // with 10 sstable
         int indexopenFileCountWithOnlyNumeric = getOpenIndexFiles();
-        // Note: The 2 (per-SSTable files) is only valid for V1
-        assertEquals(sstables * (2 + V1OnDiskFormat.instance.openFilesPerIndex(v1IndexContext)), indexopenFileCountWithOnlyNumeric);
+        assertEquals(sstables * (Version.LATEST.onDiskFormat().openFilesPerSSTable() +
+                                 Version.LATEST.onDiskFormat().openFilesPerIndex(v1IndexContext)),
+                     indexopenFileCountWithOnlyNumeric);
 
         long diskUsageWithOnlyNumeric = getDiskUsage();
         assertNotEquals(0, diskUsageWithOnlyNumeric);
@@ -86,11 +88,16 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
         compact();
 
         long perSSTableFileDiskUsage = getDiskUsage();
-        assertEquals(2 + V1OnDiskFormat.instance.openFilesPerIndex(v2IndexContext) + V1OnDiskFormat.instance.openFilesPerIndex(v1IndexContext), getOpenIndexFiles());
+        assertEquals(Version.LATEST.onDiskFormat().openFilesPerSSTable() +
+                     Version.LATEST.onDiskFormat().openFilesPerIndex(v2IndexContext) +
+                     Version.LATEST.onDiskFormat().openFilesPerIndex(v1IndexContext),
+                     getOpenIndexFiles());
 
         // drop string index, reduce open string index files, per-sstable file disk usage remains the same
         dropIndex("DROP INDEX %s." + v2IndexName);
-        assertEquals(2 + V1OnDiskFormat.instance.openFilesPerIndex(v1IndexContext), getOpenIndexFiles());
+        assertEquals(Version.LATEST.onDiskFormat().openFilesPerSSTable() +
+                     Version.LATEST.onDiskFormat().openFilesPerIndex(v1IndexContext),
+                     getOpenIndexFiles());
         assertEquals(perSSTableFileDiskUsage, getDiskUsage());
 
         // drop last index, no open index files

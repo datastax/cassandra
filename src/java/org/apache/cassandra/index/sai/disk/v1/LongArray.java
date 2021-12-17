@@ -22,7 +22,7 @@ import java.io.IOException;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.index.sai.SSTableQueryContext;
-import org.apache.cassandra.index.sai.disk.v1.block.BlockPackedReader;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 
 /**
  * Abstraction over a long-indexed array of longs.

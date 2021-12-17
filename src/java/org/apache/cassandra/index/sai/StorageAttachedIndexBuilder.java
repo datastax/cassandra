@@ -44,7 +44,6 @@ import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
@@ -53,7 +52,6 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
@@ -146,13 +144,13 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         try (RandomAccessReader dataFile = sstable.openDataReader();
              LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, tracker.metadata))
         {
-            perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable);
+            perSSTableFileLock = shouldWritePerSSTableFiles(sstable);
             // If we were unable to get the per-SSTable file lock it means that the
             // per-SSTable components are already being built so we only want to
             // build the per-index components
             boolean perIndexComponentsOnly = perSSTableFileLock == null;
             // remove existing per column index files instead of overwriting
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable.descriptor);
+            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
             indexes.forEach(index -> indexDescriptor.deleteColumnIndex(index.getIndexContext()));
 
             indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, perIndexComponentsOnly);
@@ -277,10 +275,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
      * if the per sstable index files are already created, not need to write it again, unless found corrupted on rebuild
      * if not created, try to acquire a lock, so only one builder will generate per sstable index files
      */
-    private CountDownLatch shouldWriteTokenOffsetFiles(SSTableReader sstable)
+    private CountDownLatch shouldWritePerSSTableFiles(SSTableReader sstable)
     {
         // if per-table files are incomplete or checksum failed during full rebuild.
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable.descriptor);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
         if (!indexDescriptor.isPerSSTableBuildComplete() ||
             (isFullRebuild && !indexDescriptor.validatePerSSTableComponentsChecksum()))
         {
@@ -327,7 +325,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
         // register custom index components into existing sstables
         sstable.registerComponents(group.getLiveComponents(sstable, existing), tracker);
-        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false, false);
+        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false);
 
         if (!incomplete.isEmpty())
         {

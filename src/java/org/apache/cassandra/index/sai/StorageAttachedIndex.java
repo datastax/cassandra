@@ -126,7 +126,7 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.create(s.descriptor).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.create(s).isPerIndexBuildComplete(indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
@@ -312,7 +312,7 @@ public class StorageAttachedIndex implements Index
         initBuildStarted = true;
 
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
-        List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate, true);
+        List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate);
 
         if (nonIndexed.isEmpty())
         {
@@ -448,7 +448,7 @@ public class StorageAttachedIndex implements Index
             }
 
             StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
-            Collection<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, group, true, true);
+            Collection<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, group, true);
 
             if (nonIndexed.isEmpty())
             {
@@ -534,13 +534,13 @@ public class StorageAttachedIndex implements Index
      *
      * @return a list SSTables without attached indexes
      */
-    private synchronized List<SSTableReader> findNonIndexedSSTables(ColumnFamilyStore baseCfs, StorageAttachedIndexGroup group, boolean validate, boolean rename)
+    private synchronized List<SSTableReader> findNonIndexedSSTables(ColumnFamilyStore baseCfs, StorageAttachedIndexGroup group, boolean validate)
     {
         Set<SSTableReader> sstables = baseCfs.getLiveSSTables();
 
         // Initialize the SSTable indexes w/ valid existing components...
         assert group != null : "Missing index group on " + baseCfs.name;
-        group.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate, rename);
+        group.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate);
 
         // ...then identify and rebuild the SSTable indexes that are missing.
         List<SSTableReader> nonIndexed = new ArrayList<>();
@@ -553,7 +553,7 @@ public class StorageAttachedIndex implements Index
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
             if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.create(sstable.descriptor).isPerIndexBuildComplete(indexContext))
+                !IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext))
             {
                 nonIndexed.add(sstable);
             }

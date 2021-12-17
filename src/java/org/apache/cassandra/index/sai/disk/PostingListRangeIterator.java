@@ -28,23 +28,18 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
-import org.apache.cassandra.index.sai.Token;
-import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
-import org.apache.cassandra.index.sai.disk.v1.KeyFetcher;
-import org.apache.cassandra.index.sai.disk.v1.LongArray;
-import org.apache.cassandra.index.sai.disk.v1.OnDiskKeyProducer;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Throwables;
 
 /**
  * A range iterator based on {@link PostingList}.
  *
  * <ol>
- *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link #skipTo(Long)} is called </li>
- *   <li> produce a {@link OnDiskKeyProducer.OnDiskToken} from {@link OnDiskKeyProducer#produceToken(long, int)} which is used
+ *   <li> fetch next segment row id from posting list or skip to specific segment row id if {@link #skipTo(PrimaryKey)} is called </li>
+ *   <li> produce a {@link PrimaryKey} from {@link PrimaryKeyMap#primaryKeyFromRowId(long)} which is used
  *       to avoid fetching duplicated keys due to partition-level indexing on wide partition schema.
  *       <br/>
  *       Note: in order to reduce disk access in multi-index query, partition keys will only be fetched for intersected tokens
@@ -63,58 +58,47 @@ public class PostingListRangeIterator extends RangeIterator
     private final SSTableQueryContext queryContext;
 
     private final PostingList postingList;
-    private final KeyFetcher keyFetcher;
     private final IndexContext indexContext;
-    private final IndexSearcher.SearcherContext context;
-    private final LongArray segmentRowIdToToken;
-    private final LongArray segmentRowIdToOffset;
+    private final PrimaryKeyMap primaryKeyMap;
+    private final IndexSearcherContext searcherContext;
 
-    private RandomAccessReader keyReader = null;
-    private OnDiskKeyProducer producer = null;
-
-    private boolean opened = false;
     private boolean needsSkipping = false;
-    private long skipToToken = Long.MIN_VALUE;
+    private PrimaryKey skipToToken = null;
 
 
     /**
      * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
      * immediately so the posting list size can be used.
      */
-    public PostingListRangeIterator(IndexSearcher.SearcherContext context,
-                                    KeyFetcher keyFetcher,
-                                    IndexContext indexContext)
+    public PostingListRangeIterator(IndexContext indexContext,
+                                    PrimaryKeyMap primaryKeyMap,
+                                    IndexSearcherContext searcherContext)
     {
-        super(context.minToken, context.maxToken, context.count());
+        super(searcherContext.minimumKey, searcherContext.maximumKey, searcherContext.count());
 
-        this.keyFetcher = keyFetcher;
-        this.segmentRowIdToToken = context.segmentRowIdToToken;
-        this.segmentRowIdToOffset = context.segmentRowIdToOffset;
         this.indexContext = indexContext;
-        this.postingList = context.postingList;
-        this.context = context;
-        this.queryContext = context.context;
+        this.primaryKeyMap = primaryKeyMap;
+        this.postingList = searcherContext.postingList;
+        this.searcherContext = searcherContext;
+        this.queryContext = this.searcherContext.context;
     }
 
     @Override
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
-        if (skipToToken >= nextToken)
+        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
             return;
 
-        skipToToken = nextToken;
+        skipToToken = nextKey;
         needsSkipping = true;
     }
 
     @Override
-    protected Token computeNext()
+    protected PrimaryKey computeNext()
     {
         try
         {
             queryContext.queryContext.checkpoint();
-
-            if (!opened)
-                open();
 
             // just end the iterator if we don't have a postingList or current segment is skipped
             if (exhausted())
@@ -124,7 +108,7 @@ public class PostingListRangeIterator extends RangeIterator
             if (segmentRowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return getNextToken(segmentRowId);
+            return primaryKeyMap.primaryKeyFromRowId(segmentRowId);
         }
         catch (Throwable t)
         {
@@ -145,20 +129,12 @@ public class PostingListRangeIterator extends RangeIterator
             logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), exhaustedInMills);
         }
 
-        postingList.close();
-        FileUtils.closeQuietly(segmentRowIdToToken, segmentRowIdToOffset, keyReader);
-    }
-
-    private void open()
-    {
-        this.keyReader = keyFetcher.createReader();
-        this.producer = new OnDiskKeyProducer(keyFetcher, keyReader, segmentRowIdToOffset, context.maxPartitionOffset);
-        opened = true;
+        FileUtils.closeQuietly(postingList, primaryKeyMap);
     }
 
     private boolean exhausted()
     {
-        return needsSkipping && skipToToken > getMaximum();
+        return needsSkipping && skipToToken.compareTo(getMaximum()) > 0;
     }
 
     /**
@@ -168,7 +144,7 @@ public class PostingListRangeIterator extends RangeIterator
     {
         if (needsSkipping)
         {
-            int targetRowID = Math.toIntExact(segmentRowIdToToken.findTokenRowID(skipToToken));
+            long targetRowID = primaryKeyMap.rowIdFromPrimaryKey(skipToToken);
             // skipToToken is larger than max token in token file
             if (targetRowID < 0)
             {
@@ -184,18 +160,5 @@ public class PostingListRangeIterator extends RangeIterator
         {
             return postingList.nextPosting();
         }
-    }
-
-    /**
-     * takes a segment row ID and produces a {@link Token} for its partition key.
-     */
-    private Token getNextToken(long segmentRowId)
-    {
-        assert segmentRowId != PostingList.END_OF_STREAM;
-
-        long tokenValue = segmentRowIdToToken.get(segmentRowId);
-
-        // Used to remove duplicated key offset
-        return producer.produceToken(tokenValue, segmentRowId);
     }
 }

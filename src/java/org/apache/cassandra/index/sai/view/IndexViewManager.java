@@ -72,14 +72,13 @@ public class IndexViewManager
      * @param oldSSTables A set of SSTables to remove.
      * @param newSSTableContexts A set of SSTableContexts to add to tracker.
      * @param validate if true, per-column index files' header and footer will be validated.
-     * @param rename if true check whether the per-column index components need renaming
      *
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate, boolean rename)
+    public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTableContexts, boolean validate)
     {
         // Valid indexes on the left and invalid SSTable contexts on the right...
-        Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate, rename);
+        Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate);
 
         View currentView, newView;
         Collection<SSTableIndex> newViewIndexes = new HashSet<>();
@@ -138,7 +137,7 @@ public class IndexViewManager
             index.markObsolete();
         }
 
-        update(toRemove, Collections.emptyList(), false, false);
+        update(toRemove, Collections.emptyList(), false);
     }
 
     /**

@@ -27,12 +27,14 @@ import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.utils.SuppressLeakCheck;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 
+@SuppressLeakCheck(reason="The SSTableContext.<init> error is synthetic and can't happen in a live environment")
 public class FailureTest extends SAITester
 {
     @Test

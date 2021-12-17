@@ -31,8 +31,8 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesMeta;
-import org.apache.cassandra.index.sai.disk.v1.block.NumericValuesWriter;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
@@ -117,10 +117,10 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         try (IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
              IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
              MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null),
+             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                          indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                          metadataWriter, true);
-             SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCKS, null),
+             SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                               metadataWriter,
                                                               bytesWriter,
                                                               blockFPWriter,
@@ -170,11 +170,11 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         tokenValues = new long[NUM_ROWS];
 
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS, null)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.version.fileNameFormatter().format(IndexComponent.PRIMARY_KEY_BLOCKS, null)));
+        NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS)));
         trieFile = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
         termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
-        blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.KD_TREE_POSTING_LISTS);
+        blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
 
         sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
 

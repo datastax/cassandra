@@ -27,7 +27,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -78,7 +79,7 @@ public class MemtableIndexWriter implements PerIndexWriter
     }
 
     @Override
-    public void addRow(DecoratedKey rowKey, long ssTableRowId, Row row)
+    public void addRow(PrimaryKey key, Row row, long sstableRowId)
     {
         // Memtable indexes are flushed directly to disk with the aid of a mapping between primary
         // keys and row IDs in the flushing SSTable. This writer, therefore, does nothing in
@@ -108,10 +109,10 @@ public class MemtableIndexWriter implements PerIndexWriter
                 return;
             }
 
-            final DecoratedKey minKey = rowMapping.minKey;
-            final DecoratedKey maxKey = rowMapping.maxKey;
+            final DecoratedKey minKey = rowMapping.minKey.partitionKey();
+            final DecoratedKey maxKey = rowMapping.maxKey.partitionKey();
 
-            final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtable);
+            final Iterator<Pair<ByteComparable, LongArrayList>> iterator = rowMapping.merge(memtable);
 
             try (MemtableTermsIterator terms = new MemtableTermsIterator(memtable.getMinTerm(), memtable.getMaxTerm(), iterator))
             {
@@ -143,7 +144,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
     }
 
-    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
+    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
     {
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -185,15 +186,15 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        numRows,
                                                        terms.getMinSSTableRowId(),
                                                        terms.getMaxSSTableRowId(),
-                                                       minKey,
-                                                       maxKey,
+                                                       indexDescriptor.primaryKeyFactory.createPartitionKeyOnly(minKey),
+                                                       indexDescriptor.primaryKeyFactory.createPartitionKeyOnly(maxKey),
                                                        terms.getMinTerm(),
                                                        terms.getMaxTerm(),
                                                        indexMetas);
 
         try (MetadataWriter writer = new MetadataWriter(indexDescriptor.openPerIndexOutput(IndexComponent.META, indexContext)))
         {
-            SegmentMetadata.write(writer, Collections.singletonList(metadata), null);
+            SegmentMetadata.write(writer, Collections.singletonList(metadata));
         }
 
         return numRows;

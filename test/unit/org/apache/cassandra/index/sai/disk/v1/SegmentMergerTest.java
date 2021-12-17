@@ -179,12 +179,12 @@ public class SegmentMergerTest extends SAITester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         Descriptor descriptor = Iterables.getOnlyElement(getCurrentColumnFamilyStore().getLiveSSTables()).descriptor;
         TableMetadata table = currentTableMetadata();
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, table.partitioner, table.comparator);
         assertTrue(indexDescriptor.isPerSSTableBuildComplete());
         IndexMetadata index = table.indexes.get(indexName).get();
         IndexContext indexContext = new IndexContext(table, index);
         assertTrue(indexDescriptor.isPerIndexBuildComplete(indexContext));
         final MetadataSource source = MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
-        return SegmentMetadata.load(source, null);
+        return SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);
     }
 }

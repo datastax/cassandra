@@ -31,6 +31,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -48,9 +49,7 @@ public class Segment implements Closeable
     private final Token.KeyBound maxKeyBound;
 
     // per sstable
-    final LongArray.Factory segmentRowIdToTokenFactory;
-    final LongArray.Factory segmentRowIdToOffsetFactory;
-    final KeyFetcher keyFetcher;
+    final PrimaryKeyMap.Factory primaryKeyMapFactory;
     // per-index
     public final PerIndexFiles indexFiles;
     // per-segment
@@ -60,31 +59,25 @@ public class Segment implements Closeable
 
     public Segment(IndexContext indexContext, SSTableContext sstableContext, PerIndexFiles indexFiles, SegmentMetadata metadata) throws IOException
     {
-        this.minKey = metadata.minKey.getToken();
+        this.minKey = metadata.minKey.token();
         this.minKeyBound = minKey.minKeyBound();
-        this.maxKey = metadata.maxKey.getToken();
+        this.maxKey = metadata.maxKey.token();
         this.maxKeyBound = maxKey.maxKeyBound();
 
-        this.segmentRowIdToTokenFactory = sstableContext.tokenReaderFactory.withOffset(metadata.segmentRowIdOffset);
-        this.segmentRowIdToOffsetFactory = sstableContext.offsetReaderFactory.withOffset(metadata.segmentRowIdOffset);
-        this.keyFetcher = sstableContext.keyFetcher;
+        this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        this.index = IndexSearcher.open(this, indexContext);
+        this.index = IndexSearcher.open(primaryKeyMapFactory, indexFiles, metadata, sstableContext.indexDescriptor, indexContext);
     }
 
     @VisibleForTesting
-    public Segment(LongArray.Factory tokenFactory,
-                   LongArray.Factory offsetFactory,
-                   KeyFetcher keyFetcher,
+    public Segment(PrimaryKeyMap.Factory primaryKeyMapFactory,
                    PerIndexFiles indexFiles,
                    SegmentMetadata metadata,
                    AbstractType<?> columnType)
     {
-        this.segmentRowIdToTokenFactory = tokenFactory;
-        this.segmentRowIdToOffsetFactory = offsetFactory;
-        this.keyFetcher = keyFetcher;
+        this.primaryKeyMapFactory = primaryKeyMapFactory;
         this.indexFiles = indexFiles;
         this.metadata = metadata;
         this.minKey = null;
@@ -97,9 +90,7 @@ public class Segment implements Closeable
     @VisibleForTesting
     public Segment(Token minKey, Token maxKey)
     {
-        this.segmentRowIdToTokenFactory = null;
-        this.segmentRowIdToOffsetFactory = null;
-        this.keyFetcher = null;
+        this.primaryKeyMapFactory = null;
         this.indexFiles = null;
         this.metadata = null;
         this.minKey = minKey;
@@ -140,7 +131,7 @@ public class Segment implements Closeable
      * @param defer create the iterator in a deferred state
      * @return range iterator that matches given expression
      */
-    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer)
+    public RangeIterator search(Expression expression, SSTableQueryContext context, boolean defer) throws IOException
     {
         return index.search(expression, context, defer);
     }

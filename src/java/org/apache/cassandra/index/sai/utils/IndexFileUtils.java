@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -110,9 +111,39 @@ public class IndexFileUtils
             checksum.update(b, off, len);
         }
 
+        @Override
+        public void writeChar(int v) throws IOException
+        {
+            super.writeChar(v);
+            addTochecksum(v, 2);
+        }
+
+        @Override
+        public void writeInt(int v) throws IOException
+        {
+            super.writeInt(v);
+            addTochecksum(v, 4);
+        }
+
+        @Override
+        public void writeLong(long v) throws IOException
+        {
+            super.writeLong(v);
+            addTochecksum(v, 8);
+        }
+
         public long getChecksum()
         {
             return checksum.getValue();
+        }
+
+        private void addTochecksum(long bytes, int count)
+        {
+            int origCount = count;
+            if (ByteOrder.BIG_ENDIAN == buffer.order())
+                while (count > 0) checksum.update((int) (bytes >>> (8 * --count)));
+            else
+                while (count > 0) checksum.update((int) (bytes >>> (8 * (origCount - count--))));
         }
     }
 }

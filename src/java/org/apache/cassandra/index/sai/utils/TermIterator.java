@@ -29,7 +29,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.SSTableQueryContext;
-import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
@@ -90,7 +89,7 @@ public class TermIterator extends RangeIterator
         return new TermIterator(ranges, perSSTableIndexes, queryContext);
     }
 
-    protected Token computeNext()
+    protected PrimaryKey computeNext()
     {
         try
         {
@@ -102,11 +101,11 @@ public class TermIterator extends RangeIterator
         }
     }
 
-    protected void performSkipTo(Long nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
         try
         {
-            union.skipTo(nextToken);
+            union.skipTo(nextKey);
         }
         finally
         {
