@@ -197,6 +197,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.WindowsTimer;
 import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventType;
@@ -5053,19 +5054,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
 
             if (!isFinalShutdown)
-                setMode(Mode.DRAINING, "clearing mutation stage", false);
-            viewMutationStage.shutdown();
-            counterMutationStage.shutdown();
-            mutationStage.shutdown();
-
-            // FIXME? should these *really* take up to one hour?
-            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-
-            StorageProxy.instance.verifyNoHintsInProgress();
-
-            if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
 
             // we don't want to start any new compactions while we are draining
@@ -5116,6 +5104,31 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.SHUTDOWN));
             }
             FBUtilities.waitOnFutures(flushes);
+
+            // Now that client requests, messaging service and compactions are shutdown, there shouldn't be any more
+            // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
+            // manager can generated mutations, for example because of the view builder or the sstable_activity updates
+            // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "stopping mutations", false);
+
+            List<OpOrder.Barrier> barriers = StreamSupport.stream(Keyspace.all().spliterator(), false)
+                                                          .map(ks -> ks.stopMutations())
+                                                          .collect(Collectors.toList());
+            barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
+
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "clearing mutation stages", false);
+
+            viewMutationStage.shutdown();
+            counterMutationStage.shutdown();
+            mutationStage.shutdown();
+            // FIXME? should these *really* take up to one hour?
+            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+
+            StorageProxy.instance.verifyNoHintsInProgress();
 
             HintsService.instance.shutdownBlocking();
 
