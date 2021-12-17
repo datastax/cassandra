@@ -51,12 +51,12 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
@@ -218,9 +218,10 @@ public class DatabaseDescriptor
     private static boolean clientInitialized;
     private static boolean toolInitialized;
     private static boolean daemonInitialized;
+    private static boolean enableMemtableAndCommitLog;
 
     private static final int searchConcurrencyFactor = SEARCH_CONCURRENCY_FACTOR.getInt();
-    private static DurationSpec.IntSecondsBound autoSnapshoTtl;
+    private static DurationSpec.IntSecondsBound autoSnapshoTtl; // TODO rename it
 
     private static volatile boolean disableSTCSInL0 = DISABLE_STCS_IN_L0.getBoolean();
     private static final boolean unsafeSystem = UNSAFE_SYSTEM.getBoolean();
@@ -384,6 +385,20 @@ public class DatabaseDescriptor
     public static boolean isDaemonInitialized()
     {
         return daemonInitialized;
+    }
+
+    /**
+     * Enables lifecycle transactions via {@link org.apache.cassandra.db.lifecycle.Tracker} and
+     * memtable via {@link org.apache.cassandra.db.ColumnFamilyStore}.
+     */
+    public static void setEnableMemtableAndCommitLog()
+    {
+        enableMemtableAndCommitLog = true;
+    }
+
+    public static boolean enableMemtableAndCommitLog()
+    {
+        return daemonInitialized || enableMemtableAndCommitLog;
     }
 
     public static Config getRawConfig()
