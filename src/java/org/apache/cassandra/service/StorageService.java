@@ -129,12 +129,11 @@ import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token.TokenFactory;
-import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.dht.RangeStreamer.FetchReplica;
 import org.apache.cassandra.dht.StreamStateStore;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.dht.Token.TokenFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnavailableException;
@@ -148,6 +147,7 @@ import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.gms.TokenSerializer;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.IndexStatusManager;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.IVerifier;
@@ -173,9 +173,9 @@ import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.locator.TokenMetadataProvider;
 import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.SamplingManager;
-import org.apache.cassandra.locator.TokenMetadataProvider;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.AsyncOneResponse;
 import org.apache.cassandra.net.Message;
@@ -224,6 +224,7 @@ import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 import org.apache.cassandra.utils.progress.ProgressEvent;
@@ -5330,7 +5331,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         Future<?> hintsSuccess = ImmediateFuture.success(null);
 
-        if (DatabaseDescriptor.getTransferHintsOnDecommission()) 
+        if (DatabaseDescriptor.getTransferHintsOnDecommission())
         {
             setMode(Mode.LEAVING, "streaming hints to other nodes", true);
             hintsSuccess = streamHints();
@@ -5757,13 +5758,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
 
             if (!isFinalShutdown)
-                setMode(Mode.DRAINING, "clearing mutation stage", false);
-            Stage.shutdownAndAwaitMutatingExecutors(false,
-                                                    DRAIN_EXECUTOR_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
-
-            StorageProxy.instance.verifyNoHintsInProgress();
-
-            if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
 
             // we don't want to start any new compactions while we are draining
@@ -5815,7 +5809,28 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
             FBUtilities.waitOnFutures(flushes);
 
+            // Now that client requests, messaging service and compactions are shutdown, there shouldn't be any more
+            // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
+            // manager can generated mutations, for example because of the view builder or the sstable_activity updates
+            // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "stopping mutations", false);
+
+            List<OpOrder.Barrier> barriers = StreamSupport.stream(Keyspace.all().spliterator(), false)
+                                                          .map(Keyspace::stopMutations)
+                                                          .collect(Collectors.toList());
+            barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
+
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "clearing mutation stage", false);
+            Stage.shutdownAndAwaitMutatingExecutors(false,
+                                                    DRAIN_EXECUTOR_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+
+            StorageProxy.instance.verifyNoHintsInProgress();
+
+
             SnapshotManager.shutdownAndWait(1L, MINUTES);
+
             HintsService.instance.shutdownBlocking();
 
             // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
@@ -6998,7 +7013,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (value < 0)
             throw new IllegalStateException("Table count warn threshold should be positive, not "+value);
         logger.info("Changing table count warn threshold from {} to {}", getTableCountWarnThreshold(), value);
-        Guardrails.instance.setTablesThreshold((int) Converters.TABLE_COUNT_THRESHOLD_TO_GUARDRAIL.convert(value), 
+        Guardrails.instance.setTablesThreshold((int) Converters.TABLE_COUNT_THRESHOLD_TO_GUARDRAIL.convert(value),
                                                Guardrails.instance.getTablesFailThreshold());
     }
 

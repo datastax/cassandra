@@ -47,12 +47,14 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
@@ -71,8 +73,8 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.concurrent.Promise;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -106,6 +108,9 @@ public class Keyspace
     //OpOrder is defined globally since we need to order writes across
     //Keyspaces in the case of Views (batchlog of view mutations)
     public static final OpOrder writeOrder = new OpOrder();
+
+    // Set during draining to indicate that no more mutations should be accepted
+    private volatile OpOrder.Barrier writeBarrier = null;
 
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
@@ -505,6 +510,20 @@ public class Keyspace
     }
 
     /**
+     * Close this keyspace to further mutations, called when draining or shutting down.
+     *
+     * A final write barrier is issued and returned. After this barrier is set, new mutations
+     * will be rejected, see {@link Keyspace#applyInternal(Mutation, boolean, boolean, boolean, boolean, Promise)}.
+     */
+    public OpOrder.Barrier stopMutations()
+    {
+        assert writeBarrier == null : "Keyspace has already been closed to mutations";
+        writeBarrier = writeOrder.newBarrier();
+        writeBarrier.issue();
+        return writeBarrier;
+    }
+
+    /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
      *
      * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
@@ -515,14 +534,17 @@ public class Keyspace
      * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
      */
     private Future<?> applyInternal(final Mutation mutation,
-                                               final boolean makeDurable,
-                                               boolean updateIndexes,
-                                               boolean isDroppable,
-                                               boolean isDeferrable,
-                                               Promise<?> future)
+                                    final boolean makeDurable,
+                                    boolean updateIndexes,
+                                    boolean isDroppable,
+                                    boolean isDeferrable,
+                                    Promise<?> future)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             throw new RuntimeException("Testing write failures");
+
+        if (writeBarrier != null)
+            return failDueToWriteBarrier(mutation, future);
 
         Lock[] locks = null;
 
@@ -666,6 +688,17 @@ public class Keyspace
         }
     }
 
+    private Promise<?> failDueToWriteBarrier(Mutation mutation, Promise<?> future)
+    {
+        assert writeBarrier != null : "Expected non-null write barrier";
+
+        logger.error("Attempted to apply mutation "+ mutation+" after final write barrier", new Throwable());
+        BarrierRejectionException exception = new BarrierRejectionException("Keyspace closed to new mutations");
+        if (future != null)
+            future.setFailure(exception);
+        throw exception;
+    }
+
     public AbstractReplicationStrategy getReplicationStrategy()
     {
         return replicationStrategy;
@@ -780,5 +813,19 @@ public class Keyspace
     public String getName()
     {
         return metadata.name;
+    }
+
+    public static class BarrierRejectionException extends RejectException implements InternalRequestExecutionException
+    {
+        public BarrierRejectionException(String msg)
+        {
+            super(msg);
+        }
+
+        @Override
+        public RequestFailureReason getReason()
+        {
+            return RequestFailureReason.UNKNOWN;
+        }
     }
 }
