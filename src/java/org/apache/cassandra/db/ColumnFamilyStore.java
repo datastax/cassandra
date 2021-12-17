@@ -133,8 +133,8 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.StorageHandler;
+import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -558,12 +558,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // Create Memtable and its metrics object only on online
         Memtable initialMemtable = null;
         TableMetrics.ReleasableMetric memtableMetrics = null;
-        if (DatabaseDescriptor.isDaemonInitialized())
+        if (DatabaseDescriptor.enableMemtableAndCommitLog())
         {
-            initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
-            memtableMetrics = memtableFactory.createMemtableMetrics(metadata);
+            if (DatabaseDescriptor.isDaemonInitialized())
+            {
+                initialMemtable = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+                memtableMetrics = memtableFactory.createMemtableMetrics(metadata);
+            }
+            data = new Tracker(this, initialMemtable, loadSSTables);
         }
-        data = new Tracker(this, initialMemtable, loadSSTables);
+        else
+        {
+            data = new Tracker(this, null, false);
+        }
 
         // Note that this needs to happen before we load the first sstables, or the global sstable tracker will not
         // be notified on the initial loading.
@@ -711,6 +718,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public Directories getDirectories()
     {
         return directories;
+    }
+
+    public StorageHandler getStorageHandler()
+    {
+        return storageHandler;
     }
 
     @Override
