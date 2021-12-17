@@ -196,6 +196,9 @@ public class DatabaseDescriptor
         updateInitialized(false, false, false);
 
         setPartitionerUnsafe(null);
+        IEndpointSnitch oldSnitch = getEndpointSnitch();
+        if (oldSnitch instanceof DynamicEndpointSnitch)
+            ((DynamicEndpointSnitch)oldSnitch).close();
         setEndpointSnitch(null);
         EndpointSnitchInfo.unregisterMBean();
     }
