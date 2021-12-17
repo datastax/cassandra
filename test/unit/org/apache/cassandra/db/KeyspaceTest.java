@@ -36,8 +36,8 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
+import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.metrics.ClearableHistogram;
@@ -46,6 +46,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.assertj.core.api.Assertions;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -521,14 +522,24 @@ public class KeyspaceTest extends CQLTester
         assertRowsInResult(cfs, command);
     }
 
+    @Test(expected = Keyspace.BarrierRejectionException.class)
+    public void testStopMutations() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a text, b int, c int, PRIMARY KEY (a, b))");
+        Keyspace keyspace = Keyspace.open(KEYSPACE_PER_TEST);
+        keyspace.stopMutations();
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", "0", 0, 0);
+        fail();
+    }
+
     @Test
     public void testSetUnsetInitialized()
     {
         // dumb test to make sonar happy
         Keyspace.unsetInitialized();
-        Assertions.assertThat(Keyspace.isInitialized()).isFalse();
+        assertThat(Keyspace.isInitialized()).isFalse();
         Keyspace.setInitialized();
-        Assertions.assertThat(Keyspace.isInitialized()).isTrue();
+        assertThat(Keyspace.isInitialized()).isTrue();
     }
 
     @Test
