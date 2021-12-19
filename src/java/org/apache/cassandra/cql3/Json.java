@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.util.*;
 
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
-import com.fasterxml.jackson.core.util.BufferRecyclers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
