@@ -27,7 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.util.BufferRecyclers;
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -60,8 +60,7 @@ public final class JsonUtils
      */
     public static String quoteAsJsonString(String s)
     {
-        // In future should update to directly use `JsonStringEncoder.getInstance()` but for now:
-        return new String(BufferRecyclers.getJsonStringEncoder().quoteAsString(s));
+        return new String(JsonStringEncoder.getInstance().quoteAsString(s));
     }
 
     public static Object decodeJson(byte[] json)
