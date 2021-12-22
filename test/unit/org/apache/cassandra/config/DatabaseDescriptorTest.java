@@ -50,6 +50,7 @@ import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.assertj.core.api.Assertions;
 import org.mockito.MockedStatic;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.utils.MBeanWrapper;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
@@ -60,6 +61,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -92,6 +96,8 @@ public class DatabaseDescriptorTest
 
         config = DatabaseDescriptor.loadConfig();
         assertEquals("ConfigurationLoader Test", config.cluster_name);
+
+        System.clearProperty("cassandra.config.loader");
     }
 
     public static class TestLoader implements ConfigurationLoader
@@ -972,5 +978,30 @@ public class DatabaseDescriptorTest
         when(mockSmallFileStore.getTotalSpace()).thenReturn(1L << 29); // 512 MB
         fileStoreMultiset.add(mockSmallFileStore);
         assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+    }
+
+    @Test
+    public void testResetUnsafe()
+    {
+        assertTrue(DatabaseDescriptor.isDaemonInitialized());
+        assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+        assertNotNull(DatabaseDescriptor.getPartitioner());
+        assertNotNull(DatabaseDescriptor.getEndpointSnitch());
+        assertTrue(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+
+        try
+        {
+            DatabaseDescriptor.resetUnsafe();
+
+            assertFalse(DatabaseDescriptor.isDaemonInitialized());
+            assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+            assertNull(DatabaseDescriptor.getPartitioner());
+            assertNull(DatabaseDescriptor.getEndpointSnitch());
+            assertFalse(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+        }
+        finally
+        {
+            DatabaseDescriptor.daemonInitialization();
+        }
     }
 }
