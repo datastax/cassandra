@@ -182,11 +182,13 @@ public class DatabaseDescriptor
      * that prevent changing config or directories.
      * <p/>
      * It cannot set the config to null because this would cause NPEs in the
-     * schedulers that are still running, e.g. TPC.
+     * schedulers that are still running.
      * <p/>
      * It cannot delete directories because on remote storage this would result
      * in errors if the test containers for remote storage are being shutdown
      * concurrently. The caller should delete any directories if required.
+     * TODO If you run into problems with undeleted directories or with the 
+     * caller deleting them, please add additional details here.
      * <p/>
      * This method is called by integration tests that run in the same JVM.
      */
@@ -391,6 +393,7 @@ public class DatabaseDescriptor
         }
     }
 
+    @VisibleForTesting
     public static void setConfig(Config config)
     {
         conf = config;
