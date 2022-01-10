@@ -48,6 +48,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -165,7 +166,7 @@ public abstract class CompactionStress implements Runnable
                 throw new IllegalStateException("CompactionStress does not support secondary indexes");
 
             //Register with cfs
-            cfs.addSSTables(sstables);
+            cfs.addSSTables(sstables, OperationType.COMPACTION);
         }
 
         return cfs;
