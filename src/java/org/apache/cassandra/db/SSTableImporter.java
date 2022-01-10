@@ -28,9 +28,11 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -223,7 +225,7 @@ public class SSTableImporter
             if (!cfs.indexManager.validateSSTableAttachedIndexes(newSSTables, false, options.validateIndexChecksum))
                 cfs.indexManager.buildSSTableAttachedIndexesBlocking(newSSTables);
 
-            cfs.getTracker().addSSTables(newSSTables);
+            cfs.getTracker().addSSTables(newSSTables, OperationType.UNKNOWN);
             for (SSTableReader reader : newSSTables)
             {
                 if (options.invalidateCaches && cfs.isRowCacheEnabled())
