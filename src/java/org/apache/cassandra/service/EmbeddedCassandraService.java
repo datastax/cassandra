@@ -54,7 +54,5 @@ public class EmbeddedCassandraService
     public void stop()
     {
         cassandraDaemon.stop();
-        cassandraDaemon.destroyClientTransports();
-        ActiveRepairService.instance.stop();
     }
 }
