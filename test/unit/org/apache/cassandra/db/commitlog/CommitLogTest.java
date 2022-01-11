@@ -106,6 +106,7 @@ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -825,6 +826,29 @@ public abstract class CommitLogTest
         replayer.replayFiles(files);
 
         assertEquals(cellCount, replayer.cells);
+    }
+
+    @Test
+    public void failedToReplayMultipleTimes() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
+        final Mutation rm1 = new RowUpdateBuilder(cfs.metadata(), 0, "k1")
+                             .clustering("bytes")
+                             .add("val", bytes("this is a string"))
+                             .build();
+        CommitLog.instance.add(rm1);
+        CommitLog.instance.sync(true);
+
+        SimpleCountingReplayer replayer = new SimpleCountingReplayer(CommitLog.instance, CommitLogPosition.NONE, cfs.metadata());
+        List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
+        assertFalse(activeSegments.isEmpty());
+
+        File[] files = CommitLog.instance.segmentManager.storageDirectory.tryList((file, name) -> activeSegments.contains(name));
+        replayer.replayFiles(files);
+        assertEquals(1, replayer.cells);
+
+        // replayer twice should fail
+        assertThatThrownBy(() -> replayer.replayFiles(files)).hasMessageContaining("CommitlogReplayer can only replay once");
     }
 
     @Test

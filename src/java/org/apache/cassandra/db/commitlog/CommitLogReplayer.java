@@ -24,6 +24,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
@@ -90,6 +91,8 @@ public class CommitLogReplayer implements CommitLogReadHandler
     @VisibleForTesting
     protected CommitLogReader commitLogReader;
 
+    private volatile boolean replayed = false;
+
     CommitLogReplayer(CommitLog commitLog,
                       CommitLogPosition globalPosition,
                       Map<TableId, IntervalSet<CommitLogPosition>> cfPersisted,
@@ -153,14 +156,20 @@ public class CommitLogReplayer implements CommitLogReadHandler
 
     public void replayPath(File file, boolean tolerateTruncation) throws IOException
     {
+        Preconditions.checkArgument(!replayed, "CommitlogReplayer can only replay once");
+
         sawCDCMutation = false;
         commitLogReader.readCommitLogSegment(this, file, globalPosition, CommitLogReader.ALL_MUTATIONS, tolerateTruncation);
         if (sawCDCMutation)
             handleCDCReplayCompletion(file);
+
+        replayed = true;
     }
 
     public void replayFiles(File[] clogs) throws IOException
     {
+        Preconditions.checkArgument(!replayed, "CommitlogReplayer can only replay once");
+
         List<File> filteredLogs = CommitLogReader.filterCommitLogFiles(clogs);
         int i = 0;
         for (File file: filteredLogs)
@@ -171,6 +180,8 @@ public class CommitLogReplayer implements CommitLogReadHandler
             if (sawCDCMutation)
                 handleCDCReplayCompletion(file);
         }
+
+        replayed = true;
     }
 
 

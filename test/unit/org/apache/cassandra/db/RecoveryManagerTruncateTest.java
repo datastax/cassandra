@@ -108,7 +108,7 @@ public class RecoveryManagerTruncateTest
         // and now truncate it
         cfs.truncateBlocking();
         Map<Keyspace, Integer> replayed = CommitLog.instance.resetUnsafe(false);
-        assertFalse(replayed.isEmpty());
+        assertFalse("Expect no mutation replayed, but got " + replayed, replayed.isEmpty());
 
         // and validate truncation.
         Util.assertEmptyUnfiltered(Util.cmd(cfs).build());

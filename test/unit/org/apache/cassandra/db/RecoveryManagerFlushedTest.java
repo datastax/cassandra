@@ -52,6 +52,8 @@ import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.junit.Assert.assertEquals;
+
 @RunWith(Parameterized.class)
 public class RecoveryManagerFlushedTest
 {
@@ -126,11 +128,11 @@ public class RecoveryManagerFlushedTest
         // replay the commit log (nothing on Standard1 should be replayed since everything was flushed, so only the row on Standard2
         // will be replayed)
         Map<Keyspace, Integer> replayed = CommitLog.instance.resetUnsafe(false);
-        assert replayed.size() == 1 : "Expecting only one keyspace with replayed mutations";
+        assertEquals("Expecting only one keyspace with replayed mutations", 1, replayed.size());
         Keyspace replayedKeyspace = replayed.keySet().iterator().next();
         Integer keyspaceReplayedCount = replayed.values().iterator().next();
-        assert replayedKeyspace.getName().equals(KEYSPACE1) : String.format("Expecting %s keyspace, not %s", KEYSPACE1, replayedKeyspace.getName());
-        assert keyspaceReplayedCount == 1 : "Expecting only 1 replayed mutation, got " + replayed;
+        assertEquals(String.format("Expecting %s keyspace, not %s", KEYSPACE1, replayedKeyspace.getName()), KEYSPACE1, replayedKeyspace.getName());
+        assertEquals("Expecting only 1 replayed mutation, got " + replayed, 1, (int) keyspaceReplayedCount);
     }
 
     private void insertRow(String cfname, String key)

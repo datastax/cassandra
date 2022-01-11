@@ -199,7 +199,7 @@ public class CommitLog implements CommitLogMBean
      * Perform recovery on a list of commit log files. The recovery is executed as a commit log read followed by a
      * flush.
      *
-     * @param flushReason the reason for flushing that fallows commit log reading
+     * @param flushReason the reason for flushing that follows commit log reading
      * @param clogs   the list of commit log files to replay
      * @return keyspaces and the corresponding number of partition updates
      */
