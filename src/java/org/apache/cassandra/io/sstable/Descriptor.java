@@ -290,6 +290,11 @@ public class Descriptor
             return null;
         }
     }
+    
+    public static boolean validFilename(String name)
+    {
+        return validFilenameWithComponent(name) != null;
+    }
 
     private static SSTableFormat<?, ?> formatFromName(String fileName, List<String> tokens)
     {
