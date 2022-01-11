@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.Before;
@@ -124,8 +125,12 @@ public class RecoveryManagerFlushedTest
         logger.debug("begin manual replay");
         // replay the commit log (nothing on Standard1 should be replayed since everything was flushed, so only the row on Standard2
         // will be replayed)
-        int replayed = CommitLog.instance.resetUnsafe(false);
-        assert replayed == 1 : "Expecting only 1 replayed mutation, got " + replayed;
+        Map<Keyspace, Integer> replayed = CommitLog.instance.resetUnsafe(false);
+        assert replayed.size() == 1 : "Expecting only one keyspace with replayed mutations";
+        Keyspace replayedKeyspace = replayed.keySet().iterator().next();
+        Integer keyspaceReplayedCount = replayed.values().iterator().next();
+        assert replayedKeyspace.getName().equals(KEYSPACE1) : String.format("Expecting %s keyspace, not %s", KEYSPACE1, replayedKeyspace.getName());
+        assert keyspaceReplayedCount == 1 : "Expecting only 1 replayed mutation, got " + replayed;
     }
 
     private void insertRow(String cfname, String key)

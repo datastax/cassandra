@@ -102,6 +102,7 @@ import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
@@ -201,7 +202,7 @@ public abstract class CommitLogTest
     public void testRecoveryWithEmptyLog() throws Exception
     {
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(new File[]{
+            CommitLog.instance.recoverFiles(STARTUP, new File[]{
             tmpFile(CommitLogDescriptor.current_version),
             tmpFile(CommitLogDescriptor.current_version)
             });
@@ -212,7 +213,7 @@ public abstract class CommitLogTest
     @Test
     public void testRecoveryWithEmptyFinalLog() throws Exception
     {
-        CommitLog.instance.recoverFiles(tmpFile(CommitLogDescriptor.current_version));
+        CommitLog.instance.recoverFiles(STARTUP, tmpFile(CommitLogDescriptor.current_version));
     }
 
     /**
@@ -258,13 +259,13 @@ public abstract class CommitLogTest
 
         // one corrupt file and one header only file should be ok
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(file1, file2);
+            CommitLog.instance.recoverFiles(STARTUP, file1, file2);
             return null;
         }, null);
 
         // 2 corrupt files and one header only file should fail
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(file1, file1, file2);
+            CommitLog.instance.recoverFiles(STARTUP, file1, file1, file2);
             return null;
         }, CommitLogReplayException.class);
     }
@@ -983,7 +984,7 @@ public abstract class CommitLogTest
         // In the absence of error, this should be 0 because forceBlockingFlush/forceRecycleAllSegments would have
         // persisted all data in the commit log. Because we know there was an error, there must be something left to
         // replay.
-        Assert.assertEquals(1, CommitLog.instance.resetUnsafe(false));
+        Assert.assertEquals(1, CommitLog.instance.resetUnsafe(false).size());
         System.clearProperty("cassandra.replayList");
     }
 
@@ -1062,7 +1063,7 @@ public abstract class CommitLogTest
         Mutation rm = rb.build();
         CommitLog.instance.add(rm);
 
-        int replayed = 0;
+        Map<Keyspace, Integer> replayed;
 
         try
         {
@@ -1074,7 +1075,7 @@ public abstract class CommitLogTest
             System.clearProperty(CommitLogReplayer.IGNORE_REPLAY_ERRORS_PROPERTY);
         }
 
-        Assert.assertEquals(replayed, 1);
+        Assert.assertEquals(replayed.size(), 1);
     }
 }
 
