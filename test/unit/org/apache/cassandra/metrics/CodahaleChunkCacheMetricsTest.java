@@ -64,6 +64,7 @@ public class CodahaleChunkCacheMetricsTest
     public void after()
     {
         chunkCacheMetrics.reset();
+        System.clearProperty("cassandra.use_micrometer_metrics");
     }
 
     @Test
@@ -102,9 +103,9 @@ public class CodahaleChunkCacheMetricsTest
 
         assertEquals(0, chunkCacheMetrics.entries());
 
-        assertEquals(0, chunkCacheMetrics.requestsFifteenMinuteRate());
+        assertEquals(0, chunkCacheMetrics.requestsFifteenMinuteRate(), 0.1);
 
-        assertEquals(0, chunkCacheMetrics.hitsFifteenMinuteRate());
+        assertTrue(Double.isNaN(chunkCacheMetrics.hitFifteenMinuteRate()));
 
         CacheStats snapshot = chunkCacheMetrics.snapshot();
         assertNotNull(snapshot);
