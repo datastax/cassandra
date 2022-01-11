@@ -20,7 +20,6 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -30,11 +29,13 @@ import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
 
-import static org.apache.cassandra.metrics.MicrometerChunkCacheMetrics.hitRateUpdateInterval;
+import static org.apache.cassandra.metrics.MicrometerCacheMetrics.hitRateUpdateIntervalNanos;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -45,6 +46,8 @@ public class MicrometerChunkCacheMetricsTest
 
     private ChunkCacheMetrics chunkCacheMetrics;
 
+    private WithProperties withProperties;
+
     @BeforeClass
     public static void init()
     {
@@ -54,12 +57,15 @@ public class MicrometerChunkCacheMetricsTest
     @Before
     public void before()
     {
+        withProperties = new WithProperties();
+
         mockChunkCache = Mockito.mock(ChunkCache.class);
 
         // Use micrometer metrics
-        CassandraRelevantProperties.USE_MICROMETER.setBoolean(true);
+        withProperties.set(CassandraRelevantProperties.USE_MICROMETER, true);
 
         chunkCacheMetrics = ChunkCacheMetrics.create(mockChunkCache);
+
         assertTrue(chunkCacheMetrics instanceof MicrometerChunkCacheMetrics);
     }
 
@@ -67,7 +73,7 @@ public class MicrometerChunkCacheMetricsTest
     public void after()
     {
         // Reset to not use micrometer metrics
-        CassandraRelevantProperties.USE_MICROMETER.setBoolean(false);
+        withProperties.close();
     }
 
     @Test
@@ -77,7 +83,7 @@ public class MicrometerChunkCacheMetricsTest
         assertEquals(90, chunkCacheMetrics.hits());
 
         // Added delay to increase code coverage updating hit rate when calling recordMisses
-        Thread.sleep(2 * TimeUnit.NANOSECONDS.toMillis(hitRateUpdateInterval));
+        Thread.sleep(2 * TimeUnit.NANOSECONDS.toMillis(hitRateUpdateIntervalNanos));
 
         chunkCacheMetrics.recordMisses(10);
         assertEquals(10, chunkCacheMetrics.misses());
@@ -110,9 +116,9 @@ public class MicrometerChunkCacheMetricsTest
 
         assertEquals(0, chunkCacheMetrics.entries());
 
-        assertEquals(0, chunkCacheMetrics.requestsFifteenMinuteRate());
+        assertTrue(Double.isNaN(chunkCacheMetrics.requestsFifteenMinuteRate()));
 
-        assertEquals(0, chunkCacheMetrics.hitsFifteenMinuteRate());
+        assertTrue(Double.isNaN(chunkCacheMetrics.hitFifteenMinuteRate()));
 
         CacheStats snapshot = chunkCacheMetrics.snapshot();
         assertNotNull(snapshot);
