@@ -152,8 +152,8 @@ public class CommitLogFailurePolicyTest
         try
         {
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.fail_writes);
-            CommitLog.handleCommitError("Testing ignore policy", new Throwable());
-            //error policy is set to IGNORE, so JVM must not be killed if error occurs after startup
+            CommitLog.handleCommitError("Testing fail writes policy", new Throwable());
+            //error policy is set to fail_writes, so JVM must not be killed if error occurs after startup
             Assert.assertFalse(killerForTests.wasKilled());
         }
         finally
