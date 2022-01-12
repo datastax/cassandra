@@ -179,7 +179,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         REPAIR,
         SCHEMA_CHANGE,
         UNIT_TESTS, // explicitly requested flush needed for a test
-        /** Flush performed to a remote storage. Used by remot commit log replay */
+        /** Flush performed to a remote storage. Used by remote commit log replay */
         REMOTE_REPLAY
     }
 
