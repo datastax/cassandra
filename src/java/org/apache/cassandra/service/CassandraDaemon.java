@@ -335,7 +335,7 @@ public class CassandraDaemon
         // replay the log if necessary
         try
         {
-            CommitLog.instance.recoverSegmentsOnDisk();
+            CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
         }
         catch (IOException e)
         {
