@@ -39,6 +39,7 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.io.util.PathUtils.forEach;
 import static org.junit.Assert.assertTrue;
 
@@ -141,7 +142,7 @@ public class CommitLogArchiverTest extends CQLTester
         CommitLog.instance.archiver.maybeRestoreArchive();
         CommitLogSegment.resetReplayLimit();
         // restore archived files
-        CommitLog.instance.recoverFiles(CommitLog.instance.getUnmanagedFiles());
+        CommitLog.instance.recoverFiles(UNIT_TESTS, CommitLog.instance.getUnmanagedFiles());
         // restore poin time is rpiTime in microseconds , so row(4, 0, 0) and row(4, 1, 1) is skipped
         assertRows(execute("SELECT * FROM %s"), row(3, 0, 0), row(3, 1, 1));
 
@@ -167,7 +168,7 @@ public class CommitLogArchiverTest extends CQLTester
         // replay log
         CommitLog.instance.archiver.maybeRestoreArchive();
         CommitLogSegment.resetReplayLimit();
-        CommitLog.instance.recoverFiles(CommitLog.instance.getUnmanagedFiles());
+        CommitLog.instance.recoverFiles(UNIT_TESTS, CommitLog.instance.getUnmanagedFiles());
         // restore poin time is rpiTime in millseconds, so row(2, 0, 0) and row(2, 1, 1) is skipped
         assertRows(execute("SELECT * FROM %s"), row(1, 0, 0), row(1, 1, 1));
     }
