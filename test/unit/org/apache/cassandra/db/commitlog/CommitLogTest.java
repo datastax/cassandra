@@ -109,9 +109,11 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_IGNORE_REPLAY_ERRORS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMMIT_LOG_REPLAY_LIST;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -238,7 +240,7 @@ public abstract class CommitLogTest
     public void testRecoveryWithEmptyLog() throws Exception
     {
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(tmpFile(CommitLogDescriptor.current_version),
+            CommitLog.instance.recoverFiles(STARTUP, tmpFile(CommitLogDescriptor.current_version),
                                             tmpFile(CommitLogDescriptor.current_version));
             return null;
         }, CommitLogReplayException.class);
@@ -247,7 +249,7 @@ public abstract class CommitLogTest
     @Test
     public void testRecoveryWithEmptyFinalLog() throws Exception
     {
-        CommitLog.instance.recoverFiles(tmpFile(CommitLogDescriptor.current_version));
+        CommitLog.instance.recoverFiles(STARTUP, tmpFile(CommitLogDescriptor.current_version));
     }
 
     /**
@@ -293,13 +295,13 @@ public abstract class CommitLogTest
 
         // one corrupt file and one header only file should be ok
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(file1, file2);
+            CommitLog.instance.recoverFiles(STARTUP, file1, file2);
             return null;
         }, null);
 
         // 2 corrupt files and one header only file should fail
         runExpecting(() -> {
-            CommitLog.instance.recoverFiles(file1, file1, file2);
+            CommitLog.instance.recoverFiles(STARTUP, file1, file1, file2);
             return null;
         }, CommitLogReplayException.class);
     }
@@ -1001,7 +1003,7 @@ public abstract class CommitLogTest
             // If compression or encryption are enabled, expect an error, and do not attempt to replay using only mutation CRCs.
             runExpecting(() ->
                          {
-                             CommitLog.instance.recoverFiles(firstActiveFile);
+                             CommitLog.instance.recoverFiles(STARTUP, firstActiveFile);
                              return null;
                          },
                          CommitLogReplayException.class);
@@ -1042,6 +1044,29 @@ public abstract class CommitLogTest
         {
             out.write(buffer.array());
         }
+    }
+
+    @Test
+    public void failedToReplayMultipleTimes() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(STANDARD1);
+        final Mutation rm1 = new RowUpdateBuilder(cfs.metadata(), 0, "k1")
+                             .clustering("bytes")
+                             .add("val", bytes("this is a string"))
+                             .build();
+        CommitLog.instance.add(rm1);
+        CommitLog.instance.sync(true);
+
+        SimpleCountingReplayer replayer = new SimpleCountingReplayer(CommitLog.instance, CommitLogPosition.NONE, cfs.metadata());
+        List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
+        assertFalse(activeSegments.isEmpty());
+
+        File[] files = CommitLog.instance.segmentManager.storageDirectory.tryList((file, name) -> activeSegments.contains(name));
+        replayer.replayFiles(files);
+        assertEquals(1, replayer.cells);
+
+        // replayer twice should fail
+        assertThatThrownBy(() -> replayer.replayFiles(files)).hasMessageContaining("CommitlogReplayer can only replay once");
     }
 
     @Test
@@ -1203,7 +1228,8 @@ public abstract class CommitLogTest
         // In the absence of error, this should be 0 because forceBlockingFlush/forceRecycleAllSegments would have
         // persisted all data in the commit log. Because we know there was an error, there must be something left to
         // replay.
-        assertEquals(1, CommitLog.instance.resetUnsafe(false));
+        Assert.assertEquals(1, CommitLog.instance.resetUnsafe(false).size());
+        System.clearProperty("cassandra.replayList");
     }
 
     BiConsumer<ColumnFamilyStore, Memtable> flush = (cfs, current) ->
@@ -1274,14 +1300,14 @@ public abstract class CommitLogTest
         Mutation rm = rb.build();
         CommitLog.instance.add(rm);
 
-        int replayed = 0;
+        Map<Keyspace, Integer> replayed;
 
         try (WithProperties properties = new WithProperties().set(COMMITLOG_IGNORE_REPLAY_ERRORS, true))
         {
             replayed = CommitLog.instance.resetUnsafe(false);
         }
-        
-        assertEquals(replayed, 1);
+
+        Assert.assertEquals(replayed.size(), 1);
     }
 }
 
