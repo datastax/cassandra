@@ -21,6 +21,7 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 import org.junit.After;
@@ -58,6 +59,8 @@ import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
+import static org.awaitility.Awaitility.await;
+
 @RunWith(BMUnitRunner.class)
 public class CommitLogBytemanTest
 {
@@ -76,7 +79,6 @@ public class CommitLogBytemanTest
         // Disable durable writes for system keyspaces to prevent system mutations, e.g. sstable_activity,
         // to end up in CL segments and cause unexpected results in this test wrt counting CL segments,
         // see CASSANDRA-12854
-        org.apache.cassandra.db.commitlog.CommitLogBytemanTest.failSync = false;
         KeyspaceParams.DEFAULT_LOCAL_DURABLE_WRITES = false;
 
         SchemaLoader.prepareServer();
@@ -129,7 +131,7 @@ public class CommitLogBytemanTest
             targetClass = "CommitLog",
             targetMethod = "sync",
             condition = "org.apache.cassandra.db.commitlog.CommitLogBytemanTest.failSync",
-            action = "throw new java.lang.RuntimeException();") } )
+            action = "throw new java.lang.RuntimeException(\"Fail CommitLog.sync to test fail_writes policy\");") } )
     public void testFailWritesPolicies() throws InterruptedException
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(STANDARD);
@@ -154,8 +156,8 @@ public class CommitLogBytemanTest
         CommitLog.instance.requestExtraSync();
 
         awaitForSync.start();
-        CommitLog.instance.requestExtraSync();
-        Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m));
+        await().atMost(2, TimeUnit.SECONDS)
+                .untilAsserted(() -> Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m)));
         failSync = false;
         try
         {
