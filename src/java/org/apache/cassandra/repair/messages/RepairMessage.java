@@ -23,6 +23,7 @@ import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.nodes.INodeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +37,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.nodes.NodeInfo;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -214,7 +214,7 @@ public abstract class RepairMessage
             return ErrorHandling.RETRY;
         // Repair in mixed mode isn't fully supported, but also not activally blocked... so in the common case all participants
         // will be on the same version as this instance, so can avoid the lookup from gossip
-        CassandraVersion remoteVersion = Nodes.peers().getOpt(from).map(NodeInfo::getReleaseVersion).orElse(null);
+        CassandraVersion remoteVersion = Nodes.peers().getOpt(from).map(INodeInfo::getReleaseVersion).orElse(null);
         if (remoteVersion == null)
         {
             if (VERB_TIMEOUT_VERSIONS.containsKey(verb))
