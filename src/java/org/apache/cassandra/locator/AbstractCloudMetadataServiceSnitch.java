@@ -21,7 +21,6 @@ package org.apache.cassandra.locator;
 import java.util.Map;
 
 import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.nodes.NodeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,7 +71,7 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return getLocalRack();
-        String rack = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getRack).orElse(null);
+        String rack = Nodes.getRack(endpoint, null);
         if (rack == null)
         {
             if (savedEndpoints == null)
@@ -89,7 +88,7 @@ abstract class AbstractCloudMetadataServiceSnitch extends AbstractNetworkTopolog
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return getLocalDatacenter();
-        String dc = Nodes.localOrPeerInfoOpt(endpoint).map(NodeInfo::getDataCenter).orElse(null);
+        String dc = Nodes.getDataCenter(endpoint, null);
         if (dc == null)
         {
             if (savedEndpoints == null)
