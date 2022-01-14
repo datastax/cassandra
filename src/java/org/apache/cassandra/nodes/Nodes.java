@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.nodes;
 
+import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -36,7 +38,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.LoadingMap;
 
@@ -140,6 +144,49 @@ public class Nodes
     public static boolean isKnownEndpoint(InetAddressAndPort endpoint)
     {
         return localOrPeerInfo(endpoint) != null;
+    }
+
+
+    public static UUID getHostId(InetAddressAndPort endpoint, UUID defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getHostId() : defaultValue;
+    }
+
+    public static String getDataCenter(InetAddressAndPort endpoint, String defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getDataCenter() : defaultValue;
+    }
+
+    public static String getRack(InetAddressAndPort endpoint, String defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getRack() : defaultValue;
+    }
+
+    public static CassandraVersion getReleaseVersion(InetAddressAndPort endpoint, CassandraVersion defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getReleaseVersion() : defaultValue;
+    }
+
+    public static UUID getSchemaVersion(InetAddressAndPort endpoint, UUID defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getSchemaVersion() : defaultValue;
+    }
+
+    public static Collection<Token> getTokens(InetAddressAndPort endpoint, Collection<Token> defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getTokens() : defaultValue;
+    }
+
+    public static InetAddressAndPort getNativeTransportAddressAndPort(InetAddressAndPort endpoint, InetAddressAndPort defaultValue)
+    {
+        INodeInfo<?> info = localOrPeerInfo(endpoint);
+        return info != null ? info.getNativeTransportAddressAndPort() : defaultValue;
     }
 
     /**

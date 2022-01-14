@@ -164,7 +164,6 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.AsyncOneResponse;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.nodes.INodeInfo;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.RepairRunnable;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
@@ -1996,9 +1995,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public InetAddressAndPort getNativeAddressAndPort(InetAddressAndPort endpoint)
     {
-        INodeInfo<?> info = Nodes.localOrPeerInfo(endpoint);
-        if (info != null && info.getNativeTransportAddressAndPort() != null)
-            return info.getNativeTransportAddressAndPort();
+        InetAddressAndPort addr = Nodes.getNativeTransportAddressAndPort(endpoint, null);
+        if (addr != null)
+            return addr;
 
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return FBUtilities.getBroadcastNativeAddressAndPort();
@@ -2516,11 +2515,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Collection<Token> getTokensFor(InetAddressAndPort endpoint)
     {
-        INodeInfo<?> info = Nodes.localOrPeerInfo(endpoint);
-        if (info == null)
-            return Collections.emptyList();
-
-        return info.getTokens();
+        return Nodes.getTokens(endpoint, Collections.emptyList());
     }
 
     /**
@@ -2715,10 +2710,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
-        UUID hostId = Objects.requireNonNull(Nodes.localOrPeerInfo(endpoint)).getHostId();
+        UUID hostId = Nodes.getHostId(endpoint, null);
         InetAddressAndPort existing = getTokenMetadata().getEndpointForHostId(hostId);
         if (replacing && isReplacingSameAddress() && Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null
-            && (Objects.equals(hostId, Nodes.localOrPeerInfoOpt(DatabaseDescriptor.getReplaceAddress()).map(INodeInfo::getHostId).orElse(null))))
+            && (Objects.equals(hostId, Nodes.getHostId(DatabaseDescriptor.getReplaceAddress(), null))))
             logger.warn("Not updating token metadata for {} because I am replacing it", endpoint);
         else
         {

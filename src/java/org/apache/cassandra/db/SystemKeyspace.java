@@ -818,7 +818,10 @@ public final class SystemKeyspace
         if (FBUtilities.getBroadcastAddressAndPort().equals(ep))
             return CURRENT_VERSION;
         else
-            return Nodes.peers().getOpt(ep).filter(IPeerInfo::isExisting).map(INodeInfo::getReleaseVersion).orElse(null);
+        {
+            IPeerInfo peer = Nodes.peers().get(ep);
+            return peer != null && peer.isExisting() ? peer.getReleaseVersion() : null;
+        }
     }
 
     /**
