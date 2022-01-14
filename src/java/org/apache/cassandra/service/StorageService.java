@@ -2338,6 +2338,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public InetAddressAndPort getNativeAddressAndPort(InetAddressAndPort endpoint)
     {
+        InetAddressAndPort addr = Nodes.getNativeTransportAddressAndPort(endpoint, null);
+        if (addr != null)
+            return addr;
+
         if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
             return FBUtilities.getBroadcastNativeAddressAndPort();
         else if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.NATIVE_ADDRESS_AND_PORT) != null)
