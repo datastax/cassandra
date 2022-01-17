@@ -77,10 +77,6 @@ public class CommitLogPolicyBytemanTest
     @BeforeClass
     public static void beforeClass() throws ConfigurationException
     {
-        DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setCommitLogSync(Config.CommitLogSync.group);
-        DatabaseDescriptor.setCommitLogSyncGroupWindow(1);
-
         // Disable durable writes for system keyspaces to prevent system mutations, e.g. sstable_activity,
         // to end up in CL segments and cause unexpected results in this test wrt counting CL segments,
         // see CASSANDRA-12854
