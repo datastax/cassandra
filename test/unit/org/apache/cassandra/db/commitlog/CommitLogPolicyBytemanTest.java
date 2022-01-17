@@ -62,7 +62,7 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import static org.awaitility.Awaitility.await;
 
 @RunWith(BMUnitRunner.class)
-public class CommitLogBytemanTest
+public class CommitLogPolicyBytemanTest
 {
     protected static final String KEYSPACE = "CommitLogBytemanTest";
     protected static final String STANDARD = "Standard";
@@ -70,12 +70,17 @@ public class CommitLogBytemanTest
 
     private static JVMStabilityInspector.Killer oldKiller;
     private static KillerForTests testKiller;
+    private static Config.CommitFailurePolicy oldPolicy;
 
     public static volatile boolean failSync = false;
 
     @BeforeClass
     public static void beforeClass() throws ConfigurationException
     {
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setCommitLogSync(Config.CommitLogSync.group);
+        DatabaseDescriptor.setCommitLogSyncGroupWindow(1);
+
         // Disable durable writes for system keyspaces to prevent system mutations, e.g. sstable_activity,
         // to end up in CL segments and cause unexpected results in this test wrt counting CL segments,
         // see CASSANDRA-12854
@@ -106,6 +111,8 @@ public class CommitLogBytemanTest
         // an error. If we hit a "Kill the JVM" condition while working with the CL when we don't expect it, an aggressive
         // KillerForTests will assertion out on us.
         oldKiller = JVMStabilityInspector.replaceKiller(testKiller);
+
+        oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
     }
 
     @AfterClass
@@ -123,6 +130,7 @@ public class CommitLogBytemanTest
     @After
     public void afterTest()
     {
+        DatabaseDescriptor.setCommitFailurePolicy(oldPolicy);
         testKiller.reset();
     }
 
@@ -130,44 +138,29 @@ public class CommitLogBytemanTest
     @BMRules(rules = { @BMRule(name = "Fail sync in CommitLog",
             targetClass = "CommitLog",
             targetMethod = "sync",
-            condition = "org.apache.cassandra.db.commitlog.CommitLogBytemanTest.failSync",
+            condition = "org.apache.cassandra.db.commitlog.CommitLogPolicyBytemanTest.failSync",
             action = "throw new java.lang.RuntimeException(\"Fail CommitLog.sync to test fail_writes policy\");") } )
-    public void testFailWritesPolicies() throws InterruptedException
+    public void testFailWritesPolicies()
     {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(STANDARD);
-        Config.CommitFailurePolicy oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
         DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.fail_writes);
 
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(STANDARD);
         Mutation m = new RowUpdateBuilder(cfs.metadata.get(), 0, "key")
                 .clustering("bytes")
                 .add("val", ByteBuffer.allocate(10 * 1024))
                 .build();
+
         CommitLog.instance.add(m);
+        Assert.assertFalse(CommitLog.instance.shouldRejectMutations());
 
-        Thread awaitForSync = new Thread(CommitLogBytemanTest.class.getSimpleName() + " commit log waiting thread")
-        {
-            @Override
-            public void run()
-            {
-                failSync = true;
-                CommitLog.instance.add(m);
-            }
-        };
-        CommitLog.instance.requestExtraSync();
-
-        awaitForSync.start();
+        failSync = true;
         await().atMost(2, TimeUnit.SECONDS)
-                .untilAsserted(() -> Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m)));
-        failSync = false;
-        try
-        {
-            awaitForSync.join();
-            CommitLog.instance.requestExtraSync();
-            CommitLog.instance.add(m);
-        } finally
-        {
-            DatabaseDescriptor.setCommitFailurePolicy(oldPolicy);
-        }
+                .until(() -> CommitLog.instance.shouldRejectMutations());
+        Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m));
 
+        failSync = false;
+        await().atMost(2, TimeUnit.SECONDS)
+                .until(() -> !CommitLog.instance.shouldRejectMutations());
+        CommitLog.instance.add(m);
     }
 }

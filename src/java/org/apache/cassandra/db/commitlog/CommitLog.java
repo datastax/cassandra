@@ -274,7 +274,8 @@ public class CommitLog implements CommitLogMBean
      * the sync error is cleared, which happens after a successful sync.
      * @return
      */
-    private boolean shouldRejectMutations()
+    @VisibleForTesting
+    public boolean shouldRejectMutations()
     {
         return executor.getSyncError() &&
                 DatabaseDescriptor.getCommitFailurePolicy() == Config.CommitFailurePolicy.fail_writes;
