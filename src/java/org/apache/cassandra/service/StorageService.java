@@ -2078,7 +2078,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public EndpointsByRange getRangeToAddressMap(String keyspace)
     {
-        return getRangeToAddressMap(keyspace, getTokenMetadata().sortedTokens());
+        return getRangeToAddressMap(keyspace, getTokenMetadataForKeyspace(keyspace).sortedTokens());
     }
 
     public EndpointsByRange getRangeToAddressMapInLocalDC(String keyspace)
