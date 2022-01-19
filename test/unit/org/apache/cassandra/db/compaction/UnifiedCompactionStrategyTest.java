@@ -234,7 +234,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
         DecoratedKey last = new BufferDecoratedKey(partitioner.getMaximumToken(), ByteBuffer.allocate(0));
 
@@ -709,7 +709,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private List<PartitionPosition> makeBoundaries(int numShards, int numDisks)
     {
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
         assert numShards >= 1;
         assert numDisks >= 1;
 
@@ -1086,7 +1086,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         List<Splitter.WeightedRange> ranges = new ArrayList<>();
         for (int i = 0; i < rangeBounds.length; i += 2)
             ranges.add(new Splitter.WeightedRange(1.0, new Range<>(getToken(rangeBounds[i + 0]), getToken(rangeBounds[i + 1]))));
-        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(cfs, ranges);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(realm, ranges);
 
         List<PartitionPosition> diskBoundaries = sortedRanges.split(numDisks);
 
@@ -1140,7 +1140,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
 
         List<SSTableReader> sstables = createSStables(partitioner);
 
@@ -1268,7 +1268,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> sstables = createSStables(cfs.getPartitioner());
+        List<SSTableReader> sstables = createSStables(realm.getPartitioner());
         // Tracker#addSSTables also tries to backup SSTables, so we use addInitialSSTables and notify explicitly
         dataTracker.addInitialSSTables(sstables);
 
@@ -1324,8 +1324,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         strategy.startup();
 
         UUID pendingRepair = UUID.randomUUID();
-        List<SSTableReader> expiredSSTables = createSStables(cfs.getPartitioner(), 1000, pendingRepair);
-        List<SSTableReader> nonExpiredSSTables = createSStables(cfs.getPartitioner(), 0, pendingRepair);
+        List<SSTableReader> expiredSSTables = createSStables(realm.getPartitioner(), 1000, pendingRepair);
+        List<SSTableReader> nonExpiredSSTables = createSStables(realm.getPartitioner(), 0, pendingRepair);
         List<SSTableReader> allSSTables = Stream.concat(expiredSSTables.stream(), nonExpiredSSTables.stream())
                                                 .collect(Collectors.toList());
         dataTracker.addInitialSSTables(allSSTables);
@@ -1364,8 +1364,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testPrioritizeLocallyAvailableSSTables()
     {
-        Set<SSTableReader> sstables0 = new HashSet<>(createSSTalesWithDiskIndex(cfs.getPartitioner(), 0));
-        Set<SSTableReader> sstables1 = new HashSet<>(createSSTalesWithDiskIndex(cfs.getPartitioner(), 1));
+        Set<SSTableReader> sstables0 = new HashSet<>(createSSTalesWithDiskIndex(realm.getPartitioner(), 0));
+        Set<SSTableReader> sstables1 = new HashSet<>(createSSTalesWithDiskIndex(realm.getPartitioner(), 1));
         Set<SSTableReader> sstables = Sets.union(sstables0, sstables1);
         dataTracker.addInitialSSTables(sstables);
 
@@ -1476,7 +1476,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> sstables = createSStables(cfs.getPartitioner(),
+        List<SSTableReader> sstables = createSStables(realm.getPartitioner(),
                                                       mapFromPair(Pair.create(4 * ONE_MB, 91)));
         dataTracker.addInitialSSTables(sstables);
 

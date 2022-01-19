@@ -32,7 +32,6 @@ import org.junit.Ignore;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -75,7 +74,7 @@ public class BaseCompactionStrategyTest
     final String table = "tbl";
 
     @Mock(answer = Answers.RETURNS_SMART_NULLS)
-    ColumnFamilyStore cfs;
+    CompactionRealm realm;
 
     @Mock
     CompactionStrategyFactory strategyFactory;
@@ -130,29 +129,29 @@ public class BaseCompactionStrategyTest
         if (numShards > 1)
             assertNotNull("Splitter is required with multiple compaction shards", splitter);
 
-        localRanges = SortedLocalRanges.forTesting(cfs, ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()))));
+        localRanges = SortedLocalRanges.forTesting(realm, ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()))));
 
-        when(cfs.metadata()).thenReturn(metadata);
-        when(cfs.getKeyspaceName()).thenReturn(keyspace);
-        when(cfs.getTableName()).thenReturn(table);
-        when(cfs.getDiskBoundaries()).thenReturn(diskBoundaries);
+        when(realm.metadata()).thenReturn(metadata);
+        when(realm.getKeyspaceName()).thenReturn(keyspace);
+        when(realm.getTableName()).thenReturn(table);
+        when(realm.getDiskBoundaries()).thenReturn(diskBoundaries);
         when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
-        when(cfs.getPartitioner()).thenReturn(partitioner);
-        when(cfs.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
-        when(cfs.getCompactingSSTables()).thenAnswer(request -> dataTracker.getCompacting());
-        when(cfs.getSSTables(any())).thenAnswer(request -> dataTracker.getView().select(request.getArgument(0)));
-        when(cfs.getNoncompactingSSTables(anyIterable())).thenAnswer(request -> dataTracker.getNoncompacting(request.getArgument(0)));
-        when(cfs.tryModify(anyIterable(), any())).thenAnswer(
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        when(realm.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
+        when(realm.getCompactingSSTables()).thenAnswer(request -> dataTracker.getCompacting());
+        when(realm.getSSTables(any())).thenAnswer(request -> dataTracker.getView().select(request.getArgument(0)));
+        when(realm.getNoncompactingSSTables(anyIterable())).thenAnswer(request -> dataTracker.getNoncompacting(request.getArgument(0)));
+        when(realm.tryModify(anyIterable(), any())).thenAnswer(
             request -> dataTracker.tryModify(request.getArgument(0, Iterable.class),
                                              request.getArgument(1)));
 
         // use a real compaction logger to execute that code too, even though we don't really check
         // the content of the files, at least we cover the code. The files will be overwritten next
         // time the test is run or by a gradle clean task, so they will not grow indefinitely
-        compactionLogger = new CompactionLogger(cfs.metadata());
+        compactionLogger = new CompactionLogger(realm.metadata());
         compactionLogger.enable();
 
-        when(strategyFactory.getRealm()).thenReturn(cfs);
+        when(strategyFactory.getRealm()).thenReturn(realm);
         when(strategyFactory.getCompactionLogger()).thenReturn(compactionLogger);
 
         when(diskBoundaries.getNumBoundaries()).thenAnswer(invocation -> diskIndexes);
