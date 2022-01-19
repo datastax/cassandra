@@ -46,17 +46,17 @@ public class SortedLocalRanges
     private static final Logger logger = LoggerFactory.getLogger(SortedLocalRanges.class);
 
     private final StorageService storageService;
-    private final CompactionRealm realm;
+    private final ColumnFamilyStore cfs;
     private final long ringVersion;
     private final List<Splitter.WeightedRange> ranges;
     private final Map<Integer, List<PartitionPosition>> splits;
 
     private volatile boolean valid;
 
-    public SortedLocalRanges(StorageService storageService, CompactionRealm realm, long ringVersion, List<Splitter.WeightedRange> ranges)
+    public SortedLocalRanges(StorageService storageService, ColumnFamilyStore cfs, long ringVersion, List<Splitter.WeightedRange> ranges)
     {
         this.storageService = storageService;
-        this.realm = realm;
+        this.cfs = cfs;
         this.ringVersion = ringVersion;
 
         List<Splitter.WeightedRange> sortedRanges = new ArrayList<>(ranges.size());
@@ -91,7 +91,7 @@ public class SortedLocalRanges
 
         do
         {
-            tmd = storageService.getTokenMetadata();
+            tmd = cfs.keyspace.getReplicationStrategy().getTokenMetadata();
             ringVersion = tmd.getRingVersion();
             localRanges = getLocalRanges(cfs, tmd);
 
@@ -131,9 +131,9 @@ public class SortedLocalRanges
     }
 
     @VisibleForTesting
-    public static SortedLocalRanges forTesting(CompactionRealm realm, List<Splitter.WeightedRange> ranges)
+    public static SortedLocalRanges forTesting(ColumnFamilyStore cfs, List<Splitter.WeightedRange> ranges)
     {
-        return new SortedLocalRanges(null, realm, 0, ranges);
+        return new SortedLocalRanges(null, cfs, 0, ranges);
     }
 
     /**
@@ -141,7 +141,7 @@ public class SortedLocalRanges
      */
     public boolean isOutOfDate()
     {
-        return !valid || ringVersion != storageService.getTokenMetadata().getRingVersion();
+        return !valid || ringVersion != cfs.keyspace.getReplicationStrategy().getTokenMetadata().getRingVersion();
     }
 
     public void invalidate()
@@ -173,21 +173,21 @@ public class SortedLocalRanges
 
     private List<PartitionPosition> doSplit(int numParts)
     {
-        Splitter splitter = realm.getPartitioner().splitter().orElse(null);
+        Splitter splitter = cfs.getPartitioner().splitter().orElse(null);
 
         List<Token> boundaries;
         if (splitter == null)
         {
-            logger.debug("Could not split local ranges into {} parts for {}.{} (no splitter)", numParts, realm.getKeyspaceName(), realm.getTableName());
+            logger.debug("Could not split local ranges into {} parts for {}.{} (no splitter)", numParts, cfs.getKeyspaceName(), cfs.getTableName());
             boundaries = ranges.stream().map(Splitter.WeightedRange::right).collect(Collectors.toList());
         }
         else
         {
-            logger.debug("Splitting local ranges into {} parts for {}.{}", numParts, realm.getKeyspaceName(), realm.getTableName());
+            logger.debug("Splitting local ranges into {} parts for {}.{}", numParts, cfs.getKeyspaceName(), cfs.getTableName());
             boundaries = splitter.splitOwnedRanges(numParts, ranges, Splitter.SplitType.ALWAYS_SPLIT).boundaries;
         }
 
-        logger.debug("Boundaries for {}.{}: {} ({} splits)", realm.getKeyspaceName(), realm.getTableName(), boundaries, boundaries.size());
+        logger.debug("Boundaries for {}.{}: {} ({} splits)", cfs.getKeyspaceName(), cfs.getTableName(), boundaries, boundaries.size());
         return boundaries.stream().map(Token::maxKeyBound).collect(Collectors.toList());
     }
 
@@ -214,7 +214,7 @@ public class SortedLocalRanges
         if (ringVersion != that.ringVersion)
             return false;
 
-        if (!realm.equals(that.realm))
+        if (!cfs.equals(that.cfs))
             return false;
 
         return ranges.equals(that.ranges);
@@ -222,7 +222,7 @@ public class SortedLocalRanges
 
     public int hashCode()
     {
-        int result = realm.hashCode();
+        int result = cfs.hashCode();
         result = 31 * result + Long.hashCode(ringVersion);
         result = 31 * result + ranges.hashCode();
         return result;
@@ -231,13 +231,13 @@ public class SortedLocalRanges
     public String toString()
     {
         return "LocalRanges{" +
-               "table=" + realm.getKeyspaceName() + "." + realm.getTableName() +
+               "table=" + cfs.getKeyspaceName() + "." + cfs.getTableName() +
                ", ring version=" + ringVersion +
                ", num ranges=" + ranges.size() + '}';
     }
 
-    public CompactionRealm getRealm()
+    public ColumnFamilyStore getCfs()
     {
-        return realm;
+        return cfs;
     }
 }

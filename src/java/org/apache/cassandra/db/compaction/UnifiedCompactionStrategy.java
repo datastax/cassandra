@@ -280,7 +280,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                              .getPartitioner()
                                                              .equals(partitioner))
             localRanges = new SortedLocalRanges(StorageService.instance,
-                                                localRanges.getRealm(),
+                                                localRanges.getCfs(),
                                                 localRanges.getRingVersion(),
                                                 ImmutableList.of(new Splitter.WeightedRange(1.0,
                                                                                             new Range<>(partitioner.getMinimumToken(),

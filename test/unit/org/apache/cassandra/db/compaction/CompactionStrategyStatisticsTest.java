@@ -73,8 +73,8 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
     {
         super.setUp();
 
-        when(realm.getMinimumCompactionThreshold()).thenReturn(minCompactionThreshold);
-        when(realm.getMaximumCompactionThreshold()).thenReturn(maxCompactionThreshold);
+        when(cfs.getMinimumCompactionThreshold()).thenReturn(minCompactionThreshold);
+        when(cfs.getMaximumCompactionThreshold()).thenReturn(maxCompactionThreshold);
     }
 
     /**
