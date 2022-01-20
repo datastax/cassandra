@@ -1404,6 +1404,15 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     /**
+     * @return true if global reference exists for the physical sstable corresponding to the provided descriptor.
+     */
+    @VisibleForTesting
+    public static boolean hasGlobalReference(Descriptor descriptor)
+    {
+        return GlobalTidy.exists(descriptor);
+    }
+
+    /**
      * One instance per SSTableReader we create.
      * <p>
      * We can create many InstanceTidiers (one for every time we reopen an sstable with MOVED_START for example),
@@ -1611,14 +1620,20 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         @Override
         public void tidy()
         {
-            lookup.remove(desc);
+            try
+            {
+                if (obsoletion != null)
+                    obsoletion.commit();
 
-            if (obsoletion != null)
-                obsoletion.commit();
-
-            // don't ideally want to dropPageCache for the file until all instances have been released
-            for (Component c : desc.discoverComponents())
-                INativeLibrary.instance.trySkipCache(desc.fileFor(c), 0, 0);
+                // don't ideally want to dropPageCache for the file until all instances have been released
+                for (Component c : desc.discoverComponents())
+                    INativeLibrary.instance.trySkipCache(desc.fileFor(c), 0, 0);
+            }
+            finally
+            {
+                // remove reference after deleting local files, to avoid racing with {@link GlobalTidy#exists}
+                lookup.remove(desc);
+            }
         }
 
         @Override
@@ -1653,6 +1668,11 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                 // raced with tidy
                 lookup.remove(descriptor, ref);
             }
+        }
+
+        public static boolean exists(Descriptor descriptor)
+        {
+            return lookup.containsKey(descriptor);
         }
     }
 
