@@ -2148,6 +2148,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * @return true if global reference exists for the physical sstable corresponding to the provided descriptor.
      */
+    @VisibleForTesting
     public static boolean hasGlobalReference(Descriptor descriptor)
     {
         return GlobalTidy.exists(descriptor);

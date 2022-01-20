@@ -910,6 +910,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         }
     }
 
+    @VisibleForTesting
     static final class NeighborsAndRanges
     {
         final boolean shouldExcludeDeadParticipants;
