@@ -446,7 +446,7 @@ public class StreamSession
     {
         failIfFinished();
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
-        if (flushTables)
+        if (flushTables && DatabaseDescriptor.supportsFlushBeforeStreaming())
             flushSSTables(stores);
 
         //Was it safe to remove this normalize, sorting seems not to matter, merging? Maybe we should have?
@@ -924,7 +924,7 @@ public class StreamSession
             for (FileStore fs : allWriteableFileStores)
                 newStreamBytesToWritePerFileStore.merge(fs, totalBytesInPerFileStore, Long::sum);
         }
-        Map<FileStore, Long> totalCompactionWriteRemaining = Directories.perFileStore(CompactionManager.instance.active.estimatedRemainingWriteToDiskBytes(),
+        Map<FileStore, Long> totalCompactionWriteRemaining = Directories.perFileStore(CompactionManager.instance.active.estimatedRemainingWriteBytes(),
                                                                                       fileStoreMapper);
         long totalStreamRemaining = StreamManager.instance.getTotalRemainingOngoingBytes();
         long totalBytesStreamRemainingPerFileStore = totalStreamRemaining / Math.max(1, allFileStores.size());
