@@ -34,6 +34,13 @@ public class DefaultTokenMetadataProvider implements TokenMetadataProvider
     }
 
     @Override
+    public TokenMetadata getTokenMetadataForKeyspace(String keyspace)
+    {
+        return tokenMetadata;
+    }
+
+    /** @deprecated See STAR-1032 */
+    @Deprecated(forRemoval = true, since = "CC 4.0") // since we can select TMDP implementation via config, this method is no longer needed
     public void replaceTokenMetadata(TokenMetadata newTokenMetadata)
     {
         this.tokenMetadata = newTokenMetadata;

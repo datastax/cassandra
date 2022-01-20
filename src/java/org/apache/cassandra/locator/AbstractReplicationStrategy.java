@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import com.google.common.base.Preconditions;
-
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +47,6 @@ import org.apache.cassandra.service.DatacenterSyncWriteResponseHandler;
 import org.apache.cassandra.service.DatacenterWriteResponseHandler;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.FBUtilities;
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 /**
  * A abstract parent for all replication strategies.
@@ -70,6 +69,11 @@ public abstract class AbstractReplicationStrategy
         this.snitch = snitch;
         this.configOptions = configOptions == null ? Collections.<String, String>emptyMap() : configOptions;
         this.keyspaceName = keyspaceName;
+    }
+
+    public TokenMetadata getTokenMetadata()
+    {
+        return tokenMetadata;
     }
 
     public EndpointsForRange getCachedReplicas(long ringVersion, Token t)
