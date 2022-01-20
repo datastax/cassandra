@@ -85,6 +85,7 @@ import org.apache.cassandra.repair.CommonRange;
 import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.service.paxos.PaxosRepair;
 import org.apache.cassandra.service.paxos.cleanup.PaxosCleanup;
+import org.apache.cassandra.repair.ParentRepairSessionListener;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.RepairSession;
@@ -424,6 +425,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              String keyspace,
                                              RepairParallelism parallelismDegree,
                                              boolean isIncremental,
+                                             boolean pushRepair,
                                              boolean pullRepair,
                                              PreviewKind previewKind,
                                              boolean optimiseStreams,
@@ -442,7 +444,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         final RepairSession session = new RepairSession(ctx, parentRepairSession, range, keyspace,
-                                                        parallelismDegree, isIncremental, pullRepair,
+                                                        parallelismDegree, isIncremental, pushRepair, pullRepair,
                                                         previewKind, optimiseStreams, repairPaxos, paxosOnly, cfnames);
         repairs.getIfPresent(parentRepairSession).register(session.state);
 
@@ -500,7 +502,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         {
             session.forceShutdown(cause);
         }
+        Collection<Map.Entry<TimeUUID, ParentRepairSession>> sessions = new ArrayList<>(parentRepairSessions.entrySet());
         parentRepairSessions.clear();
+
+        for (Map.Entry<TimeUUID, ParentRepairSession> e : sessions)
+            ParentRepairSessionListener.instance.onRemoved(e.getKey(), e.getValue());
     }
 
     public void recordRepairStatus(int cmd, ParentRepairStatus parentRepairStatus, List<String> messages)
@@ -667,7 +673,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             }
         }
         // implement timeout to bound the runtime of the future
-        long timeoutMillis = getRepairRetrySpec().isEnabled() ? getRepairRpcTimeout(MILLISECONDS)
+        long timeoutMillis = getRepairRetrySpec().isEnabled() ? getRepairPrepareMessageTimeout(MILLISECONDS)
                                                               : getRpcTimeout(MILLISECONDS);
         ctx.optionalTasks().schedule(() -> {
             if (promise.isDone())
@@ -803,7 +809,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         if (!parentRepairSessions.containsKey(parentRepairSession))
         {
-            parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind));
+            ParentRepairSession session = new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind);
+            parentRepairSessions.put(parentRepairSession, session);
+            ParentRepairSessionListener.instance.onRegistered(parentRepairSession, session);
         }
     }
 
@@ -841,6 +849,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         String snapshotName = parentSessionId.toString();
+        ParentRepairSessionListener.instance.onRemoved(parentSessionId, session);
+
         if (session.hasSnapshots.get())
         {
             snapshotExecutor.submit(() -> {

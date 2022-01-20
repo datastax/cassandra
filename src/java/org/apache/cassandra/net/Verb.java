@@ -109,8 +109,35 @@ import org.apache.cassandra.utils.UUIDSerializer;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.*;
 import static org.apache.cassandra.net.VerbTimeouts.*;
-import static org.apache.cassandra.net.Verb.Kind.*;
-import static org.apache.cassandra.net.Verb.Priority.*;
+import static org.apache.cassandra.concurrent.Stage.ANTI_ENTROPY;
+import static org.apache.cassandra.concurrent.Stage.COUNTER_MUTATION;
+import static org.apache.cassandra.concurrent.Stage.GOSSIP;
+import static org.apache.cassandra.concurrent.Stage.IMMEDIATE;
+import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
+import static org.apache.cassandra.concurrent.Stage.MIGRATION;
+import static org.apache.cassandra.concurrent.Stage.MISC;
+import static org.apache.cassandra.concurrent.Stage.MUTATION;
+import static org.apache.cassandra.concurrent.Stage.READ;
+import static org.apache.cassandra.concurrent.Stage.REQUEST_RESPONSE;
+import static org.apache.cassandra.concurrent.Stage.TRACING;
+import static org.apache.cassandra.net.Verb.Kind.CUSTOM;
+import static org.apache.cassandra.net.Verb.Kind.NORMAL;
+import static org.apache.cassandra.net.Verb.Priority.P0;
+import static org.apache.cassandra.net.Verb.Priority.P1;
+import static org.apache.cassandra.net.Verb.Priority.P2;
+import static org.apache.cassandra.net.Verb.Priority.P3;
+import static org.apache.cassandra.net.Verb.Priority.P4;
+import static org.apache.cassandra.net.VerbTimeouts.counterTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.longTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.noTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.pingTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.prepareTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.rangeTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.readTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.repairMsgTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.rpcTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.truncateTimeout;
+import static org.apache.cassandra.net.VerbTimeouts.writeTimeout;
 
 /**
  * Note that priorities except P0 are presently unused.  P0 corresponds to urgent, i.e. what used to be the "Gossip" connection.
@@ -180,7 +207,7 @@ public class Verb
     public static Verb VALIDATION_REQ         = new Verb("VALIDATION_REQ",         101, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> ValidationRequest.serializer,         () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SYNC_RSP               = new Verb("SYNC_RSP",               104, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SyncResponse.serializer,              () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SYNC_REQ               = new Verb("SYNC_REQ",               103, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SyncRequest.serializer,               () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> PrepareMessage.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, prepareTimeout,  ANTI_ENTROPY,      () -> PrepareMessage.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SNAPSHOT_MSG           = new Verb("SNAPSHOT_MSG",           106, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SnapshotMessage.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb CLEANUP_MSG            = new Verb("CLEANUP_MSG",            107, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> CleanupMessage.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb PREPARE_CONSISTENT_RSP = new Verb("PREPARE_CONSISTENT_RSP", 109, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> PrepareConsistentResponse.serializer, () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
@@ -587,5 +614,6 @@ class VerbTimeouts
             return longTimeout.applyAsLong(units);
         return rpcTimeout.applyAsLong(units);
     };
+    static final ToLongFunction<TimeUnit> prepareTimeout  = DatabaseDescriptor::getRepairPrepareMessageTimeout;
     static final ToLongFunction<TimeUnit> repairMsgTimeout= DatabaseDescriptor::getRepairRpcTimeout;
 }
