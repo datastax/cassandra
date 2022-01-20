@@ -18,10 +18,12 @@
 
 package org.apache.cassandra.locator;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
-import static org.junit.Assert.*;
-
 import org.junit.Test;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CustomTokenMetadataProviderTest
 {
@@ -34,6 +36,14 @@ public class CustomTokenMetadataProviderTest
         }
 
         @Override
+        public TokenMetadata getTokenMetadataForKeyspace(String keyspace)
+        {
+            return null;
+        }
+
+        @Override
+        /** @deprecated See STAR-1032 */
+        @Deprecated(forRemoval = true, since = "CC 4.0") // since we can select TMDP implementation via config, this method is no longer needed
         public void replaceTokenMetadata(TokenMetadata newTokenMetadata)
         {
         }
