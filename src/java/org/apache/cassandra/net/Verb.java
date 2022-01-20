@@ -180,7 +180,7 @@ public class Verb
     public static Verb VALIDATION_REQ         = new Verb("VALIDATION_REQ",         101, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> ValidationRequest.serializer,     () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SYNC_RSP               = new Verb("SYNC_RSP",               104, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SyncResponse.serializer,          () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SYNC_REQ               = new Verb("SYNC_REQ",               103, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SyncRequest.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> PrepareMessage.serializer,        () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, prepareTimeout, ANTI_ENTROPY, () -> PrepareMessage.serializer,                  () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb SNAPSHOT_MSG           = new Verb("SNAPSHOT_MSG",           106, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SnapshotMessage.serializer,       () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb CLEANUP_MSG            = new Verb("CLEANUP_MSG",            107, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> CleanupMessage.serializer,        () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
     public static Verb PREPARE_CONSISTENT_RSP = new Verb("PREPARE_CONSISTENT_RSP", 109, P1, repairWithBackoffTimeout, ANTI_ENTROPY,      () -> PrepareConsistentResponse.serializer, () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
@@ -589,5 +589,6 @@ class VerbTimeouts
             return longTimeout.applyAsLong(units);
         return rpcTimeout.applyAsLong(units);
     };
+    static final ToLongFunction<TimeUnit> prepareTimeout  = DatabaseDescriptor::getRepairPrepareMessageTimeout;
     static final ToLongFunction<TimeUnit> repairMsgTimeout= DatabaseDescriptor::getRepairRpcTimeout;
 }

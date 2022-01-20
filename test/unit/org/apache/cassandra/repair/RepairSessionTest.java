@@ -74,7 +74,7 @@ public class RepairSessionTest
         RepairSession session = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(), parentSessionId,
                                                   new CommonRange(endpoints, Collections.emptySet(), Arrays.asList(repairRange)),
                                                   "Keyspace1", RepairParallelism.SEQUENTIAL,
-                                                  false, false,
+                                                  false, false, false,
                                                   PreviewKind.NONE, false, false, false, "Standard1");
 
         // perform convict
@@ -238,7 +238,7 @@ public class RepairSessionTest
         RepairSession session = new RepairSession(ctx, new Scheduler.NoopScheduler(), parentSessionId,
                                                   new CommonRange(endpoints, Collections.emptySet(), Arrays.asList(repairRange)),
                                                   "Keyspace1", RepairParallelism.SEQUENTIAL,
-                                                  false, false,
+                                                  false, false, false,
                                                   PreviewKind.NONE, false,
                                                   false, false, "Standard1");
 
