@@ -36,6 +36,7 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
 import org.apache.cassandra.streaming.StreamPlan;
+import org.apache.cassandra.streaming.StreamResultFuture;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.TimeUUID;
@@ -50,7 +51,7 @@ import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
  * StreamingRepairTask performs data streaming between two remote replicas, neither of which is repair coordinator.
  * Task will send {@link SyncResponse} message back to coordinator upon streaming completion.
  */
-public class StreamingRepairTask implements Runnable, StreamEventHandler
+public class StreamingRepairTask implements StreamEventHandler
 {
     private static final Logger logger = LoggerFactory.getLogger(StreamingRepairTask.class);
 
@@ -79,14 +80,14 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
         this.previewKind = previewKind;
     }
 
-    public void run()
+    public StreamResultFuture execute()
     {
         logger.info("[streaming task #{}] Performing {}streaming repair of {} ranges with {}", desc.sessionId, asymmetric ? "asymmetric " : "", ranges.size(), dst);
         long start = approxTime.now();
         StreamPlan streamPlan = createStreamPlan(dst);
         logger.info("[streaming task #{}] Stream plan created in {}ms", desc.sessionId, MILLISECONDS.convert(approxTime.now() - start, NANOSECONDS));
         state.phase.start();
-        ctx.streamExecutor().execute(streamPlan);
+        return ctx.streamExecutor().execute(streamPlan);
     }
 
     @VisibleForTesting
