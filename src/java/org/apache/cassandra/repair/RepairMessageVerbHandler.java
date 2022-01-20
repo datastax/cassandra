@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.concurrent.Future;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -253,7 +254,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
 
                     Validator validator = new Validator(ctx, vState, validationRequest.nowInSec,
                                                         isIncremental(desc.parentSessionId), previewKind);
-                    ctx.validationManager().submitValidation(store, validator);
+                    Future<?> validationFuture = ValidationManager.instance.submitValidation(store, validator);
+                    ParentRepairSessionListener.instance.onValidation(desc, validationFuture);
                 }
                 catch (Throwable t)
                 {
@@ -287,7 +289,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                                                                    isIncremental(desc.parentSessionId) ? desc.parentSessionId : null,
                                                                    request.previewKind,
                                                                    request.asymmetric);
-                task.run();
+                Future<?> syncFuture = task.execute();
+                ParentRepairSessionListener.instance.onSync(desc, syncFuture);
                 sendAck(message);
             }
             else if (message.verb() == CLEANUP_MSG)
@@ -342,7 +345,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
         }
         catch (Exception e)
         {
-            logger.error("Got error, removing parent repair session");
+            logger.error("Got error processing {}, removing parent repair session", message.verb());
             if (desc != null && desc.parentSessionId != null)
             {
                 ParticipateState parcipate = ctx.repair().participate(desc.parentSessionId);
