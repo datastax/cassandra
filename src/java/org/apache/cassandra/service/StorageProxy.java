@@ -44,7 +44,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,9 +110,9 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
-import org.apache.cassandra.metrics.DenylistMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+import org.apache.cassandra.metrics.DenylistMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.ForwardingInfo;
@@ -151,12 +150,9 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.CountDownLatch;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
+import static com.google.common.collect.Iterables.concat;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
-import static com.google.common.collect.Iterables.concat;
-import static org.apache.commons.lang3.StringUtils.join;
-
 import static org.apache.cassandra.db.ConsistencyLevel.SERIAL;
 import static org.apache.cassandra.net.Message.out;
 import static org.apache.cassandra.net.NoPayload.noPayload;
@@ -178,6 +174,7 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.apache.cassandra.utils.concurrent.CountDownLatch.newCountDownLatch;
+import static org.apache.commons.lang3.StringUtils.join;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -1059,7 +1056,8 @@ public class StorageProxy implements StorageProxyMBean
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
 
         long startTime = nanoTime();
-        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
+        String ks = mutations.iterator().next().getKeyspaceName();
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(ks);
 
         try
         {
@@ -1076,7 +1074,7 @@ public class StorageProxy implements StorageProxyMBean
                 List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
                 //non-local mutations rely on the base mutation commit-log entry for eventual consistency
                 Set<Mutation> nonLocalMutations = new HashSet<>(mutations);
-                Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
+                Token baseToken = StorageService.instance.getTokenMetadataForKeyspace(ks).partitioner.getToken(dataKey);
 
                 ConsistencyLevel consistencyLevel = ConsistencyLevel.ONE;
 
@@ -1092,7 +1090,7 @@ public class StorageProxy implements StorageProxyMBean
                     Token tk = mutation.key().getToken();
                     AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
                     Optional<Replica> pairedEndpoint = ViewUtils.getViewNaturalEndpoint(replicationStrategy, baseToken, tk);
-                    EndpointsForToken pendingReplicas = StorageService.instance.getTokenMetadata().pendingEndpointsForToken(tk, keyspaceName);
+                    EndpointsForToken pendingReplicas = StorageService.instance.getTokenMetadataForKeyspace(keyspaceName).pendingEndpointsForToken(tk, keyspaceName);
 
                     // if there are no paired endpoints there are probably range movements going on, so we write to the local batchlog to replay later
                     if (!pairedEndpoint.isPresent())
@@ -1253,7 +1251,8 @@ public class StorageProxy implements StorageProxyMBean
                     batchConsistencyLevel = consistencyLevel;
             }
 
-            ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY);
+            ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY,
+                    mutations.iterator().next().getKeyspaceName());
 
             final TimeUUID batchUUID = nextTimeUUID();
             BatchlogCleanup cleanup = new BatchlogCleanup(mutations.size(),
@@ -1989,9 +1988,9 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Performs a read for paxos reads and paxos writes (cas method)
      */
-    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, 
-                                                   ConsistencyLevel consistencyLevel, 
-                                                   ClientState clientState, 
+    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group,
+                                                   ConsistencyLevel consistencyLevel,
+                                                   ClientState clientState,
                                                    Dispatcher.RequestTime requestTime,
                                                    QueryInfoTracker.ReadTracker readTracker)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
@@ -2325,7 +2324,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (!command.isTrackingWarnings())
                         throw e;
-                    
+
                     response = command.createEmptyResponse();
                     readRejected = true;
                 }
