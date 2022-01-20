@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.locator;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
 
 /**
@@ -29,7 +31,18 @@ public interface TokenMetadataProvider
                                      new DefaultTokenMetadataProvider() :
                                      CustomTokenMetadataProvider.make(CUSTOM_TMD_PROVIDER_PROPERTY.getString());
 
+    /**
+     * Returns the default TokenMetadata instance.
+     */
     TokenMetadata getTokenMetadata();
 
+    /**
+     * Returns the per-keyspace TokenMetadata instance.
+     */
+    TokenMetadata getTokenMetadataForKeyspace(String keyspace);
+
+    @VisibleForTesting
+    /** @deprecated See STAR-1032 */
+    @Deprecated(forRemoval = true, since = "CC 4.0") // since we can select TMDP implementation via config, this method is no longer needed
     void replaceTokenMetadata(TokenMetadata newTokenMetadata);
 }
