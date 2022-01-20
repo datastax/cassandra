@@ -26,7 +26,12 @@ import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CqlBuilder;
-import org.apache.cassandra.locator.*;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 
@@ -74,7 +79,7 @@ public final class ReplicationParams
     public void validate(String name, ClientState state)
     {
         // Attempt to instantiate the ARS, which will throw a ConfigurationException if the options aren't valid.
-        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        TokenMetadata tmd = StorageService.instance.getTokenMetadataForKeyspace(name);
         IEndpointSnitch eps = DatabaseDescriptor.getEndpointSnitch();
         AbstractReplicationStrategy.validateReplicationStrategy(name, klass, tmd, eps, options, state);
     }

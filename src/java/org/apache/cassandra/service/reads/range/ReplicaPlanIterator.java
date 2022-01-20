@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -38,7 +37,6 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 
@@ -63,7 +61,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
 
         List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
                                                               ? keyRange.unwrap()
-                                                              : getRestrictedRanges(keyRange);
+                                                              : getRestrictedRanges(keyspace.getReplicationStrategy().getTokenMetadata(), keyRange);
         this.ranges = l.iterator();
         this.rangeCount = l.size();
     }
@@ -89,15 +87,13 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
      * Compute all ranges we're going to query, in sorted order. Nodes can be replica destinations for many ranges,
      * so we need to restrict each scan to the specific range we want, or else we'd get duplicate results.
      */
-    private static List<AbstractBounds<PartitionPosition>> getRestrictedRanges(final AbstractBounds<PartitionPosition> queryRange)
+    private static List<AbstractBounds<PartitionPosition>> getRestrictedRanges(TokenMetadata tokenMetadata, final AbstractBounds<PartitionPosition> queryRange)
     {
         // special case for bounds containing exactly 1 (non-minimum) token
         if (queryRange instanceof Bounds && queryRange.left.equals(queryRange.right) && !queryRange.left.isMinimum())
         {
             return Collections.singletonList(queryRange);
         }
-
-        TokenMetadata tokenMetadata = StorageService.instance.getTokenMetadata();
 
         List<AbstractBounds<PartitionPosition>> ranges = new ArrayList<>();
         // divide the queryRange into pieces delimited by the ring and minimum tokens
