@@ -188,12 +188,12 @@ import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
 import static org.apache.cassandra.config.DatabaseDescriptor.getFlushWriters;
 import static org.apache.cassandra.db.commitlog.CommitLogPosition.NONE;
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.FBUtilities.now;
-import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -1620,7 +1620,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         if (shardBoundaries == null ||
             shardBoundaries.shardCount() != shardCount ||
             (shardBoundaries.ringVersion != RING_VERSION_IRRELEVANT &&
-             shardBoundaries.ringVersion != StorageService.instance.getTokenMetadata().getRingVersion()))
+             shardBoundaries.ringVersion != keyspace.getReplicationStrategy().getTokenMetadata().getRingVersion()))
         {
             SortedLocalRanges localRanges = getLocalRanges();
             List<PartitionPosition> positions = localRanges.split(shardCount);

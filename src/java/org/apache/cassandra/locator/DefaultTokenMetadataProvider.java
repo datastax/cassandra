@@ -34,6 +34,11 @@ public class DefaultTokenMetadataProvider implements TokenMetadataProvider
     }
 
     @Override
+    public TokenMetadata getTokenMetadataForKeyspace(String keyspace)
+    {
+        return tokenMetadata;
+    }
+
     public void replaceTokenMetadata(TokenMetadata newTokenMetadata)
     {
         this.tokenMetadata = newTokenMetadata;
