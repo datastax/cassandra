@@ -33,6 +33,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.streaming.PreviewKind;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
@@ -63,11 +64,17 @@ public class RepairOptionTest
         options.put(RepairOption.RANGES_KEY, "0:10,11:20,21:30");
         options.put(RepairOption.COLUMNFAMILIES_KEY, "cf1,cf2,cf3");
         options.put(RepairOption.DATACENTERS_KEY, "dc1,dc2,dc3");
+        options.put(RepairOption.PUSH_REPAIR_KEY, Boolean.toString(true));
+        options.put(RepairOption.OFFLINE_SERVICE, Boolean.toString(true));
 
         option = RepairOption.parse(options, partitioner);
         assertTrue(option.getParallelism() == RepairParallelism.PARALLEL);
         assertFalse(option.isPrimaryRange());
         assertFalse(option.isIncremental());
+        assertTrue(option.isPushRepair());
+        assertTrue(option.isSubrangeRepair());
+        assertTrue(option.isOfflineService());
+        assertEquals(Boolean.toString(true), option.asMap().get(RepairOption.OFFLINE_SERVICE));
 
         Set<Range<Token>> expectedRanges = new HashSet<>(3);
         expectedRanges.add(new Range<>(tokenFactory.fromString("0"), tokenFactory.fromString("10")));
@@ -93,7 +100,9 @@ public class RepairOptionTest
 
         // remove data centers to proceed with testing parsing hosts
         options.remove(RepairOption.DATACENTERS_KEY);
+        options.remove(RepairOption.PUSH_REPAIR_KEY);
         option = RepairOption.parse(options, partitioner);
+        assertFalse(option.isPushRepair());
 
         Set<String> expectedHosts = new HashSet<>(3);
         expectedHosts.add("127.0.0.1");
@@ -139,6 +148,20 @@ public class RepairOptionTest
         options.put(RepairOption.RANGES_KEY, "0:10");
         RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
         assertTrue(option.isPullRepair());
+    }
+
+    @Test
+    public void testPullRepairAndPushRepair()
+    {
+        Map<String, String> options = new HashMap<>();
+
+        options.put(RepairOption.PULL_REPAIR_KEY, "true");
+        options.put(RepairOption.PUSH_REPAIR_KEY, "true");
+        options.put(RepairOption.HOSTS_KEY, "127.0.0.1,127.0.0.2");
+        options.put(RepairOption.RANGES_KEY, "0:10");
+
+        assertThatThrownBy(() -> RepairOption.parse(options, Murmur3Partitioner.instance))
+               .hasMessageContaining("Cannot use pushRepair and pullRepair as the same time");
     }
 
     @Test

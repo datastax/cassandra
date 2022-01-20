@@ -544,8 +544,8 @@ public class ActiveRepairServiceTest
 
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true,
                                                 false, 1, ranges, false, false,
-                                                false, PreviewKind.ALL, false,
-                                                false, false, false);
+                                                false, false, PreviewKind.ALL, false,
+                                                false, false, false, false);
         try
         {
             ActiveRepairService.instance().prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);

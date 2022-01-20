@@ -93,6 +93,9 @@ public class Repair extends NodeToolCmd
     @Option(title = "trace_repair", name = {"-tr", "--trace"}, description = "Use -tr to trace the repair. Traces are logged to system_traces.events.")
     private boolean trace = false;
 
+    @Option(title = "push_repair", name = {"-ps", "--push"}, description = "Use --push to perform a one way repair where data is only streamed from local node to remote node.")
+    private boolean pushRepair = false;
+
     @Option(title = "pull_repair", name = {"-pl", "--pull"}, description = "Use --pull to perform a one way repair where data is only streamed from a remote node to this node.")
     private boolean pullRepair = false;
 
@@ -179,6 +182,7 @@ public class Repair extends NodeToolCmd
         options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
         options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
         options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(cfnames, ","));
+        options.put(RepairOption.PUSH_REPAIR_KEY, Boolean.toString(pushRepair));
         options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
         options.put(RepairOption.FORCE_REPAIR_KEY, Boolean.toString(force));
         options.put(RepairOption.PREVIEW, getPreviewKind().toString());
