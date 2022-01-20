@@ -731,6 +731,7 @@ public class SSTableReaderTest
         Util.flush(store);
 
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        assertTrue(SSTableReader.hasGlobalReference(sstable.descriptor));
         Descriptor desc = sstable.descriptor;
 
         // test to see if sstable can be opened as expected

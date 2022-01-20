@@ -71,6 +71,7 @@ public abstract class AbstractRepairTask implements RepairTask
                                                                                  keyspace,
                                                                                  options.getParallelism(),
                                                                                  isIncremental,
+                                                                                 options.isPushRepair(), 
                                                                                  options.isPullRepair(),
                                                                                  options.getPreviewKind(),
                                                                                  options.optimiseStreams(),

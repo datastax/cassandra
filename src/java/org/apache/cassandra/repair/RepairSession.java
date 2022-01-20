@@ -114,6 +114,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
 
     public final SessionState state;
     public final RepairParallelism parallelismDegree;
+    public final boolean pushRepair;
     public final boolean pullRepair;
 
     /** Range to repair */
@@ -144,6 +145,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
      * @param commonRange ranges to repair
      * @param keyspace name of keyspace
      * @param parallelismDegree specifies the degree of parallelism when calculating the merkle trees
+     * @param pushRepair true if the repair should be one way pushing differences to remote host
      * @param pullRepair true if the repair should be one way (from remote host to this host and only applicable between two hosts--see RepairOption)
      * @param repairPaxos true if incomplete paxos operations should be completed as part of repair
      * @param paxosOnly true if we should only complete paxos operations, not run a normal repair
@@ -156,6 +158,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                          String keyspace,
                          RepairParallelism parallelismDegree,
                          boolean isIncremental,
+                         boolean pushRepair,
                          boolean pullRepair,
                          PreviewKind previewKind,
                          boolean optimiseStreams,
@@ -170,6 +173,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         assert cfnames.length > 0 : "Repairing no column families seems pointless, doesn't it";
         this.state = new SessionState(ctx.clock(), parentRepairSession, keyspace, cfnames, commonRange);
         this.parallelismDegree = parallelismDegree;
+        this.pushRepair = pushRepair;
         this.isIncremental = isIncremental;
         this.previewKind = previewKind;
         this.pullRepair = pullRepair;
@@ -300,6 +304,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         if (!previewKind.isPreview() && !paxosOnly)
         {
             SystemDistributedKeyspace.startRepairs(getId(), state.parentRepairSession, state.keyspace, state.cfnames, state.commonRange);
+            RepairProgressReporter.instance.onRepairsStarted(getId(), state.parentRepairSession, state.keyspace, state.cfnames, state.commonRange);
         }
 
         if (state.commonRange.endpoints.isEmpty())
@@ -311,6 +316,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             if (!previewKind.isPreview())
             {
                 SystemDistributedKeyspace.failRepairs(getId(), state.keyspace, state.cfnames, new RuntimeException(message));
+                RepairProgressReporter.instance.onRepairsFailed(getId(), state.keyspace, state.cfnames, new RuntimeException(message));
             }
             return;
         }
@@ -328,6 +334,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                 if (!previewKind.isPreview())
                 {
                     SystemDistributedKeyspace.failRepairs(getId(), state.keyspace, state.cfnames, e);
+                    RepairProgressReporter.instance.onRepairsFailed(getId(), state.keyspace, state.cfnames, e);
                 }
                 return;
             }
