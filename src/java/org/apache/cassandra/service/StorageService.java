@@ -179,7 +179,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairCoordinator;
 import org.apache.cassandra.repair.SharedContext;
-import org.apache.cassandra.nodes.NodeInfo;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;

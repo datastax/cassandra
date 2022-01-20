@@ -456,6 +456,14 @@ public enum CassandraRelevantProperties
     REPAIR_DELETE_TIMEOUT_SECONDS("cassandra.repair_delete_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_FAIL_TIMEOUT_SECONDS("cassandra.repair_fail_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.DAYS.toSeconds(1)))),
     REPAIR_MUTATION_REPAIR_ROWS_PER_BATCH("cassandra.repair.mutation_repair_rows_per_batch", "100"),
+    /**
+     * Listen to repair parent session lifecycle
+     */
+    REPAIR_PARENT_SESSION_LISTENER("cassandra.custom_parent_repair_session_listener_class"),
+    /**
+     * Repair progress reporter, default using system distributed keyspace
+     */
+    REPAIR_PROGRESS_REPORTER("cassandra.repair_progress_reporter_class"),
     REPAIR_STATUS_CHECK_TIMEOUT_SECONDS("cassandra.repair_status_check_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.HOURS.toSeconds(1)))),
     /**
      * When doing a host replacement its possible that the gossip state is "empty" meaning that the endpoint is known

@@ -17,10 +17,12 @@
  */
 package org.apache.cassandra.repair;
 
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -32,6 +34,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -67,7 +70,6 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.repair.state.CoordinatorState;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.ActiveRepairService.ParentRepairStatus;
 import org.apache.cassandra.service.ClientState;
@@ -292,6 +294,9 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         .addCallback((pair, failure) -> {
             if (failure != null)
             {
+                // clear peers' parent repair session if there are registered
+                ctx.repair().cleanUp(state.id, neighborsAndRanges.participants);
+
                 notifyError(failure);
                 fail(failure.getMessage());
             }
@@ -354,6 +359,10 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
 
     private NeighborsAndRanges getNeighborsAndRanges() throws RepairException
     {
+        // if it's offline service, don't check token metadata and storage service.
+        if (state.options.isOfflineService())
+            return createNeighbordAndRangesForOfflineService(state.options);
+
         Set<InetAddressAndPort> allNeighbors = new HashSet<>();
         List<CommonRange> commonRanges = new ArrayList<>();
 
@@ -401,11 +410,42 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         return new NeighborsAndRanges(shouldExcludeDeadParticipants, allNeighbors, commonRanges);
     }
 
+    @VisibleForTesting
+    public static NeighborsAndRanges createNeighbordAndRangesForOfflineService(RepairOption options)
+    {
+        Preconditions.checkArgument(!options.getHosts().isEmpty(), "There should be at least 1 host when repairing via offline service");
+        Preconditions.checkArgument(!options.getRanges().isEmpty(), "Token ranges must be specified when repairing via offline service. " +
+                                                                    "Please specify at least one token range which all hosts have in common.");
+
+        Set<InetAddressAndPort> allNeighbors = new HashSet<>();
+        List<CommonRange> commonRanges = new ArrayList<>();
+
+        for (String host : options.getHosts())
+        {
+            try
+            {
+                InetAddressAndPort endpoint = InetAddressAndPort.getByName(host.trim());
+                if (!endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
+                    allNeighbors.add(endpoint);
+            }
+            catch (UnknownHostException e)
+            {
+                throw new IllegalArgumentException("Unknown host specified " + host, e);
+            }
+        }
+
+        Preconditions.checkArgument(!allNeighbors.isEmpty(), "There should be at least 1 neighbor when repairing via offline service");
+
+        commonRanges.add(new CommonRange(allNeighbors, Collections.emptySet(), options.getRanges()));
+        return new NeighborsAndRanges(false, allNeighbors, commonRanges);
+    }
+
     private void maybeStoreParentRepairStart(String[] cfnames)
     {
         if (!state.options.isPreview())
         {
-            SystemDistributedKeyspace.startParentRepair(state.id, state.keyspace, cfnames, state.options);
+//            SystemDistributedKeyspace.startParentRepair(state.id, state.keyspace, cfnames, state.options);
+            RepairProgressReporter.instance.onParentRepairStarted(state.id, state.keyspace, cfnames, state.options);
         }
     }
 
@@ -413,7 +453,8 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
     {
         if (!state.options.isPreview())
         {
-            SystemDistributedKeyspace.successfulParentRepair(state.id, successfulRanges);
+//            SystemDistributedKeyspace.successfulParentRepair(state.id, successfulRanges);
+            RepairProgressReporter.instance.onParentRepairSucceeded(state.id, successfulRanges);
         }
     }
 
@@ -421,7 +462,8 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
     {
         if (!state.options.isPreview())
         {
-            SystemDistributedKeyspace.failParentRepair(state.id, error);
+//            SystemDistributedKeyspace.failParentRepair(state.id, error);
+            RepairProgressReporter.instance.onParentRepairFailed(state.id, error);
         }
     }
 
