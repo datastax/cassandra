@@ -441,7 +441,7 @@ public class StreamSession
     {
         failIfFinished();
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
-        if (flushTables)
+        if (flushTables && DatabaseDescriptor.supportsFlushBeforeStreaming())
             flushSSTables(stores);
 
         //Was it safe to remove this normalize, sorting seems not to matter, merging? Maybe we should have?

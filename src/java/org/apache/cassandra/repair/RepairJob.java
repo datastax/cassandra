@@ -47,9 +47,8 @@ import org.apache.cassandra.repair.asymmetric.DifferenceHolder;
 import org.apache.cassandra.repair.asymmetric.HostDifferences;
 import org.apache.cassandra.repair.asymmetric.PreferedNodeFilter;
 import org.apache.cassandra.repair.asymmetric.ReduceHelper;
-import org.apache.cassandra.schema.SystemDistributedKeyspace;
-import org.apache.cassandra.service.paxos.cleanup.PaxosCleanup;
 import org.apache.cassandra.streaming.PreviewKind;
+import org.apache.cassandra.service.paxos.cleanup.PaxosCleanup;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
@@ -207,7 +206,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 if (!session.previewKind.isPreview())
                 {
                     logger.info("{} {}.{} is fully synced", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
-                    SystemDistributedKeyspace.successfulRepairJob(session.getId(), desc.keyspace, desc.columnFamily);
+                    RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
                 }
                 cfs.metric.repairsCompleted.inc();
                 trySuccess(new RepairResult(desc, stats));
@@ -225,7 +224,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 if (!session.previewKind.isPreview())
                 {
                     logger.warn("{} {}.{} sync failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
-                    SystemDistributedKeyspace.failedRepairJob(session.getId(), desc.keyspace, desc.columnFamily, t);
+                    RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);
                 }
                 cfs.metric.repairsCompleted.inc();
                 tryFailure(t instanceof NoSuchRepairSessionExceptionWrapper
@@ -287,6 +286,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                                        ctx.broadcastAddressAndPort(),
                                        this::isTransient,
                                        session.isIncremental,
+                                       session.pushRepair,
                                        session.pullRepair,
                                        session.previewKind);
     }
@@ -298,6 +298,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                                                   InetAddressAndPort local,
                                                   Predicate<InetAddressAndPort> isTransient,
                                                   boolean isIncremental,
+                                                  boolean pushRepair,
                                                   boolean pullRepair,
                                                   PreviewKind previewKind)
     {
@@ -327,8 +328,8 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                     TreeResponse self = r1.endpoint.equals(local) ? r1 : r2;
                     TreeResponse remote = r2.endpoint.equals(local) ? r1 : r2;
 
-                    // pull only if local is full
-                    boolean requestRanges = !isTransient.test(self.endpoint);
+                    // pull only if local is full; additionally check for push repair
+                    boolean requestRanges = !isTransient.test(self.endpoint) && !pushRepair;
                     // push only if remote is full; additionally check for pull repair
                     boolean transferRanges = !isTransient.test(remote.endpoint) && !pullRepair;
 
@@ -341,6 +342,8 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 }
                 else if (isTransient.test(r1.endpoint) || isTransient.test(r2.endpoint))
                 {
+                    Preconditions.checkArgument(!pushRepair, "Push Repair doesn't support transient replica");
+
                     // Stream only from transient replica
                     TreeResponse streamFrom = isTransient.test(r1.endpoint) ? r1 : r2;
                     TreeResponse streamTo = isTransient.test(r1.endpoint) ? r2 : r1;
@@ -403,6 +406,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 
     private List<SyncTask> createOptimisedSyncingSyncTasks(List<TreeResponse> trees)
     {
+        Preconditions.checkArgument(!session.pushRepair, "Push Repair doesn't support optimized sync");
         return createOptimisedSyncingSyncTasks(ctx,
                                                desc,
                                                trees,
