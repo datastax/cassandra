@@ -21,7 +21,6 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -37,9 +36,9 @@ import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.Tables.TablesDiff;
 import org.apache.cassandra.schema.Types.TypesDiff;
+import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.Views.ViewsDiff;
 import org.apache.cassandra.service.StorageService;
 
@@ -345,7 +344,7 @@ public final class KeyspaceMetadata implements SchemaElement
     {
         return AbstractReplicationStrategy.createReplicationStrategy(name,
                                                                      params.replication.klass,
-                                                                     StorageService.instance.getTokenMetadata(),
+                                                                     StorageService.instance.getTokenMetadataForKeyspace(name),
                                                                      DatabaseDescriptor.getEndpointSnitch(),
                                                                      params.replication.options);
     }

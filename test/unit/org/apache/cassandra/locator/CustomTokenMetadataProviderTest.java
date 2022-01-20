@@ -18,10 +18,12 @@
 
 package org.apache.cassandra.locator;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
-import static org.junit.Assert.*;
-
 import org.junit.Test;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CustomTokenMetadataProviderTest
 {
@@ -29,6 +31,12 @@ public class CustomTokenMetadataProviderTest
     {
         @Override
         public TokenMetadata getTokenMetadata()
+        {
+            return null;
+        }
+
+        @Override
+        public TokenMetadata getTokenMetadataForKeyspace(String keyspace)
         {
             return null;
         }
