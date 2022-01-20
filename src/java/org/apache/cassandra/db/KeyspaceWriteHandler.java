@@ -23,7 +23,8 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 public interface KeyspaceWriteHandler
 {
     // mutation can be null if makeDurable is false
-    WriteContext beginWrite(Mutation mutation, boolean makeDurable) throws RequestExecutionException;
+    WriteContext beginWrite(Mutation mutation, WriteOptions writeOptions) throws RequestExecutionException;
+
     WriteContext createContextForIndexing();
     WriteContext createContextForRead();
 }
