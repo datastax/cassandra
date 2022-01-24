@@ -241,7 +241,7 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     {
         assert (UUID_VERSION_BITS_IN_MSB & msb) == TIMESTAMP_UUID_VERSION_IN_MSB;
         msb &= ~TIMESTAMP_UUID_VERSION_IN_MSB;
-        return   (msb &     0xFFFFL) << 48
+        return (msb & 0xFFFFL) << 48
                | (msb & 0xFFFF0000L) << 16
                | (msb >>> 32);
     }
@@ -263,7 +263,7 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     @Override
     public boolean equals(Object that)
     {
-        return    (that instanceof UUID && equals((UUID) that))
+        return (that instanceof UUID && equals((UUID) that))
                || (that instanceof TimeUUID && equals((TimeUUID) that));
     }
 
