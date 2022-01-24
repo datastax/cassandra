@@ -186,7 +186,7 @@ public class SystemKeyspaceMigrator41Test extends CQLTester
             assertEquals(InetAddress.getByName("127.0.0.1"), row.getInetAddress("peer"));
             assertEquals(DatabaseDescriptor.getStoragePort(), row.getInt("peer_port"));
             assertEquals("bar", row.getString("keyspace_name"));
-            assertEquals(ImmutableSet.of(ByteBuffer.wrap(new byte[] { 42 })), row.getSet("ranges", BytesType.instance));
+            assertEquals(ImmutableSet.of(ByteBuffer.wrap(new byte[]{ 42 })), row.getSet("ranges", BytesType.instance));
         }
         assertEquals(1, rowCount);
 
