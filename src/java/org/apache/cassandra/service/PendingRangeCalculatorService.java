@@ -21,6 +21,8 @@ package org.apache.cassandra.service;
 import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -50,16 +52,22 @@ public class PendingRangeCalculatorService
             .withRejectedExecutionHandler((r, e) -> {})  // silently handle rejected tasks, this::update takes care of bookkeeping
             .build();
 
-    private final AtLeastOnceTrigger update = executor.atLeastOnceTrigger(() -> {
+    private final AtLeastOnceTrigger update = executor.atLeastOnceTrigger(() -> doUpdate(keyspaceName -> true));
+
+    private void doUpdate(Predicate<String> keyspaceNamePredicate)
+    {
         PendingRangeCalculatorServiceDiagnostics.taskStarted(1);
         long start = currentTimeMillis();
-        Collection<String> keyspaces = Schema.instance.distributedKeyspaces().names();
+        Collection<String> keyspaces = Schema.instance.distributedKeyspaces().names().stream()
+                                                      .filter(keyspaceNamePredicate)
+                                                      .collect(Collectors.toList());
+
         for (String keyspaceName : keyspaces)
             calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
         if (logger.isTraceEnabled())
             logger.trace("Finished PendingRangeTask for {} keyspaces in {}ms", keyspaces.size(), currentTimeMillis() - start);
         PendingRangeCalculatorServiceDiagnostics.taskFinished();
-    });
+    }
 
     public PendingRangeCalculatorService()
     {
@@ -67,6 +75,18 @@ public class PendingRangeCalculatorService
 
     public void update()
     {
+        boolean success = update.trigger();
+        if (!success) PendingRangeCalculatorServiceDiagnostics.taskRejected(1);
+        else PendingRangeCalculatorServiceDiagnostics.taskCountChanged(1);
+    }
+
+    public void update(Predicate<String> keyspaceNamePredicate)
+    {
+        // TODO this is probably wrong. The implementation of this class assumes that if the update is scheduled, there
+        //  is no need to schedule another update, because each update would update all keyspaces. However this is not
+        //  the case when we can trigger update with a predicate. Such update can be skipped because an update with
+        //  different filter was scheduled and in the end we may end up with a pending range that is not updated (silently).
+        AtLeastOnceTrigger update = executor.atLeastOnceTrigger(() -> doUpdate(keyspaceNamePredicate));
         boolean success = update.trigger();
         if (!success) PendingRangeCalculatorServiceDiagnostics.taskRejected(1);
         else PendingRangeCalculatorServiceDiagnostics.taskCountChanged(1);
