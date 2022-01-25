@@ -31,7 +31,7 @@ public enum WriteOptions
     DEFAULT(null, true, true, null, true),
 
     /**
-     * Does nor persist commit log but updates indexes and is droppable. Used for tests and
+     * Does not persist commit log but updates indexes and is droppable. Used for tests and
      * when commit log persistence is not required.
      */
     DEFAULT_WITHOUT_COMMITLOG(false, true, true, null, true),

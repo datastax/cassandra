@@ -33,6 +33,7 @@ import static org.apache.cassandra.db.WriteOptions.FOR_BATCH_REPLAY;
 import static org.apache.cassandra.db.WriteOptions.FOR_BOOTSTRAP_STREAMING;
 import static org.apache.cassandra.db.WriteOptions.FOR_HINT_REPLAY;
 import static org.apache.cassandra.db.WriteOptions.FOR_PAXOS_COMMIT;
+import static org.apache.cassandra.db.WriteOptions.FOR_READ_REPAIR;
 import static org.apache.cassandra.db.WriteOptions.FOR_STREAMING;
 import static org.apache.cassandra.db.WriteOptions.FOR_VIEW_BUILD;
 import static org.apache.cassandra.db.WriteOptions.SKIP_INDEXES_AND_COMMITLOG;
@@ -47,6 +48,7 @@ public class WriteOptionsTest extends CQLTester
     {
         String DURABLE_KEYSPACE = "durable_ks";
         String NON_DURABLE_KEYSPACE = "non_durable_ks";
+        String DEFAULT_DURABLE_KEYSPACE = "ks_with_default_durability";
 
         Set<WriteOptions> WRITE_COMMIT_LOG_TRUE = Sets.newHashSet(FOR_BOOTSTRAP_STREAMING,
                 FOR_STREAMING,
@@ -54,10 +56,12 @@ public class WriteOptionsTest extends CQLTester
                 FOR_VIEW_BUILD);
         Set<WriteOptions> WRITE_COMMIT_LOG_AUTO = Sets.newHashSet(DEFAULT,
                 FOR_BATCH_REPLAY,
-                FOR_HINT_REPLAY);
+                FOR_HINT_REPLAY,
+                FOR_READ_REPAIR);
 
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'} AND durable_writes = true", DURABLE_KEYSPACE));
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'} AND durable_writes = false", NON_DURABLE_KEYSPACE));
+        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", DEFAULT_DURABLE_KEYSPACE));
         try
         {
             for (WriteOptions opt : WriteOptions.values())
@@ -65,11 +69,13 @@ public class WriteOptionsTest extends CQLTester
                 if (WRITE_COMMIT_LOG_AUTO.contains(opt))
                 {
                     assertTrue(String.format("%s should write commit log", opt), opt.shouldWriteCommitLog(DURABLE_KEYSPACE));
+                    assertTrue(String.format("%s should write commit log", opt), opt.shouldWriteCommitLog(DEFAULT_DURABLE_KEYSPACE));
                     assertFalse(String.format("%s should NOT write commit log", opt), opt.shouldWriteCommitLog(NON_DURABLE_KEYSPACE));
                 }
                 else
                 {
-                    assertEquals(WRITE_COMMIT_LOG_TRUE.contains(opt), opt.shouldWriteCommitLog(NON_DURABLE_KEYSPACE));
+                    assertEquals("CommitLog write for non durable keyspace for " + opt, WRITE_COMMIT_LOG_TRUE.contains(opt), opt.shouldWriteCommitLog(NON_DURABLE_KEYSPACE));
+                    assertEquals("CommitLog write for default duratility for " + opt, WRITE_COMMIT_LOG_TRUE.contains(opt), opt.shouldWriteCommitLog(DEFAULT_DURABLE_KEYSPACE));
                 }
             }
         }

@@ -137,7 +137,10 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch)
     {
-        // WATCH OUT: here true was changed to null (the same was done in DSE)
+        /**
+         * by default writes are durable, see
+         * {@link org.apache.cassandra.schema.KeyspaceParams#DEFAULT_DURABLE_WRITES}
+         */
         store(batch, WriteOptions.DEFAULT);
     }
 
