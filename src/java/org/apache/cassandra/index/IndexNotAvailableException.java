@@ -28,11 +28,11 @@ public final class IndexNotAvailableException extends UncheckedInternalRequestEx
 {
     /**
      * Creates a new <code>IndexNotAvailableException</code> for the specified index.
-     * @param index the index
+     * @param indexName the index
      */
-    public IndexNotAvailableException(Index index)
+    public IndexNotAvailableException(String indexName)
     {
         super(RequestFailureReason.INDEX_NOT_AVAILABLE,
-              String.format("The secondary index '%s' is not yet available", index.getIndexMetadata().name));
+              String.format("The secondary index '%s' is not yet available", indexName));
     }
 }

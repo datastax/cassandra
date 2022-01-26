@@ -321,7 +321,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         for (Index index : queryPlan.getIndexes())
         {
             if (!isIndexQueryable(index))
-                throw new IndexNotAvailableException(index);
+                throw new IndexNotAvailableException(index.getIndexMetadata().name);
         }
     }
 
