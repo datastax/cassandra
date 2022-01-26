@@ -20,14 +20,15 @@ package org.apache.cassandra.hints;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.primitives.Ints;
 
-import javax.annotation.Nullable;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -106,7 +107,7 @@ public final class Hint
                     filtered = filtered.without(id);
 
             if (!filtered.isEmpty())
-                return filtered.applyFuture();
+                return filtered.applyFuture(WriteOptions.FOR_HINT_REPLAY);
         }
 
         return ImmediateFuture.success(null);
