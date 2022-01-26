@@ -468,26 +468,14 @@ public class Keyspace
         }
     }
 
-    public Future<?> applyFuture(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public Future<?> applyFuture(Mutation mutation, WriteOptions writeOptions)
     {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, true, true, new AsyncPromise<>());
+        return applyInternal(mutation, writeOptions, true, new AsyncPromise<>());
     }
 
-    public Future<?> applyFuture(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable,
-                                            boolean isDeferrable)
+    public Future<?> applyFuture(Mutation mutation, WriteOptions writeOptions, boolean isDeferrable)
     {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable, isDeferrable, new AsyncPromise<>());
-    }
-
-    public void apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
-    {
-        apply(mutation, writeCommitLog, updateIndexes, true);
-    }
-
-    public void apply(final Mutation mutation,
-                      final boolean writeCommitLog)
-    {
-        apply(mutation, writeCommitLog, true, true);
+        return applyInternal(mutation, writeOptions, isDeferrable, new AsyncPromise<>());
     }
 
     /**
@@ -495,25 +483,20 @@ public class Keyspace
      * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
      * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
      *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param makeDurable    if true, don't return unless write has been made durable
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout
+     * @param mutation     the row to write.  Must not be modified after calling apply, since commitlog append
+     *                     may happen concurrently, depending on the CL Executor type.
+     * @param writeOptions describes desired write properties
      */
-    public void apply(final Mutation mutation,
-                      final boolean makeDurable,
-                      boolean updateIndexes,
-                      boolean isDroppable)
+    public void apply(Mutation mutation, WriteOptions writeOptions)
     {
-        applyInternal(mutation, makeDurable, updateIndexes, isDroppable, false, null);
+        applyInternal(mutation, writeOptions, false, null);
     }
 
     /**
      * Close this keyspace to further mutations, called when draining or shutting down.
      *
      * A final write barrier is issued and returned. After this barrier is set, new mutations
-     * will be rejected, see {@link Keyspace#applyInternal(Mutation, boolean, boolean, boolean, boolean, Promise)}.
+     * will be rejected, see {@link Keyspace#applyInternal(Mutation, WriteOptions, boolean, Promise)}.
      */
     public OpOrder.Barrier stopMutations()
     {
@@ -526,17 +509,13 @@ public class Keyspace
     /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
      *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param makeDurable    if true, don't return unless write has been made durable
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout
-     * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
+     * @param mutation     the row to write.  Must not be modified after calling apply, since commitlog append
+     *                     may happen concurrently, depending on the CL Executor type.
+     * @param writeOptions describes desired write properties
+     * @param isDeferrable true if caller is not waiting for future to complete, so that future may be deferred
      */
-    private Future<?> applyInternal(final Mutation mutation,
-                                    final boolean makeDurable,
-                                    boolean updateIndexes,
-                                    boolean isDroppable,
+    private Future<?> applyInternal(Mutation mutation,
+                                    WriteOptions writeOptions,
                                     boolean isDeferrable,
                                     Promise<?> future)
     {
@@ -548,7 +527,7 @@ public class Keyspace
 
         Lock[] locks = null;
 
-        boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
+        boolean requiresViewUpdate = writeOptions.requiresViewUpdate(viewManager, mutation);
 
         if (requiresViewUpdate)
         {
@@ -575,7 +554,7 @@ public class Keyspace
                     if (lock == null)
                     {
                         //throw WTE only if request is droppable
-                        if (isDroppable && (approxTime.isAfter(mutation.approxCreatedAtNanos + DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS))))
+                        if (writeOptions.isDroppable && (approxTime.isAfter(mutation.approxCreatedAtNanos + DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS))))
                         {
                             for (int j = 0; j < i; j++)
                                 locks[j].unlock();
@@ -597,9 +576,9 @@ public class Keyspace
                                 locks[j].unlock();
 
                             // This view update can't happen right now. so rather than keep this thread busy
-                            // we will re-apply ourself to the queue and try again later
+                            // we will re-apply ourselve to the queue and try again later
                             Stage.MUTATION.execute(() ->
-                                                   applyInternal(mutation, makeDurable, true, isDroppable, true, future)
+                                                   applyInternal(mutation, writeOptions, true, future)
                             );
                             return future;
                         }
@@ -632,13 +611,13 @@ public class Keyspace
             long acquireTime = currentTimeMillis() - mutation.viewLockAcquireStart.get();
             // Metrics are only collected for droppable write operations
             // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
-            if (isDroppable)
+            if (writeOptions.isDroppable)
             {
                 for(TableId tableId : tableIds)
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
-        try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
+        try (WriteContext ctx = getWriteHandler().beginWrite(mutation, writeOptions))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
@@ -655,7 +634,7 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
+                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeOptions, baseComplete);
                     }
                     catch (Throwable t)
                     {
@@ -666,7 +645,7 @@ public class Keyspace
                     }
                 }
 
-                cfs.getWriteHandler().write(upd, ctx, updateIndexes);
+                cfs.getWriteHandler().write(upd, ctx, writeOptions.updateIndexes);
 
                 if (requiresViewUpdate)
                     baseComplete.set(currentTimeMillis());

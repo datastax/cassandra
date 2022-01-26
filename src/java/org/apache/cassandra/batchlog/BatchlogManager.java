@@ -35,12 +35,10 @@ import java.util.function.Supplier;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
-import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
-import org.apache.cassandra.utils.TimeUUID;
-import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -49,6 +47,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -75,6 +74,8 @@ import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
@@ -134,10 +135,14 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch)
     {
-        store(batch, true);
+        /**
+         * by default writes are durable, see
+         * {@link org.apache.cassandra.schema.KeyspaceParams#DEFAULT_DURABLE_WRITES}
+         */
+        store(batch, WriteOptions.DEFAULT);
     }
 
-    public static void store(Batch batch, boolean durableWrites)
+    public static void store(Batch batch, WriteOptions writeOptions)
     {
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
@@ -162,7 +167,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                .add("version", MessagingService.current_version)
                .appendAll("mutations", mutations);
 
-        builder.buildAsMutation().apply(durableWrites);
+        builder.buildAsMutation().apply(writeOptions);
     }
 
     @VisibleForTesting
@@ -484,7 +489,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             Replica selfReplica = liveAndDown.all().selfIfPresent();
             if (selfReplica != null)
-                mutation.apply();
+                mutation.apply(WriteOptions.FOR_BATCH_REPLAY);
 
             ReplicaLayout.ForTokenWrite liveRemoteOnly = liveAndDown.filter(
                     r -> IFailureDetector.isReplicaAlive.test(r) && r != selfReplica);
