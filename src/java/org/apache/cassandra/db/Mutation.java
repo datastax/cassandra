@@ -241,25 +241,15 @@ public class Mutation implements IMutation, Supplier<Mutation>
         return new Mutation(ks, key, modifications.build(), approxTime.now());
     }
 
-    public Future<?> applyFuture()
+    public Future<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
+        return ks.applyFuture(this, writeOptions, true);
     }
 
-    private void apply(Keyspace keyspace, boolean durableWrites, boolean isDroppable)
+    public void apply(WriteOptions writeOptions)
     {
-        keyspace.apply(this, durableWrites, true, isDroppable);
-    }
-
-    public void apply(boolean durableWrites, boolean isDroppable)
-    {
-        apply(Keyspace.open(keyspaceName), durableWrites, isDroppable);
-    }
-
-    public void apply(boolean durableWrites)
-    {
-        apply(durableWrites, true);
+        Keyspace.open(keyspaceName).apply(this, writeOptions);
     }
 
     /*
@@ -268,13 +258,12 @@ public class Mutation implements IMutation, Supplier<Mutation>
      */
     public void apply()
     {
-        Keyspace keyspace = Keyspace.open(keyspaceName);
-        apply(keyspace, keyspace.getMetadata().params.durableWrites, true);
+        apply(WriteOptions.DEFAULT);
     }
 
     public void applyUnsafe()
     {
-        apply(false);
+        apply(WriteOptions.DEFAULT_WITHOUT_COMMITLOG);
     }
 
     public long getTimeout(TimeUnit unit)

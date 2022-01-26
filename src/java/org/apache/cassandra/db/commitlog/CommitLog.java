@@ -62,9 +62,9 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
-import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
@@ -322,7 +322,6 @@ public class CommitLog implements CommitLogMBean
      * Add a Mutation to the commit log. If CDC is enabled, this can fail.
      *
      * @param mutation the Mutation to add to the log
-     * @throws CDCWriteException
      */
     public CommitLogPosition add(Mutation mutation) throws CDCWriteException
     {
