@@ -19,7 +19,10 @@ package org.apache.cassandra.db;
 
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.*;
+import org.apache.cassandra.net.ForwardingInfo;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -61,7 +64,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         InetAddressAndPort respondToAddress = message.respondTo();
         try
         {
-            processMessage(message, respondToAddress);
+            message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(message, respondToAddress), wto -> failed());
         }
         catch (WriteTimeoutException wto)
         {
@@ -72,7 +75,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
     @Override
     protected void applyMutation(Message<Mutation> message, InetAddressAndPort respondToAddress)
     {
-        message.payload.applyFuture().addCallback(o -> respond(message, respondToAddress), wto -> failed());
+        message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(message, respondToAddress), wto -> failed());
     }
 
     private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)
