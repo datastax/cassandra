@@ -69,6 +69,7 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.RejectException;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.TruncateRequest;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.partitions.FilteredPartition;
@@ -1045,12 +1046,12 @@ public class StorageProxy implements StorageProxyMBean
      * across all replicas.
      *
      * @param mutations the mutations to be applied across the replicas
-     * @param writeCommitLog if commitlog should be written
+     * @param writeOptions describes desired write properties
      * @param baseComplete time from epoch in ms that the local base mutation was(or will be) completed
      * @param requestTime object holding times when request got enqueued and started execution
      */
-    public static void mutateMV(ByteBuffer dataKey, Collection<Mutation> mutations, boolean writeCommitLog, AtomicLong baseComplete, Dispatcher.RequestTime requestTime)
-    throws UnavailableException, OverloadedException, WriteTimeoutException
+    public static void mutateMV(ByteBuffer dataKey, Collection<Mutation> mutations, WriteOptions writeOptions, AtomicLong baseComplete, Dispatcher.RequestTime requestTime)
+            throws UnavailableException, OverloadedException, WriteTimeoutException
     {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
@@ -1066,8 +1067,7 @@ public class StorageProxy implements StorageProxyMBean
 
             if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
             {
-                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
-                                                        mutations), writeCommitLog);
+                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), mutations), writeOptions);
             }
             else
             {
@@ -1112,7 +1112,7 @@ public class StorageProxy implements StorageProxyMBean
                     {
                         try
                         {
-                            mutation.apply(writeCommitLog);
+                            mutation.apply(writeOptions);
                             nonLocalMutations.remove(mutation);
                             // won't trigger cleanup
                             cleanup.decrement();
@@ -1143,7 +1143,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 // Apply to local batchlog memtable in this thread
                 if (!nonLocalMutations.isEmpty())
-                    BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog);
+                    BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeOptions);
 
                 // Perform remote writes
                 if (!wrappers.isEmpty())
