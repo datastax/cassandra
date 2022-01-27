@@ -71,13 +71,13 @@ public class ValidationRequest extends RepairMessage
         public void serialize(ValidationRequest message, DataOutputPlus out, int version) throws IOException
         {
             RepairJobDesc.serializer.serialize(message.desc, out, version);
-            out.writeInt(version >= MessagingService.VERSION_50 ? CassandraUInt.fromLong(message.nowInSec) : (int) message.nowInSec);
+            out.writeInt(MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.fromLong(message.nowInSec) : (int) message.nowInSec);
         }
 
         public ValidationRequest deserialize(DataInputPlus dis, int version) throws IOException
         {
             RepairJobDesc desc = RepairJobDesc.serializer.deserialize(dis, version);
-            long nowInsec = version >= MessagingService.VERSION_50 ? CassandraUInt.toLong(dis.readInt()) : dis.readInt();
+            long nowInsec = MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.toLong(dis.readInt()) : dis.readInt();
             return new ValidationRequest(desc, nowInsec);
         }
 
