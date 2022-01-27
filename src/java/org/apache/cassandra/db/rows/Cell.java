@@ -94,7 +94,7 @@ public abstract class Cell<V> extends ColumnData
             // The whole cluster is 2016, we're out of the 2038/2106 mixed cluster scenario. Shortcut to avoid the 'minClusterVersion' volatile read
             return Cell.MAX_DELETION_TIME;
         else
-            return MessagingService.instance().versions.minClusterVersion >= MessagingService.VERSION_50
+            return MessagingService.Version.supportsExtendedDeletionTime(MessagingService.instance().versions.minClusterVersion)
                    ? Cell.MAX_DELETION_TIME
                    : Cell.MAX_DELETION_TIME_2038_LEGACY_CAP;
     }
@@ -226,9 +226,8 @@ public abstract class Cell<V> extends ColumnData
         if (localDeletionTime < 0)
         {
             // Overflown signed int, decode to long. The result is guaranteed > ttl (and any signed int)
-            return helper.version < MessagingService.VERSION_50
-                   ? INVALID_DELETION_TIME
-                   : deletionTimeUnsignedIntegerToLong((int) localDeletionTime);
+            return MessagingService.Version.supportsExtendedDeletionTime(helper.version)
+                   ? deletionTimeUnsignedIntegerToLong((int) localDeletionTime) : INVALID_DELETION_TIME;
         }
 
         if (ttl == LivenessInfo.EXPIRED_LIVENESS_TTL)
