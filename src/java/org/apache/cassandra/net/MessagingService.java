@@ -34,7 +34,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.util.concurrent.Future; //checkstyle: permit this import
+import io.netty.util.concurrent.Future;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -212,23 +212,26 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public enum Version
     {
         @Deprecated
-        VERSION_30(10),
+        VERSION_30(10, false),
         @Deprecated
-        VERSION_3014(11),
-        VERSION_40(12),
+        VERSION_3014(11, false),
+        VERSION_40(12, false),
         // c14227 TTL overflow, 'uint' timestamps
-        VERSION_50(13),
-        VERSION_SG_10(100), // DS Converged Cassandra 4.0
-        VERSION_SG_20(110), // DS Converged Cassandra 5.0
+        VERSION_50(13, true),
+        VERSION_SG_10(100, false), // DS Converged Cassandra 4.0
+        VERSION_SG_20(110, true), // DS Converged Cassandra 5.0
+        VERSION_DSE_68(168, false), // DSE 6.8
         ;
 
         public static final Version CURRENT = VERSION_SG_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
+        public final boolean supportsExtendedDeletionTime;
 
-        Version(int value)
+        Version(int value, boolean extendedDeletionTime)
         {
             this.value = value;
+            this.supportsExtendedDeletionTime = extendedDeletionTime;
         }
 
         public static List<Version> supportedVersions()
@@ -239,6 +242,11 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
                     versions.add(version);
 
             return Collections.unmodifiableList(versions);
+        }
+
+        public static boolean supportsExtendedDeletionTime(int value)
+        {
+            return  Version.values()[versionOrdinalMap.get(value)].supportsExtendedDeletionTime;
         }
     }
     // Maintance Note:
@@ -254,6 +262,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_SG_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
     public static final int current_version = Version.CURRENT.value;
+    // DSE 6.8 version for backward compatibility
+    public static final int VERSION_DSE_68 = 168;
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
     static AcceptVersions accept_streaming = new AcceptVersions(minimum_version, current_version);
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, v -> v.ordinal()));
