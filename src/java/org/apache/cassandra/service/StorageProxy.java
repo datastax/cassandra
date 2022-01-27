@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -207,6 +208,20 @@ public class StorageProxy implements StorageProxyMBean
 
     private volatile long logBlockingReadRepairAttemptsUntilNanos = Long.MIN_VALUE;
     private static volatile QueryInfoTracker queryInfoTracker = QueryInfoTracker.NOOP;
+
+    // allows custom implementation of mutateAtomically
+    private static final AtomicReference<AtomicMutator> atomicMutator = new AtomicReference<>();
+    private static final AtomicMutator DEFAULT_ATOMIC_MUTATOR = (mutations, consistencyLevel, requireQuorumForRemove, requestTime, metrics, clientState) -> {
+        throw new RuntimeException("the default atomic mutator is just a placeholder meaning " +
+                "that the default code path is being used; it should not be run directly");
+    };
+
+    public static void setAtomicMutator(AtomicMutator mutator)
+    {
+        boolean mutatorSet = atomicMutator.compareAndSet(null, mutator);
+        Preconditions.checkState(mutatorSet, "atomic mutator used before setting a custom mutator? " +
+                "Failing to prevent inconsistency; the already set mutator is " + atomicMutator.get());
+    }
 
     private StorageProxy()
     {
@@ -1225,6 +1240,15 @@ public class StorageProxy implements StorageProxyMBean
                                         ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
+        atomicMutator.compareAndSet(null, DEFAULT_ATOMIC_MUTATOR);
+
+        AtomicMutator mutator = atomicMutator.get();
+        if (mutator != DEFAULT_ATOMIC_MUTATOR)
+        {
+            mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, requestTime, metrics, clientState);
+            return;
+        }
+
         Tracing.trace("Determining replicas for atomic batch");
         long startTime = nanoTime();
 
@@ -1312,7 +1336,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
+    public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
     {
         if (null == mutations)
         {
@@ -1395,7 +1419,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, Stage stage, Dispatcher.RequestTime requestTime)
+    public static void syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, Stage stage, Dispatcher.RequestTime requestTime)
     throws WriteTimeoutException, OverloadedException
     {
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
@@ -1453,12 +1477,12 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     // same as performWrites except does not initiate writes (but does perform availability checks).
-    private static WriteResponseHandlerWrapper wrapBatchResponseHandler(Mutation mutation,
-                                                                        ConsistencyLevel consistencyLevel,
-                                                                        ConsistencyLevel batchConsistencyLevel,
-                                                                        WriteType writeType,
-                                                                        BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                        Dispatcher.RequestTime requestTime)
+    public static WriteResponseHandlerWrapper wrapBatchResponseHandler(Mutation mutation,
+                                                                       ConsistencyLevel consistencyLevel,
+                                                                       ConsistencyLevel batchConsistencyLevel,
+                                                                       WriteType writeType,
+                                                                       BatchlogResponseHandler.BatchlogCleanup cleanup,
+                                                                       Dispatcher.RequestTime requestTime)
     {
         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
         Token tk = mutation.key().getToken();
@@ -1503,7 +1527,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     // used by atomic_batch_mutate to decouple availability check from the write itself, caches consistency level and endpoints.
-    private static class WriteResponseHandlerWrapper
+    public static class WriteResponseHandlerWrapper
     {
         final BatchlogResponseHandler<IMutation> handler;
         final Mutation mutation;
