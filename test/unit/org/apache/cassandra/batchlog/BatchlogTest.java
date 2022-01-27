@@ -27,7 +27,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -36,8 +35,12 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 
@@ -103,5 +106,56 @@ public class BatchlogTest
                 assertEquals(it1.next().toString(), Mutation.serializer.deserialize(in, version).toString());
             }
         }
+    }
+
+    @Test
+    public void testDseDeserialization() throws IOException
+    {
+        SchemaLoader.prepareServer();
+
+        String keyspace = "testDseDeserialization";
+
+        TableMetadata.Builder table = SchemaLoader.standardCFMD(keyspace, "batchlog", 1, BytesType.instance);
+        table.id(TableId.fromString("397cb220-bedc-11ee-a2a7-39f39072efe4"));
+
+        SchemaLoader.createKeyspace(keyspace,
+                                    KeyspaceParams.simple(1),
+                                    table);
+
+        TableMetadata cfm = Keyspace.open(keyspace).getColumnFamilyStore("batchlog").metadata();
+
+        // prepare a batch locally
+        long now = 1706556356256000L;
+        long mutationTimestamp = now + 10;
+        TimeUUID uuid = TimeUUID.fromString("398b0a00-bedc-11ee-a2a7-39f39072efe4");
+
+        List<Mutation> mutations = new ArrayList<>(10);
+        for (int i = 0; i < 10; i++)
+        {
+            mutations.add(new RowUpdateBuilder(cfm, mutationTimestamp, bytes(i))
+                          .clustering("name" + i)
+                          .add("val", "val" + i)
+                          .build());
+        }
+        Batch batch1 = Batch.createLocal(uuid, now, mutations);
+        assertEquals(uuid, batch1.id);
+        assertEquals(now, batch1.creationTime);
+        assertEquals(mutations, batch1.decodedMutations);
+
+        // deserialize the same (hopefully) batch which was serialized in dse 6.8
+        File f = new File("test/data/serialization/DSE_68/batch.bin");
+        assert f.exists() : f.path();
+
+        DataInputPlus dis = new FileInputStreamPlus(f);
+
+        int version = MessagingService.VERSION_DSE_68;
+        Batch batch2 = Batch.serializer.deserialize(dis, version);
+
+        // expect batches to be equal, i.e. downgrading from 6.8 batch to CC batch works
+        assertEquals(batch1.id, batch2.id);
+        assertEquals(batch1.creationTime, batch2.creationTime);
+        assertEquals(batch1.decodedMutations.size(), batch2.decodedMutations.size());
+
+        assertEquals(batch1.decodedMutations.toString(), batch2.decodedMutations.toString());
     }
 }
