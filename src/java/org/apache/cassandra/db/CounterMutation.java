@@ -32,8 +32,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
-
-import org.apache.cassandra.utils.NoSpamLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,14 +58,16 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
+import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
+import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_SG_20;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -370,6 +370,7 @@ public class CounterMutation implements IMutation
     private int serializedSize50;
     private int serializedSizeSG10;
     private int serializedSizeSG20;
+    private int serializedSizeDSE68;
 
     public int serializedSize(int version)
     {
@@ -391,6 +392,10 @@ public class CounterMutation implements IMutation
                 if (serializedSizeSG20 == 0)
                     serializedSizeSG20 = (int) serializer.serializedSize(this, VERSION_SG_20);
                 return serializedSizeSG20;
+            case VERSION_DSE_68:
+                if (serializedSizeDSE68 == 0)
+                    serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                return serializedSizeDSE68;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }

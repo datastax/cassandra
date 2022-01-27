@@ -1137,7 +1137,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             if (command.isDigestQuery())
                 out.writeUnsignedVInt32(command.digestVersion());
             command.metadata().id.serialize(out);
-            out.writeInt(version >= MessagingService.VERSION_50 ? CassandraUInt.fromLong(command.nowInSec()) : (int) command.nowInSec());
+            out.writeInt(MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.fromLong(command.nowInSec()) : (int) command.nowInSec());
             ColumnFilter.serializer.serialize(command.columnFilter(), out, version);
             RowFilter.serializer.serialize(command.rowFilter(), out, version);
             DataLimits.serializer.serialize(command.limits(), out, version, command.metadata().comparator);
@@ -1169,7 +1169,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             boolean needsReconciliation = needsReconciliation(flags);
 
             TableMetadata metadata = schema.getExistingTableMetadata(TableId.deserialize(in));
-            long nowInSec = version >= MessagingService.VERSION_50 ? CassandraUInt.toLong(in.readInt()) : in.readInt();
+            long nowInSec = MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.toLong(in.readInt()) : in.readInt();
             ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
             RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata, needsReconciliation);
             DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata);
