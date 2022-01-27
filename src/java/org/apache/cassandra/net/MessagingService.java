@@ -213,24 +213,27 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     {
         /** @deprecated See CASSANDRA-18314 */
         @Deprecated(since = "5.0")
-        VERSION_30(10),
+        VERSION_30(10, false),
         /** @deprecated See CASSANDRA-18314 */
         @Deprecated(since = "5.0")
-        VERSION_3014(11),
-        VERSION_40(12),
+        VERSION_3014(11, false),
+        VERSION_40(12, false),
         // c14227 TTL overflow, 'uint' timestamps
-        VERSION_50(13),
-        VERSION_SG_10(100), // DS Converged Cassandra 4.0
-        VERSION_SG_20(110), // DS Converged Cassandra 5.0
+        VERSION_50(13, true),
+        VERSION_SG_10(100, false), // DS Converged Cassandra 4.0
+        VERSION_SG_20(110, true), // DS Converged Cassandra 5.0
+        VERSION_DSE_68(168, false), // DSE 6.8
         ;
 
         public static final Version CURRENT = VERSION_SG_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
+        public final boolean supportsExtendedDeletionTime;
 
-        Version(int value)
+        Version(int value, boolean extendedDeletionTime)
         {
             this.value = value;
+            this.supportsExtendedDeletionTime = extendedDeletionTime;
         }
 
         public static List<Version> supportedVersions()
@@ -241,6 +244,11 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
                     versions.add(version);
 
             return Collections.unmodifiableList(versions);
+        }
+
+        public static boolean supportsExtendedDeletionTime(int value)
+        {
+            return  Version.values()[versionOrdinalMap.get(value)].supportsExtendedDeletionTime;
         }
     }
     // Maintance Note:
@@ -262,6 +270,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     // should not need to run in a compatibility mode. They should be able to connect to the server regardless whether
     // it uses messaving version 4 or 5
     public static final int current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_40 : VERSION_50;
+    // DSE 6.8 version for backward compatibility
+    public static final int VERSION_DSE_68 = 168;
     static AcceptVersions accept_messaging;
     static AcceptVersions accept_streaming;
     static
