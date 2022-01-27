@@ -59,15 +59,19 @@ public class CommitLogDescriptor
     static final String COMPRESSION_PARAMETERS_KEY = "compressionParameters";
     static final String COMPRESSION_CLASS_KEY = "compressionClass";
 
+    /**
+     * the versions below ARE NOT the same thing as MessagingService versions
+     * see {@link #getMessagingVersion()}
+     */
     // We don't support anything pre-3.0
     public static final int VERSION_30 = 6;
     public static final int VERSION_40 = 7;
     public static final int VERSION_50 = 8;
-    // For compatibility with CNDB
-    public static final int VERSION_DSE_68 = 680;
     // Stargazer 1.0 messaging
     public static final int VERSION_SG_10 = 100;
     public static final int VERSION_SG_20 = 110;
+    // For compatibility with CNDB
+    public static final int VERSION_DSE_68 = 680;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
@@ -227,7 +231,6 @@ public class CommitLogDescriptor
             case VERSION_30:
                 return MessagingService.Version.VERSION_30.value;
             case VERSION_40:
-            case VERSION_DSE_68:
                 return MessagingService.Version.VERSION_40.value;
             case VERSION_50:
                 return MessagingService.Version.VERSION_50.value;
@@ -235,6 +238,8 @@ public class CommitLogDescriptor
                 return MessagingService.Version.VERSION_SG_10.value;
             case VERSION_SG_20:
                 return MessagingService.Version.VERSION_SG_20.value;
+            case VERSION_DSE_68:
+                return MessagingService.Version.VERSION_DSE_68.value;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + version);
         }
