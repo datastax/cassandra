@@ -29,9 +29,9 @@ public class FSReadError extends FSError
         super(cause, path);
     }
 
-    public FSReadError(Throwable cause, File path)
+    public FSReadError(Throwable cause, File file)
     {
-        super(cause, path);
+        super(cause, file);
     }
 
     public FSReadError(Throwable cause, String path)
