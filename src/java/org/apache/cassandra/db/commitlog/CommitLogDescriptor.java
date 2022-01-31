@@ -57,20 +57,24 @@ public class CommitLogDescriptor
     static final String COMPRESSION_PARAMETERS_KEY = "compressionParameters";
     static final String COMPRESSION_CLASS_KEY = "compressionClass";
 
+    /**
+     * the versions below ARE NOT the same thing as MessagingService versions
+     * see {@link #getMessagingVersion()}
+     */
     // We don't support anything pre-3.0
-    private static final int COMMITLOG_VERSION_30 = 6;
-    private static final int COMMITLOG_VERSION_40 = 7;
+    private static final int VERSION_30 = 6;
+    private static final int VERSION_40 = 7;
     // For compatibility with CNDB
-    private static final int COMMITLOG_VERSION_DSE_68 = 680;
+    private static final int VERSION_DSE_68 = 680;
     // Stargazer 1.0 messaging
-    private static final int COMMITLOG_VERSION_SG_10 = 100;
+    private static final int VERSION_SG_10 = 100;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
     @VisibleForTesting
-    public static final int current_version = COMMITLOG_VERSION_SG_10;
+    public static final int current_version = VERSION_SG_10;
 
     final int version;
     public final long id;
@@ -153,7 +157,7 @@ public class CommitLogDescriptor
     {
         CRC32 checkcrc = new CRC32();
         int version = input.readInt();
-        if (version < COMMITLOG_VERSION_30)
+        if (version < VERSION_30)
             throw new IllegalArgumentException("Unsupported pre-3.0 commit log found; cannot read.");
 
         updateChecksumInt(checkcrc, version);
@@ -208,12 +212,12 @@ public class CommitLogDescriptor
     {
         switch (version)
         {
-            case COMMITLOG_VERSION_30:
+            case VERSION_30:
                 return MessagingService.VERSION_30;
-            case COMMITLOG_VERSION_40:
-            case COMMITLOG_VERSION_DSE_68:
+            case VERSION_40:
+            case VERSION_DSE_68:
                 return MessagingService.VERSION_40;
-            case COMMITLOG_VERSION_SG_10:
+            case VERSION_SG_10:
                 return MessagingService.VERSION_SG_10;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + version);
