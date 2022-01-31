@@ -150,11 +150,11 @@ public class DiskFailurePolicyTest
                 throw e;
         }
 
-        if (testPolicy == best_effort && ((FSReadError) t).path.equals("best_effort_io_exception"))
+        if (testPolicy == best_effort && ((FSReadError) t).file.path().equals("best_effort_io_exception"))
             assertTrue(DisallowedDirectories.isUnreadable(new File("best_effort_io_exception")));
 
         // when we have OOM, as cause, there is no reason to remove data
-        if (testPolicy == best_effort && ((FSReadError) t).path.equals("best_effort_oom"))
+        if (testPolicy == best_effort && ((FSReadError) t).file.path().equals("best_effort_oom"))
             assertFalse(DisallowedDirectories.isUnreadable(new File("best_effort_oom")));
 
         assertEquals(expectJVMKilled, killerForTests.wasKilled());
