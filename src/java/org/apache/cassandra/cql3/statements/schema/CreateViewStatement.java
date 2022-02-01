@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -378,7 +379,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, viewName);
     }
 
-    public final static class Raw extends CQLStatement.Raw
+    public final static class Raw extends AlterSchemaStatement.Raw<CreateViewStatement>
     {
         private final QualifiedName tableName;
         private final QualifiedName viewName;
@@ -402,7 +403,8 @@ public final class CreateViewStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateViewStatement prepare(ClientState state)
+        @Override
+        public CreateViewStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
             String keyspaceName = viewName.hasKeyspace() ? viewName.getKeyspace() : state.getKeyspace();
 
@@ -415,7 +417,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
             if (null == partitionKeyColumns)
                 throw ire("No PRIMARY KEY specifed for view '%s' (exactly one required)", viewName);
 
-            return new CreateViewStatement(keyspaceName,
+            return new CreateViewStatement(keyspaceMapper.apply(keyspaceName),
                                            tableName.getName(),
                                            viewName.getName(),
 

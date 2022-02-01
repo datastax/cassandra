@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.function.Function;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -497,7 +498,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
                          .builder(types);
     }
 
-    public final static class Raw extends CQLStatement.Raw
+    public final static class Raw extends AlterSchemaStatement.Raw<CreateTableStatement>
     {
         private final QualifiedName name;
         private final boolean ifNotExists;
@@ -518,9 +519,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateTableStatement prepare(ClientState state)
+        @Override
+        public CreateTableStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+
+            rawColumns.values().forEach(t -> t.updateKeyspaceIfSet(keyspaceName));
 
             if (null == partitionKeyColumns)
                 throw ire("No PRIMARY KEY specifed for table '%s' (exactly one required)", name);

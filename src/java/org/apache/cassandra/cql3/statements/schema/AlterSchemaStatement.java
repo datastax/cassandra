@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.Set;
+import java.util.function.Function;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -29,14 +30,15 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation
+public abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation
 {
-    protected final String keyspaceName; // name of the keyspace affected by the statement
+    public final String keyspaceName; // name of the keyspace affected by the statement
 
     protected AlterSchemaStatement(String keyspaceName)
     {
@@ -149,5 +151,16 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
     static InvalidRequestException ire(String format, Object... args)
     {
         return new InvalidRequestException(String.format(format, args));
+    }
+
+    public static abstract class Raw<R extends AlterSchemaStatement> extends CQLStatement.Raw
+    {
+        @Override
+        public R prepare(ClientState state)
+        {
+            return prepare(state, ks -> ks);
+        }
+
+        public abstract R prepare(ClientState state, Function<String, String> keyspaceMapper);
     }
 }

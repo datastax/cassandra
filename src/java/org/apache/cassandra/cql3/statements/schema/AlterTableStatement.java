@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -26,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
@@ -38,7 +38,6 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.Keyspace;
@@ -551,7 +550,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         }
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<AlterTableStatement>
     {
         private enum Kind
         {
@@ -580,15 +579,18 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             this.name = name;
         }
 
-        public AlterTableStatement prepare(ClientState state)
+        @Override
+        public AlterTableStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
             String tableName = name.getName();
 
             switch (kind)
             {
                 case          ALTER_COLUMN: return new AlterColumn(keyspaceName, tableName);
-                case           ADD_COLUMNS: return new AddColumns(keyspaceName, tableName, addedColumns);
+                case           ADD_COLUMNS:
+                    addedColumns.forEach(c -> c.type.updateKeyspaceIfSet(keyspaceName));
+                    return new AddColumns(keyspaceName, tableName, addedColumns);
                 case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, dropTimestamp);
                 case        RENAME_COLUMNS: return new RenameColumns(keyspaceName, tableName, renamedColumns);
                 case         ALTER_OPTIONS: return new AlterOptions(keyspaceName, tableName, attrs);

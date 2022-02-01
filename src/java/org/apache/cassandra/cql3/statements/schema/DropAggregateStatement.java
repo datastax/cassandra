@@ -27,7 +27,6 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDAggregate;
@@ -152,7 +151,7 @@ public final class DropAggregateStatement extends AlterSchemaStatement
                         .collect(toList());
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<DropAggregateStatement>
     {
         private final FunctionName name;
         private final List<CQL3Type.Raw> arguments;
@@ -170,9 +169,11 @@ public final class DropAggregateStatement extends AlterSchemaStatement
             this.ifExists = ifExists;
         }
 
-        public DropAggregateStatement prepare(ClientState state)
+        @Override
+        public DropAggregateStatement prepare(ClientState state, java.util.function.Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.keyspace : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.keyspace : state.getKeyspace());
+            arguments.forEach(t -> t.updateKeyspaceIfSet(keyspaceName));
             return new DropAggregateStatement(keyspaceName, name.name, arguments, argumentsSpecified, ifExists);
         }
     }

@@ -542,6 +542,8 @@ public interface CQL3Type
             return null;
         }
 
+        public abstract void updateKeyspaceIfSet(String keyspaceName);
+
         public Raw freeze()
         {
             String message = String.format("frozen<> is only allowed on collections, tuples, and user-defined types (got %s)", this);
@@ -626,6 +628,12 @@ public interface CQL3Type
             public boolean isDuration()
             {
                 return type == Native.DURATION;
+            }
+
+            @Override
+            public void updateKeyspaceIfSet(String keyspaceName)
+            {
+                // no-op
             }
 
             @Override
@@ -739,6 +747,13 @@ public interface CQL3Type
             }
 
             @Override
+            public void updateKeyspaceIfSet(String keyspaceName)
+            {
+                keys.updateKeyspaceIfSet(keyspaceName);
+                values.updateKeyspaceIfSet(keyspaceName);
+            }
+
+            @Override
             public String toString()
             {
                 String start = frozen? "frozen<" : "";
@@ -766,6 +781,12 @@ public interface CQL3Type
             public String keyspace()
             {
                 return name.getKeyspace();
+            }
+
+            @Override
+            public void updateKeyspaceIfSet(String keyspaceName)
+            {
+                name.setKeyspace(keyspaceName);
             }
 
             @Override
@@ -868,6 +889,12 @@ public interface CQL3Type
             public boolean referencesUserType(String name)
             {
                 return types.stream().anyMatch(t -> t.referencesUserType(name));
+            }
+
+            @Override
+            public void updateKeyspaceIfSet(String keyspaceName)
+            {
+                types.forEach(t -> t.updateKeyspaceIfSet(keyspaceName));
             }
 
             @Override

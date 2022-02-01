@@ -31,7 +31,7 @@ import org.apache.commons.lang3.builder.ToStringStyle;
 
 public class UseStatement extends CQLStatement.Raw implements CQLStatement
 {
-    private final String keyspace;
+    public final String keyspace;
 
     public UseStatement(String keyspace)
     {

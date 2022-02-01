@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -28,7 +29,6 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -42,7 +42,6 @@ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.utils.FBUtilities;
@@ -192,7 +191,7 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
         return String.format("%s (%s)", getClass().getSimpleName(), keyspaceName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<AlterKeyspaceStatement>
     {
         private final String keyspaceName;
         private final KeyspaceAttributes attrs;
@@ -203,9 +202,10 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
             this.attrs = attrs;
         }
 
-        public AlterKeyspaceStatement prepare(ClientState state)
+        @Override
+        public AlterKeyspaceStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            return new AlterKeyspaceStatement(keyspaceName, attrs);
+            return new AlterKeyspaceStatement(keyspaceMapper.apply(keyspaceName), attrs);
         }
     }
 }

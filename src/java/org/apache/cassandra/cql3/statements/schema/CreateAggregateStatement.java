@@ -286,7 +286,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         return format("%s(%s)", finalFunctionName, rawStateType);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<CreateAggregateStatement>
     {
         private final FunctionName aggregateName;
         private final List<CQL3Type.Raw> rawArgumentTypes;
@@ -316,9 +316,12 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateAggregateStatement prepare(ClientState state)
+        @Override
+        public CreateAggregateStatement prepare(ClientState state, java.util.function.Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace());
+            rawArgumentTypes.forEach(t -> t.updateKeyspaceIfSet(keyspaceName));
+            rawStateType.updateKeyspaceIfSet(keyspaceName);
 
             return new CreateAggregateStatement(keyspaceName,
                                                 aggregateName.name,

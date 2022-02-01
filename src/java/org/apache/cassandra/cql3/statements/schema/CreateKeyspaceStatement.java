@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -32,7 +33,6 @@ import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -41,7 +41,6 @@ import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 
@@ -133,7 +132,7 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
         return clientWarnings;
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<CreateKeyspaceStatement>
     {
         public final String keyspaceName;
         private final KeyspaceAttributes attrs;
@@ -146,9 +145,10 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateKeyspaceStatement prepare(ClientState state)
+        @Override
+        public CreateKeyspaceStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            return new CreateKeyspaceStatement(keyspaceName, attrs, ifNotExists);
+            return new CreateKeyspaceStatement(keyspaceMapper.apply(keyspaceName), attrs, ifNotExists);
         }
     }
 }

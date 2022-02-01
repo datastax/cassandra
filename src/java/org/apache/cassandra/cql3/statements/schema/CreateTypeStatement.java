@@ -18,13 +18,13 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.function.Function;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.CQLFragmentParser;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.CqlParser;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.UTName;
@@ -161,7 +161,7 @@ public final class CreateTypeStatement extends AlterSchemaStatement
         return type;
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<CreateTypeStatement>
     {
         private final UTName name;
         private final boolean ifNotExists;
@@ -181,9 +181,11 @@ public final class CreateTypeStatement extends AlterSchemaStatement
             return this;
         }
 
-        public CreateTypeStatement prepare(ClientState state)
+        @Override
+        public CreateTypeStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+            rawFieldTypes.forEach(t -> t.updateKeyspaceIfSet(keyspaceName));
             return new CreateTypeStatement(keyspaceName, name.getStringTypeName(), fieldNames, rawFieldTypes, ifNotExists);
         }
 

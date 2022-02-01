@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
@@ -212,7 +213,7 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
         }
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends AlterSchemaStatement.Raw<AlterTypeStatement>
     {
         private enum Kind
         {
@@ -235,14 +236,17 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             this.name = name;
         }
 
-        public AlterTypeStatement prepare(ClientState state)
+        @Override
+        public AlterTypeStatement prepare(ClientState state, Function<String, String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
             String typeName = name.getStringTypeName();
 
             switch (kind)
             {
-                case     ADD_FIELD: return new AddField(keyspaceName, typeName, newFieldName, newFieldType);
+                case     ADD_FIELD:
+                    newFieldType.updateKeyspaceIfSet(keyspaceName);
+                    return new AddField(keyspaceName, typeName, newFieldName, newFieldType);
                 case RENAME_FIELDS: return new RenameFields(keyspaceName, typeName, renamedFields);
                 case   ALTER_FIELD: return new AlterField(keyspaceName, typeName);
             }
