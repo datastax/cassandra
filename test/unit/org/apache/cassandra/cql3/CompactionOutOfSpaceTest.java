@@ -29,6 +29,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.assertj.core.api.Assertions;
@@ -151,7 +152,7 @@ public class CompactionOutOfSpaceTest extends CQLTester
         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 4, 4);
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
         Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         try
         {
