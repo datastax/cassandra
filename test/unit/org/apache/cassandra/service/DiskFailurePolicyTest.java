@@ -39,6 +39,7 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -55,7 +56,7 @@ import static org.junit.Assert.assertTrue;
 public class DiskFailurePolicyTest
 {
     DiskFailurePolicy originalDiskFailurePolicy;
-    JVMStabilityInspector.Killer originalKiller;
+    JVMKiller originalKiller;
     KillerForTests killerForTests;
     DiskFailurePolicy testPolicy;
     boolean isStartUpInProgress;
