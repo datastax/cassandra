@@ -55,7 +55,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.PRINT_HEAP
 public final class JVMStabilityInspector
 {
     private static final Logger logger = LoggerFactory.getLogger(JVMStabilityInspector.class);
-    private static Killer killer = new Killer();
+    private static JVMKiller killer = new Killer();
 
     private static Object lock = new Object();
     private static boolean printingHeapHistogram;
@@ -279,14 +279,14 @@ public final class JVMStabilityInspector
     }
 
     @VisibleForTesting
-    public static Killer replaceKiller(Killer newKiller)
+    public static JVMKiller replaceKiller(JVMKiller newKiller)
     {
-        Killer oldKiller = JVMStabilityInspector.killer;
+        JVMKiller oldKiller = JVMStabilityInspector.killer;
         JVMStabilityInspector.killer = newKiller;
         return oldKiller;
     }
 
-    public static Killer killer()
+    public static JVMKiller killer()
     {
         return killer;
     }
