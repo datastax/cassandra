@@ -191,14 +191,6 @@ public class ChunkCache
         return instance.wrapper.apply(file);
     }
 
-    public void invalidatePosition(FileHandle dfile, long position)
-    {
-        if (!(dfile.rebuffererFactory() instanceof CachingRebufferer))
-            return;
-
-        ((CachingRebufferer) dfile.rebuffererFactory()).invalidate(position);
-    }
-
     public void invalidateFile(String fileName)
     {
         cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.path.equals(fileName)));
@@ -272,16 +264,17 @@ public class ChunkCache
             }
         }
 
-        public void invalidate(long position)
-        {
-            long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos));
-        }
-
         @Override
         public Rebufferer instantiateRebufferer()
         {
             return this;
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
+            long pageAlignedPos = position & alignmentMask;
+            cache.invalidate(new Key(source, pageAlignedPos));
         }
 
         @Override
