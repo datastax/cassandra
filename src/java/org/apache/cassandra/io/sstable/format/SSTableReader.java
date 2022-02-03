@@ -454,7 +454,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return open(desc, componentsFor(desc), metadata);
     }
 
-    private static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
+    public static SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata)
     {
         return open(descriptor, components, metadata, true, false);
     }
