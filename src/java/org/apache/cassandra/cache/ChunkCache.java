@@ -36,7 +36,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
@@ -50,7 +49,7 @@ public class ChunkCache
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMiB() - RESERVED_POOL_SPACE_IN_MiB);
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
-    private static boolean enabled = DatabaseDescriptor.getFileCacheEnabled() && cacheSize > 0;
+    private static final boolean enabled = DatabaseDescriptor.getFileCacheEnabled() && cacheSize > 0;
     public static final ChunkCache instance = enabled ? new ChunkCache(BufferPools.forChunkCache()) : null;
 
     private final BufferPool bufferPool;
@@ -190,14 +189,6 @@ public class ChunkCache
         return instance.wrap(file);
     }
 
-    public void invalidatePosition(FileHandle dfile, long position)
-    {
-        if (!(dfile.rebuffererFactory() instanceof CachingRebufferer))
-            return;
-
-        ((CachingRebufferer) dfile.rebuffererFactory()).invalidate(position);
-    }
-
     public void invalidateFile(String fileName)
     {
         cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.path.equals(fileName)));
@@ -257,7 +248,8 @@ public class ChunkCache
             }
         }
 
-        public void invalidate(long position)
+        @Override
+        public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
             cache.invalidate(new Key(source, pageAlignedPos));
