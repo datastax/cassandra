@@ -364,7 +364,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
             if (chunkCache != null)
             {
                 if (lastEarlyOpenLength != 0 && dataFile.dataLength() > lastEarlyOpenLength)
-                    chunkCache.invalidatePosition(dataFile, lastEarlyOpenLength);
+                    dataFile.rebuffererFactory().invalidateIfCached(lastEarlyOpenLength);
             }
             lastEarlyOpenLength = dataFile.dataLength();
         }
