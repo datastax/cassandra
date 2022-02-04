@@ -106,14 +106,14 @@ public class RowIndexEntryTest extends CQLTester
     @Test
     public void testC11206AgainstPreviousArray() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(99999);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(99999);
         testC11206AgainstPrevious();
     }
 
     @Test
     public void testC11206AgainstPreviousShallow() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testC11206AgainstPrevious();
     }
 
