@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.service;
 
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -31,60 +29,59 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.google.common.collect.Multimap;
-
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.RangeStreamer;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.HeartBeatState;
-import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.locator.EndpointsByRange;
-import org.apache.cassandra.locator.EndpointsByReplica;
-import org.apache.cassandra.locator.EndpointsForRange;
-import org.apache.cassandra.locator.ReplicaCollection;
-
 import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Multimap;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.EndpointsByRange;
+import org.apache.cassandra.locator.EndpointsByReplica;
+import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.ReplicaMultimap;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.locator.SystemReplicas;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService.LeavingReplica;
+import org.apache.cassandra.utils.FBUtilities;
 import org.mockito.Mockito;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.awaitility.Awaitility.await;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.utils.FBUtilities;
-
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK;
+import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -742,5 +739,20 @@ public class StorageServiceTest
         assertEquals("Singlular leaving endpoint not found", leavingSet, tmd.getLeavingEndpoints());
         ss.forceRemoveCompletion();
         assertEquals("Leaving endpoints still exist after forceRemoveCompletion()", emptySet, tmd.getLeavingEndpoints());
+    }
+
+    @Test
+    public void testSettingColumnIndexCacheSize()
+    {
+        int old = StorageService.instance.getColumnIndexCacheSize();
+        try
+        {
+            StorageService.instance.setColumnIndexCacheSize(old + 2);
+            assertEquals(old + 2, DatabaseDescriptor.getColumnIndexCacheSizeInKiB());
+        }
+        finally
+        {
+            StorageService.instance.setColumnIndexCacheSize(old);
+        }
     }
 }
