@@ -77,10 +77,10 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -338,7 +338,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public boolean isIndexQueryable(Index index)
     {
-        return queryableIndexes.contains(index.getIndexMetadata().name);
+        return isIndexQueryable(index.getIndexMetadata().name);
+    }
+
+    /**
+     * Checks if the specified index is queryable.
+     *
+     * @param indexName name of the index
+     * @return <code>true</code> if the specified index is registered, <code>false</code> otherwise
+     */
+    public boolean isIndexQueryable(String indexName)
+    {
+        return queryableIndexes.contains(indexName);
     }
 
     /**
