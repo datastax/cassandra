@@ -59,8 +59,8 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -179,7 +179,7 @@ public class LegacySSTableTest
     @Test
     public void testLoadLegacyCqlTables() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(99999);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(99999);
         CacheService.instance.invalidateKeyCache();
         doTestLegacyCqlTables();
     }
@@ -187,7 +187,7 @@ public class LegacySSTableTest
     @Test
     public void testLoadLegacyCqlTablesShallow() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         CacheService.instance.invalidateKeyCache();
         doTestLegacyCqlTables();
     }
