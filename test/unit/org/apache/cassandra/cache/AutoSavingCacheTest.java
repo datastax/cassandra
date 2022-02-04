@@ -62,14 +62,14 @@ public class AutoSavingCacheTest
     @Test
     public void testSerializeAndLoadKeyCache0kB() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         doTestSerializeAndLoadKeyCache();
     }
 
     @Test
     public void testSerializeAndLoadKeyCache() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         doTestSerializeAndLoadKeyCache();
     }
 
