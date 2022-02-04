@@ -41,9 +41,9 @@ import org.junit.rules.TemporaryFolder;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.assertj.core.api.Assertions;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
@@ -289,7 +289,7 @@ public class DatabaseDescriptorTest
     public void testExceptionsForInvalidConfigValues() {
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(-1);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(-1);
             fail("Should have received a IllegalArgumentException column_index_cache_size = -1");
         }
         catch (IllegalArgumentException ignored) { }
@@ -297,8 +297,8 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(2 * 1024 * 1024);
-            fail("Should have received a ConfigurationException column_index_cache_size= 2GiB");
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(2 * 1024 * 1024);
+            fail("Should have received a ConfigurationException column_index_cache_size = 2GiB");
         }
         catch (ConfigurationException ignored) { }
         Assert.assertEquals(2048, DatabaseDescriptor.getColumnIndexCacheSize());

@@ -30,7 +30,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.junit.AfterClass;
 import org.junit.Assume;
 import org.junit.BeforeClass;
@@ -52,6 +51,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.RowIndexEntry;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -126,14 +126,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadShallowIndexEntry() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheLoad(COLUMN_FAMILY2);
     }
 
     @Test
     public void testKeyCacheLoadIndexInfoOnHeap() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheLoad(COLUMN_FAMILY5);
     }
 
@@ -234,14 +234,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadWithLostTableShallowIndexEntry() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY3);
     }
 
     @Test
     public void testKeyCacheLoadWithLostTableIndexInfoOnHeap() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY6);
     }
 
@@ -297,14 +297,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheShallowIndexEntry() throws ExecutionException, InterruptedException
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCache(COLUMN_FAMILY1);
     }
 
     @Test
     public void testKeyCacheIndexInfoOnHeap() throws ExecutionException, InterruptedException
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCache(COLUMN_FAMILY4);
     }
 

@@ -46,7 +46,7 @@ public class RowIndexSizeWarningTest extends AbstractClientSizeWarning
             DatabaseDescriptor.setRowIndexReadSizeFailThreshold(new DataStorageSpec.LongBytesBound(2, KIBIBYTES));
 
             // hack to force multiple index entries
-            DatabaseDescriptor.setColumnIndexCacheSize(1 << 20);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(1 << 20);
             DatabaseDescriptor.setColumnIndexSizeInKiB(0);
         }));
     }
