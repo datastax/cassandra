@@ -6674,7 +6674,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @Override
     public void setColumnIndexCacheSize(int cacheSizeInKB)
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(cacheSizeInKB);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(cacheSizeInKB);
         logger.info("Updated column_index_cache_size to {}", cacheSizeInKB);
     }
 
@@ -6694,7 +6694,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(cacheSizeInKiB);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(cacheSizeInKiB);
         }
         catch (ConfigurationException e)
         {

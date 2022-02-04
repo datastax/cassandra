@@ -294,7 +294,7 @@ public class DatabaseDescriptorTest
     public void testExceptionsForInvalidConfigValues() {
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(-1);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(-1);
             fail("Should have received a IllegalArgumentException column_index_cache_size = -1");
         }
         catch (IllegalArgumentException ignored) { }
@@ -302,8 +302,8 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(2 * 1024 * 1024);
-            fail("Should have received a ConfigurationException column_index_cache_size= 2GiB");
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(2 * 1024 * 1024);
+            fail("Should have received a ConfigurationException column_index_cache_size = 2GiB");
         }
         catch (ConfigurationException ignored) { }
         Assert.assertEquals(2048, DatabaseDescriptor.getColumnIndexCacheSize());
