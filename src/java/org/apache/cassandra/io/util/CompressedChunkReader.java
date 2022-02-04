@@ -316,6 +316,10 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
             super.close();
         }
+
+        public void invalidateIfCached(long position)
+        {
+        }
     }
 
     public static class Mmap extends CompressedChunkReader
@@ -384,6 +388,11 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             regions.closeQuietly();
             super.close();
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
         }
     }
 }
