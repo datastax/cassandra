@@ -139,14 +139,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testSliceQueriesShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testSliceQueries();
     }
 
     @Test
     public void testSliceQueriesIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testSliceQueries();
     }
 
@@ -236,14 +236,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         test2iKeyCachePaths();
     }
 
     @Test
     public void test2iKeyCachePathsIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         test2iKeyCachePaths();
     }
 
@@ -329,14 +329,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
 
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
 
@@ -411,14 +411,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheNonClusteredShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheNonClustered();
     }
 
     @Test
     public void testKeyCacheNonClusteredIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheNonClustered();
     }
 
@@ -465,14 +465,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheClusteredShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheClustered();
     }
 
     @Test
     public void testKeyCacheClusteredIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheClustered();
     }
 

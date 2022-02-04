@@ -62,8 +62,6 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
-
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,6 +91,7 @@ import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -2005,7 +2004,7 @@ public class DatabaseDescriptor
         return conf.column_index_cache_size.toKibibytes();
     }
 
-    public static void setColumnIndexCacheSize(int val)
+    public static void setColumnIndexCacheSizeInKiB(int val)
     {
         conf.column_index_cache_size = createIntKibibyteBoundAndEnsureItIsValidForByteConversion(val,"column_index_cache_size");
     }
