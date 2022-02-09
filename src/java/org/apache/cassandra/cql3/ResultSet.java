@@ -27,6 +27,8 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -137,6 +139,11 @@ public class ResultSet
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public ResultSet withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+    {
+        return new ResultSet(metadata.withOverriddenKeyspace(keyspaceOverrideFunction), rows);
     }
 
     public static class Codec implements CBCodec<ResultSet>
@@ -366,6 +373,14 @@ public class ResultSet
             return sb.toString();
         }
 
+        public ResultMetadata withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            List<ColumnSpecification> newNames = names.stream()
+                                                      .map(cs -> new ColumnSpecification(keyspaceOverrideFunction.apply(cs.ksName), cs.cfName, cs.name, cs.type))
+                                                      .collect(Collectors.toList());
+            return new ResultMetadata(resultMetadataId, EnumSet.copyOf(flags), newNames, columnCount, pagingState);
+        }
+
         private static class Codec implements CBCodec<ResultMetadata>
         {
             public ResultMetadata decode(ByteBuf body, ProtocolVersion version)
@@ -576,6 +591,14 @@ public class ResultSet
         public static PreparedMetadata fromPrepared(CQLStatement statement)
         {
             return new PreparedMetadata(statement.getBindVariables(), statement.getPartitionKeyBindVariableIndexes());
+        }
+
+        public PreparedMetadata withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            List<ColumnSpecification> newNames = names.stream()
+                                                      .map(cs -> new ColumnSpecification(keyspaceOverrideFunction.apply(cs.ksName), cs.cfName, cs.name, cs.type))
+                                                      .collect(Collectors.toList());
+            return new PreparedMetadata(EnumSet.copyOf(flags), newNames, Arrays.copyOf(partitionKeyBindIndexes, partitionKeyBindIndexes.length));
         }
 
         private static class Codec implements CBCodec<PreparedMetadata>

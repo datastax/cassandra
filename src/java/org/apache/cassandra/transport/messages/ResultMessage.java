@@ -18,6 +18,8 @@
 package org.apache.cassandra.transport.messages;
 
 
+import java.util.function.Function;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.buffer.ByteBuf;
@@ -26,7 +28,7 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.MD5Digest;
 
-public abstract class ResultMessage extends Message.Response
+public abstract class ResultMessage<T extends ResultMessage<T>> extends Message.Response
 {
     public static final Message.Codec<ResultMessage> codec = new Message.Codec<ResultMessage>()
     {
@@ -97,7 +99,12 @@ public abstract class ResultMessage extends Message.Response
         this.kind = kind;
     }
 
-    public static class Void extends ResultMessage
+    public T withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+    {
+        return (T) this;
+    }
+
+    public static class Void extends ResultMessage<Void>
     {
         // Even though we have no specific information here, don't make a
         // singleton since as each message it has in fact a streamid and connection.
@@ -131,7 +138,7 @@ public abstract class ResultMessage extends Message.Response
         }
     }
 
-    public static class SetKeyspace extends ResultMessage
+    public static class SetKeyspace extends ResultMessage<SetKeyspace>
     {
         public final String keyspace;
 
@@ -167,9 +174,20 @@ public abstract class ResultMessage extends Message.Response
         {
             return "RESULT set keyspace " + keyspace;
         }
+
+        @Override
+        public SetKeyspace withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            SetKeyspace r = new SetKeyspace(keyspaceOverrideFunction.apply(keyspace));
+            r.setWarnings(r.getWarnings());
+            r.setCustomPayload(r.getCustomPayload());
+            r.setSource(r.getSource());
+            r.setStreamId(r.getStreamId());
+            return r;
+        }
     }
 
-    public static class Rows extends ResultMessage
+    public static class Rows extends ResultMessage<Rows>
     {
         public static final Message.Codec<ResultMessage> subcodec = new Message.Codec<ResultMessage>()
         {
@@ -206,9 +224,20 @@ public abstract class ResultMessage extends Message.Response
         {
             return "ROWS " + result;
         }
+
+        @Override
+        public Rows withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            Rows r = new Rows(result.withOverriddenKeyspace(keyspaceOverrideFunction));
+            r.setWarnings(r.getWarnings());
+            r.setCustomPayload(r.getCustomPayload());
+            r.setSource(r.getSource());
+            r.setStreamId(r.getStreamId());
+            return r;
+        }
     }
 
-    public static class Prepared extends ResultMessage
+    public static class Prepared extends ResultMessage<Prepared>
     {
         public static final Message.Codec<ResultMessage> subcodec = new Message.Codec<ResultMessage>()
         {
@@ -284,13 +313,27 @@ public abstract class ResultMessage extends Message.Response
         }
 
         @Override
+        public Prepared withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            Prepared r = new Prepared(statementId,
+                                      resultMetadataId,
+                                      metadata.withOverriddenKeyspace(keyspaceOverrideFunction),
+                                      resultMetadata.withOverriddenKeyspace(keyspaceOverrideFunction));
+            r.setWarnings(r.getWarnings());
+            r.setCustomPayload(r.getCustomPayload());
+            r.setSource(r.getSource());
+            r.setStreamId(r.getStreamId());
+            return r;
+        }
+
+        @Override
         public String toString()
         {
             return "RESULT PREPARED " + statementId + " " + metadata + " (resultMetadata=" + resultMetadata + ")";
         }
     }
 
-    public static class SchemaChange extends ResultMessage
+    public static class SchemaChange extends ResultMessage<SchemaChange>
     {
         public final Event.SchemaChange change;
 
@@ -321,6 +364,17 @@ public abstract class ResultMessage extends Message.Response
                 return scm.change.eventSerializedSize(version);
             }
         };
+
+        @Override
+        public SchemaChange withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            SchemaChange r = new SchemaChange(change.withOverriddenKeyspace(keyspaceOverrideFunction));
+            r.setWarnings(r.getWarnings());
+            r.setCustomPayload(r.getCustomPayload());
+            r.setSource(r.getSource());
+            r.setStreamId(r.getStreamId());
+            return r;
+        }
 
         @Override
         public String toString()

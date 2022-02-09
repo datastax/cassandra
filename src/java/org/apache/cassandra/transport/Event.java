@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Function;
 
 import com.google.common.base.Objects;
 
@@ -269,6 +270,11 @@ public abstract class Event
         public SchemaChange(Change change, String keyspace)
         {
             this(change, Target.KEYSPACE, keyspace, null);
+        }
+
+        public SchemaChange withOverriddenKeyspace(Function<String, String> keyspaceOverrideFunction)
+        {
+            return new SchemaChange(change, target, keyspaceOverrideFunction.apply(keyspace), name, argTypes);
         }
 
         public static SchemaChange forFunction(Change change, UDFunction function)
