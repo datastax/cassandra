@@ -26,6 +26,7 @@ import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.KeyspaceStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.*;
@@ -36,9 +37,9 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-public abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation
+public abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation, KeyspaceStatement
 {
-    public final String keyspaceName; // name of the keyspace affected by the statement
+    protected final String keyspaceName; // name of the keyspace affected by the statement
 
     protected AlterSchemaStatement(String keyspaceName)
     {
@@ -120,6 +121,12 @@ public abstract class AlterSchemaStatement implements CQLStatement, SchemaTransf
             createdResources(result.diff).forEach(r -> grantPermissionsOnResource(r, user));
 
         return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
+    }
+
+    @Override
+    public String keyspace()
+    {
+        return keyspaceName;
     }
 
     private void validateKeyspaceName()

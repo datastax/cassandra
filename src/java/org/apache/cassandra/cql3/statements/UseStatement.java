@@ -29,9 +29,9 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
-public class UseStatement extends CQLStatement.Raw implements CQLStatement
+public class UseStatement extends CQLStatement.Raw implements CQLStatement, KeyspaceStatement
 {
-    public final String keyspace;
+    private final String keyspace;
 
     public UseStatement(String keyspace)
     {
@@ -76,5 +76,11 @@ public class UseStatement extends CQLStatement.Raw implements CQLStatement
     public AuditLogContext getAuditLogContext()
     {
         return new AuditLogContext(AuditLogEntryType.USE_KEYSPACE, keyspace);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        return keyspace;
     }
 }
