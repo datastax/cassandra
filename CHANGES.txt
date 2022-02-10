@@ -1,4 +1,4 @@
-ble ble ble be
+ble ble ble be nbe
 
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
