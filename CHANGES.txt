@@ -1,3 +1,5 @@
+bla bla bla
+
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 
