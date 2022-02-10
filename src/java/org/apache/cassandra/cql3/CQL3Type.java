@@ -749,8 +749,10 @@ public interface CQL3Type
             @Override
             public void updateKeyspaceIfSet(String keyspaceName)
             {
-                keys.updateKeyspaceIfSet(keyspaceName);
-                values.updateKeyspaceIfSet(keyspaceName);
+                if (keys != null)
+                    keys.updateKeyspaceIfSet(keyspaceName);
+                if (values != null)
+                    values.updateKeyspaceIfSet(keyspaceName);
             }
 
             @Override
