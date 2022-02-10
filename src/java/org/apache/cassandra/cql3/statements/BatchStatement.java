@@ -631,8 +631,17 @@ public class BatchStatement implements CQLStatement
         @Override
         public void setKeyspace(ClientState state) throws InvalidRequestException
         {
+            super.setKeyspace(state);
             for (ModificationStatement.Parsed statement : parsedStatements)
                 statement.setKeyspace(state);
+        }
+
+        @Override
+        public void setKeyspace(String keyspace)
+        {
+            super.setKeyspace(keyspace);
+            for (ModificationStatement.Parsed statement : parsedStatements)
+                statement.setKeyspace(keyspace);
         }
 
         public BatchStatement prepare(ClientState state)
