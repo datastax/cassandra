@@ -39,10 +39,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
-
-import org.apache.cassandra.config.DataStorageSpec;
-import org.apache.cassandra.metrics.ClientRequestsMetrics;
-import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.slf4j.Logger;
@@ -51,6 +47,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -110,6 +107,8 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -156,6 +155,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
 
+    private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
     public final TableMetadata table;
     public final Parameters parameters;
@@ -184,7 +184,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                        false,
                                                                        false);
 
-    public SelectStatement(TableMetadata table,
+    public SelectStatement(String queryString,
+                           TableMetadata table,
                            VariableSpecifications bindVariables,
                            Parameters parameters,
                            Selection selection,
@@ -195,6 +196,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            Term limit,
                            Term perPartitionLimit)
     {
+        this.rawCQLStatement = queryString;
         this.table = table;
         this.bindVariables = bindVariables;
         this.selection = selection;
@@ -205,6 +207,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+    }
+
+    @Override
+    public String getRawCQLStatement()
+    {
+        return rawCQLStatement;
     }
 
     @Override
@@ -256,7 +264,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     // queried data through processColumnFamily.
     static SelectStatement forSelection(TableMetadata table, Selection selection)
     {
-        return new SelectStatement(table,
+        return new SelectStatement(null,
+                                   table,
                                    VariableSpecifications.empty(),
                                    defaultParameters,
                                    selection,
@@ -1288,7 +1297,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             checkNeedsFiltering(table, restrictions, state);
 
-            return new SelectStatement(table,
+            return new SelectStatement(rawCQLStatement,
+                                       table,
                                        bindVariables,
                                        parameters,
                                        selection,
