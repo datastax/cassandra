@@ -27,19 +27,17 @@ import org.apache.cassandra.cql3.UTName;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Keyspaces;
+import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
-import org.apache.cassandra.transport.Event.SchemaChange;
-
-import static java.lang.String.join;
 
 import static com.google.common.collect.Iterables.isEmpty;
 import static com.google.common.collect.Iterables.transform;
-
+import static java.lang.String.join;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 public final class DropTypeStatement extends AlterSchemaStatement
@@ -47,9 +45,10 @@ public final class DropTypeStatement extends AlterSchemaStatement
     private final String typeName;
     private final boolean ifExists;
 
-    public DropTypeStatement(String keyspaceName, String typeName, boolean ifExists)
+    public DropTypeStatement(String queryString, String keyspaceName, String typeName,
+                             boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.typeName = typeName;
         this.ifExists = ifExists;
     }
@@ -148,7 +147,8 @@ public final class DropTypeStatement extends AlterSchemaStatement
         public DropTypeStatement prepare(ClientState state)
         {
             String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropTypeStatement(keyspaceName, name.getStringTypeName(), ifExists);
+            return new DropTypeStatement(rawCQLStatement, keyspaceName, name.getStringTypeName(),
+                                         ifExists);
         }
     }
 }

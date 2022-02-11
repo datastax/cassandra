@@ -23,8 +23,12 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.guardrails.Guardrails;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -37,9 +41,10 @@ public final class AlterViewStatement extends AlterSchemaStatement
     private ClientState state;
     private final boolean ifExists;
 
-    public AlterViewStatement(String keyspaceName, String viewName, TableAttributes attrs, boolean ifExists)
+    public AlterViewStatement(String queryString, String keyspaceName, String viewName,
+            TableAttributes attrs, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.viewName = viewName;
         this.attrs = attrs;
         this.ifExists = ifExists;
@@ -133,7 +138,7 @@ public final class AlterViewStatement extends AlterSchemaStatement
         public AlterViewStatement prepare(ClientState state)
         {
             String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new AlterViewStatement(keyspaceName, name.getName(), attrs, ifExists);
+            return new AlterViewStatement(rawCQLStatement, keyspaceName, name.getName(), attrs, ifExists);
         }
     }
 }
