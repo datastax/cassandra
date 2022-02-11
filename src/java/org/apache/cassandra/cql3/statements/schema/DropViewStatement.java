@@ -22,8 +22,11 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -34,9 +37,10 @@ public final class DropViewStatement extends AlterSchemaStatement
     private final String viewName;
     private final boolean ifExists;
 
-    public DropViewStatement(String keyspaceName, String viewName, boolean ifExists)
+    public DropViewStatement(String queryString, String keyspaceName, String viewName,
+                             boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.viewName = viewName;
         this.ifExists = ifExists;
     }
@@ -97,7 +101,7 @@ public final class DropViewStatement extends AlterSchemaStatement
         public DropViewStatement prepare(ClientState state)
         {
             String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropViewStatement(keyspaceName, name.getName(), ifExists);
+            return new DropViewStatement(rawCQLStatement, keyspaceName, name.getName(), ifExists);
         }
     }
 }
