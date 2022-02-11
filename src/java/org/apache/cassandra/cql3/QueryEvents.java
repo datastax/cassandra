@@ -25,7 +25,6 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -104,7 +103,6 @@ public class QueryEvents
     }
 
     public void notifyExecuteSuccess(CQLStatement statement,
-                                     String query,
                                      QueryOptions options,
                                      QueryState state,
                                      long queryTime,
@@ -112,6 +110,7 @@ public class QueryEvents
     {
         try
         {
+            String query = statement.getRawCQLStatement();
             final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
                 listener.executeSuccess(statement, maybeObfuscatedQuery, options, state, queryTime, response);
@@ -129,7 +128,7 @@ public class QueryEvents
                                      Exception cause)
     {
         CQLStatement statement = prepared != null ? prepared.statement : null;
-        String query = prepared != null ? prepared.rawCQLStatement : null;
+        String query = prepared != null ? prepared.statement.getRawCQLStatement() : null;
         try
         {
             final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
@@ -180,7 +179,7 @@ public class QueryEvents
             {
                 prepared.forEach(p -> {
                     statements.add(p.statement);
-                    queries.add(p.rawCQLStatement);
+                    queries.add(p.statement.getRawCQLStatement());
                 });
             }
             try
@@ -242,7 +241,7 @@ public class QueryEvents
         }
     }
 
-    private String maybeObfuscatePassword(CQLStatement statement, String query)
+    private String maybeObfuscatePassword(@Nullable CQLStatement statement, String query)
     {
         // Statement might be null as side-effect of failed parsing, originates from QueryMessage#execute
         if (statement == null)
