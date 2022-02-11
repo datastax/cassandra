@@ -17,14 +17,15 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.function.UnaryOperator;
+
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
-
-import java.util.Collection;
-import java.util.Iterator;
 
 public class ColumnSpecification
 {
@@ -74,6 +75,15 @@ public class ColumnSpecification
                 return false;
         }
         return true;
+    }
+
+    public ColumnSpecification withOverriddenKeyspace(UnaryOperator<String> keyspaceMapper)
+    {
+        if (keyspaceMapper == Constants.IDENTITY_STRING_MAPPER)
+            return this;
+
+        String newKeyspaceName = keyspaceMapper.apply(ksName);
+        return ksName.equals(newKeyspaceName) ? this : new ColumnSpecification(newKeyspaceName, cfName, name, type);
     }
 
     @Override
