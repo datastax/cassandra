@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -42,11 +44,13 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.CQLFragmentParser;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.CqlParser;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.UTName;
 import org.apache.cassandra.cql3.functions.masking.ColumnMask;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -532,7 +536,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
                          .builder(types);
     }
 
-    public final static class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateTableStatement>
     {
         private final QualifiedName name;
         private final boolean ifNotExists;
@@ -553,9 +557,13 @@ public final class CreateTableStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateTableStatement prepare(ClientState state)
+        @Override
+        public CreateTableStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+
+            if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+                rawColumns.values().forEach(t -> t.forEachUserType(utName -> utName.updateKeyspaceIfDefined(keyspaceMapper)));
 
             if (null == partitionKeyColumns)
                 throw ire("No PRIMARY KEY specifed for table '%s' (exactly one required)", name);
@@ -681,6 +689,11 @@ public final class CreateTableStatement extends AlterSchemaStatement
                 AbstractType<?> type = cqlType.getType();
                 ColumnMask mask = rawMask == null ? null : rawMask.prepare(keyspace, table, column, type);
                 return new ColumnProperties(type, cqlType, mask);
+            }
+
+            public void forEachUserType(Consumer<UTName> keyspaceMapper)
+            {
+                rawType.forEachUserType(keyspaceMapper);
             }
         }
     }
