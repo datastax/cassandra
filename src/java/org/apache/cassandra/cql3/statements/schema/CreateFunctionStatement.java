@@ -26,7 +26,9 @@ import com.google.common.collect.Lists;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.FunctionResource;
+import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -34,11 +36,11 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -58,7 +60,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
     private final boolean orReplace;
     private final boolean ifNotExists;
 
-    public CreateFunctionStatement(String keyspaceName,
+    public CreateFunctionStatement(String queryString,
+                                   String keyspaceName,
                                    String functionName,
                                    List<ColumnIdentifier> argumentNames,
                                    List<CQL3Type.Raw> rawArgumentTypes,
@@ -69,7 +72,7 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                    boolean orReplace,
                                    boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.functionName = functionName;
         this.argumentNames = argumentNames;
         this.rawArgumentTypes = rawArgumentTypes;
@@ -241,7 +244,8 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         {
             String keyspaceName = name.hasKeyspace() ? name.keyspace : state.getKeyspace();
 
-            return new CreateFunctionStatement(keyspaceName,
+            return new CreateFunctionStatement(rawCQLStatement,
+                                               keyspaceName,
                                                name.name,
                                                argumentNames,
                                                rawArgumentTypes,

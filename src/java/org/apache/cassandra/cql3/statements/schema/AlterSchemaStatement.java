@@ -42,12 +42,20 @@ import static org.apache.cassandra.schema.KeyspaceMetadata.validateKeyspaceName;
 
 abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
 {
+    private final String rawCQLStatement;
     protected final String keyspaceName; // name of the keyspace affected by the statement
     protected ClientState state;
 
-    protected AlterSchemaStatement(String keyspaceName)
+    protected AlterSchemaStatement(String queryString, String keyspaceName)
     {
+        this.rawCQLStatement = queryString;
         this.keyspaceName = keyspaceName;
+    }
+
+    @Override
+    public String getRawCQLStatement()
+    {
+        return rawCQLStatement;
     }
 
     public void validate(ClientState state)
