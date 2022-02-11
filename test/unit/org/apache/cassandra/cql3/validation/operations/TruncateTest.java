@@ -17,12 +17,20 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
+import org.junit.After;
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 
 public class TruncateTest extends CQLTester
 {
+    @After
+    public void afterTest()
+    {
+        System.clearProperty("cassandra.remote_truncate_statement");
+    }
+
     @Test
     public void testTruncate() throws Throwable
     {
@@ -44,5 +52,13 @@ public class TruncateTest extends CQLTester
 
             assertEmpty(execute("SELECT * FROM %s"));
         }
+    }
+
+    @Test
+    public void testRemoteTruncateStmt() throws Throwable
+    {
+        System.setProperty("cassandra.remote_truncate_statement", RemoteTruncateStatement.class.getName());
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY(a, b))");
+        execute("TRUNCATE TABLE %s");
     }
 }
