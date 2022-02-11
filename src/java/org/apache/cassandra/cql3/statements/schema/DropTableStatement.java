@@ -23,26 +23,29 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.guardrails.Guardrails;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
-import static java.lang.String.join;
-
 import static com.google.common.collect.Iterables.isEmpty;
 import static com.google.common.collect.Iterables.transform;
+import static java.lang.String.join;
 
 public final class DropTableStatement extends AlterSchemaStatement
 {
     private final String tableName;
     private final boolean ifExists;
 
-    public DropTableStatement(String keyspaceName, String tableName, boolean ifExists)
+    public DropTableStatement(String queryString, String keyspaceName, String tableName,
+                              boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.ifExists = ifExists;
     }
@@ -114,7 +117,7 @@ public final class DropTableStatement extends AlterSchemaStatement
         public DropTableStatement prepare(ClientState state)
         {
             String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropTableStatement(keyspaceName, name.getName(), ifExists);
+            return new DropTableStatement(rawCQLStatement, keyspaceName, name.getName(), ifExists);
         }
     }
 }

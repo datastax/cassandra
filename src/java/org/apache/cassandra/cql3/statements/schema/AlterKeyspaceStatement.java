@@ -58,9 +58,9 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
     private final KeyspaceAttributes attrs;
     private final boolean ifExists;
 
-    public AlterKeyspaceStatement(String keyspaceName, KeyspaceAttributes attrs, boolean ifExists)
+    public AlterKeyspaceStatement(String queryString, String keyspaceName, KeyspaceAttributes attrs, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.attrs = attrs;
         this.ifExists = ifExists;
     }
@@ -219,7 +219,7 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
 
         public AlterKeyspaceStatement prepare(ClientState state)
         {
-            return new AlterKeyspaceStatement(keyspaceName, attrs, ifExists);
+            return new AlterKeyspaceStatement(rawCQLStatement, keyspaceName, attrs, ifExists);
         }
     }
 }
