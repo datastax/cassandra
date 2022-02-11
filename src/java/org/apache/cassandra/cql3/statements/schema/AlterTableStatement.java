@@ -82,9 +82,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
     private final boolean ifExists;
     protected ClientState state;
 
-    public AlterTableStatement(String keyspaceName, String tableName, boolean ifExists)
+    public AlterTableStatement(String queryString, String keyspaceName, String tableName, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.ifExists = ifExists;
     }
@@ -154,9 +154,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
      */
     public static class AlterColumn extends AlterTableStatement
     {
-        AlterColumn(String keyspaceName, String tableName, boolean ifTableExists)
+        AlterColumn(String queryString, String keyspaceName, String tableName, boolean ifTableExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
         }
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
@@ -175,14 +175,15 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         private final ColumnMask.Raw rawMask;
         private final boolean ifColumnExists;
 
-        MaskColumn(String keyspaceName,
+        MaskColumn(String queryString,
+                   String keyspaceName,
                    String tableName,
                    ColumnIdentifier columnName,
                    @Nullable ColumnMask.Raw rawMask,
                    boolean ifTableExists,
                    boolean ifColumnExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
             this.columnName = columnName;
             this.rawMask = rawMask;
             this.ifColumnExists = ifColumnExists;
@@ -264,9 +265,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         private final Collection<Column> newColumns;
         private final boolean ifColumnNotExists;
 
-        private AddColumns(String keyspaceName, String tableName, Collection<Column> newColumns, boolean ifTableExists, boolean ifColumnNotExists)
+        private AddColumns(String queryString, String keyspaceName, String tableName, Collection<Column> newColumns, boolean ifTableExists, boolean ifColumnNotExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
             this.newColumns = newColumns;
             this.ifColumnNotExists = ifColumnNotExists;
         }
@@ -375,9 +376,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         private final boolean ifColumnExists;
         private final Long timestamp;
 
-        private DropColumns(String keyspaceName, String tableName, Set<ColumnIdentifier> removedColumns, boolean ifTableExists, boolean ifColumnExists, Long timestamp)
+        private DropColumns(String queryString, String keyspaceName, String tableName, Set<ColumnIdentifier> removedColumns, boolean ifTableExists, boolean ifColumnExists, Long timestamp)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
             this.removedColumns = removedColumns;
             this.ifColumnExists = ifColumnExists;
             this.timestamp = timestamp;
@@ -444,9 +445,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         private final Map<ColumnIdentifier, ColumnIdentifier> renamedColumns;
         private final boolean ifColumnsExists;
 
-        private RenameColumns(String keyspaceName, String tableName, Map<ColumnIdentifier, ColumnIdentifier> renamedColumns, boolean ifTableExists, boolean ifColumnsExists)
+        private RenameColumns(String queryString, String keyspaceName, String tableName, Map<ColumnIdentifier, ColumnIdentifier> renamedColumns, boolean ifTableExists, boolean ifColumnsExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
             this.renamedColumns = renamedColumns;
             this.ifColumnsExists = ifColumnsExists;
         }
@@ -517,9 +518,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
     {
         private final TableAttributes attrs;
 
-        private AlterOptions(String keyspaceName, String tableName, TableAttributes attrs, boolean ifTableExists)
+        private AlterOptions(String queryString, String keyspaceName, String tableName, TableAttributes attrs, boolean ifTableExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
             this.attrs = attrs;
         }
 
@@ -576,9 +577,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
     {
         private static final Logger logger = LoggerFactory.getLogger(AlterTableStatement.class);
         private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
-        private DropCompactStorage(String keyspaceName, String tableName, boolean ifTableExists)
+        private DropCompactStorage(String queryString, String keyspaceName, String tableName, boolean ifTableExists)
         {
-            super(keyspaceName, tableName, ifTableExists);
+            super(queryString, keyspaceName, tableName, ifTableExists);
         }
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
@@ -718,13 +719,13 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
             switch (kind)
             {
-                case          ALTER_COLUMN: return new AlterColumn(keyspaceName, tableName, ifTableExists);
-                case           MASK_COLUMN: return new MaskColumn(keyspaceName, tableName, maskedColumn, rawMask, ifTableExists, ifColumnExists);
-                case           ADD_COLUMNS: return new AddColumns(keyspaceName, tableName, addedColumns, ifTableExists, ifColumnNotExists);
-                case          DROP_COLUMNS: return new DropColumns(keyspaceName, tableName, droppedColumns, ifTableExists, ifColumnExists, dropTimestamp);
-                case        RENAME_COLUMNS: return new RenameColumns(keyspaceName, tableName, renamedColumns, ifTableExists, ifColumnExists);
-                case         ALTER_OPTIONS: return new AlterOptions(keyspaceName, tableName, attrs, ifTableExists);
-                case  DROP_COMPACT_STORAGE: return new DropCompactStorage(keyspaceName, tableName, ifTableExists);
+                case          ALTER_COLUMN: return new AlterColumn(rawCQLStatement, keyspaceName, tableName, ifTableExists);
+                case           MASK_COLUMN: return new MaskColumn(rawCQLStatement, keyspaceName, tableName, maskedColumn, rawMask, ifTableExists, ifColumnExists);
+                case           ADD_COLUMNS: return new AddColumns(rawCQLStatement, keyspaceName, tableName, addedColumns, ifTableExists, ifColumnNotExists);
+                case          DROP_COLUMNS: return new DropColumns(rawCQLStatement, keyspaceName, tableName, droppedColumns, ifTableExists, ifColumnExists, dropTimestamp);
+                case        RENAME_COLUMNS: return new RenameColumns(rawCQLStatement, keyspaceName, tableName, renamedColumns, ifTableExists, ifColumnExists);
+                case         ALTER_OPTIONS: return new AlterOptions(rawCQLStatement, keyspaceName, tableName, attrs, ifTableExists);
+                case  DROP_COMPACT_STORAGE: return new DropCompactStorage(rawCQLStatement, keyspaceName, tableName, ifTableExists);
             }
 
             throw new AssertionError();

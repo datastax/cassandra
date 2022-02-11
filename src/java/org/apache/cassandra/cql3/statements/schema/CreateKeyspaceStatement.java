@@ -21,7 +21,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,9 +51,10 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
     private final KeyspaceAttributes attrs;
     private final boolean ifNotExists;
 
-    public CreateKeyspaceStatement(String keyspaceName, KeyspaceAttributes attrs, boolean ifNotExists)
+    public CreateKeyspaceStatement(String queryString, String keyspaceName,
+                                   KeyspaceAttributes attrs, boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.attrs = attrs;
         this.ifNotExists = ifNotExists;
     }
@@ -148,7 +148,7 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
 
         public CreateKeyspaceStatement prepare(ClientState state)
         {
-            return new CreateKeyspaceStatement(keyspaceName, attrs, ifNotExists);
+            return new CreateKeyspaceStatement(rawCQLStatement, keyspaceName, attrs, ifNotExists);
         }
     }
 }

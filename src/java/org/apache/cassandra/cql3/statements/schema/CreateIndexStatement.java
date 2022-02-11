@@ -17,7 +17,11 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -39,8 +43,13 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -102,14 +111,15 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex"
     );
 
-    public CreateIndexStatement(String keyspaceName,
+    public CreateIndexStatement(String queryString,
+                                String keyspaceName,
                                 String tableName,
                                 String indexName,
                                 List<IndexTarget.Raw> rawIndexTargets,
                                 IndexAttributes attrs,
                                 boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.indexName = indexName;
         this.rawIndexTargets = rawIndexTargets;
@@ -386,7 +396,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                     attrs.isCustom = true;
             }
 
-            return new CreateIndexStatement(keyspaceName, tableName.getName(), indexName.getName(), rawIndexTargets, attrs, ifNotExists);
+            return new CreateIndexStatement(rawCQLStatement, keyspaceName, tableName.getName(),
+                                            indexName.getName(), rawIndexTargets, attrs, ifNotExists);
         }
     }
 
