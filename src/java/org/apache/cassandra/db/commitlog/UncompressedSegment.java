@@ -19,6 +19,8 @@ package org.apache.cassandra.db.commitlog;
 
 import java.nio.ByteBuffer;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.SyncUtil;
@@ -41,6 +43,8 @@ public class UncompressedSegment extends FileDirectSegment
     UncompressedSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
     {
         super(commitLog, manager);
+        Preconditions.checkState(BufferType.OFF_HEAP == manager.getBufferPool().getPreferredReusableBufferType(),
+                                 "Invalid BufferType %s, expected OFF_HEAP", manager.getBufferPool().getPreferredReusableBufferType());
     }
 
     ByteBuffer createBuffer(CommitLog commitLog)
