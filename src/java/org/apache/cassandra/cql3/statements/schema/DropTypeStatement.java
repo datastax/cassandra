@@ -18,13 +18,14 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.nio.ByteBuffer;
+import java.util.function.UnaryOperator;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.UTName;
 import org.apache.cassandra.cql3.functions.UserFunction;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
@@ -133,7 +134,7 @@ public final class DropTypeStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, typeName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<DropTypeStatement>
     {
         private final UTName name;
         private final boolean ifExists;
@@ -144,9 +145,10 @@ public final class DropTypeStatement extends AlterSchemaStatement
             this.ifExists = ifExists;
         }
 
-        public DropTypeStatement prepare(ClientState state)
+        @Override
+        public DropTypeStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
             return new DropTypeStatement(rawCQLStatement, keyspaceName, name.getStringTypeName(),
                                          ifExists);
         }

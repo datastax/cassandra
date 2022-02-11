@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -1205,14 +1206,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         Collections.sort(cqlRows.rows, orderingComparator);
     }
 
-    public static class RawStatement extends QualifiedStatement
+    public static class RawStatement extends QualifiedStatement<SelectStatement>
     {
         public final Parameters parameters;
         public final List<RawSelector> selectClause;
         public final WhereClause whereClause;
         public final Term.Raw limit;
         public final Term.Raw perPartitionLimit;
-        private ClientState state;
 
         public RawStatement(QualifiedName cfName,
                             Parameters parameters,
@@ -1229,16 +1229,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             this.perPartitionLimit = perPartitionLimit;
         }
 
-        public SelectStatement prepare(ClientState state)
+        @Override
+        public SelectStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            // Cache locally for use by Guardrails
-            this.state = state;
-            return prepare(state, false);
+            setKeyspace(state);
+            return prepare(state, false, keyspaceMapper);
         }
 
-        public SelectStatement prepare(ClientState state, boolean forView) throws InvalidRequestException
+        public SelectStatement prepare(ClientState state, boolean forView, UnaryOperator<String> keyspaceMapper) throws InvalidRequestException
         {
-            TableMetadata table = Schema.instance.validateTable(keyspace(), name());
+            String ks = keyspaceMapper.apply(keyspace());
+            TableMetadata table = Schema.instance.validateTable(ks, name());
 
             List<Selectable> selectables = RawSelector.toSelectables(selectClause, table);
             boolean containsOnlyStaticColumns = selectOnlyStaticColumns(table, selectables);
@@ -1251,7 +1252,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Set<ColumnMetadata> resultSetOrderingColumns = restrictions.keyIsInRelation() ? orderingColumns.keySet()
                                                                                           : Collections.emptySet();
 
-            Selection selection = prepareSelection(table,
+            Selection selection = prepareSelection(state,
+                                                   table,
                                                    selectables,
                                                    bindVariables,
                                                    resultSetOrderingColumns,
@@ -1299,11 +1301,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        isReversed,
                                        aggregationSpecFactory,
                                        orderingComparator,
-                                       prepareLimit(bindVariables, limit, keyspace(), limitReceiver()),
-                                       prepareLimit(bindVariables, perPartitionLimit, keyspace(), perPartitionLimitReceiver()));
+                                       prepareLimit(bindVariables, limit, ks, limitReceiver()),
+                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()));
         }
 
-        private Selection prepareSelection(TableMetadata table,
+        private Selection prepareSelection(ClientState state,
+                                           TableMetadata table,
                                            List<Selectable> selectables,
                                            VariableSpecifications boundNames,
                                            Set<ColumnMetadata> resultSetOrderingColumns,
@@ -1729,7 +1732,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return 0;
         }
     }
-    
+
     @Override
     public String toString()
     {

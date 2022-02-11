@@ -21,15 +21,46 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.guardrails.Guardrails;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CollectionType.Kind;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.DurationType;
+import org.apache.cassandra.db.marshal.EmptyType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
+import org.apache.cassandra.db.marshal.TimeType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.TypeParser;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -644,6 +675,8 @@ public interface CQL3Type
             return null;
         }
 
+        public abstract void forEachUserType(Consumer<UTName> userTypeNameConsumer);
+
         public Raw freeze()
         {
             String message = String.format("frozen<> is only allowed on collections, tuples, and user-defined types (got %s)", this);
@@ -745,6 +778,12 @@ public interface CQL3Type
             public boolean isDuration()
             {
                 return type == Native.DURATION;
+            }
+
+            @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                // no-op
             }
 
             @Override
@@ -867,6 +906,15 @@ public interface CQL3Type
             }
 
             @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                if (keys != null)
+                    keys.forEachUserType(userTypeNameConsumer);
+                if (values != null)
+                    values.forEachUserType(userTypeNameConsumer);
+            }
+
+            @Override
             public String toString()
             {
                 String start = frozen? "frozen<" : "";
@@ -931,6 +979,12 @@ public interface CQL3Type
             }
 
             @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                element.forEachUserType(userTypeNameConsumer);
+            }
+
+            @Override
             public String toString()
             {
                 return "vector<" + element.toString() + ", " + dimension + '>';
@@ -950,6 +1004,12 @@ public interface CQL3Type
             public String keyspace()
             {
                 return name.getKeyspace();
+            }
+
+            @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                userTypeNameConsumer.accept(name);
             }
 
             @Override
@@ -1065,6 +1125,12 @@ public interface CQL3Type
             public boolean referencesUserType(String name)
             {
                 return types.stream().anyMatch(t -> t.referencesUserType(name));
+            }
+
+            @Override
+            public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
+            {
+                types.forEach(t -> t.forEachUserType(userTypeNameConsumer));
             }
 
             @Override
