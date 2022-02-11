@@ -26,7 +26,10 @@ import java.util.Map;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.UTName;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
@@ -44,7 +47,6 @@ import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.join;
 import static java.util.function.Predicate.isEqual;
 import static java.util.stream.Collectors.toList;
-
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 public abstract class AlterTypeStatement extends AlterSchemaStatement
@@ -52,9 +54,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
     protected final String typeName;
     protected final boolean ifExists;
 
-    public AlterTypeStatement(String keyspaceName, String typeName, boolean ifExists)
+    public AlterTypeStatement(String queryString, String keyspaceName, String typeName, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.ifExists = ifExists;
         this.typeName = typeName;
     }
@@ -108,9 +110,10 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
         private ClientState state;
 
-        private AddField(String keyspaceName, String typeName, FieldIdentifier fieldName, CQL3Type.Raw type, boolean ifExists, boolean ifFieldNotExists)
+        private AddField(String queryString, String keyspaceName, String typeName,
+                         FieldIdentifier fieldName, CQL3Type.Raw type, boolean ifExists, boolean ifFieldNotExists)
         {
-            super(keyspaceName, typeName, ifExists);
+            super(queryString, keyspaceName, typeName, ifExists);
             this.fieldName = fieldName;
             this.ifFieldNotExists = ifFieldNotExists;
             this.type = type;
@@ -176,9 +179,10 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
         private final Map<FieldIdentifier, FieldIdentifier> renamedFields;
         private final boolean ifFieldExists;
 
-        private RenameFields(String keyspaceName, String typeName, Map<FieldIdentifier, FieldIdentifier> renamedFields, boolean ifExists, boolean ifFieldExists)
+        private RenameFields(String queryString, String keyspaceName, String typeName,
+                             Map<FieldIdentifier, FieldIdentifier> renamedFields, boolean ifExists, boolean ifFieldExists)
         {
-            super(keyspaceName, typeName, ifExists);
+            super(queryString, keyspaceName, typeName, ifExists);
             this.ifFieldExists = ifFieldExists;
             this.renamedFields = renamedFields;
         }
@@ -225,9 +229,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
     private static final class AlterField extends AlterTypeStatement
     {
-        private AlterField(String keyspaceName, String typeName, boolean ifExists)
+        private AlterField(String queryString, String keyspaceName, String typeName, boolean ifExists)
         {
-            super(keyspaceName, typeName, ifExists);
+            super(queryString, keyspaceName, typeName, ifExists);
         }
 
         UserType apply(KeyspaceMetadata keyspace, UserType userType)
@@ -270,9 +274,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
             switch (kind)
             {
-                case     ADD_FIELD: return new AddField(keyspaceName, typeName, newFieldName, newFieldType, ifExists, ifFieldNotExists);
-                case RENAME_FIELDS: return new RenameFields(keyspaceName, typeName, renamedFields, ifExists, ifFieldExists);
-                case   ALTER_FIELD: return new AlterField(keyspaceName, typeName, ifExists);
+                case     ADD_FIELD: return new AddField(rawCQLStatement, keyspaceName, typeName, newFieldName, newFieldType, ifExists, ifFieldNotExists);
+                case RENAME_FIELDS: return new RenameFields(rawCQLStatement, keyspaceName, typeName, renamedFields, ifExists, ifFieldExists);
+                case   ALTER_FIELD: return new AlterField(rawCQLStatement, keyspaceName, typeName, ifExists);
             }
 
             throw new AssertionError();
