@@ -21,8 +21,11 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TriggerMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -34,9 +37,10 @@ public final class DropTriggerStatement extends AlterSchemaStatement
     private final String triggerName;
     private final boolean ifExists;
 
-    public DropTriggerStatement(String keyspaceName, String tableName, String triggerName, boolean ifExists)
+    public DropTriggerStatement(String queryString, String keyspaceName, String tableName,
+                                String triggerName, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.triggerName = triggerName;
         this.ifExists = ifExists;
@@ -103,7 +107,8 @@ public final class DropTriggerStatement extends AlterSchemaStatement
         public DropTriggerStatement prepare(ClientState state)
         {
             String keyspaceName = tableName.hasKeyspace() ? tableName.getKeyspace() : state.getKeyspace();
-            return new DropTriggerStatement(keyspaceName, tableName.getName(), triggerName, ifExists);
+            return new DropTriggerStatement(rawCQLStatement, keyspaceName, tableName.getName(),
+                                            triggerName, ifExists);
         }
     }
 }
