@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,9 +34,9 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget.Type;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
@@ -355,7 +356,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, indexName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateIndexStatement>
     {
         private final QualifiedName tableName;
         private final QualifiedName indexName;
@@ -376,7 +377,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateIndexStatement prepare(ClientState state)
+        @Override
+        public CreateIndexStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
             String keyspaceName = tableName.hasKeyspace()
                                 ? tableName.getKeyspace()
@@ -387,7 +389,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
             if (indexName.hasKeyspace() && !keyspaceName.equals(indexName.getKeyspace()))
                 throw ire(KEYSPACE_DOES_NOT_MATCH_INDEX, keyspaceName, tableName);
-            
+
             // Set the configured default 2i implementation if one isn't specified with USING:
             if (attrs.customClass == null)
             {
@@ -397,9 +399,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                     // However, operators may require an implementation be specified
                     throw ire(MUST_SPECIFY_INDEX_IMPLEMENTATION);
             }
-            
+
             // If we explicitly specify the index type "legacy_local_table", we can just clear the custom class, and the
-            // non-custom 2i creation process will begin. Otherwise, if an index type has been specified with 
+            // non-custom 2i creation process will begin. Otherwise, if an index type has been specified with
             // USING, make sure the appropriate custom index is created.
             if (attrs.customClass != null)
             {
@@ -409,7 +411,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                     attrs.isCustom = true;
             }
 
-            return new CreateIndexStatement(rawCQLStatement, keyspaceName, tableName.getName(),
+            return new CreateIndexStatement(rawCQLStatement, keyspaceMapper.apply(keyspaceName), tableName.getName(),
                                             indexName.getName(), rawIndexTargets, attrs, ifNotExists);
         }
     }
