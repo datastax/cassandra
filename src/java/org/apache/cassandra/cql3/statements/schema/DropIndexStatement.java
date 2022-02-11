@@ -22,9 +22,13 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.Diff;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -35,9 +39,10 @@ public final class DropIndexStatement extends AlterSchemaStatement
     private final String indexName;
     private final boolean ifExists;
 
-    public DropIndexStatement(String keyspaceName, String indexName, boolean ifExists)
+    public DropIndexStatement(String queryString, String keyspaceName, String indexName,
+                              boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.indexName = indexName;
         this.ifExists = ifExists;
     }
@@ -108,7 +113,7 @@ public final class DropIndexStatement extends AlterSchemaStatement
         public DropIndexStatement prepare(ClientState state)
         {
             String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropIndexStatement(keyspaceName, name.getName(), ifExists);
+            return new DropIndexStatement(rawCQLStatement, keyspaceName, name.getName(), ifExists);
         }
     }
 }
