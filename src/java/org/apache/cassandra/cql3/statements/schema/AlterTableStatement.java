@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.UnaryOperator;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Splitter;
@@ -38,10 +39,11 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.functions.masking.ColumnMask;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -669,7 +671,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         }
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<AlterTableStatement>
     {
         private enum Kind
         {
@@ -712,16 +714,20 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             this.ifTableExists = ifTableExists;
         }
 
-        public AlterTableStatement prepare(ClientState state)
+        @Override
+        public AlterTableStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
             String tableName = name.getName();
 
             switch (kind)
             {
                 case          ALTER_COLUMN: return new AlterColumn(rawCQLStatement, keyspaceName, tableName, ifTableExists);
                 case           MASK_COLUMN: return new MaskColumn(rawCQLStatement, keyspaceName, tableName, maskedColumn, rawMask, ifTableExists, ifColumnExists);
-                case           ADD_COLUMNS: return new AddColumns(rawCQLStatement, keyspaceName, tableName, addedColumns, ifTableExists, ifColumnNotExists);
+                case           ADD_COLUMNS:
+                    if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+                        addedColumns.forEach(c -> c.type.forEachUserType(utName -> utName.updateKeyspaceIfDefined(keyspaceMapper)));
+                    return new AddColumns(rawCQLStatement, keyspaceName, tableName, addedColumns, ifTableExists, ifColumnNotExists);
                 case          DROP_COLUMNS: return new DropColumns(rawCQLStatement, keyspaceName, tableName, droppedColumns, ifTableExists, ifColumnExists, dropTimestamp);
                 case        RENAME_COLUMNS: return new RenameColumns(rawCQLStatement, keyspaceName, tableName, renamedColumns, ifTableExists, ifColumnExists);
                 case         ALTER_OPTIONS: return new AlterOptions(rawCQLStatement, keyspaceName, tableName, attrs, ifTableExists);
