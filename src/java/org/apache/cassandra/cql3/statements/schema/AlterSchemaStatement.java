@@ -40,7 +40,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.apache.cassandra.schema.KeyspaceMetadata.validateKeyspaceName;
 
-abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
 {
     private final String rawCQLStatement;
     protected final String keyspaceName; // name of the keyspace affected by the statement
