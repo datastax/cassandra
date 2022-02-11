@@ -30,32 +30,35 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.ScalarFunction;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
+import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
-
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Iterables.transform;
 
 public final class CreateAggregateStatement extends AlterSchemaStatement
 {
@@ -68,7 +71,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     private final boolean orReplace;
     private final boolean ifNotExists;
 
-    public CreateAggregateStatement(String keyspaceName,
+    public CreateAggregateStatement(String queryString,
+                                    String keyspaceName,
                                     String aggregateName,
                                     List<CQL3Type.Raw> rawArgumentTypes,
                                     CQL3Type.Raw rawStateType,
@@ -78,7 +82,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                     boolean orReplace,
                                     boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.aggregateName = aggregateName;
         this.rawArgumentTypes = rawArgumentTypes;
         this.rawStateType = rawStateType;
@@ -333,7 +337,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         {
             String keyspaceName = aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace();
 
-            return new CreateAggregateStatement(keyspaceName,
+            return new CreateAggregateStatement(rawCQLStatement,
+                                                keyspaceName,
                                                 aggregateName.name,
                                                 rawArgumentTypes,
                                                 rawStateType,

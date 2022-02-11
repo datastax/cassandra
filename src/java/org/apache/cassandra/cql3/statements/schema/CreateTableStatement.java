@@ -17,15 +17,21 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
-
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,14 +40,32 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.CQLFragmentParser;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.CqlParser;
+import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.functions.masking.ColumnMask;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.EmptyType;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.DroppedColumn;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
@@ -67,7 +91,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
     private final boolean ifNotExists;
     private final boolean useCompactStorage;
 
-    public CreateTableStatement(String keyspaceName,
+    public CreateTableStatement(String queryString,
+                                String keyspaceName,
                                 String tableName,
                                 Map<ColumnIdentifier, ColumnProperties.Raw> rawColumns,
                                 Set<ColumnIdentifier> staticColumns,
@@ -78,7 +103,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
                                 boolean ifNotExists,
                                 boolean useCompactStorage)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
 
         this.rawColumns = rawColumns;
@@ -535,7 +560,8 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (null == partitionKeyColumns)
                 throw ire("No PRIMARY KEY specifed for table '%s' (exactly one required)", name);
 
-            return new CreateTableStatement(keyspaceName,
+            return new CreateTableStatement(rawCQLStatement,
+                                            keyspaceName,
                                             name.getName(),
                                             rawColumns,
                                             staticColumns,
