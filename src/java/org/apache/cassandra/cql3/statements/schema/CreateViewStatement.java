@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -31,7 +32,6 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.VariableSpecifications;
@@ -39,6 +39,7 @@ import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -401,7 +402,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, viewName);
     }
 
-    public final static class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateViewStatement>
     {
         private final QualifiedName tableName;
         private final QualifiedName viewName;
@@ -425,7 +426,8 @@ public final class CreateViewStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateViewStatement prepare(ClientState state)
+        @Override
+        public CreateViewStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
             String keyspaceName = viewName.hasKeyspace() ? viewName.getKeyspace() : state.getKeyspace();
 
@@ -439,7 +441,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
                 throw ire("No PRIMARY KEY specifed for view '%s' (exactly one required)", viewName);
 
             return new CreateViewStatement(rawCQLStatement,
-                                           keyspaceName,
+                                           keyspaceMapper.apply(keyspaceName),
                                            tableName.getName(),
                                            viewName.getName(),
 
