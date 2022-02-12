@@ -1434,6 +1434,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                             writerIterator.remove();
                         }
                     }
+
+                    // This can throw on remote storage, e.g. if a file cannot be uploaded
+                    txn.prepareToCommit();
                 }
                 catch (Throwable t)
                 {
@@ -1443,8 +1446,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     Throwables.throwIfUnchecked(t);
                     throw new RuntimeException(t);
                 }
-
-                txn.prepareToCommit();
 
                 Throwable accumulate = null;
                 for (SSTableMultiWriter writer : flushResults)

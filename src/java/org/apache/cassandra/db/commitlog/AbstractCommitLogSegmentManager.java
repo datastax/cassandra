@@ -18,7 +18,12 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -32,6 +37,7 @@ import com.codahale.metrics.Timer.Context;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.concurrent.Interruptible;
 import org.apache.cassandra.concurrent.Interruptible.TerminateException;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -44,7 +50,11 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.*;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Daemon.NON_DAEMON;
@@ -111,9 +121,16 @@ public abstract class AbstractCommitLogSegmentManager
     {
         // For encrypted segments we want to keep the compression buffers on-heap as we need those bytes for encryption,
         // and we want to avoid copying from off-heap (compression buffer) to on-heap encryption APIs
-        BufferType bufferType = commitLog.configuration.useEncryption() || !commitLog.configuration.useCompression()
+        // For encrypted segments we want to keep the compression buffers on-heap as we need those bytes for encryption,
+        // and we want to avoid copying from off-heap (compression buffer) to on-heap encryption APIs
+        CommitLog.Configuration config = commitLog.configuration;
+        BufferType bufferType = config.useEncryption()
                                 ? BufferType.ON_HEAP
-                                : commitLog.configuration.getCompressor().preferredBufferType();
+                                : config.useCompression()
+                                  ? commitLog.configuration.getCompressor().preferredBufferType()
+                                  : DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.standard
+                                    ? BufferType.OFF_HEAP
+                                    : BufferType.ON_HEAP;
 
         this.bufferPool = new SimpleCachedBufferPool(DatabaseDescriptor.getCommitLogMaxCompressionBuffersInPool(),
                                                      DatabaseDescriptor.getCommitLogSegmentSize(),
