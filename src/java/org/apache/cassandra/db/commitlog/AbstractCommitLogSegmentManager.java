@@ -138,6 +138,10 @@ public abstract class AbstractCommitLogSegmentManager
         {
             return new MemoryMappedSegment.MemoryMappedSegmentBuilder(this);
         }
+        else if (config.diskAccessMode == DiskAccessMode.standard)
+        {
+            return new UncompressedSegment.UncompressedSegmentBuilder(this);
+        }
 
         throw new AssertionError("Unsupported disk access mode: " + config.diskAccessMode);
     }
