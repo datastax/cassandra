@@ -34,16 +34,16 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.security.EncryptionContext;
 
-import static org.junit.Assert.assertEquals;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.junit.Assert.assertEquals;
 
 public class BatchCommitLogTest extends CommitLogTest
 {
     private static final long CL_BATCH_SYNC_WINDOW = 1000; // 1 second
     
-    public BatchCommitLogTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext)
+    public BatchCommitLogTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext, Config.DiskAccessMode diskAccessMode)
     {
-        super(commitLogCompression, encryptionContext);
+        super(commitLogCompression, encryptionContext, diskAccessMode);
     }
 
     @BeforeClass
