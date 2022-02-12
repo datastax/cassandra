@@ -18,11 +18,6 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config.DiskFailurePolicy;
-import org.apache.cassandra.distributed.shared.WithProperties;
-import org.apache.cassandra.io.util.File;
-
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.DataOutputStream;
@@ -46,30 +41,26 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
-
 import javax.crypto.Cipher;
 
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
-
-import org.apache.cassandra.io.util.FileOutputStreamPlus;
-
-import org.junit.*;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.Assume;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.db.memtable.SkipListMemtable;
-import org.apache.cassandra.io.compress.ZstdCompressor;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.schema.MemtableParams;
-import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.schema.SchemaTestUtil;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -85,16 +76,28 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
+import org.apache.cassandra.io.compress.ZstdCompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MemtableParams;
+import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.CipherFactory;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
@@ -138,24 +141,30 @@ public abstract class CommitLogTest
     private static JVMKiller oldKiller;
     private static KillerForTests testKiller;
 
-    public CommitLogTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext)
+    public CommitLogTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext, Config.DiskAccessMode diskAccessMode)
     {
         DatabaseDescriptor.setCommitLogCompression(commitLogCompression);
         DatabaseDescriptor.setEncryptionContext(encryptionContext);
+        if (diskAccessMode != null)
+            DatabaseDescriptor.setDiskAccessMode(diskAccessMode);
     }
 
     @Parameters()
     public static Collection<Object[]> generateData() throws Exception
     {
-        return Arrays.asList(new Object[][]
-                             {
-                             { null, EncryptionContextGenerator.createDisabledContext() }, // No compression, no encryption
-                             { null, newEncryptionContext() }, // Encryption
-                             { new ParameterizedClass(LZ4Compressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext() },
-                             { new ParameterizedClass(SnappyCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext() },
-                             { new ParameterizedClass(DeflateCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext() },
-                             { new ParameterizedClass(ZstdCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext() }
-                             });
+        List<Object[]> params = new ArrayList<>();
+        for (Config.DiskAccessMode mode : Config.DiskAccessMode.values())
+        {
+            params.addAll(Arrays.asList(new Object[][]{
+            { null, EncryptionContextGenerator.createDisabledContext(), mode }, // No compression, no encryption
+            { null, newEncryptionContext(), mode }, // Encryption
+            { new ParameterizedClass(LZ4Compressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), mode },
+            { new ParameterizedClass(SnappyCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), mode },
+            { new ParameterizedClass(DeflateCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), mode },
+            { new ParameterizedClass(ZstdCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), mode }
+                                        }));
+        }
+        return params;
     }
 
     private static EncryptionContext newEncryptionContext() throws Exception
