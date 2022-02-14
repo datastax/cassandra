@@ -1058,6 +1058,7 @@ public class Directories
                 switch (type)
                 {
                     case TXN_LOG:
+                    case OBSOLETE:
                         return false;
                     case TEMPORARY:
                         if (skipTemporary)
