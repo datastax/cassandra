@@ -175,7 +175,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (table.isView())
             throw ire(MATERIALIZED_VIEWS_NOT_SUPPORTED);
 
-        if (Keyspace.open(table.keyspace).getReplicationStrategy().hasTransientReplicas())
+        if (keyspace.createReplicationStrategy().hasTransientReplicas())
             throw new InvalidRequestException(TRANSIENTLY_REPLICATED_KEYSPACE_NOT_SUPPORTED);
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));
