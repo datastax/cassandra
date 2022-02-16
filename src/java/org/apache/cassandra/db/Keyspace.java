@@ -122,6 +122,17 @@ public class Keyspace
         initialized = true;
     }
 
+    /**
+     * Never use it in production code.
+     *
+     * Useful when creating a fake SchemaManager so that it does not manage Keyspace instances (and CFS)
+     */
+    @VisibleForTesting
+    public static void unsetInitialized()
+    {
+        initialized = false;
+    }
+
     public static boolean isInitialized()
     {
         return initialized;
@@ -139,8 +150,7 @@ public class Keyspace
         return open(keyspaceName, SchemaManager.instance, false);
     }
 
-    @VisibleForTesting
-    static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables) throws UnknownKeyspaceException
+    public static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables) throws UnknownKeyspaceException
     {
         return schema.getOrCreateKeyspaceInstance(keyspaceName, () -> new Keyspace(keyspaceName, schema, loadSSTables));
     }
