@@ -27,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
-import org.apache.cassandra.utils.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,11 +41,13 @@ import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
@@ -119,9 +120,19 @@ public class Flushing
         SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
         long estimatedSize = format.getWriterFactory().estimateSize(flushSet);
 
-        Descriptor descriptor = flushLocation == null
-                                ? cfs.newSSTableDescriptor(cfs.getDirectories().getWriteableLocationAsFile(estimatedSize), format)
-                                : cfs.newSSTableDescriptor(cfs.getDirectories().getLocationForDisk(flushLocation), format);
+        Descriptor descriptor;
+        if (flushLocation == null)
+        {
+            descriptor = cfs.newSSTableDescriptor(cfs.getDirectories().getWriteableLocationAsFile(estimatedSize), format);
+        }
+        else
+        {
+            // exclude directory if its total writeSize does not fit to data directory
+            if (flushLocation.getAvailableSpace() < estimatedSize)
+                throw new FSDiskFullWriteError(cfs.metadata.keyspace, estimatedSize);
+
+            descriptor = cfs.newSSTableDescriptor(cfs.getDirectories().getLocationForDisk(flushLocation), format);
+        }
 
         SSTableMultiWriter writer = createFlushWriter(cfs,
                                                       flushSet,
