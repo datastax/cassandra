@@ -54,6 +54,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.metrics.CommitLogMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
@@ -230,7 +231,7 @@ public class CommitLog implements CommitLogMBean
     public void recoverPath(String path, boolean tolerateTruncation) throws IOException
     {
         CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
-        replayer.replayPath(new File(path), tolerateTruncation);
+        replayer.replayPath(new File(PathUtils.getPath(path)), tolerateTruncation);
         replayer.blockForWrites(STARTUP);
     }
 
