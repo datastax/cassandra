@@ -506,4 +506,14 @@ public class KeyspaceTest extends CQLTester
         keyspace.stopMutations();
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", "0", 0, 0);
     }
+
+    @Test
+    public void testSetUnsetInitialized()
+    {
+        // dumb test to make sonar happy
+        Keyspace.unsetInitialized();
+        Assertions.assertThat(Keyspace.isInitialized()).isFalse();
+        Keyspace.setInitialized();
+        Assertions.assertThat(Keyspace.isInitialized()).isTrue();
+    }
 }
