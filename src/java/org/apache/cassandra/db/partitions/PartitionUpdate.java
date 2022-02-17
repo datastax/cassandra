@@ -59,7 +59,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 {
     protected static final Logger logger = LoggerFactory.getLogger(PartitionUpdate.class);
 
-    public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer();
+    public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer(SchemaManager.instance);
 
     private final BTreePartitionData holder;
     private final DeletionInfo deletionInfo;
@@ -624,6 +624,13 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     public static class PartitionUpdateSerializer
     {
+        private final SchemaManager schemaManager;
+
+        public PartitionUpdateSerializer(SchemaManager schemaManager)
+        {
+            this.schemaManager = schemaManager;
+        }
+
         public void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
         {
             Preconditions.checkArgument(version != MessagingService.VERSION_DSE_68,
@@ -639,7 +646,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
-            TableMetadata metadata = SchemaManager.instance.getExistingTableMetadata(TableId.deserialize(in));
+            TableMetadata metadata = schemaManager.getExistingTableMetadata(TableId.deserialize(in));
             if (version == MessagingService.VERSION_DSE_68)
             {
                 // ignore maxTimestamp

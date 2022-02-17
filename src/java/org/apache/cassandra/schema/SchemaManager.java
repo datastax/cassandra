@@ -283,7 +283,8 @@ public final class SchemaManager implements SchemaProvider
      *
      * @param keyspaceName The name of the keyspace to remove
      */
-    private void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
+    @VisibleForTesting
+    public void removeKeyspaceInstance(String keyspaceName, Consumer<Keyspace> unloadFunction)
     {
         CompletableFuture<Keyspace> droppedFuture = new CompletableFuture<>();
         droppedFuture.completeExceptionally(new KeyspaceNotDefinedException(keyspaceName));
