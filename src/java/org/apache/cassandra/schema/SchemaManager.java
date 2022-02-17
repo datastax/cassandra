@@ -85,7 +85,7 @@ public final class SchemaManager implements SchemaProvider
     public static final String FORCE_LOAD_LOCAL_KEYSPACES_PROP = "cassandra.schema.force_load_local_keyspaces";
     private static final boolean FORCE_LOAD_LOCAL_KEYSPACES = Boolean.getBoolean(FORCE_LOAD_LOCAL_KEYSPACES_PROP);
 
-    public static final SchemaManager instance = new SchemaManager();
+    public static SchemaManager instance = new SchemaManager();
 
     private volatile Keyspaces sharedKeyspaces = Keyspaces.none();
 
@@ -129,6 +129,12 @@ public final class SchemaManager implements SchemaProvider
         this.updateHandler = updateHandler;
     }
 
+    @VisibleForTesting
+    public static void setSchemaManagerInstance(SchemaManager schemaManager)
+    {
+        SchemaManager.instance = schemaManager;
+    }
+    
     public void startSync()
     {
         logger.debug("Starting update handler");
