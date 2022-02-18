@@ -63,7 +63,7 @@ import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class Mutation implements IMutation, Supplier<Mutation>
 {
-    public static final MutationSerializer serializer = new MutationSerializer();
+    public static final MutationSerializer serializer = new MutationSerializer(PartitionUpdate.serializer);
 
     // todo this is redundant
     // when we remove it, also restore SerializationsTest.testMutationRead to not regenerate new Mutations each test
@@ -415,9 +415,16 @@ public class Mutation implements IMutation, Supplier<Mutation>
 
     public static class MutationSerializer implements IVersionedSerializer<Mutation>
     {
+        private final PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer;
+
+        public MutationSerializer(PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer)
+        {
+            this.partitionUpdateSerializer = partitionUpdateSerializer;
+        }
+
         public void serialize(Mutation mutation, DataOutputPlus out, int version) throws IOException
         {
-            serialization(mutation, version).serialize(PartitionUpdate.serializer, mutation, out, version);
+            serialization(mutation, version).serialize(partitionUpdateSerializer, mutation, out, version);
         }
 
         /**
@@ -450,7 +457,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
             if (serialization == null)
             {
                 serialization = new SizeOnlyCacheableSerialization();
-                long serializedSize = serialization.serializedSize(PartitionUpdate.serializer, mutation, version);
+                long serializedSize = serialization.serializedSize(partitionUpdateSerializer, mutation, version);
 
                 // Excessively large mutation objects cause GC pressure and huge allocations when serialized.
                 // so we only cache serialized mutations when they are below the defined limit.
@@ -458,7 +465,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 {
                     try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
                     {
-                        serializeInternal(PartitionUpdate.serializer, mutation, dob, version);
+                        serializeInternal(partitionUpdateSerializer, mutation, dob, version);
                         serialization = new CachedSerialization(dob.toByteArray());
                     }
                     catch (IOException e)
@@ -501,7 +508,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 int size = teeIn.readUnsignedVInt32();
                 assert size > 0;
 
-                PartitionUpdate update = PartitionUpdate.serializer.deserialize(teeIn, version, flag);
+                PartitionUpdate update = partitionUpdateSerializer.deserialize(teeIn, version, flag);
                 if (size == 1)
                 {
                     m = new Mutation(update);
@@ -514,7 +521,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
                     modifications.put(update.metadata().id, update);
                     for (int i = 1; i < size; ++i)
                     {
-                        update = PartitionUpdate.serializer.deserialize(teeIn, version, flag);
+                        update = partitionUpdateSerializer.deserialize(teeIn, version, flag);
                         modifications.put(update.metadata().id, update);
                     }
                     m = new Mutation(update.metadata().keyspace, dk, modifications.build(), approxTime.now());
@@ -535,7 +542,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
 
         public long serializedSize(Mutation mutation, int version)
         {
-            return serialization(mutation, version).serializedSize(PartitionUpdate.serializer, mutation, version);
+            return serialization(mutation, version).serializedSize(partitionUpdateSerializer, mutation, version);
         }
     }
 
