@@ -46,6 +46,7 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
 {
     private final String rawCQLStatement;
     private final QualifiedName qualifiedName;
+    private final static String remoteTruncateStatement = REMOTE_TRUNCATE_STATEMENT.getString();
 
     public TruncateStatement(String queryString, QualifiedName name)
     {
@@ -158,13 +159,13 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
                 qual = new QualifiedName(ks, qual.getName());
 
             // local keyspaces are always local so don't use the remote statement even if it has been configured
-            if (!REMOTE_TRUNCATE_STATEMENT.isPresent() ||
+            if (remoteTruncateStatement == null ||
                 SchemaManager.isKeyspaceWithLocalStrategy(super.keyspace()))
             {
                 return new TruncateStatement(rawCQLStatement, qual);
             }
 
-            Class<TruncateStatement> factoryClass = FBUtilities.classForName(REMOTE_TRUNCATE_STATEMENT.getString(),
+            Class<TruncateStatement> factoryClass = FBUtilities.classForName(remoteTruncateStatement,
                                                                              "Remote truncate statement");
             try
             {
@@ -175,7 +176,7 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
                    InvocationTargetException e)
             {
                 throw new RuntimeException("Unable to find correct constructor for " +
-                                           REMOTE_TRUNCATE_STATEMENT.getString(), e);
+                                           remoteTruncateStatement, e);
             }
         }
     }
