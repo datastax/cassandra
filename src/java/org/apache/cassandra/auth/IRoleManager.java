@@ -153,6 +153,15 @@ public interface IRoleManager
      }
 
     /**
+     * Return the set of roles that are member of the given role.
+     * @return any non-{@code null} value means the found reverse-memberships.
+     *         {@code null} means that the functionality is not supported.
+     * @throws RequestValidationException
+     * @throws RequestExecutionException
+     */
+    Set<RoleResource> getRoleMemberOf(RoleResource role);
+
+    /**
      * Called during the execution of an unqualified LIST ROLES query.
      * Returns the total set of distinct roles in the system.
      *
