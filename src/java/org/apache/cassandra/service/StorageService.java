@@ -5134,7 +5134,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         try
         {
-            StorageProxy.truncateBlocking(keyspace, table);
+            StorageProxy.instance.truncateBlocking(keyspace, table);
         }
         catch (UnavailableException e)
         {
