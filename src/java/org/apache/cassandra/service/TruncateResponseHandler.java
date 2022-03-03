@@ -60,7 +60,7 @@ public class TruncateResponseHandler implements RequestCallback<TruncateResponse
         start = nanoTime();
     }
 
-    public void get() throws TimeoutException
+    public void get() throws TimeoutException, TruncateException
     {
         long timeoutNanos = getTruncateRpcTimeout(NANOSECONDS) - (nanoTime() - start);
         boolean signaled;
