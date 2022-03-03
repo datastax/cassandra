@@ -88,7 +88,7 @@ public class TruncateStatement extends QualifiedStatement<TruncateStatement> imp
             }
             else
             {
-                StorageProxy.truncateBlocking(keyspace(), name());
+                StorageProxy.instance.truncateBlocking(keyspace(), name());
             }
         }
         catch (UnavailableException | TimeoutException e)
