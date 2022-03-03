@@ -74,6 +74,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.datasketches.hll.HllSketch;
+import org.apache.datasketches.hll.Union;
 
 /**
  * Manage metadata for each column index.
@@ -637,5 +639,21 @@ public class IndexContext
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
+    }
+
+    public double cardinality()
+    {
+        Union union = new Union();
+        double terms = 0;
+        for (SSTableIndex index : getView().getIndexes())
+        {
+            HllSketch sketch = index.getDataSketch();
+            if (sketch != null)
+            {
+                union.update(sketch);
+                terms += index.getRowCount();
+            }
+        }
+        return terms == 0 ? Double.MIN_VALUE : union.getEstimate() / terms;
     }
 }

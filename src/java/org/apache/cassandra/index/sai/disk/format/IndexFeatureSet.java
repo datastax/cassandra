@@ -38,6 +38,13 @@ public interface IndexFeatureSet
     boolean isRowAware();
 
     /**
+     * Returns whether the index can provide an estimate for it's cardinality.
+     *
+     * @return true if the index can provide an estimate of cardinality
+     */
+    boolean canEstimateCardinality();
+
+    /**
      * The {@code Accumulator} is used to accumulate the {@code IndexFeatureSet} responses from
      * multiple sources. This will include all the SSTables included in a query and all the indexes
      * attached to those SSTables.
@@ -50,6 +57,7 @@ public interface IndexFeatureSet
     public static class Accumulator
     {
         boolean isRowAware = true;
+        boolean canEstimateCardinality = true;
         boolean complete = false;
 
         /**
@@ -62,6 +70,8 @@ public interface IndexFeatureSet
             assert !complete : "Cannot accumulate after complete has been called";
             if (!indexFeatureSet.isRowAware())
                 isRowAware = false;
+            if (!indexFeatureSet.canEstimateCardinality())
+                canEstimateCardinality = false;
         }
 
         /**
@@ -79,6 +89,12 @@ public interface IndexFeatureSet
                 public boolean isRowAware()
                 {
                     return isRowAware;
+                }
+
+                @Override
+                public boolean canEstimateCardinality()
+                {
+                    return canEstimateCardinality;
                 }
             };
         }

@@ -111,6 +111,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean canEstimateCardinality()
+        {
+            return false;
+        }
     };
 
     protected V1OnDiskFormat()

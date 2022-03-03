@@ -188,6 +188,8 @@ public class QueryController
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, expressions).entrySet();
 
+        view = optimize(op, view);
+
         try
         {
             for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
@@ -265,6 +267,17 @@ public class QueryController
     public void finish()
     {
         if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
+    }
+
+    private Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> optimize(Operation.OperationType op,
+                                                                            Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view)
+    {
+        if (indexFeatureSet.canEstimateCardinality() && (op == Operation.OperationType.AND) && (view.size() > 1))
+        {
+
+
+        }
+        return view;
     }
 
     /**

@@ -229,7 +229,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     {
         private final Map<IndexComponent, ComponentMetadata> metas = new HashMap<>();
 
-        ComponentMetadataMap(IndexInput input) throws IOException
+        public ComponentMetadataMap(IndexInput input) throws IOException
         {
             int size = input.readInt();
 
@@ -253,7 +253,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             metas.put(indexComponent, new ComponentMetadata(root, offset, length, additionalMap));
         }
 
-        private void write(IndexOutput output) throws IOException
+        public void write(IndexOutput output) throws IOException
         {
             output.writeInt(metas.size());
 

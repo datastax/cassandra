@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.datasketches.hll.HllSketch;
 
 /**
  * This is used to abstract the index search between on-disk versions.
@@ -54,6 +55,11 @@ public interface SearchableIndex extends Closeable
     public ByteBuffer minTerm();
 
     public ByteBuffer maxTerm();
+
+    default public HllSketch getDataSketch()
+    {
+        return null;
+    }
 
     public DecoratedKey minKey();
 

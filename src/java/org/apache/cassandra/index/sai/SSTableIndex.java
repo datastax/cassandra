@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.datasketches.hll.HllSketch;
 
 /**
  * SSTableIndex is created for each column index on individual sstable to track per-column indexer.
@@ -157,6 +158,11 @@ public class SSTableIndex
     public IndexFeatureSet indexFeatureSet()
     {
         return sstableContext.indexDescriptor.version.onDiskFormat().indexFeatureSet();
+    }
+
+    public HllSketch getDataSketch()
+    {
+        return searchableIndex.getDataSketch();
     }
 
     public SSTableReader getSSTable()
