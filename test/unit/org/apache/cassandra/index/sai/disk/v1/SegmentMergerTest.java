@@ -190,7 +190,6 @@ public class SegmentMergerTest extends SAITester
 
         List<SegmentMetadata> segments = getSegments(indexName);
         assertTrue(segments.size() > 1);
-        logger.info("Segments count: {}", segments.size());
 
         for (Map.Entry<String, List<Integer>> entry : expected.entrySet())
         {
@@ -236,8 +235,6 @@ public class SegmentMergerTest extends SAITester
 
         List<SegmentMetadata> segments = getSegments(indexName);
         assertTrue(segments.size() > 1);
-
-        logger.info("Segments count: {}", segments.size());
 
         for (Map.Entry<Integer, List<Integer>> entry : expected.entrySet())
         {
