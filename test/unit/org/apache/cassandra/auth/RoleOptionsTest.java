@@ -182,7 +182,7 @@ public class RoleOptionsTest
                 return null;
             }
 
-            public Set<RoleResource> getRoleMemberOf(RoleResource role)
+            public Set<RoleResource> getMembersOf(RoleResource role)
             {
                 return null;
             }

@@ -153,13 +153,13 @@ public interface IRoleManager
      }
 
     /**
-     * Return the set of roles that are member of the given role.
+     * Return the set of roles that are direct members of the given role (non-recursive).
      * @return any non-{@code null} value means the found reverse-memberships.
      *         {@code null} means that the functionality is not supported.
      * @throws RequestValidationException
      * @throws RequestExecutionException
      */
-    Set<RoleResource> getRoleMemberOf(RoleResource role);
+    Set<RoleResource> getMembersOf(RoleResource role);
 
     /**
      * Called during the execution of an unqualified LIST ROLES query.

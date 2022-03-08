@@ -24,6 +24,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
@@ -118,6 +119,7 @@ public class CassandraRoleManager implements IRoleManager
     }
 
     private SelectStatement loadRoleStatement;
+    private SelectStatement loadRoleMembersStatement;
 
     private final Set<Option> supportedOptions;
     private final Set<Option> alterableOptions;
@@ -140,6 +142,10 @@ public class CassandraRoleManager implements IRoleManager
         loadRoleStatement = (SelectStatement) prepare("SELECT * from %s.%s WHERE role = ?",
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
                                                       AuthKeyspace.ROLES);
+
+        loadRoleMembersStatement = (SelectStatement) prepare("SELECT member FROM %s.%s WHERE role = ?",
+                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                      AuthKeyspace.ROLE_MEMBERS);
         scheduleSetupTask(() -> {
             setupDefaultRole();
             return null;
@@ -258,21 +264,17 @@ public class CassandraRoleManager implements IRoleManager
                .collect(Collectors.toSet());
     }
 
-    public Set<RoleResource> getRoleMemberOf(RoleResource role)
+    public Set<RoleResource> getMembersOf(RoleResource role)
     {
         // Get the membership list of the given role
-        UntypedResultSet rows = process(String.format("SELECT member FROM %s.%s WHERE role = '%s'",
-                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                      AuthKeyspace.ROLE_MEMBERS,
-                                                      escape(role.getRoleName())),
-                                        consistencyForRole(role.getRoleName()));
+        QueryOptions options = QueryOptions.forInternalCalls(consistencyForRole(role.getRoleName()),
+                                                             Collections.singletonList(ByteBufferUtil.bytes(role.getRoleName())));
+        ResultMessage.Rows rows = select(loadRoleMembersStatement, options);
+        UntypedResultSet resultSet = UntypedResultSet.create(rows.result);
 
-        // Update each member in the list, removing this role from its own list of granted roles
-        Set<RoleResource> memberOf = new HashSet<>();
-        for (UntypedResultSet.Row row : rows)
-            memberOf.add(RoleResource.role(row.getString("member")));
-
-        return memberOf;
+        return StreamSupport.stream(resultSet.spliterator(), false)
+               .map(row -> RoleResource.role(row.getString("member")))
+               .collect(Collectors.toSet());
     }
 
     public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException

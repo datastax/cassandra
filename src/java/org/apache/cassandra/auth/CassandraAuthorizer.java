@@ -141,6 +141,7 @@ public class CassandraAuthorizer implements IAuthorizer
     // Called after a resource is removed (DROP KEYSPACE, DROP TABLE, etc.).
     // Execute a logged batch removing all the permissions for the resource
     // as well as the index table entry
+    @Override
     public Set<RoleResource> revokeAllOn(IResource droppedResource)
     {
         Set<RoleResource> affectedRoles = new HashSet<>();
