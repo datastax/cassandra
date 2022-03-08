@@ -1,0 +1,15 @@
+--- a/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java
++++ b/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java
+@@ -115,11 +115,7 @@
+ 
+                 assertNotNull(txnLogs);
+                 assertNotNull(txnLogs.id());
+-<<<<<<<
+-                Assert.assertEquals(OperationType.COMPACTION, txnLogs.opType());
+-=======
+-                assertEquals(OperationType.COMPACTION, txnLogs.type());
+->>>>>>>
++                assertEquals(OperationType.COMPACTION, txnLogs.opType());
+ 
+                 txnLogs.trackNew(sstableNew);
+                 tidier = txnLogs.obsoleted(sstableOld);

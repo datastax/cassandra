@@ -17,12 +17,14 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
+import java.util.function.UnaryOperator;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
-import org.apache.cassandra.schema.Diff;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -36,9 +38,10 @@ public final class DropIndexStatement extends AlterSchemaStatement
     private final String indexName;
     private final boolean ifExists;
 
-    public DropIndexStatement(String keyspaceName, String indexName, boolean ifExists)
+    public DropIndexStatement(String queryString, String keyspaceName, String indexName,
+                              boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.indexName = indexName;
         this.ifExists = ifExists;
     }
@@ -76,7 +79,7 @@ public final class DropIndexStatement extends AlterSchemaStatement
 
     public void authorize(ClientState client)
     {
-        KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(keyspaceName);
+        KeyspaceMetadata keyspace = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
         if (null == keyspace)
             return;
 
@@ -95,7 +98,7 @@ public final class DropIndexStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, indexName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<DropIndexStatement>
     {
         private final QualifiedName name;
         private final boolean ifExists;
@@ -106,10 +109,11 @@ public final class DropIndexStatement extends AlterSchemaStatement
             this.ifExists = ifExists;
         }
 
-        public DropIndexStatement prepare(ClientState state)
+        @Override
+        public DropIndexStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropIndexStatement(keyspaceName, name.getName(), ifExists);
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+            return new DropIndexStatement(rawCQLStatement, keyspaceName, name.getName(), ifExists);
         }
     }
 }

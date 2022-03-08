@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.db.compaction.writers;
 
-import java.io.File;
+import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -27,31 +27,34 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Transactional;
-import org.apache.cassandra.db.compaction.OperationType;
-
 
 /**
  * Class that abstracts away the actual writing of files to make it possible to use CompactionTask for more
  * use cases.
  */
-public abstract class CompactionAwareWriter extends Transactional.AbstractTransactional implements Transactional
+public abstract class CompactionAwareWriter extends Transactional.AbstractTransactional implements Transactional, SSTableDataSink
 {
     protected static final Logger logger = LoggerFactory.getLogger(CompactionAwareWriter.class);
 
-    protected final ColumnFamilyStore cfs;
+    protected final CompactionRealm realm;
     protected final Directories directories;
     protected final Set<SSTableReader> nonExpiredSSTables;
     protected final long estimatedTotalKeys;
@@ -65,26 +68,27 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     private final List<Directories.DataDirectory> locations;
     private final List<PartitionPosition> diskBoundaries;
     private int locationIndex;
+    protected Directories.DataDirectory currentDirectory;
 
-    public CompactionAwareWriter(ColumnFamilyStore cfs,
+    public CompactionAwareWriter(CompactionRealm realm,
                                  Directories directories,
                                  LifecycleTransaction txn,
                                  Set<SSTableReader> nonExpiredSSTables,
                                  boolean keepOriginals)
     {
-        this.cfs = cfs;
+        this.realm = realm;
         this.directories = directories;
         this.nonExpiredSSTables = nonExpiredSSTables;
         this.txn = txn;
 
         estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
-        sstableWriter = SSTableRewriter.construct(cfs, txn, keepOriginals, maxAge);
+        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);
-        DiskBoundaries db = cfs.getDiskBoundaries();
-        diskBoundaries = db.positions;
+        DiskBoundaries db = realm.getDiskBoundaries();
+        diskBoundaries = db.getPositions();
         locations = db.directories;
         locationIndex = -1;
     }
@@ -131,10 +135,38 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
      * @param partition the partition to append
      * @return true if the partition was written, false otherwise
      */
-    public final boolean append(UnfilteredRowIterator partition)
+    public boolean append(UnfilteredRowIterator partition)
     {
         maybeSwitchWriter(partition.partitionKey());
-        return realAppend(partition);
+        return appendWithoutSwitchingWriters(partition);
+    }
+
+    /**
+     * Write a partition without considering location change.
+     * Exposed for TieredCompactionStrategy which needs to control the location itself.
+     */
+    boolean appendWithoutSwitchingWriters(UnfilteredRowIterator partition)
+    {
+        return sstableWriter.append(partition);
+    }
+
+    @Override
+    public boolean startPartition(DecoratedKey partitionKey, DeletionTime deletionTime) throws IOException
+    {
+        maybeSwitchWriter(partitionKey);
+        return sstableWriter.startPartition(partitionKey, deletionTime);
+    }
+
+    @Override
+    public void endPartition() throws IOException
+    {
+        sstableWriter.endPartition();
+    }
+
+    @Override
+    public void addUnfiltered(Unfiltered unfiltered) throws IOException
+    {
+        sstableWriter.addUnfiltered(unfiltered);
     }
 
     @Override
@@ -144,35 +176,56 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         return super.doPostCleanup(accumulate);
     }
 
-    protected abstract boolean realAppend(UnfilteredRowIterator partition);
-
     /**
+     * Switches the writer if necessary, i.e. if the new key should be placed in a different data directory, or if the
+     * specific strategy has decided a new sstable is needed.
      * Guaranteed to be called before the first call to realAppend.
-     * @param key
      */
     protected void maybeSwitchWriter(DecoratedKey key)
+    {
+        if (maybeSwitchLocation(key))
+            return;
+
+        if (shouldSwitchWriterInCurrentLocation(key))
+            switchCompactionWriter(currentDirectory);
+    }
+
+    /**
+     * Switches the file location and writer and returns true if the new key should be placed in a different data
+     * directory.
+     */
+    protected boolean maybeSwitchLocation(DecoratedKey key)
     {
         if (diskBoundaries == null)
         {
             if (locationIndex < 0)
             {
                 Directories.DataDirectory defaultLocation = getWriteDirectory(nonExpiredSSTables, getExpectedWriteSize());
-                switchCompactionLocation(defaultLocation);
+                switchCompactionWriter(defaultLocation);
                 locationIndex = 0;
+                return true;
             }
-            return;
+            return false;
         }
 
         if (locationIndex > -1 && key.compareTo(diskBoundaries.get(locationIndex)) < 0)
-            return;
+            return false;
 
         int prevIdx = locationIndex;
         while (locationIndex == -1 || key.compareTo(diskBoundaries.get(locationIndex)) > 0)
             locationIndex++;
+        Directories.DataDirectory newLocation = locations.get(locationIndex);
         if (prevIdx >= 0)
-            logger.debug("Switching write location from {} to {}", locations.get(prevIdx), locations.get(locationIndex));
-        switchCompactionLocation(locations.get(locationIndex));
+            logger.debug("Switching write location from {} to {}", locations.get(prevIdx), newLocation);
+        switchCompactionWriter(newLocation);
+        return true;
     }
+
+    /**
+     * Returns true if the writer should be switched for reasons other than switching to a new data directory
+     * (e.g. because an sstable size limit has been reached).
+     */
+    protected abstract boolean shouldSwitchWriterInCurrentLocation(DecoratedKey key);
 
     /**
      * Implementations of this method should finish the current sstable writer and start writing to this directory.
@@ -180,7 +233,29 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
      * Called once before starting to append and then whenever we see a need to start writing to another directory.
      * @param directory
      */
-    protected abstract void switchCompactionLocation(Directories.DataDirectory directory);
+    protected void switchCompactionWriter(Directories.DataDirectory directory)
+    {
+        currentDirectory = directory;
+        PartitionPosition diskBoundary = diskBoundaries != null && locationIndex > -1
+                                         ? diskBoundaries.get(locationIndex)
+                                         : null;
+        sstableWriter.switchWriter(sstableWriter(directory, diskBoundary));
+    }
+
+    @SuppressWarnings("resource")
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
+    {
+        return SSTableWriter.create(realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
+                                    estimatedTotalKeys,
+                                    minRepairedAt,
+                                    pendingRepair,
+                                    isTransient,
+                                    realm.metadataRef(),
+                                    new MetadataCollector(txn.originals(), realm.metadata().comparator),
+                                    SerializationHeader.make(realm.metadata(), nonExpiredSSTables),
+                                    realm.getIndexManager().listIndexGroups(),
+                                    txn);
+    }
 
     /**
      * The directories we can write to
@@ -236,6 +311,16 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
     protected long getExpectedWriteSize()
     {
-        return cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+        return realm.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+    }
+
+    public long bytesWritten()
+    {
+        return sstableWriter.bytesWritten();
+    }
+
+    public String getCurrentFileName()
+    {
+        return sstableWriter.currentWriter().getFilename();
     }
 }

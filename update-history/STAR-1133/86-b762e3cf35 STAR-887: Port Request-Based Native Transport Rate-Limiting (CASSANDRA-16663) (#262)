@@ -1,0 +1,115 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,7 +1,9 @@
+ Future version (tbd)
+  * Require only MODIFY permission on base when updating table with MV (STAR-564)
+ 
+-<<<<<<<
++4.1
++ * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
++
+ 4.0.4
+ Merged from 3.0:
+  * Fix flaky test - test_cqlsh_completion.TestCqlshCompletion (CASSANDRA-17338)
+@@ -72,10 +74,6 @@
+  * Avoid removing batch when it's not created during view replication (CASSANDRA-16175)
+  * Make the addition of regular column to COMPACT tables throw an InvalidRequestException (CASSANDRA-14564)
+  * Race in CompactionExecutorTest (CASSANDRA-17239)
+-=======
+-4.1
+- * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
+->>>>>>>
+ 
+ 4.0.1
+  * Tolerate missing DNS entry when completing a host replacement (CASSANDRA-16873)
+--- a/src/java/org/apache/cassandra/transport/ExceptionHandlers.java
++++ b/src/java/org/apache/cassandra/transport/ExceptionHandlers.java
+@@ -32,11 +32,8 @@
+ import io.netty.channel.ChannelHandlerContext;
+ import io.netty.channel.ChannelInboundHandlerAdapter;
+ import io.netty.channel.ChannelPromise;
+-<<<<<<<
+ import io.netty.channel.unix.Errors;
+-=======
+ import org.apache.cassandra.exceptions.OverloadedException;
+->>>>>>>
+ import org.apache.cassandra.metrics.ClientMetrics;
+ import org.apache.cassandra.net.FrameEncoder;
+ import org.apache.cassandra.transport.messages.ErrorMessage;
+@@ -92,32 +89,8 @@
+                     JVMStabilityInspector.inspectThrowable(cause);
+                 }
+             }
+-<<<<<<<
+-            
++
+             logClientNetworkingExceptions(cause);
+-=======
+-            if (Throwables.anyCauseMatches(cause, t -> t instanceof ProtocolException))
+-            {
+-                // if any ProtocolExceptions is not silent, then handle
+-                if (Throwables.anyCauseMatches(cause, t -> t instanceof ProtocolException && !((ProtocolException) t).isSilent()))
+-                {
+-                    ClientMetrics.instance.markProtocolException();
+-                    // since protocol exceptions are expected to be client issues, not logging stack trace
+-                    // to avoid spamming the logs once a bad client shows up
+-                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, "Protocol exception with client networking: " + cause.getMessage());
+-                }
+-            }
+-            else if (Throwables.anyCauseMatches(cause, t -> t instanceof Errors.NativeIoException))
+-            {
+-                ClientMetrics.instance.markUnknownException();
+-                logger.trace("Native exception in client networking", cause);
+-            }
+-            else
+-            {
+-                ClientMetrics.instance.markUnknownException();
+-                logger.warn("Unknown exception in client networking", cause);
+-            }
+->>>>>>>
+         }
+ 
+         private static boolean isFatal(Throwable cause)
+@@ -145,7 +118,12 @@
+             // Once the threshold for overload is breached, it will very likely spam the logs...
+             NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, TimeUnit.MINUTES, cause.getMessage());
+         }
+-        else
++        else if (Throwables.anyCauseMatches(cause, t -> t instanceof Errors.NativeIoException))
++            {
++                ClientMetrics.instance.markUnknownException();
++                logger.trace("Native exception in client networking", cause);
++            }
++            else
+         {
+             ClientMetrics.instance.markUnknownException();
+             logger.warn("Unknown exception in client networking", cause);
+--- a/test/unit/org/apache/cassandra/cql3/CQLTester.java
++++ b/test/unit/org/apache/cassandra/cql3/CQLTester.java
+@@ -104,15 +104,11 @@
+ 
+ import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
+ import static com.datastax.driver.core.SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
+-<<<<<<<
+-import static junit.framework.Assert.assertNotNull;
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.junit.Assert.assertNotNull;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+->>>>>>>
+ 
+ /**
+  * Base class for CQL tests.
+@@ -1047,8 +1043,8 @@
+     protected static void assertNoWarningContains(Message.Response response, String message)
+     {
+         List<String> warnings = response.getWarnings();
+-        
+-        if (warnings != null) 
++
++        if (warnings != null)
+         {
+             assertFalse(warnings.stream().anyMatch(s -> s.contains(message)));
+         }

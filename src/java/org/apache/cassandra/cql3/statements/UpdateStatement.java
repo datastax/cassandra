@@ -48,7 +48,8 @@ public class UpdateStatement extends ModificationStatement
 {
     private static final Constants.Value EMPTY = new Constants.Value(ByteBufferUtil.EMPTY_BYTE_BUFFER);
 
-    private UpdateStatement(StatementType type,
+    private UpdateStatement(String queryString,
+                            StatementType type,
                             VariableSpecifications bindVariables,
                             TableMetadata metadata,
                             Operations operations,
@@ -56,7 +57,7 @@ public class UpdateStatement extends ModificationStatement
                             Conditions conditions,
                             Attributes attrs)
     {
-        super(type, bindVariables, metadata, operations, restrictions, conditions, attrs);
+        super(queryString, type, bindVariables, metadata, operations, restrictions, conditions, attrs);
     }
 
     @Override
@@ -176,15 +177,16 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.create(type,
+                                                                              metadata,
+                                                                              whereClause.build(),
+                                                                              bindVariables,
+                                                                              applyOnlyToStaticColumns,
+                                                                              false,
+                                                                              false);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,
@@ -244,15 +246,16 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.create(type,
+                                                                              metadata,
+                                                                              whereClause.build(),
+                                                                              bindVariables,
+                                                                              applyOnlyToStaticColumns,
+                                                                              false,
+                                                                              false);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,
@@ -315,7 +318,8 @@ public class UpdateStatement extends ModificationStatement
                                                                  whereClause,
                                                                  conditions);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,

@@ -41,7 +41,8 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
     public void doVerb(Message<ReadCommand> message)
     {
-        if (StorageService.instance.isBootstrapMode())
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(message.payload.metadata());
+        if (!cfs.isReadyToServeData())
         {
             throw new RuntimeException("Cannot service reads while bootstrapping!");
         }
@@ -78,8 +79,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (command instanceof SinglePartitionReadCommand)
             token = ((SinglePartitionReadCommand) command).partitionKey().getToken();
-        else
+        else if (command instanceof PartitionRangeReadCommand)
             token = ((PartitionRangeReadCommand) command).dataRange().keyRange().right.getToken();
+        else
+            return;
 
         Replica replica = Keyspace.open(command.metadata().keyspace)
                                   .getReplicationStrategy()

@@ -18,14 +18,18 @@
 */
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -64,18 +68,27 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NonThrowingCloseable;
+import org.mockito.Mockito;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 public class CompactionsTest
 {
@@ -131,14 +144,14 @@ public class CompactionsTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
         store.clearUnsafe();
-        MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).build(), true);
+        SchemaTestUtil.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).build());
 
         // disable compaction while flushing
         store.disableAutoCompaction();
 
         long timestamp = populate(KEYSPACE1, CF_STANDARD1, 0, 9, 3); //ttl=3s
 
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
         assertEquals(1, store.getLiveSSTables().size());
         long originalSize = store.getLiveSSTables().iterator().next().uncompressedLength();
 
@@ -147,7 +160,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -173,18 +186,18 @@ public class CompactionsTest
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
         store.clearUnsafe();
 
-        MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build(), true);
+        SchemaTestUtil.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build());
 
         // disable compaction while flushing
         store.disableAutoCompaction();
 
         //Populate sstable1 with with keys [0..9]
         populate(KEYSPACE1, CF_STANDARD1, 0, 9, 3); //ttl=3s
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         //Populate sstable2 with with keys [10..19] (keys do not overlap with SSTable1)
         long timestamp2 = populate(KEYSPACE1, CF_STANDARD1, 10, 19, 3); //ttl=3s
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         assertEquals(2, store.getLiveSSTables().size());
 
@@ -197,7 +210,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -216,10 +229,10 @@ public class CompactionsTest
 
         // now let's enable the magic property
         compactionOptions.put("unchecked_tombstone_compaction", "true");
-        MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build(), true);
+        SchemaTestUtil.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).compaction(CompactionParams.stcs(compactionOptions)).build());
 
         //submit background task again and wait for it to complete
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(store));
         do
         {
             TimeUnit.SECONDS.sleep(1);
@@ -264,14 +277,14 @@ public class CompactionsTest
             .add("val", "val1")
             .build().applyUnsafe();
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         Collection<SSTableReader> sstables = cfs.getLiveSSTables();
 
         assertEquals(1, sstables.size());
         SSTableReader sstable = sstables.iterator().next();
 
-        int prevGeneration = sstable.descriptor.generation;
-        String file = new File(sstable.descriptor.filenameFor(Component.DATA)).getAbsolutePath();
+        SSTableUniqueIdentifier prevGeneration = sstable.descriptor.generation;
+        String file = sstable.descriptor.fileFor(Component.DATA).absolutePath();
         // submit user defined compaction on flushed sstable
         CompactionManager.instance.forceUserDefinedCompaction(file);
         // wait until user defined compaction finishes
@@ -282,7 +295,7 @@ public class CompactionsTest
         // CF should have only one sstable with generation number advanced
         sstables = cfs.getLiveSSTables();
         assertEquals(1, sstables.size());
-        assertEquals( prevGeneration + 1, sstables.iterator().next().descriptor.generation);
+        assertThat(prevGeneration).isLessThan(sstables.iterator().next().descriptor.generation);
     }
 
     public static void writeSSTableWithRangeTombstoneMaskingOneColumn(ColumnFamilyStore cfs, TableMetadata table, int[] dks) {
@@ -299,7 +312,7 @@ public class CompactionsTest
             notYetDeletedRowUpdateBuilder.clustering("02").add("val", "a"); //Range tombstone doesn't cover this (timestamp 3 > 2)
             notYetDeletedRowUpdateBuilder.build().applyUnsafe();
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
     }
 
     @Test
@@ -360,8 +373,8 @@ public class CompactionsTest
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             StatsMetadata stats = sstable.getSSTableMetadata();
-            assertEquals(ByteBufferUtil.bytes("0"), stats.minClusteringValues.get(0));
-            assertEquals(ByteBufferUtil.bytes("b"), stats.maxClusteringValues.get(0));
+            assertEquals(ByteBufferUtil.bytes("0"), stats.coveredClustering.start().bufferAt(0));
+            assertEquals(ByteBufferUtil.bytes("b"), stats.coveredClustering.end().bufferAt(0));
         }
 
         assertEquals(keys, k);
@@ -384,7 +397,7 @@ public class CompactionsTest
         rowUpdateBuilder.clustering("c").add("val", "a");
         rowUpdateBuilder.build().applyUnsafe();
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         Collection<SSTableReader> sstablesBefore = cfs.getLiveSSTables();
 
@@ -402,7 +415,7 @@ public class CompactionsTest
         // Sleep one second so that the removal is indeed purgeable even with gcgrace == 0
         Thread.sleep(1000);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         Collection<SSTableReader> sstablesAfter = cfs.getLiveSSTables();
         Collection<SSTableReader> toCompact = new ArrayList<SSTableReader>();
@@ -484,7 +497,7 @@ public class CompactionsTest
             insertRowWithKey(i + 100);
             insertRowWithKey(i + 200);
         }
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
@@ -561,5 +574,72 @@ public class CompactionsTest
         assertEquals(3, CompactionManager.instance.getCoreCompactorThreads());
         CompactionManager.instance.setConcurrentCompactors(1);
         assertEquals(1, CompactionManager.instance.getCoreCompactorThreads());
+    }
+
+    @Test
+    public void testCompactionsCanBeInterrupted() throws Exception
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        store.clearUnsafe();
+
+        // disable compaction while flushing
+        store.disableAutoCompaction();
+
+        // Write a bit of data
+        for (int j = 0; j < 2; j++)
+        {
+            for (int i = 1; i < 100; i++)
+            {
+                new RowUpdateBuilder(store.metadata(), 0, ByteBufferUtil.bytes("key" + i))
+                .clustering("Column1")
+                .add("val", ByteBufferUtil.bytes("abcd"))
+                .build()
+                .apply();
+            }
+
+            store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+        }
+
+        assertTrue(store.getLiveSSTables().size() >= 2);
+
+        // Enable compaction but do not submit any background compactions
+        store.getCompactionStrategyContainer().enable();
+
+        CountDownLatch compactionRegistered = new CountDownLatch(1);
+        CountDownLatch resumeCompaction = new CountDownLatch(1);
+        TableOperationObserver obs = Mockito.mock(TableOperationObserver.class);
+
+        when(obs.onOperationStart(any(TableOperation.class))).thenAnswer(invocation -> {
+            NonThrowingCloseable ret = CompactionManager.instance.active.onOperationStart(invocation.getArgument(0));
+            compactionRegistered.countDown(); // this makes sure we don't attempt to interrupt a compaction before it has registered
+            resumeCompaction.await(); // this will block the compaction just after it has registered so that we can interrupt it before it even starts
+            return ret;
+        });
+
+        List<Future<?>> compactions = CompactionManager.instance.submitMaximal(store, FBUtilities.nowInSeconds(), false, obs);
+        assertEquals("Expected one compaction to be submitted", 1, compactions.size());
+
+        // Wait for compaction to register with its operation observer (the metrics)
+        compactionRegistered.await(1, TimeUnit.MINUTES);
+
+        // Interrupt the compaction, this only works if CompactionManager.instance.active.onOperationStart() has already been called
+        boolean ret = CompactionManager.instance.interruptCompactionFor(ImmutableList.of(store.metadata()));
+        assertTrue("Compaction should have been interrupted", ret);
+
+        // Let the compaction continue running
+        resumeCompaction.countDown();
+
+        // Make sure the compactions was interrupted
+        try
+        {
+            compactions.get(0).get();
+            fail("Compaction should have been interrupted");
+        }
+        catch(Throwable t)
+        {
+            t = Throwables.getRootCause(t);
+            assertTrue(t.getMessage(), t instanceof CompactionInterruptedException);
+        }
     }
 }

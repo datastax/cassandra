@@ -44,11 +44,12 @@ import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.repair.consistent.LocalSessionTest.InstrumentedLocalSessions;
 import org.apache.cassandra.repair.consistent.admin.PendingStats;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.repair.consistent.ConsistentSession.State.FAILED;
 import static org.apache.cassandra.repair.consistent.ConsistentSession.State.FINALIZED;
 import static org.apache.cassandra.repair.consistent.ConsistentSession.State.PREPARING;
@@ -78,7 +79,7 @@ public class PendingRepairStatTest extends AbstractRepairTest
         SchemaLoader.prepareServer();
         cfm = CreateTableStatement.parse("CREATE TABLE tbl (k INT PRIMARY KEY, v INT)", "coordinatorsessiontest").build();
         SchemaLoader.createKeyspace("coordinatorsessiontest", KeyspaceParams.simple(1), cfm);
-        cfs = Schema.instance.getColumnFamilyStoreInstance(cfm.id);
+        cfs = SchemaManager.instance.getColumnFamilyStoreInstance(cfm.id);
     }
 
     @Before
@@ -114,7 +115,7 @@ public class PendingRepairStatTest extends AbstractRepairTest
             int key = startKey + i;
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", cfm.keyspace, cfm.name), key, key);
         }
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         return Iterables.getOnlyElement(Sets.difference(cfs.getLiveSSTables(), existing));
     }
 
@@ -122,7 +123,7 @@ public class PendingRepairStatTest extends AbstractRepairTest
     {
         try
         {
-            cfs.getCompactionStrategyManager().mutateRepaired(Collections.singleton(sstable), repairedAt, pendingRepair, false);
+            cfs.mutateRepaired(Collections.singleton(sstable), repairedAt, pendingRepair, false);
         }
         catch (IOException e)
         {

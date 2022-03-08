@@ -78,7 +78,7 @@ public final class ViewMetadata implements SchemaElement
 
     public TableMetadata baseTableMetadata()
     {
-        return Schema.instance.getTableMetadata(baseTableId);
+        return SchemaManager.instance.getTableMetadata(baseTableId);
     }
 
     @Override
@@ -198,7 +198,7 @@ public final class ViewMetadata implements SchemaElement
                .append(" WITH ")
                .increaseIndent();
 
-        metadata.appendTableOptions(builder, internals);
+        metadata.appendTableOptions(builder, internals, false);
     }
 
     @Override

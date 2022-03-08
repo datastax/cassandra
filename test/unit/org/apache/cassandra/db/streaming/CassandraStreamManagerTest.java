@@ -53,7 +53,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -65,6 +65,7 @@ import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 
 public class CassandraStreamManagerTest
@@ -89,7 +90,7 @@ public class CassandraStreamManagerTest
         keyspace = String.format("ks_%s", System.currentTimeMillis());
         tbm = CreateTableStatement.parse(String.format("CREATE TABLE %s (k INT PRIMARY KEY, v INT)", table), keyspace).build();
         SchemaLoader.createKeyspace(keyspace, KeyspaceParams.simple(1), tbm);
-        cfs = Schema.instance.getColumnFamilyStoreInstance(tbm.id);
+        cfs = SchemaManager.instance.getColumnFamilyStoreInstance(tbm.id);
     }
 
     private static StreamSession session(UUID pendingRepair)
@@ -114,7 +115,7 @@ public class CassandraStreamManagerTest
     {
         Set<SSTableReader> before = cfs.getLiveSSTables();
         queryable.run();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         Set<SSTableReader> after = cfs.getLiveSSTables();
 
         Set<SSTableReader> diff = Sets.difference(after, before);
@@ -134,7 +135,7 @@ public class CassandraStreamManagerTest
         Set<SSTableReader> sstables = new HashSet<>();
         for (OutgoingStream stream: streams)
         {
-            Ref<SSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
+            Ref<? extends SSTableReader> ref = CassandraOutgoingFile.fromStream(stream).getRef();
             sstables.add(ref.get());
             ref.release();
         }

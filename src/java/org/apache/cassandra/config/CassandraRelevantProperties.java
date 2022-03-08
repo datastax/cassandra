@@ -96,6 +96,9 @@ public enum CassandraRelevantProperties
     /** Cassandra jmx remote port */
     CASSANDRA_JMX_REMOTE_PORT("cassandra.jmx.remote.port"),
 
+    /** Cassandra jmx local port */
+    CASSANDRA_JMX_LOCAL_PORT("cassandra.jmx.local.port"),
+
     /** This property  indicates whether SSL is enabled for monitoring remotely. Default is set to false. */
     COM_SUN_MANAGEMENT_JMXREMOTE_SSL ("com.sun.management.jmxremote.ssl"),
 
@@ -136,6 +139,10 @@ public enum CassandraRelevantProperties
     /** mx4jport */
     MX4JPORT ("mx4jport"),
 
+    RING_DELAY("cassandra.ring_delay_ms", "30000"),
+
+    MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
+
     /**
      * When bootstraping we wait for all schema versions found in gossip to be seen, and if not seen in time we fail
      * the bootstrap; this property will avoid failing and allow bootstrap to continue if set to true.
@@ -153,6 +160,11 @@ public enum CassandraRelevantProperties
     GOSSIPER_QUARANTINE_DELAY("cassandra.gossip_quarantine_delay_ms"),
 
     /**
+     * Factory to create instances used during log transaction processing
+     */
+    LOG_TRANSACTIONS_FACTORY("cassandra.log_transactions_factory"),
+
+    /**
      * When doing a host replacement its possible that the gossip state is "empty" meaning that the endpoint is known
      * but the current state isn't known.  If the host replacement is needed to repair this state, this property must
      * be true.
@@ -163,6 +175,33 @@ public enum CassandraRelevantProperties
      * Whether {@link org.apache.cassandra.db.ConsistencyLevel#NODE_LOCAL} should be allowed.
      */
     ENABLE_NODELOCAL_QUERIES("cassandra.enable_nodelocal_queries", "false"),
+
+    CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings", "false"),
+
+    /**
+     * To provide custom implementation to prioritize compaction tasks in UCS
+     */
+    UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
+
+    /**
+     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     */
+    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+
+    /**
+     * custom native library for os access
+     */
+    CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
+
+    /**
+     * Repair progress reporter, default using system distributed keyspace
+     */
+    REPAIR_PROGRESS_REPORTER("cassandra.repair_progress_reporter_class"),
+
+    /**
+     * Listen to repair parent session lifecycle
+     */
+    REPAIR_PARENT_SESSION_LISTENER("cassandra.custom_parent_repair_session_listener_class"),
 
     //cassandra properties (without the "cassandra." prefix)
 
@@ -183,7 +222,42 @@ public enum CassandraRelevantProperties
     IS_DISABLED_MBEAN_REGISTRATION("org.apache.cassandra.disable_mbean_registration"),
 
     /** what class to use for mbean registeration */
-    MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class");
+    MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
+
+    /** Which class to use for token metadata provider */
+    CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
+
+    /** Which class to use for failure detection */
+    CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
+
+    /** Set this property to true in order to switch to micrometer metrics */
+    USE_MICROMETER("cassandra.use_micrometer_metrics", "false"),
+
+    /** Which class to use for coordinator client request metrics */
+    CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY("cassandra.custom_client_request_metrics_provider_class"),
+
+    /**
+     * Which class to use for creating guardrails
+     */
+    CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
+
+    /**
+     * Used to support directory creation for different file system and remote/local conversion
+     */
+    CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
+
+    /** Watcher used when opening sstables to discover extra components, eg. archive component */
+    CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
+
+    /**
+     * Whether to disable auto-compaction
+     */
+    DISABLED_AUTO_COMPACTION_PROPERTY("cassandra.disabled_auto_compaction"),
+    
+    /** Which class to use for dynamic snitch severity values */
+    DYNAMIC_SNITCH_SEVERITY_PROVIDER("cassandra.dynamic_snitch_severity_provider"),
+
+    NEVER_PURGE_TOMBSTONES_PROPERTY("cassandra.never_purge_tombstones");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
@@ -304,6 +378,39 @@ public enum CassandraRelevantProperties
         System.setProperty(key, Integer.toString(value));
     }
 
+    /**
+     * Gets the value of a system property as a long.
+     * @return system property long value if it exists, defaultValue otherwise.
+     */
+    public long getLong()
+    {
+        String value = System.getProperty(key);
+
+        return LONG_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property as a long.
+     * @return system property long value if it exists, overrideDefaultValue otherwise.
+     */
+    public long getLong(int overrideDefaultValue)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            return overrideDefaultValue;
+
+        return LONG_CONVERTER.convert(value);
+    }
+
+    /**
+     * Sets the value into system properties.
+     * @param value to set
+     */
+    public void setLong(long value)
+    {
+        System.setProperty(key, Long.toString(value));
+    }
+
     private interface PropertyConverter<T>
     {
         T convert(String value);
@@ -323,6 +430,32 @@ public enum CassandraRelevantProperties
         {
             throw new ConfigurationException(String.format("Invalid value for system property: " +
                                                            "expected integer value but got '%s'", value));
+        }
+    };
+
+    private static final PropertyConverter<Long> LONG_CONVERTER = value ->
+    {
+        try
+        {
+            return Long.decode(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected integer value but got '%s'", value));
+        }
+    };
+
+    private static final PropertyConverter<Double> DOUBLE_CONVERTER = value ->
+    {
+        try
+        {
+            return Double.parseDouble(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected double value but got '%s'", value));
         }
     };
 

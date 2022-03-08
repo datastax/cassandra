@@ -35,7 +35,6 @@ import javax.management.openmbean.TabularData;
 
 import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.InetAddressAndPort;
 
 public interface StorageServiceMBean extends NotificationEmitter
 {
@@ -556,7 +555,10 @@ public interface StorageServiceMBean extends NotificationEmitter
     public void setNativeTransportMaxConcurrentRequestsInBytes(long newLimit);
     public long getNativeTransportMaxConcurrentRequestsInBytesPerIp();
     public void setNativeTransportMaxConcurrentRequestsInBytesPerIp(long newLimit);
-
+    public int getNativeTransportMaxRequestsPerSecond();
+    public void setNativeTransportMaxRequestsPerSecond(int newPerSecond);
+    public void setNativeTransportRateLimitingEnabled(boolean enabled);
+    public boolean getNativeTransportRateLimitingEnabled();
 
     // allows a node that have been started without joining the ring to join it
     public void joinRing() throws IOException;
@@ -625,7 +627,9 @@ public interface StorageServiceMBean extends NotificationEmitter
     public int getSSTablePreemptiveOpenIntervalInMB();
     public void setSSTablePreemptiveOpenIntervalInMB(int intervalInMB);
 
+    @Deprecated // CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782)
     public boolean getMigrateKeycacheOnCompaction();
+    @Deprecated // CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782)
     public void setMigrateKeycacheOnCompaction(boolean invalidateKeyCacheOnCompaction);
 
     public int getConcurrentViewBuilders();

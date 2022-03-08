@@ -1,0 +1,31 @@
+--- a/src/java/org/apache/cassandra/service/ActiveRepairService.java
++++ b/src/java/org/apache/cassandra/service/ActiveRepairService.java
+@@ -717,13 +717,9 @@
+         if (session == null)
+             return null;
+ 
+-<<<<<<<
+         ParentRepairSessionListener.instance.onRemoved(parentSessionId, session);
+ 
+-        for (ColumnFamilyStore cfs : session.columnFamilyStores.values())
+-=======
+         if (session.hasSnapshots)
+->>>>>>>
+         {
+             clearSnapshotExecutor.submit(() -> {
+                 logger.info("[repair #{}] Clearing snapshots for {}", parentSessionId,
+diff --git a/test/unit/org/apache/cassandra/repair/RepairProgressReporterTest.java b/test/unit/org/apache/cassandra/repair/RepairProgressReporterTest.java
+index 0040513ccb..6deb92b736 100644
+--- a/test/unit/org/apache/cassandra/repair/RepairProgressReporterTest.java
++++ b/test/unit/org/apache/cassandra/repair/RepairProgressReporterTest.java
+@@ -89,8 +89,8 @@ public class RepairProgressReporterTest extends CQLTester
+     @After
+     public void after()
+     {
+-        Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(REPAIR_HISTORY).truncateBlocking(false);
+-        Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(PARENT_REPAIR_HISTORY).truncateBlocking(false);
++        Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(REPAIR_HISTORY).truncateBlockingWithoutSnapshot();
++        Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(PARENT_REPAIR_HISTORY).truncateBlockingWithoutSnapshot();
+     }
+ 
+     @Test

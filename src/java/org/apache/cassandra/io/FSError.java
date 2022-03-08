@@ -17,17 +17,25 @@
  */
 package org.apache.cassandra.io;
 
-import java.io.File;
 import java.io.IOError;
+import java.nio.file.Path;
+
+import org.apache.cassandra.io.util.File;
 
 public abstract class FSError extends IOError
 {
-    public final File path;
+    public final File file;
 
-    public FSError(Throwable cause, File path)
+    public FSError(Throwable cause, File file)
     {
         super(cause);
-        this.path = path;
+        this.file = file;
+    }
+
+    public FSError(Throwable cause, Path path)
+    {
+        super(cause);
+        this.file = new File(path);
     }
 
     /**

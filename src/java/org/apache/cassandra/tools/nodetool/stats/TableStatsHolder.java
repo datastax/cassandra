@@ -222,7 +222,7 @@ public class TableStatsHolder implements StatsHolder
                 statsTable.oldSSTableCount = probe.getColumnFamilyMetric(keyspaceName, tableName, "OldVersionSSTableCount");
 
                 int[] leveledSStables = table.getSSTableCountPerLevel();
-                if (leveledSStables != null)
+                if (leveledSStables.length > 0)
                 {
                     statsTable.isLeveledSstable = true;
 
@@ -445,7 +445,7 @@ public class TableStatsHolder implements StatsHolder
             return filter.get(keyspace) != null || ignoreMode;
         }
 
-        public void verifyKeyspaces(List<String> keyspaces)
+        public void verifyKeyspaces(Collection<String> keyspaces)
         {
             for (String ks : verifier.keySet())
                 if (!keyspaces.contains(ks))

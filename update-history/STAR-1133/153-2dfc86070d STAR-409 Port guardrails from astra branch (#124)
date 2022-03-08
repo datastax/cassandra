@@ -1,0 +1,1127 @@
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -386,15 +386,7 @@
+         if (prepared != null)
+             return prepared;
+ 
+-<<<<<<<
+-        // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing
+-        CQLStatement statement = parseStatement(query, internalQueryState().getClientState());
+-        statement.validate(internalQueryState());
+-
+-        prepared = new Prepared(statement);
+-=======
+         prepared = parseAndPrepare(query, internalQueryState().getClientState(), true);
+->>>>>>>
+         internalStatements.put(query, prepared);
+         return prepared;
+     }
+@@ -417,7 +409,7 @@
+ 
+         // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing
+         CQLStatement statement = raw.prepare(clientState);
+-        statement.validate(clientState);
++        statement.validate(new QueryState(clientState));
+ 
+         if (isInternal)
+             return new Prepared(statement, "", fullyQualified, keyspace);
+--- a/test/unit/org/apache/cassandra/cql3/ViewFilteringClustering1Test.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewFilteringClustering1Test.java
+@@ -39,54 +39,6 @@
+ @RunWith(Parameterized.class)
+ public class ViewFilteringClustering1Test extends ViewFilteringTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ViewFilteringTest.versions();
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        ViewFilteringTest.startup();
+-    }
+-
+-    @AfterClass
+-    public static void tearDown()
+-    {
+-        ViewFilteringTest.tearDown();
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        ViewFilteringTest.beginSetup(views);
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        ViewFilteringTest.endSetup(views, version, this);
+-    }
+-
+-    private void createView(String name, String query) throws Throwable
+-    {
+-        ViewFilteringTest.createView(name, query, views, version, this);
+-    }
+-
+-    private void dropMaterializedView(String name) throws Throwable
+-    {
+-        ViewFilteringTest.dropMaterializedView(name, views, version, this);
+-    }
+-
+->>>>>>>
+     @Test
+     public void testClusteringKeyEQRestrictions() throws Throwable
+     {
+@@ -191,7 +143,7 @@
+                                     row(0, 1, 1, 0)
+             );
+ 
+-            dropMaterializedView("mv_test" + i);
++            dropView("mv_test" + i);
+             dropTable("DROP TABLE %s");
+         }
+     }
+@@ -299,7 +251,7 @@
+                                     row(0, 1, 1, 0)
+             );
+ 
+-            dropMaterializedView("mv_test" + i);
++            dropView("mv_test" + i);
+             dropTable("DROP TABLE %s");
+         }
+     }
+@@ -416,7 +368,7 @@
+                                     row(0, 1, 1, 0)
+             );
+ 
+-            dropMaterializedView("mv_test" + i);
++            dropView("mv_test" + i);
+             dropTable("DROP TABLE %s");
+         }
+     }
+--- a/test/unit/org/apache/cassandra/cql3/ViewFilteringClustering2Test.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewFilteringClustering2Test.java
+@@ -39,54 +39,6 @@
+ @RunWith(Parameterized.class)
+ public class ViewFilteringClustering2Test extends ViewFilteringTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ViewFilteringTest.versions();
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        ViewFilteringTest.startup();
+-    }
+-
+-    @AfterClass
+-    public static void tearDown()
+-    {
+-        ViewFilteringTest.tearDown();
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        ViewFilteringTest.beginSetup(views);
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        ViewFilteringTest.endSetup(views, version, this);
+-    }
+-
+-    private void createView(String name, String query) throws Throwable
+-    {
+-        ViewFilteringTest.createView(name, query, views, version, this);
+-    }
+-
+-    private void dropMaterializedView(String name) throws Throwable
+-    {
+-        ViewFilteringTest.dropMaterializedView(name, views, version, this);
+-    }
+-
+->>>>>>>
+     @Test
+     public void testClusteringKeyMultiColumnRestrictions() throws Throwable
+     {
+@@ -195,7 +147,7 @@
+                                     row(0, 1, 1, 0)
+             );
+ 
+-            dropMaterializedView("mv_test" + i);
++            dropView("mv_test" + i);
+             dropTable("DROP TABLE %s");
+         }
+     }
+@@ -320,7 +272,7 @@
+                                     row(4, 4, 1, 1)
+             );
+ 
+-            dropMaterializedView("mv_test" + i);
++            dropView("mv_test" + i);
+             dropTable("DROP TABLE %s");
+         }
+     }
+--- a/test/unit/org/apache/cassandra/cql3/ViewFilteringSimplePKTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewFilteringSimplePKTest.java
+@@ -39,54 +39,6 @@
+ @RunWith(Parameterized.class)
+ public class ViewFilteringSimplePKTest extends ViewFilteringTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ViewFilteringTest.versions();
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        ViewFilteringTest.startup();
+-    }
+-
+-    @AfterClass
+-    public static void tearDown()
+-    {
+-        ViewFilteringTest.tearDown();
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        ViewFilteringTest.beginSetup(views);
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        ViewFilteringTest.endSetup(views, version, this);
+-    }
+-
+-    private void createView(String name, String query) throws Throwable
+-    {
+-        ViewFilteringTest.createView(name, query, views, version, this);
+-    }
+-
+-    private void dropMaterializedView(String name) throws Throwable
+-    {
+-        ViewFilteringTest.dropMaterializedView(name, views, version, this);
+-    }
+-
+->>>>>>>
+     @Test
+     public void testPartitionKeyFilteringUnrestrictedPart() throws Throwable
+     {
+@@ -382,277 +334,4 @@
+             assertEmpty(execute("SELECT * FROM mv_test" + i));
+         }
+     }
+-<<<<<<<
+-=======
+-
+-    @Test
+-    public void testCompoundPartitionKeyRestrictions() throws Throwable
+-    {
+-        List<String> mvPrimaryKeys = Arrays.asList("((a, b), c)", "((b, a), c)", "(a, b, c)", "(c, b, a)", "((c, a), b)");
+-        for (int i = 0; i < mvPrimaryKeys.size(); i++)
+-        {
+-            createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
+-
+-            execute("USE " + keyspace());
+-            executeNet(version, "USE " + keyspace());
+-
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 0);
+-
+-            logger.info("Testing MV primary key: {}", mvPrimaryKeys.get(i));
+-
+-            // only accept rows where a = 1 and b = 1
+-            createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND c IS NOT NULL PRIMARY KEY " + mvPrimaryKeys.get(i));
+-
+-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+-                Thread.sleep(10);
+-
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 0),
+-                                    row(1, 1, 1, 0)
+-            );
+-
+-            // insert new rows that do not match the filter
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 0, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 1, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 0, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 0),
+-                                    row(1, 1, 1, 0)
+-            );
+-
+-            // insert new row that does match the filter
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 2, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 0),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 1, 2, 0)
+-            );
+-
+-            // update rows that don't match the filter
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 0, 0, 0);
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 1, 0, 0);
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 0, 1, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 0),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 1, 2, 0)
+-            );
+-
+-            // update a row that does match the filter
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 1, 1, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 1),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 1, 2, 0)
+-            );
+-
+-            // delete rows that don't match the filter
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 0, 0, 0);
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 0, 0);
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 0, 1, 0);
+-            execute("DELETE FROM %s WHERE a = ? AND b = ?", 0, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 0, 1),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 1, 2, 0)
+-            );
+-
+-            // delete a row that does match the filter
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 1, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 1, 2, 0)
+-            );
+-
+-            // delete a partition that matches the filter
+-            execute("DELETE FROM %s WHERE a = ? AND b = ?", 1, 1);
+-            assertEmpty(execute("SELECT * FROM mv_test" + i));
+-        }
+-    }
+-
+-    @Test
+-    public void testCompoundPartitionKeyRestrictionsNotIncludeAll() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c))");
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 0);
+-
+-        // only accept rows where a = 1 and b = 1, don't include column d in the selection
+-        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT a, b, c FROM %%s WHERE a = 1 AND b = 1 AND c IS NOT NULL PRIMARY KEY ((a, b), c)");
+-
+-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+-            Thread.sleep(10);
+-
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1)
+-        );
+-
+-        // insert new rows that do not match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 0, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1)
+-        );
+-
+-        // insert new row that does match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 2, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1),
+-                   row(1, 1, 2)
+-        );
+-
+-        // update rows that don't match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 0, 0, 0);
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 1, 0, 0);
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 0, 1, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1),
+-                   row(1, 1, 2)
+-        );
+-
+-        // update a row that does match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 1, 1, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1),
+-                   row(1, 1, 2)
+-        );
+-
+-        // delete rows that don't match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 0, 0, 0);
+-        execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 0, 0);
+-        execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 0, 1, 0);
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 0, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 0),
+-                   row(1, 1, 1),
+-                   row(1, 1, 2)
+-        );
+-
+-        // delete a row that does match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 1, 0);
+-        assertRows(execute("SELECT * FROM mv_test"),
+-                   row(1, 1, 1),
+-                   row(1, 1, 2)
+-        );
+-
+-        // delete a partition that matches the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 1, 1);
+-        assertEmpty(execute("SELECT * FROM mv_test"));
+-    }
+-
+-    @Test
+-    public void testPartitionKeyAndClusteringKeyFilteringRestrictions() throws Throwable
+-    {
+-        List<String> mvPrimaryKeys = Arrays.asList("((a, b), c)", "((b, a), c)", "(a, b, c)", "(c, b, a)", "((c, a), b)");
+-        for (int i = 0; i < mvPrimaryKeys.size(); i++)
+-        {
+-            createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b, c))");
+-
+-            execute("USE " + keyspace());
+-            executeNet(version, "USE " + keyspace());
+-
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, -1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 0);
+-
+-            logger.info("Testing MV primary key: {}", mvPrimaryKeys.get(i));
+-
+-            // only accept rows where b = 1
+-            createView("mv_test" + i, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b IS NOT NULL AND c = 1 PRIMARY KEY " + mvPrimaryKeys.get(i));
+-
+-            while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test" + i))
+-                Thread.sleep(10);
+-
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 0)
+-            );
+-
+-            // insert new rows that do not match the filter
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 0)
+-            );
+-
+-            // insert new row that does match the filter
+-            execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 1, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 2, 1, 0)
+-            );
+-
+-            // update rows that don't match the filter
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 1, 1, -1, 0);
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 0, 1, 1, 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 0),
+-                                    row(1, 2, 1, 0)
+-            );
+-
+-            // update a row that does match the filter
+-            execute("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 2, 1, 1, 1);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 2),
+-                                    row(1, 2, 1, 0)
+-            );
+-
+-            // delete rows that don't match the filter
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 1, -1);
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 2, 0, 1);
+-            execute("DELETE FROM %s WHERE a = ?", 0);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 1, 1, 2),
+-                                    row(1, 2, 1, 0)
+-            );
+-
+-            // delete a row that does match the filter
+-            execute("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 1, 1, 1);
+-            assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test" + i),
+-                                    row(1, 0, 1, 0),
+-                                    row(1, 2, 1, 0)
+-            );
+-
+-            // delete a partition that matches the filter
+-            execute("DELETE FROM %s WHERE a = ?", 1);
+-            assertEmpty(execute("SELECT a, b, c, d FROM mv_test" + i));
+-
+-            dropMaterializedView("mv_test" + i);
+-            dropTable("DROP TABLE %s");
+-        }
+-    }
+->>>>>>>
+ }
+--- a/test/unit/org/apache/cassandra/cql3/ViewFilteringTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewFilteringTest.java
+@@ -46,107 +46,6 @@
+ @RunWith(Parameterized.class)
+ public class ViewFilteringTest extends ViewFilteringTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ProtocolVersion.SUPPORTED.stream()
+-                                        .map(v -> new Object[]{v})
+-                                        .collect(Collectors.toList());
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        requireNetwork();
+-        System.setProperty("cassandra.mv.allow_filtering_nonkey_columns_unsafe", "true");
+-    }
+-
+-    @AfterClass
+-    public static void tearDown()
+-    {
+-        System.setProperty("cassandra.mv.allow_filtering_nonkey_columns_unsafe", "false");
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        beginSetup(views);
+-    }
+-
+-    public static void beginSetup(List<String> views)
+-    {
+-        views.clear();
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        endSetup(views, version, this);
+-    }
+-
+-    public static void endSetup(List<String> views, ProtocolVersion version, CQLTester tester) throws Throwable
+-    {
+-        for (String viewName : views)
+-            tester.executeNet(version, "DROP MATERIALIZED VIEW " + viewName);
+-    }
+-
+-    private void createView(String name, String query) throws Throwable
+-    {
+-        createView(name, query, views, version, this);
+-    }
+-
+-    public static void createView(String name, String query, List<String> views, ProtocolVersion version, CQLTester tester) throws Throwable
+-    {
+-        try
+-        {
+-            tester.executeNet(version, String.format(query, name));
+-            // If exception is thrown, the view will not be added to the list; since it shouldn't have been created, this is
+-            // the desired behavior
+-            views.add(name);
+-        }
+-        catch (OperationTimedOutException ex)
+-        {
+-            // ... except for timeout, when we actually do not know whether the view was created or not
+-            views.add(name);
+-            throw ex;
+-        }
+-    }
+-
+-    private void updateView(String query, Object... params) throws Throwable
+-    {
+-        executeNet(version, query, params);
+-        while (!(((SEPExecutor) Stage.VIEW_MUTATION.executor()).getPendingTaskCount() == 0
+-                 && ((SEPExecutor) Stage.VIEW_MUTATION.executor()).getActiveTaskCount() == 0))
+-        {
+-            Thread.sleep(1);
+-        }
+-    }
+-
+-    private void dropMaterializedView(String name) throws Throwable
+-    {
+-        dropMaterializedView(name, views, version, this);
+-    }
+-
+-    public static void dropMaterializedView(String name, List<String> views, ProtocolVersion version, CQLTester tester) throws Throwable
+-    {
+-        tester.executeNet(version, "DROP MATERIALIZED VIEW " + name);
+-        views.remove(name);
+-    }
+-
+-    public static void waitForView(String keyspace, String view) throws InterruptedException
+-    {
+-        while (!SystemKeyspace.isViewBuilt(keyspace, view))
+-            Thread.sleep(10);
+-    }
+-
+->>>>>>>
+     // TODO will revise the non-pk filter condition in MV, see CASSANDRA-11500
+     @Ignore
+     @Test
+@@ -361,12 +260,12 @@
+         assertRowCount(execute("SELECT * FROM mv_test5"), 0);
+         assertRowCount(execute("SELECT * FROM mv_test6"), 0);
+ 
+-        dropMaterializedView("mv_test1");
+-        dropMaterializedView("mv_test2");
+-        dropMaterializedView("mv_test3");
+-        dropMaterializedView("mv_test4");
+-        dropMaterializedView("mv_test5");
+-        dropMaterializedView("mv_test6");
++        dropView("mv_test1");
++        dropView("mv_test2");
++        dropView("mv_test3");
++        dropView("mv_test4");
++        dropView("mv_test5");
++        dropView("mv_test6");
+         dropTable("DROP TABLE %s");
+     }
+ 
+@@ -628,419 +527,5 @@
+                    row(1, 0, 2),
+                    row(1, 1, 3)
+         );
+-<<<<<<<
+-=======
+-    } 
+-
+-    @Test
+-    public void testAllTypes() throws Throwable
+-    {
+-        String myType = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
+-        String columnNames = "asciival, " +
+-                             "bigintval, " +
+-                             "blobval, " +
+-                             "booleanval, " +
+-                             "dateval, " +
+-                             "decimalval, " +
+-                             "doubleval, " +
+-                             "floatval, " +
+-                             "inetval, " +
+-                             "intval, " +
+-                             "textval, " +
+-                             "timeval, " +
+-                             "timestampval, " +
+-                             "timeuuidval, " +
+-                             "uuidval," +
+-                             "varcharval, " +
+-                             "varintval, " +
+-                             "frozenlistval, " +
+-                             "frozensetval, " +
+-                             "frozenmapval, " +
+-                             "tupleval, " +
+-                             "udtval";
+-
+-        createTable(
+-        "CREATE TABLE %s (" +
+-        "asciival ascii, " +
+-        "bigintval bigint, " +
+-        "blobval blob, " +
+-        "booleanval boolean, " +
+-        "dateval date, " +
+-        "decimalval decimal, " +
+-        "doubleval double, " +
+-        "floatval float, " +
+-        "inetval inet, " +
+-        "intval int, " +
+-        "textval text, " +
+-        "timeval time, " +
+-        "timestampval timestamp, " +
+-        "timeuuidval timeuuid, " +
+-        "uuidval uuid," +
+-        "varcharval varchar, " +
+-        "varintval varint, " +
+-        "frozenlistval frozen<list<int>>, " +
+-        "frozensetval frozen<set<uuid>>, " +
+-        "frozenmapval frozen<map<ascii, int>>," +
+-        "tupleval frozen<tuple<int, ascii, uuid>>," +
+-        "udtval frozen<" + myType + ">, " +
+-        "PRIMARY KEY (" + columnNames + "))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView(
+-        "mv_test",
+-        "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE " +
+-        "asciival = 'abc' AND " +
+-        "bigintval = 123 AND " +
+-        "blobval = 0xfeed AND " +
+-        "booleanval = true AND " +
+-        "dateval = '1987-03-23' AND " +
+-        "decimalval = 123.123 AND " +
+-        "doubleval = 123.123 AND " +
+-        "floatval = 123.123 AND " +
+-        "inetval = '127.0.0.1' AND " +
+-        "intval = 123 AND " +
+-        "textval = 'abc' AND " +
+-        "timeval = '07:35:07.000111222' AND " +
+-        "timestampval = 123123123 AND " +
+-        "timeuuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+-        "uuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+-        "varcharval = 'abc' AND " +
+-        "varintval = 123123123 AND " +
+-        "frozenlistval = [1, 2, 3] AND " +
+-        "frozensetval = {6BDDC89A-5644-11E4-97FC-56847AFE9799} AND " +
+-        "frozenmapval = {'a': 1, 'b': 2} AND " +
+-        "tupleval = (1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799) AND " +
+-        "udtval = {a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}} " +
+-        "PRIMARY KEY (" + columnNames + ")");
+-
+-        execute("INSERT INTO %s (" + columnNames + ") VALUES (" +
+-                "'abc'," +
+-                "123," +
+-                "0xfeed," +
+-                "true," +
+-                "'1987-03-23'," +
+-                "123.123," +
+-                "123.123," +
+-                "123.123," +
+-                "'127.0.0.1'," +
+-                "123," +
+-                "'abc'," +
+-                "'07:35:07.000111222'," +
+-                "123123123," +
+-                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+-                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+-                "'abc'," +
+-                "123123123," +
+-                "[1, 2, 3]," +
+-                "{6BDDC89A-5644-11E4-97FC-56847AFE9799}," +
+-                "{'a': 1, 'b': 2}," +
+-                "(1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799)," +
+-                "{a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}})");
+-
+-        assert !execute("SELECT * FROM mv_test").isEmpty();
+-
+-        executeNet(version, "ALTER TABLE %s RENAME inetval TO foo");
+-        assert !execute("SELECT * FROM mv_test").isEmpty();
+-    }
+-
+-    @Test
+-    public void testMVCreationWithNonPrimaryRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        try {
+-            createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d = 1 PRIMARY KEY (a, b, c)");
+-            dropMaterializedView("mv_test");
+-        } catch(Exception e) {
+-            throw new RuntimeException("MV creation with non primary column restrictions failed.", e);
+-        }
+-
+-        dropTable("DROP TABLE %s");
+-    }
+-
+-    @Test
+-    public void testNonPrimaryRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 0);
+-
+-        // only accept rows where c = 1
+-        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (a, b, c)");
+-
+-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+-            Thread.sleep(10);
+-
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // insert new rows that do not match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 1, 2, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // insert new row that does match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 1, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // update rows that don't match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 2, 2, 0);
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 1, 2, 1);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // update a row that does match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 1, 1, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // delete rows that don't match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 2, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // delete a row that does match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 1, 2);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // delete a partition that matches the filter
+-        execute("DELETE FROM %s WHERE a = ?", 1);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0)
+-        );
+-
+-        dropMaterializedView("mv_test");
+-        dropTable("DROP TABLE %s");
+-    }
+-
+-    @Test
+-    public void complexRestrictedTimestampUpdateTestWithFlush() throws Throwable
+-    {
+-        complexRestrictedTimestampUpdateTest(true);
+-    }
+-
+-    @Test
+-    public void complexRestrictedTimestampUpdateTestWithoutFlush() throws Throwable
+-    {
+-        complexRestrictedTimestampUpdateTest(false);
+-    }
+-
+-    public void complexRestrictedTimestampUpdateTest(boolean flush) throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, e int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        Keyspace ks = Keyspace.open(keyspace());
+-
+-        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (c, a, b)");
+-        ks.getColumnFamilyStore("mv").disableAutoCompaction();
+-
+-        //Set initial values TS=0, matching the restriction and verify view
+-        executeNet(version, "INSERT INTO %s (a, b, c, d) VALUES (0, 0, 1, 0) USING TIMESTAMP 0");
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //update c's timestamp TS=2
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //change c's value and TS=3, tombstones c=1 and adds c=0 record
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 0, 0, 0));
+-
+-        if(flush)
+-        {
+-            ks.getColumnFamilyStore("mv").forceMajorCompaction();
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        }
+-
+-        //change c's value back to 1 with TS=4, check we can see d
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        if (flush)
+-        {
+-            ks.getColumnFamilyStore("mv").forceMajorCompaction();
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        }
+-
+-        assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
+-
+-        //Add e value @ TS=1
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 1 SET e = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //Change d value @ TS=2
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET d = ? WHERE a = ? and b = ? ", 2, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //Change d value @ TS=3
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(1));
+-
+-        //Tombstone c
+-        executeNet(version, "DELETE FROM %s WHERE a = ? and b = ?", 0, 0);
+-        assertRowsIgnoringOrder(execute("SELECT d from mv"));
+-        assertRows(execute("SELECT d from mv"));
+-
+-        //Add back without D
+-        executeNet(version, "INSERT INTO %s (a, b, c) VALUES (0, 0, 1)");
+-
+-        //Make sure D doesn't pop back in.
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row((Object) null));
+-
+-        //New partition
+-        // insert a row with timestamp 0
+-        executeNet(version, "INSERT INTO %s (a, b, c, d, e) VALUES (?, ?, ?, ?, ?) USING TIMESTAMP 0", 1, 0, 1, 0, 0);
+-
+-        // overwrite pk and e with timestamp 1, but don't overwrite d
+-        executeNet(version, "INSERT INTO %s (a, b, c, e) VALUES (?, ?, ?, ?) USING TIMESTAMP 1", 1, 0, 1, 0);
+-
+-        // delete with timestamp 0 (which should only delete d)
+-        executeNet(version, "DELETE FROM %s USING TIMESTAMP 0 WHERE a = ? AND b = ?", 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, null, 0)
+-        );
+-
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? AND b = ?", 1, 1, 1);
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? AND b = ?", 1, 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, null, 0)
+-        );
+-
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? AND b = ?", 0, 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, 0, 0)
+-        );
+-    }
+-
+-    @Test
+-    public void testRestrictedRegularColumnTimestampUpdates() throws Throwable
+-    {
+-        // Regression test for CASSANDRA-10910
+-
+-        createTable("CREATE TABLE %s (" +
+-                    "k int PRIMARY KEY, " +
+-                    "c int, " +
+-                    "val int)");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView("mv_rctstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (k,c)");
+-
+-        updateView("UPDATE %s SET c = ?, val = ? WHERE k = ?", 0, 0, 0);
+-        updateView("UPDATE %s SET val = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s SET c = ? WHERE k = ?", 1, 0);
+-        assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(1, 0, 1));
+-
+-        updateView("TRUNCATE %s");
+-
+-        updateView("UPDATE %s USING TIMESTAMP 1 SET c = ?, val = ? WHERE k = ?", 0, 0, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 2 SET val = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 3 SET val = ? WHERE k = ?", 2, 0);
+-        assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(1, 0, 2));
+-    }
+-
+-    @Test
+-    public void testOldTimestampsWithRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (" +
+-                    "k int, " +
+-                    "c int, " +
+-                    "val text, " + "" +
+-                    "PRIMARY KEY(k, c))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView("mv_tstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL AND val = 'baz' PRIMARY KEY (val,k,c)");
+-
+-        for (int i = 0; i < 100; i++)
+-            updateView("INSERT into %s (k,c,val)VALUES(?,?,?)", 0, i % 2, "baz");
+-
+-        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush(UNIT_TESTS);
+-
+-        Assert.assertEquals(2, execute("select * from %s").size());
+-        Assert.assertEquals(2, execute("select * from mv_tstest").size());
+-
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 0"), row("baz"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0), row(1));
+-
+-        //Make sure an old TS does nothing
+-        updateView("UPDATE %s USING TIMESTAMP 100 SET val = ? where k = ? AND c = ?", "bar", 0, 1);
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 1"), row("baz"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0), row(1));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"));
+-
+-        //Latest TS
+-        updateView("UPDATE %s SET val = ? where k = ? AND c = ?", "bar", 0, 1);
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 1"), row("bar"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0));
+->>>>>>>
+     }
+ }
+--- a/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java
+@@ -39,13 +39,10 @@
+ import com.datastax.driver.core.exceptions.InvalidQueryException;
+ import org.apache.cassandra.concurrent.SEPExecutor;
+ import org.apache.cassandra.concurrent.Stage;
+-<<<<<<<
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.db.SchemaCQLHelper;
+-=======
+ import org.apache.cassandra.db.SystemKeyspace;
+->>>>>>>
+ import org.apache.cassandra.schema.ColumnMetadata;
+ import org.apache.cassandra.schema.Schema;
+ import org.apache.cassandra.exceptions.InvalidRequestException;
+@@ -936,7 +933,7 @@
+         createView(view, createView);
+ 
+         ColumnFamilyStore mv = Keyspace.open(keyspace()).getColumnFamilyStore(view);
+-        
++
+         assertTrue(SchemaCQLHelper.getTableMetadataAsCQL(mv.metadata(), true, true, true)
+                                   .startsWith(String.format(viewSnapshotSchema,
+                                                             keyspace(),
+--- a/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
+@@ -25,12 +25,10 @@
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.stream.Collectors;
+-import java.util.stream.Stream;
+ import java.util.stream.StreamSupport;
+ 
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.ImmutableMap;
+-import com.google.common.io.Files;
+ 
+ import org.junit.Before;
+ import org.junit.BeforeClass;
+@@ -48,16 +46,11 @@
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.db.commitlog.CommitLog;
+-import org.apache.cassandra.db.rows.Row;
+ import org.apache.cassandra.dht.*;
+ import org.apache.cassandra.exceptions.*;
+ import org.apache.cassandra.schema.Schema;
+ import org.apache.cassandra.schema.TableMetadataRef;
+-<<<<<<<
+-import org.apache.cassandra.serializers.SimpleDateSerializer;
+-=======
+ import org.apache.cassandra.service.QueryState;
+->>>>>>>
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.transport.ProtocolVersion;
+ import org.apache.cassandra.utils.*;

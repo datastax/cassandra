@@ -18,15 +18,16 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import com.google.common.collect.BoundType;
 import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -34,7 +35,11 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryState;
 
 import static org.apache.cassandra.cql3.statements.Bound.END;
 import static org.apache.cassandra.cql3.statements.Bound.START;
@@ -45,36 +50,108 @@ import static org.apache.cassandra.cql3.statements.Bound.START;
  * <p>If all partition key columns have non-token restrictions and do not need filtering, they take precedence
  * when calculating bounds, incusiveness etc (see CASSANDRA-12149).</p>
  */
-final class TokenFilter implements PartitionKeyRestrictions
+abstract class TokenFilter implements PartitionKeyRestrictions
 {
     /**
      * The decorated restriction
      */
-    private final PartitionKeyRestrictions restrictions;
+    final PartitionKeyRestrictions restrictions;
 
     /**
      * The restriction on the token
      */
-    private final TokenRestriction tokenRestriction;
+    final TokenRestriction tokenRestriction;
 
     /**
      * Partitioner to manage tokens, extracted from tokenRestriction metadata.
      */
     private final IPartitioner partitioner;
 
-    public boolean hasIN()
+    static TokenFilter create(PartitionKeyRestrictions restrictions, TokenRestriction tokenRestriction)
     {
-        return isOnToken() ? false : restrictions.hasIN();
+        boolean onToken = restrictions.needFiltering(tokenRestriction.metadata) || restrictions.size() < tokenRestriction.size();
+        return onToken ? new TokenFilter.OnToken(restrictions, tokenRestriction)
+                       : new TokenFilter.NotOnToken(restrictions, tokenRestriction);
     }
 
-    public boolean hasContains()
+    private TokenFilter(PartitionKeyRestrictions restrictions, TokenRestriction tokenRestriction)
     {
-        return isOnToken() ? false : restrictions.hasContains();
+        this.restrictions = restrictions;
+        this.tokenRestriction = tokenRestriction;
+        this.partitioner = tokenRestriction.metadata.partitioner;
     }
 
-    public boolean hasOnlyEqualityRestrictions()
+    private static final class OnToken extends TokenFilter
     {
-        return isOnToken() ? false : restrictions.hasOnlyEqualityRestrictions();
+        private OnToken(PartitionKeyRestrictions restrictions, TokenRestriction tokenRestriction)
+        {
+            super(restrictions, tokenRestriction);
+        }
+
+        @Override
+        public boolean isOnToken()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean isInclusive(Bound bound)
+        {
+            return tokenRestriction.isInclusive(bound);
+        }
+
+        @Override
+        public boolean hasBound(Bound bound)
+        {
+            return tokenRestriction.hasBound(bound);
+        }
+
+        @Override
+        public List<ByteBuffer> bounds(Bound bound, QueryOptions options) throws InvalidRequestException
+        {
+            return tokenRestriction.bounds(bound, options);
+        }
+    }
+
+    private static final class NotOnToken extends TokenFilter
+    {
+        private NotOnToken(PartitionKeyRestrictions restrictions, TokenRestriction tokenRestriction)
+        {
+            super(restrictions, tokenRestriction);
+        }
+
+        @Override
+        public boolean isInclusive(Bound bound)
+        {
+            return restrictions.isInclusive(bound);
+        }
+
+        @Override
+        public boolean hasBound(Bound bound)
+        {
+            return restrictions.hasBound(bound);
+        }
+
+        @Override
+        public List<ByteBuffer> bounds(Bound bound, QueryOptions options) throws InvalidRequestException
+        {
+            return restrictions.bounds(bound, options);
+        }
+
+        public boolean hasIN()
+        {
+            return restrictions.hasIN();
+        }
+
+        public boolean hasContains()
+        {
+            return restrictions.hasContains();
+        }
+
+        public boolean hasOnlyEqualityRestrictions()
+        {
+            return restrictions.hasOnlyEqualityRestrictions();
+        }
     }
 
     @Override
@@ -94,44 +171,19 @@ final class TokenFilter implements PartitionKeyRestrictions
         return needFiltering(tokenRestriction.metadata) || restrictions.size() < tokenRestriction.size();
     }
 
-    public TokenFilter(PartitionKeyRestrictions restrictions, TokenRestriction tokenRestriction)
-    {
-        this.restrictions = restrictions;
-        this.tokenRestriction = tokenRestriction;
-        this.partitioner = tokenRestriction.metadata.partitioner;
-    }
-
     @Override
-    public List<ByteBuffer> values(QueryOptions options) throws InvalidRequestException
+    public List<ByteBuffer> values(QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
-        return filter(restrictions.values(options), options);
+        return filter(restrictions.values(options, queryState), options, queryState);
     }
 
     @Override
     public PartitionKeyRestrictions mergeWith(Restriction restriction) throws InvalidRequestException
     {
         if (restriction.isOnToken())
-            return new TokenFilter(restrictions, (TokenRestriction) tokenRestriction.mergeWith(restriction));
+            return TokenFilter.create(restrictions, (TokenRestriction) tokenRestriction.mergeWith(restriction));
 
-        return new TokenFilter(restrictions.mergeWith(restriction), tokenRestriction);
-    }
-
-    @Override
-    public boolean isInclusive(Bound bound)
-    {
-        return isOnToken() ? tokenRestriction.isInclusive(bound) : restrictions.isInclusive(bound);
-    }
-
-    @Override
-    public boolean hasBound(Bound bound)
-    {
-        return isOnToken() ? tokenRestriction.hasBound(bound) : restrictions.hasBound(bound);
-    }
-
-    @Override
-    public List<ByteBuffer> bounds(Bound bound, QueryOptions options) throws InvalidRequestException
-    {
-        return isOnToken() ? tokenRestriction.bounds(bound, options) : restrictions.bounds(bound, options);
+        return TokenFilter.create(restrictions.mergeWith(restriction), tokenRestriction);
     }
 
     /**
@@ -139,13 +191,14 @@ final class TokenFilter implements PartitionKeyRestrictions
      *
      * @param values the values returned by the decorated restriction
      * @param options the query options
+     * @param queryState the query state
      * @return the values matching the token restriction
      * @throws InvalidRequestException if the request is invalid
      */
-    private List<ByteBuffer> filter(List<ByteBuffer> values, QueryOptions options) throws InvalidRequestException
+    private List<ByteBuffer> filter(List<ByteBuffer> values, QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
         RangeSet<Token> rangeSet = tokenRestriction.hasSlice() ? toRangeSet(tokenRestriction, options)
-                                                               : toRangeSet(tokenRestriction.values(options));
+                                                               : toRangeSet(tokenRestriction.values(options, queryState));
 
         return filterWithRangeSet(rangeSet, values);
     }
@@ -278,9 +331,15 @@ final class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public void addRowFilterTo(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
+    public boolean needsFiltering(Index.Group indexGroup)
     {
-        restrictions.addRowFilterTo(filter, indexRegistry, options);
+        return restrictions.needsFiltering(indexGroup);
+    }
+
+    @Override
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+    {
+        restrictions.addToRowFilter(filter, indexRegistry, options);
     }
 
     @Override

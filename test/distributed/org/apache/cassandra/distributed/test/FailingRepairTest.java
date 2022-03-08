@@ -63,8 +63,10 @@ import org.apache.cassandra.distributed.impl.InstanceKiller;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.ForwardingSSTableReader;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairParallelism;
@@ -73,17 +75,19 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService.ParentRepairStatus;
 import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+
 @RunWith(Parameterized.class)
 public class FailingRepairTest extends TestBaseImpl implements Serializable
 {
     private static ICluster<IInvokableInstance> CLUSTER;
 
-    private final Verb messageType;
+    private final int messageType;
     private final RepairParallelism parallelism;
     private final boolean withTracing;
     private final SerializableRunnable setup;
 
-    public FailingRepairTest(Verb messageType, RepairParallelism parallelism, boolean withTracing, SerializableRunnable setup)
+    public FailingRepairTest(int messageType, RepairParallelism parallelism, boolean withTracing, SerializableRunnable setup)
     {
         this.messageType = messageType;
         this.parallelism = parallelism;
@@ -99,18 +103,19 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         {
             for (Boolean withTracing : Arrays.asList(Boolean.TRUE, Boolean.FALSE))
             {
-                tests.add(new Object[]{ Verb.VALIDATION_REQ, parallelism, withTracing, failingReaders(Verb.VALIDATION_REQ, parallelism, withTracing) });
+                tests.add(new Object[]{ Verb.VALIDATION_REQ.id, parallelism, withTracing, failingReaders(Verb.VALIDATION_REQ.id, parallelism, withTracing) });
             }
         }
         return tests;
     }
 
-    private static SerializableRunnable failingReaders(Verb type, RepairParallelism parallelism, boolean withTracing)
+    private static SerializableRunnable failingReaders(int typeId, RepairParallelism parallelism, boolean withTracing)
     {
         return () -> {
+            Verb type = Verb.fromId(typeId);
             String cfName = getCfName(type, parallelism, withTracing);
             ColumnFamilyStore cf = Keyspace.open(KEYSPACE).getColumnFamilyStore(cfName);
-            cf.forceBlockingFlush();
+            cf.forceBlockingFlush(UNIT_TESTS);
             Set<SSTableReader> remove = cf.getLiveSSTables();
             Set<SSTableReader> replace = new HashSet<>();
             if (type == Verb.VALIDATION_REQ)
@@ -170,7 +175,7 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
     {
         final int replica = 1;
         final int coordinator = 2;
-        String tableName = getCfName(messageType, parallelism, withTracing);
+        String tableName = getCfName(Verb.fromId(messageType), parallelism, withTracing);
         String fqtn = KEYSPACE + "." + tableName;
 
         CLUSTER.schemaChange("CREATE TABLE " + fqtn + " (k INT, PRIMARY KEY (k))");
@@ -273,6 +278,12 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             super(delegate);
         }
 
+        @Override
+        public PartitionIndexIterator allKeysIterator() throws IOException
+        {
+            throw new IOException("Fail");
+        }
+
         public ISSTableScanner getScanner()
         {
             return new FailingISSTableScanner();
@@ -296,6 +307,18 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         public ChannelProxy getDataChannel()
         {
             throw new RuntimeException();
+        }
+
+        @Override
+        public boolean hasIndex()
+        {
+            return false;
+        }
+
+        @Override
+        public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+        {
+            return null;
         }
 
         public String toString()
@@ -329,6 +352,11 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         public Set<SSTableReader> getBackingSSTables()
         {
             return Collections.emptySet();
+        }
+
+        public int level()
+        {
+            return 0;
         }
 
         public TableMetadata metadata()

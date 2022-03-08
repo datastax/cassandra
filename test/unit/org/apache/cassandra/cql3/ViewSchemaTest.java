@@ -29,29 +29,28 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.concurrent.SEPExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SchemaCQLHelper;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaManager;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import com.datastax.driver.core.exceptions.InvalidQueryException;
 
 import static org.junit.Assert.assertTrue;
 
@@ -191,7 +190,7 @@ public class ViewSchemaTest extends CQLTester
 
         //Test alter add
         executeNet(protocolVersion, "ALTER TABLE %s ADD foo text");
-        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace(), "mv1_test");
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata(keyspace(), "mv1_test");
         Assert.assertNotNull(metadata.getColumn(ByteBufferUtil.bytes("foo")));
 
         updateView("INSERT INTO %s(k,asciival,bigintval,foo)VALUES(?,?,?,?)", 0, "foo", 1L, "bar");
@@ -201,7 +200,7 @@ public class ViewSchemaTest extends CQLTester
         executeNet(protocolVersion, "ALTER TABLE %s RENAME asciival TO bar");
 
         assertRows(execute("SELECT bar from %s"), row("foo"));
-        metadata = Schema.instance.getTableMetadata(keyspace(), "mv1_test");
+        metadata = SchemaManager.instance.getTableMetadata(keyspace(), "mv1_test");
         Assert.assertNotNull(metadata.getColumn(ByteBufferUtil.bytes("bar")));
     }
 
@@ -934,8 +933,8 @@ public class ViewSchemaTest extends CQLTester
         createView(view, createView);
 
         ColumnFamilyStore mv = Keyspace.open(keyspace()).getColumnFamilyStore(view);
-        
-        assertTrue(SchemaCQLHelper.getTableMetadataAsCQL(mv.metadata(), true, true, true)
+
+        assertTrue(SchemaCQLHelper.getTableMetadataAsCQL(mv.metadata(), mv.keyspace.getMetadata(), true, true, true)
                                   .startsWith(String.format(viewSnapshotSchema,
                                                             keyspace(),
                                                             view,

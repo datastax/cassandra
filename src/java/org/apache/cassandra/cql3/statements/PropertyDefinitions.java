@@ -69,7 +69,7 @@ public class PropertyDefinitions
         return (String)val;
     }
 
-    protected Map<String, String> getMap(String name) throws SyntaxException
+    public Map<String, String> getMap(String name) throws SyntaxException
     {
         Object val = properties.get(name);
         if (val == null)
@@ -142,5 +142,18 @@ public class PropertyDefinitions
                 throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, key));
             }
         }
+    }
+
+    /**
+     * Returns the name of all the properties that are updated by this object.
+     */
+    public Set<String> updatedProperties()
+    {
+        return properties.keySet();
+    }
+
+    public void removeProperty(String name)
+    {
+        properties.remove(name);
     }
 }

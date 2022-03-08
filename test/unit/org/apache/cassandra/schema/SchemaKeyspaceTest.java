@@ -19,10 +19,7 @@
 package org.apache.cassandra.schema;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -31,9 +28,9 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableMap;
-
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -49,13 +46,16 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
+import static org.apache.cassandra.schema.SchemaTestUtil.getSchemaMutations;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(BMUnitRunner.class)
@@ -71,25 +71,8 @@ public class SchemaKeyspaceTest
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
-    }
 
-    /** See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes */
-    @Test
-    public void testSchemaPullSynchronicity() throws Exception
-    {
-        for (String methodName : Arrays.asList("schemaKeyspaceAsMutations",
-                                               "truncateSchemaKeyspace",
-                                               "saveSystemKeyspace",
-                                               "updateVersion"))
-        {
-            Method method = Schema.class.getDeclaredMethod(methodName);
-            assertTrue(Modifier.isSynchronized(method.getModifiers()));
-        }
-
-        Method method = Schema.class.getDeclaredMethod("merge", Collection.class);
-        assertTrue(Modifier.isSynchronized(method.getModifiers()));
-        method = Schema.class.getDeclaredMethod("transform", SchemaTransformation.class, boolean.class, long.class);
-        assertTrue(Modifier.isSynchronized(method.getModifiers()));
+        MessagingService.instance().listen();
     }
 
     /** See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes */
@@ -104,7 +87,7 @@ public class SchemaKeyspaceTest
         String keyspace = "sandbox";
         ExecutorService pool = Executors.newFixedThreadPool(2);
 
-        Schema.instance.truncateSchemaKeyspace();; // Make sure there's nothing but the create we're about to do
+        SchemaKeyspace.truncate(); // Make sure there's nothing but the create we're about to do
         CyclicBarrier barrier = new CyclicBarrier(2);
 
         Future<Void> creation = pool.submit(() -> {
@@ -115,19 +98,13 @@ public class SchemaKeyspaceTest
 
         Future<Collection<Mutation>> mutationsFromThread = pool.submit(() -> {
             barrier.await();
-
-            Collection<Mutation> mutations = Schema.instance.schemaKeyspaceAsMutations();
-            // Make sure we actually have a mutation to check for partial modification.
-            while (mutations.size() == 0)
-                mutations = Schema.instance.schemaKeyspaceAsMutations();
-
-            return mutations;
+            return Stream.generate(() -> getSchemaMutations().join()).filter(m -> !m.isEmpty()).findFirst().get();
         });
 
         creation.get(); // make sure the creation is finished
 
         Collection<Mutation> mutationsFromConcurrentAccess = mutationsFromThread.get();
-        Collection<Mutation> settledMutations = Schema.instance.schemaKeyspaceAsMutations();
+        Collection<Mutation> settledMutations = getSchemaMutations().join();
 
         // If the worker thread picked up the creation at all, it should have the same modifications.
         // In other words, we should see all modifications or none.
@@ -147,7 +124,7 @@ public class SchemaKeyspaceTest
     @Test
     public void testConversionsInverses() throws Exception
     {
-        for (String keyspaceName : Schema.instance.getNonSystemKeyspaces())
+        for (String keyspaceName : SchemaManager.instance.getNonSystemKeyspaces().names())
         {
             for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
             {
@@ -167,7 +144,7 @@ public class SchemaKeyspaceTest
 
         createTable(keyspace, "CREATE TABLE test (a text primary key, b int, c int)");
 
-        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace, "test");
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata(keyspace, "test");
         assertTrue("extensions should be empty", metadata.params.extensions.isEmpty());
 
         ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of("From ... with Love",
@@ -177,7 +154,7 @@ public class SchemaKeyspaceTest
 
         updateTable(keyspace, metadata, copy);
 
-        metadata = Schema.instance.getTableMetadata(keyspace, "test");
+        metadata = SchemaManager.instance.getTableMetadata(keyspace, "test");
         assertEquals(extensions, metadata.params.extensions);
     }
 
@@ -185,16 +162,16 @@ public class SchemaKeyspaceTest
     public void testReadRepair()
     {
         createTable("ks", "CREATE TABLE tbl (a text primary key, b int, c int) WITH read_repair='none'");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "tbl");
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata("ks", "tbl");
         Assert.assertEquals(ReadRepairStrategy.NONE, metadata.params.readRepair);
 
     }
 
     private static void updateTable(String keyspace, TableMetadata oldTable, TableMetadata newTable)
     {
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceInstance(keyspace).getMetadata();
+        KeyspaceMetadata ksm = SchemaManager.instance.getKeyspaceInstance(keyspace).getMetadata();
         Mutation mutation = SchemaKeyspace.makeUpdateTableMutation(ksm, oldTable, newTable, FBUtilities.timestampMicros()).build();
-        Schema.instance.merge(Collections.singleton(mutation));
+        SchemaTestUtil.mergeAndAnnounceLocally(Collections.singleton(mutation));
     }
 
     private static void createTable(String keyspace, String cql)
@@ -203,17 +180,17 @@ public class SchemaKeyspaceTest
 
         KeyspaceMetadata ksm = KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1), Tables.of(table));
         Mutation mutation = SchemaKeyspace.makeCreateTableMutation(ksm, table, FBUtilities.timestampMicros()).build();
-        Schema.instance.merge(Collections.singleton(mutation));
+        SchemaTestUtil.mergeAndAnnounceLocally(Collections.singleton(mutation));
     }
 
     private static void checkInverses(TableMetadata metadata) throws Exception
     {
-        KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(metadata.keyspace);
+        KeyspaceMetadata keyspace = SchemaManager.instance.getKeyspaceMetadata(metadata.keyspace);
 
         // Test schema conversion
         Mutation rm = SchemaKeyspace.makeCreateTableMutation(keyspace, metadata, FBUtilities.timestampMicros()).build();
-        PartitionUpdate serializedCf = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES));
-        PartitionUpdate serializedCD = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS));
+        PartitionUpdate serializedCf = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES));
+        PartitionUpdate serializedCD = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS));
 
         UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES),
                                                                  UnfilteredRowIterators.filter(serializedCf.unfilteredIterator(), FBUtilities.nowInSeconds()))
@@ -256,5 +233,20 @@ public class SchemaKeyspaceTest
         String query = String.format("DELETE FROM %s.%s WHERE keyspace_name=? and table_name=?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS);
         executeOnceInternal(query, testKS, testTable);
         SchemaKeyspace.fetchNonSystemKeyspaces();
+    }
+
+    @Test
+    public void testIsKeyspaceWithLocalStrategy()
+    {
+        assertTrue(SchemaManager.isKeyspaceWithLocalStrategy("system"));
+        assertTrue(SchemaManager.isKeyspaceWithLocalStrategy(SchemaManager.instance.getKeyspaceMetadata("system")));
+        assertFalse(SchemaManager.isKeyspaceWithLocalStrategy("non_existing"));
+
+        SchemaLoader.createKeyspace("local_ks", KeyspaceParams.local());
+        SchemaLoader.createKeyspace("simple_ks", KeyspaceParams.simple(3));
+
+        assertTrue(SchemaManager.isKeyspaceWithLocalStrategy("local_ks"));
+        assertTrue(SchemaManager.isKeyspaceWithLocalStrategy(SchemaManager.instance.getKeyspaceMetadata("local_ks")));
+        assertFalse(SchemaManager.isKeyspaceWithLocalStrategy("simple_ks"));
     }
 }

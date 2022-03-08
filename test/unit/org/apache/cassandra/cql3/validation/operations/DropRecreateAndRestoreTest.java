@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
-import java.io.File;
 import java.util.List;
 
 import org.junit.Test;
@@ -28,6 +27,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableId;
 
@@ -53,7 +53,7 @@ public class DropRecreateAndRestoreTest extends CQLTester
 
         // Drop will flush and clean segments. Hard-link them so that they can be restored later.
         List<String> segments = CommitLog.instance.getActiveSegmentNames();
-        File logPath = new File(DatabaseDescriptor.getCommitLogLocation());
+        File logPath = DatabaseDescriptor.getCommitLogLocation();
         for (String segment: segments)
             FileUtils.createHardLink(new File(logPath, segment), new File(logPath, segment + ".save"));
 
@@ -65,7 +65,7 @@ public class DropRecreateAndRestoreTest extends CQLTester
 
         // Restore saved segments
         for (String segment: segments)
-            FileUtils.renameWithConfirm(new File(logPath, segment + ".save"), new File(logPath, segment));
+            new File(logPath, segment + ".save").move(new File(logPath, segment));
         try
         {
             // Restore to point in time.

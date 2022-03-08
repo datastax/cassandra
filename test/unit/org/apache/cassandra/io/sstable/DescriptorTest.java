@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
-import java.io.IOException;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
@@ -29,11 +27,15 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class DescriptorTest
 {
@@ -42,10 +44,10 @@ public class DescriptorTest
     private final String cfId = ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(UUID.randomUUID()));
     private final File tempDataDir;
 
-    public DescriptorTest() throws IOException
+    public DescriptorTest()
     {
         // create CF directories, one without CFID and one with it
-        tempDataDir = FileUtils.createTempFile("DescriptorTest", null).getParentFile();
+        tempDataDir = FileUtils.createTempFile("DescriptorTest", null).parent();
     }
 
     @BeforeClass
@@ -57,44 +59,44 @@ public class DescriptorTest
     @Test
     public void testFromFilename() throws Exception
     {
-        File cfIdDir = new File(tempDataDir.getAbsolutePath() + File.separator + ksname + File.separator + cfname + '-' + cfId);
+        File cfIdDir = new File(tempDataDir.absolutePath() + File.pathSeparator() + ksname + File.pathSeparator() + cfname + '-' + cfId);
         testFromFilenameFor(cfIdDir);
     }
 
     @Test
     public void testFromFilenameInBackup() throws Exception
     {
-        File backupDir = new File(StringUtils.join(new String[]{tempDataDir.getAbsolutePath(), ksname, cfname + '-' + cfId, Directories.BACKUPS_SUBDIR}, File.separator));
+        File backupDir = new File(StringUtils.join(new String[]{ tempDataDir.absolutePath(), ksname, cfname + '-' + cfId, Directories.BACKUPS_SUBDIR}, File.pathSeparator()));
         testFromFilenameFor(backupDir);
     }
 
     @Test
     public void testFromFilenameInSnapshot() throws Exception
     {
-        File snapshotDir = new File(StringUtils.join(new String[]{tempDataDir.getAbsolutePath(), ksname, cfname + '-' + cfId, Directories.SNAPSHOT_SUBDIR, "snapshot_name"}, File.separator));
+        File snapshotDir = new File(StringUtils.join(new String[]{ tempDataDir.absolutePath(), ksname, cfname + '-' + cfId, Directories.SNAPSHOT_SUBDIR, "snapshot_name"}, File.pathSeparator()));
         testFromFilenameFor(snapshotDir);
     }
 
     @Test
     public void testFromFilenameInLegacyDirectory() throws Exception
     {
-        File cfDir = new File(tempDataDir.getAbsolutePath() + File.separator + ksname + File.separator + cfname);
+        File cfDir = new File(tempDataDir.absolutePath() + File.pathSeparator() + ksname + File.pathSeparator() + cfname);
         testFromFilenameFor(cfDir);
     }
 
     private void testFromFilenameFor(File dir)
     {
-        checkFromFilename(new Descriptor(dir, ksname, cfname, 1, SSTableFormat.Type.BIG));
+        checkFromFilename(new Descriptor(dir, ksname, cfname, new SequenceBasedSSTableUniqueIdentifier(1), SSTableFormat.Type.BIG));
 
         // secondary index
         String idxName = "myidx";
-        File idxDir = new File(dir.getAbsolutePath() + File.separator + Directories.SECONDARY_INDEX_NAME_SEPARATOR + idxName);
-        checkFromFilename(new Descriptor(idxDir, ksname, cfname + Directories.SECONDARY_INDEX_NAME_SEPARATOR + idxName, 4, SSTableFormat.Type.BIG));
+        File idxDir = new File(dir.absolutePath() + File.pathSeparator() + Directories.SECONDARY_INDEX_NAME_SEPARATOR + idxName);
+        checkFromFilename(new Descriptor(idxDir, ksname, cfname + Directories.SECONDARY_INDEX_NAME_SEPARATOR + idxName, new SequenceBasedSSTableUniqueIdentifier(4), SSTableFormat.Type.BIG));
     }
 
     private void checkFromFilename(Descriptor original)
     {
-        File file = new File(original.filenameFor(Component.DATA));
+        File file = original.fileFor(Component.DATA);
 
         Pair<Descriptor, Component> pair = Descriptor.fromFilenameWithComponent(file);
         Descriptor desc = pair.left;
@@ -105,6 +107,8 @@ public class DescriptorTest
         assertEquals(original.version, desc.version);
         assertEquals(original.generation, desc.generation);
         assertEquals(Component.DATA, pair.right);
+
+        assertEquals(Component.DATA, Descriptor.validFilenameWithComponent(file.name()));
     }
 
     @Test
@@ -112,8 +116,8 @@ public class DescriptorTest
     {
         // Descriptor should be equal when parent directory points to the same directory
         File dir = new File(".");
-        Descriptor desc1 = new Descriptor(dir, "ks", "cf", 1, SSTableFormat.Type.BIG);
-        Descriptor desc2 = new Descriptor(dir.getAbsoluteFile(), "ks", "cf", 1, SSTableFormat.Type.BIG);
+        Descriptor desc1 = new Descriptor(dir, "ks", "cf", new SequenceBasedSSTableUniqueIdentifier(1), SSTableFormat.Type.BIG);
+        Descriptor desc2 = new Descriptor(dir.toAbsolute(), "ks", "cf", new SequenceBasedSSTableUniqueIdentifier(1), SSTableFormat.Type.BIG);
         assertEquals(desc1, desc2);
         assertEquals(desc1.hashCode(), desc2.hashCode());
     }
@@ -124,13 +128,29 @@ public class DescriptorTest
         String[] names = {
              "ma-1-big-Data.db",
              // 2ndary index
-             ".idx1" + File.separator + "ma-1-big-Data.db",
+             ".idx1" + File.pathSeparator() + "ma-1-big-Data.db",
         };
 
         for (String name : names)
         {
-            assertNotNull(Descriptor.fromFilename(name));
+            Descriptor descriptor = Descriptor.fromFilename(name);
+            assertNotNull(descriptor);
+            assertNotNull(name, descriptor.filenamePart());
+            assertNotNull(name, Descriptor.validFilenameWithComponent(new File(name).name()));
         }
+    }
+
+    @Test
+    public void testValidFilename()
+    {
+        String names[] = {
+        "system-schema_keyspaces-k234a-1-CompressionInfo.db",  "system-schema_keyspaces-ka-aa-Summary.db",
+        "system-schema_keyspaces-XXX-ka-1-Data.db",             "system-schema_keyspaces-k",
+        "system-schema_keyspace-ka-1-AAA-Data.db",  "system-schema-keyspace-ka-1-AAA-Data.db"
+        };
+
+        for (String name : names)
+            assertFalse(Descriptor.validFilename(name));
     }
 
     @Test
@@ -151,6 +171,8 @@ public class DescriptorTest
             } catch (Throwable e) {
                 //good
             }
+            
+            assertNull(Descriptor.validFilenameWithComponent(name));
         }
     }
 

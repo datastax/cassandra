@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.Set;
@@ -43,13 +42,13 @@ import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class SSTableWriterTestBase extends SchemaLoader
 {
@@ -135,7 +134,7 @@ public class SSTableWriterTestBase extends SchemaLoader
      */
     public static void validateCFS(ColumnFamilyStore cfs)
     {
-        Set<Integer> liveDescriptors = new HashSet<>();
+        Set<SSTableUniqueIdentifier> liveDescriptors = new HashSet<>();
         long spaceUsed = 0;
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
@@ -146,11 +145,11 @@ public class SSTableWriterTestBase extends SchemaLoader
         }
         for (File dir : cfs.getDirectories().getCFDirectories())
         {
-            for (File f : dir.listFiles())
+            for (File f : dir.tryList())
             {
-                if (f.getName().contains("Data"))
+                if (f.name().contains("Data"))
                 {
-                    Descriptor d = Descriptor.fromFilename(f.getAbsolutePath());
+                    Descriptor d = Descriptor.fromFilename(f.absolutePath());
                     assertTrue(d.toString(), liveDescriptors.contains(d.generation));
                 }
             }
@@ -166,7 +165,7 @@ public class SSTableWriterTestBase extends SchemaLoader
     public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn, long repairedAt, UUID pendingRepair, boolean isTransient)
     {
         Descriptor desc = cfs.newSSTableDescriptor(directory);
-        return SSTableWriter.create(desc, 0, repairedAt, pendingRepair, isTransient, new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS), cfs.indexManager.listIndexes(), txn);
+        return SSTableWriter.create(desc, 0, repairedAt, pendingRepair, isTransient, new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS), cfs.indexManager.listIndexGroups(), txn);
     }
 
     public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)

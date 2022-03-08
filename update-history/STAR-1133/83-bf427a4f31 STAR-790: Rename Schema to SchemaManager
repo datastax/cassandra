@@ -1,0 +1,366 @@
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -37,14 +37,10 @@
+ import org.antlr.runtime.*;
+ import org.apache.cassandra.concurrent.ScheduledExecutors;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+-<<<<<<<
+ import org.apache.cassandra.metrics.ClientRequestMetrics;
+ import org.apache.cassandra.metrics.ClientRequestsMetrics;
+ import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+-import org.apache.cassandra.schema.Schema;
+-=======
+ import org.apache.cassandra.schema.SchemaManager;
+->>>>>>>
+ import org.apache.cassandra.schema.SchemaChangeListener;
+ import org.apache.cassandra.schema.SchemaConstants;
+ import org.apache.cassandra.cql3.functions.Function;
+--- a/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
+@@ -513,17 +513,10 @@
+ 
+             synchronized (CQLSSTableWriter.class)
+             {
+-<<<<<<<
+-                if (Schema.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME) == null)
+-                    Schema.instance.load(Schema.getSystemKeyspaceMetadata());
+-                if (Schema.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME) == null)
+-                    Schema.instance.load(SystemKeyspace.metadata());
+-=======
+                 if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME) == null)
+-                    SchemaManager.instance.load(SchemaKeyspace.metadata());
++                    SchemaManager.instance.load(SchemaManager.getSystemKeyspaceMetadata());
+                 if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME) == null)
+                     SchemaManager.instance.load(SystemKeyspace.metadata());
+->>>>>>>
+ 
+                 String keyspaceName = schemaStatement.keyspace();
+ 
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -289,13 +289,8 @@
+     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException, CasWriteUnknownResultException
+     {
+         final long startTimeForMetrics = System.nanoTime();
+-<<<<<<<
+         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+-        TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+-=======
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
+         TableMetadata metadata = SchemaManager.instance.validateTable(keyspaceName, cfName);
+->>>>>>>
+         QueryInfoTracker.LWTWriteTracker lwtTracker = queryTracker().onLWTWrite(state.getClientState(),
+                                                                                 metadata,
+                                                                                 key,
+--- a/src/java/org/apache/cassandra/tools/StandaloneVerifier.java
++++ b/src/java/org/apache/cassandra/tools/StandaloneVerifier.java
+@@ -36,10 +36,6 @@
+ 
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.schema.SchemaManager;
+->>>>>>>
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Directories;
+ import org.apache.cassandra.db.Keyspace;
+@@ -51,7 +47,7 @@
+ import org.apache.cassandra.io.sstable.Component;
+ import org.apache.cassandra.io.sstable.Descriptor;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+-import org.apache.cassandra.schema.Schema;
++import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.OutputHandler;
+ 
+--- a/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java
++++ b/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java
+@@ -42,12 +42,7 @@
+ import org.apache.cassandra.distributed.api.IInvokableInstance;
+ import org.apache.cassandra.distributed.test.TestBaseImpl;
+ import org.apache.cassandra.repair.SystemDistributedKeyspace;
+-<<<<<<<
+-import org.apache.cassandra.schema.Schema;
+-=======
+ import org.apache.cassandra.schema.SchemaManager;
+-import org.apache.cassandra.schema.SchemaKeyspace;
+->>>>>>>
+ import org.apache.cassandra.tracing.TraceKeyspace;
+ import org.apache.cassandra.utils.MBeanWrapper;
+ 
+@@ -125,7 +120,7 @@
+         SYSTEM_TABLES = cluster.get(1).callOnInstance(() -> {
+             Map<String, Collection<String>> map = new HashMap<>();
+             Arrays.asList(SystemKeyspace.metadata(), AuthKeyspace.metadata(), SystemDistributedKeyspace.metadata(),
+-                          Schema.getSystemKeyspaceMetadata(), TraceKeyspace.metadata())
++                          SchemaManager.getSystemKeyspaceMetadata(), TraceKeyspace.metadata())
+                   .forEach(meta -> {
+                       Set<String> tables = meta.tables.stream().map(t -> t.name).collect(Collectors.toSet());
+                       map.put(meta.name, tables);
+--- a/test/unit/org/apache/cassandra/db/SinglePartitionSliceCommandTest.java
++++ b/test/unit/org/apache/cassandra/db/SinglePartitionSliceCommandTest.java
+@@ -284,11 +284,7 @@
+         }
+ 
+         // check (de)serialized iterator for sstable static cell
+-<<<<<<<
+-        Schema.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush(UNIT_TESTS);
+-=======
+-        SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+->>>>>>>
++        SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush(UNIT_TESTS);
+         try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
+         {
+             response = ReadResponse.createDataResponse(pi, cmd, executionController.getRepairedDataInfo());
+--- a/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java
++++ b/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java
+@@ -82,13 +82,13 @@
+                                                "saveSystemKeyspace",
+                                                "updateVersion"))
+         {
+-            Method method = Schema.class.getDeclaredMethod(methodName);
++            Method method = SchemaManager.class.getDeclaredMethod(methodName);
+             assertTrue(Modifier.isSynchronized(method.getModifiers()));
+         }
+ 
+-        Method method = Schema.class.getDeclaredMethod("merge", Collection.class);
++        Method method = SchemaManager.class.getDeclaredMethod("merge", Collection.class);
+         assertTrue(Modifier.isSynchronized(method.getModifiers()));
+-        method = Schema.class.getDeclaredMethod("transform", SchemaTransformation.class, boolean.class, long.class);
++        method = SchemaManager.class.getDeclaredMethod("transform", SchemaTransformation.class, boolean.class, long.class);
+         assertTrue(Modifier.isSynchronized(method.getModifiers()));
+     }
+ 
+@@ -104,7 +104,7 @@
+         String keyspace = "sandbox";
+         ExecutorService pool = Executors.newFixedThreadPool(2);
+ 
+-        Schema.instance.truncateSchemaKeyspace();; // Make sure there's nothing but the create we're about to do
++        SchemaManager.instance.truncateSchemaKeyspace();; // Make sure there's nothing but the create we're about to do
+         CyclicBarrier barrier = new CyclicBarrier(2);
+ 
+         Future<Void> creation = pool.submit(() -> {
+@@ -116,10 +116,10 @@
+         Future<Collection<Mutation>> mutationsFromThread = pool.submit(() -> {
+             barrier.await();
+ 
+-            Collection<Mutation> mutations = Schema.instance.schemaKeyspaceAsMutations();
++            Collection<Mutation> mutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+             // Make sure we actually have a mutation to check for partial modification.
+             while (mutations.size() == 0)
+-                mutations = Schema.instance.schemaKeyspaceAsMutations();
++                mutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+ 
+             return mutations;
+         });
+@@ -127,7 +127,7 @@
+         creation.get(); // make sure the creation is finished
+ 
+         Collection<Mutation> mutationsFromConcurrentAccess = mutationsFromThread.get();
+-        Collection<Mutation> settledMutations = Schema.instance.schemaKeyspaceAsMutations();
++        Collection<Mutation> settledMutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+ 
+         // If the worker thread picked up the creation at all, it should have the same modifications.
+         // In other words, we should see all modifications or none.
+@@ -212,13 +212,8 @@
+ 
+         // Test schema conversion
+         Mutation rm = SchemaKeyspace.makeCreateTableMutation(keyspace, metadata, FBUtilities.timestampMicros()).build();
+-<<<<<<<
+-        PartitionUpdate serializedCf = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES));
+-        PartitionUpdate serializedCD = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS));
+-=======
+-        PartitionUpdate serializedCf = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES));
+-        PartitionUpdate serializedCD = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.COLUMNS));
+->>>>>>>
++        PartitionUpdate serializedCf = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES));
++        PartitionUpdate serializedCD = rm.getPartitionUpdate(SchemaManager.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS));
+ 
+         UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES),
+                                                                  UnfilteredRowIterators.filter(serializedCf.unfilteredIterator(), FBUtilities.nowInSeconds()))
+diff --git a/src/java/org/apache/cassandra/db/SystemKeyspace.java b/src/java/org/apache/cassandra/db/SystemKeyspace.java
+index 90a8ce5f2e..2113f06aee 100644
+--- a/src/java/org/apache/cassandra/db/SystemKeyspace.java
++++ b/src/java/org/apache/cassandra/db/SystemKeyspace.java
+@@ -478,7 +478,7 @@ public final class SystemKeyspace
+ 
+     public static void finishStartup()
+     {
+-        Schema.instance.saveSystemKeyspace();
++        SchemaManager.instance.saveSystemKeyspace();
+     }
+ 
+     public static void persistLocalMetadata()
+diff --git a/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java b/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
+index 2db171f2cb..6714a3e8e8 100644
+--- a/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
+@@ -514,7 +514,7 @@ public class CQLSSTableWriter implements Closeable
+             synchronized (CQLSSTableWriter.class)
+             {
+                 if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME) == null)
+-                    SchemaManager.instance.load(Schema.getSystemKeyspaceMetadata());
++                    SchemaManager.instance.load(SchemaManager.getSystemKeyspaceMetadata());
+                 if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME) == null)
+                     SchemaManager.instance.load(SystemKeyspace.metadata());
+ 
+diff --git a/src/java/org/apache/cassandra/schema/MigrationManager.java b/src/java/org/apache/cassandra/schema/MigrationManager.java
+index eaf840958e..d8a6ecb1e1 100644
+--- a/src/java/org/apache/cassandra/schema/MigrationManager.java
++++ b/src/java/org/apache/cassandra/schema/MigrationManager.java
+@@ -266,7 +266,7 @@ public class MigrationManager
+ 
+         SchemaMigrationDiagnostics.resetLocalSchema();
+ 
+-        Schema.instance.truncateSchemaKeyspace();
++        SchemaManager.instance.truncateSchemaKeyspace();
+ 
+         logger.debug("Clearing local schema keyspace definitions...");
+ 
+diff --git a/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java b/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java
+index 16ee968348..5b02772540 100644
+--- a/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java
++++ b/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java
+@@ -41,7 +41,7 @@ public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
+     public void doVerb(Message<NoPayload> message)
+     {
+         logger.trace("Received schema pull request from {}", message.from());
+-        Message<Collection<Mutation>> response = message.responseWith(Schema.instance.schemaKeyspaceAsMutations());
++        Message<Collection<Mutation>> response = message.responseWith(SchemaManager.instance.schemaKeyspaceAsMutations());
+         MessagingService.instance().send(response, message.from());
+     }
+ }
+\ No newline at end of file
+diff --git a/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java b/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java
+index 474ab5ee04..0ae06eb6bf 100644
+--- a/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java
++++ b/test/distributed/org/apache/cassandra/distributed/test/metric/TableMetricTest.java
+@@ -120,7 +120,7 @@ public class TableMetricTest extends TestBaseImpl
+         SYSTEM_TABLES = cluster.get(1).callOnInstance(() -> {
+             Map<String, Collection<String>> map = new HashMap<>();
+             Arrays.asList(SystemKeyspace.metadata(), AuthKeyspace.metadata(), SystemDistributedKeyspace.metadata(),
+-                          Schema.getSystemKeyspaceMetadata(), TraceKeyspace.metadata())
++                          SchemaManager.getSystemKeyspaceMetadata(), TraceKeyspace.metadata())
+                   .forEach(meta -> {
+                       Set<String> tables = meta.tables.stream().map(t -> t.name).collect(Collectors.toSet());
+                       map.put(meta.name, tables);
+diff --git a/test/unit/org/apache/cassandra/cql3/PagingQueryTest.java b/test/unit/org/apache/cassandra/cql3/PagingQueryTest.java
+index 0bf326d600..d9ffc5d17d 100644
+--- a/test/unit/org/apache/cassandra/cql3/PagingQueryTest.java
++++ b/test/unit/org/apache/cassandra/cql3/PagingQueryTest.java
+@@ -44,7 +44,7 @@ import org.apache.cassandra.db.ReadQuery;
+ import org.apache.cassandra.db.partitions.PartitionIterator;
+ import org.apache.cassandra.exceptions.InvalidRequestException;
+ import org.apache.cassandra.exceptions.OperationExecutionException;
+-import org.apache.cassandra.schema.Schema;
++import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.service.QueryState;
+ import org.apache.cassandra.service.pager.AggregationQueryPager;
+ import org.apache.cassandra.service.pager.QueryPager;
+@@ -391,7 +391,7 @@ public class PagingQueryTest extends CQLTester
+     private String generateData(int genPartitions, int genClusterings, int genClusterings2) throws Throwable
+     {
+         String table = String.format("table_%d_%d_%d", genPartitions, genClusterings, genClusterings2);
+-        if (Schema.instance.getTableMetadata(KEYSPACE, table) != null)
++        if (SchemaManager.instance.getTableMetadata(KEYSPACE, table) != null)
+             return table;
+ 
+         QueryProcessor.executeInternal(String.format("CREATE TABLE %s.%s (k INT, c INT, c2 INT, v INT, PRIMARY KEY (k, c, c2))", KEYSPACE, table));
+diff --git a/test/unit/org/apache/cassandra/db/SystemKeyspaceTest.java b/test/unit/org/apache/cassandra/db/SystemKeyspaceTest.java
+index 97f3874fe4..c481a78467 100644
+--- a/test/unit/org/apache/cassandra/db/SystemKeyspaceTest.java
++++ b/test/unit/org/apache/cassandra/db/SystemKeyspaceTest.java
+@@ -27,8 +27,8 @@ import org.junit.Test;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.commitlog.CommitLog;
+ import org.apache.cassandra.locator.InetAddressAndPort;
+-import org.apache.cassandra.schema.Schema;
+ import org.apache.cassandra.schema.SchemaConstants;
++import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.cql3.QueryProcessor;
+ import org.apache.cassandra.cql3.UntypedResultSet;
+ import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
+@@ -138,7 +138,7 @@ public class SystemKeyspaceTest
+         Set<String> snapshottedSystemTables = getSystemSnapshotFiles(SchemaConstants.SYSTEM_KEYSPACE_NAME);
+         SystemKeyspace.metadata().tables.forEach(t -> assertTrue(snapshottedSystemTables.contains(t.name)));
+         Set<String> snapshottedSchemaTables = getSystemSnapshotFiles(SchemaConstants.SCHEMA_KEYSPACE_NAME);
+-        Schema.getSystemKeyspaceMetadata().tables.forEach(t -> assertTrue(snapshottedSchemaTables.contains(t.name)));
++        SchemaManager.getSystemKeyspaceMetadata().tables.forEach(t -> assertTrue(snapshottedSchemaTables.contains(t.name)));
+ 
+         // clear out the snapshots & set the previous recorded version equal to the latest, we shouldn't
+         // see any new snapshots created this time.
+diff --git a/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java b/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
+index 2ed7741064..380daa0525 100644
+--- a/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
++++ b/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
+@@ -59,7 +59,7 @@ public class MigrationManagerDropKSTest
+     public void dropKS() throws ConfigurationException
+     {
+         // sanity
+-        final KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(KEYSPACE1);
++        final KeyspaceMetadata ks = SchemaManager.instance.getKeyspaceMetadata(KEYSPACE1);
+         assertNotNull(ks);
+         final TableMetadata cfm = ks.tables.getNullable(TABLE2);
+         assertNotNull(cfm);
+@@ -76,7 +76,7 @@ public class MigrationManagerDropKSTest
+ 
+         MigrationManager.announceKeyspaceDrop(ks.name);
+ 
+-        assertNull(Schema.instance.getKeyspaceMetadata(ks.name));
++        assertNull(SchemaManager.instance.getKeyspaceMetadata(ks.name));
+ 
+         // write should fail.
+         boolean success = true;
+diff --git a/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java b/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java
+index 58101ae292..7c7a330b87 100644
+--- a/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java
++++ b/test/unit/org/apache/cassandra/schema/SchemaKeyspaceTest.java
+@@ -82,13 +82,13 @@ public class SchemaKeyspaceTest
+                                                "saveSystemKeyspace",
+                                                "updateVersion"))
+         {
+-            Method method = Schema.class.getDeclaredMethod(methodName);
++            Method method = SchemaManager.class.getDeclaredMethod(methodName);
+             assertTrue(Modifier.isSynchronized(method.getModifiers()));
+         }
+ 
+-        Method method = Schema.class.getDeclaredMethod("merge", Collection.class);
++        Method method = SchemaManager.class.getDeclaredMethod("merge", Collection.class);
+         assertTrue(Modifier.isSynchronized(method.getModifiers()));
+-        method = Schema.class.getDeclaredMethod("transform", SchemaTransformation.class, boolean.class, long.class);
++        method = SchemaManager.class.getDeclaredMethod("transform", SchemaTransformation.class, boolean.class, long.class);
+         assertTrue(Modifier.isSynchronized(method.getModifiers()));
+     }
+ 
+@@ -104,7 +104,7 @@ public class SchemaKeyspaceTest
+         String keyspace = "sandbox";
+         ExecutorService pool = Executors.newFixedThreadPool(2);
+ 
+-        Schema.instance.truncateSchemaKeyspace();; // Make sure there's nothing but the create we're about to do
++        SchemaManager.instance.truncateSchemaKeyspace();; // Make sure there's nothing but the create we're about to do
+         CyclicBarrier barrier = new CyclicBarrier(2);
+ 
+         Future<Void> creation = pool.submit(() -> {
+@@ -116,10 +116,10 @@ public class SchemaKeyspaceTest
+         Future<Collection<Mutation>> mutationsFromThread = pool.submit(() -> {
+             barrier.await();
+ 
+-            Collection<Mutation> mutations = Schema.instance.schemaKeyspaceAsMutations();
++            Collection<Mutation> mutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+             // Make sure we actually have a mutation to check for partial modification.
+             while (mutations.size() == 0)
+-                mutations = Schema.instance.schemaKeyspaceAsMutations();
++                mutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+ 
+             return mutations;
+         });
+@@ -127,7 +127,7 @@ public class SchemaKeyspaceTest
+         creation.get(); // make sure the creation is finished
+ 
+         Collection<Mutation> mutationsFromConcurrentAccess = mutationsFromThread.get();
+-        Collection<Mutation> settledMutations = Schema.instance.schemaKeyspaceAsMutations();
++        Collection<Mutation> settledMutations = SchemaManager.instance.schemaKeyspaceAsMutations();
+ 
+         // If the worker thread picked up the creation at all, it should have the same modifications.
+         // In other words, we should see all modifications or none.

@@ -42,12 +42,14 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -55,7 +57,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -112,7 +114,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
 
         batchlogTasks.scheduleWithFixedDelay(this::replayFailedBatches,
-                                             StorageService.RING_DELAY,
+                                             StorageService.RING_DELAY_MILLIS,
                                              REPLAY_INTERVAL,
                                              MILLISECONDS);
     }
@@ -133,10 +135,14 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch)
     {
-        store(batch, true);
+        /**
+         * by default writes are durable, see
+         * {@link org.apache.cassandra.schema.KeyspaceParams#DEFAULT_DURABLE_WRITES}
+         */
+        store(batch, WriteOptions.DEFAULT);
     }
 
-    public static void store(Batch batch, boolean durableWrites)
+    public static void store(Batch batch, WriteOptions writeOptions)
     {
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
@@ -161,7 +167,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                .add("version", MessagingService.current_version)
                .appendAll("mutations", mutations);
 
-        builder.buildAsMutation().apply(durableWrites);
+        builder.buildAsMutation().apply(writeOptions);
     }
 
     @VisibleForTesting
@@ -220,7 +226,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE token(id) > token(?) AND token(id) <= token(?)",
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES);
-        UntypedResultSet batches = executeInternalWithPaging(query, pageSize, lastReplayedUuid, limitUuid);
+        UntypedResultSet batches = executeInternalWithPaging(query, PageSize.inRows(pageSize), lastReplayedUuid, limitUuid);
         processBatchlogEntries(batches, pageSize, rateLimiter);
         lastReplayedUuid = limitUuid;
         logger.trace("Finished replayFailedBatches");
@@ -483,10 +489,10 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             Replica selfReplica = liveAndDown.all().selfIfPresent();
             if (selfReplica != null)
-                mutation.apply();
+                mutation.apply(WriteOptions.FOR_BATCH_REPLAY);
 
             ReplicaLayout.ForTokenWrite liveRemoteOnly = liveAndDown.filter(
-                    r -> FailureDetector.isReplicaAlive.test(r) && r != selfReplica);
+                    r -> IFailureDetector.isReplicaAlive.test(r) && r != selfReplica);
 
             for (Replica replica : liveAndDown.all())
             {

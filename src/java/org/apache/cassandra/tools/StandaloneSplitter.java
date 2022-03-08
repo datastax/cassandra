@@ -18,23 +18,36 @@
  */
 package org.apache.cassandra.tools;
 
-import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.commons.cli.*;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.GnuParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.ParseException;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.SSTableSplitter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
@@ -60,7 +73,7 @@ public class StandaloneSplitter
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            SchemaManager.instance.loadFromDisk();
 
             String ksName = null;
             String cfName = null;
@@ -89,18 +102,12 @@ public class StandaloneSplitter
                 else if (!cfName.equals(desc.cfname))
                     throw new IllegalArgumentException("All sstables must be part of the same table");
 
-                Set<Component> components = new HashSet<Component>(Arrays.asList(new Component[]{
-                    Component.DATA,
-                    Component.PRIMARY_INDEX,
-                    Component.FILTER,
-                    Component.COMPRESSION_INFO,
-                    Component.STATS
-                }));
+                Set<Component> components = new HashSet<>(desc.getFormat().supportedComponents());
 
                 Iterator<Component> iter = components.iterator();
                 while (iter.hasNext()) {
                     Component component = iter.next();
-                    if (!(new File(desc.filenameFor(component)).exists()))
+                    if (!(desc.fileFor(component).exists()))
                         iter.remove();
                 }
                 parsedFilenames.put(desc, components);
@@ -122,7 +129,7 @@ public class StandaloneSplitter
             {
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs);
+                    SSTableReader sstable = fn.getKey().getFormat().getReaderFactory().openNoValidation(fn.getKey(), fn.getValue(), cfs);
                     if (!isSSTableLargerEnough(sstable, options.sizeInMB)) {
                         System.out.println(String.format("Skipping %s: it's size (%.3f MB) is less than the split size (%d MB)",
                                 sstable.getFilename(), ((sstable.onDiskLength() * 1.0d) / 1024L) / 1024L, options.sizeInMB));
@@ -132,7 +139,7 @@ public class StandaloneSplitter
 
                     if (options.snapshot) {
                         File snapshotDirectory = Directories.getSnapshotDirectory(sstable.descriptor, snapshotName);
-                        sstable.createLinks(snapshotDirectory.getPath());
+                        sstable.createLinks(snapshotDirectory.path());
                     }
 
                 }

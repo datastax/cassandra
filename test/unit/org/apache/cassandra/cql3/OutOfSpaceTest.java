@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import static junit.framework.Assert.fail;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
 import java.io.Closeable;
 import java.util.concurrent.ExecutionException;
@@ -28,12 +29,14 @@ import org.junit.Test;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -48,7 +51,7 @@ public class OutOfSpaceTest extends CQLTester
         makeTable();
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
@@ -115,7 +118,10 @@ public class OutOfSpaceTest extends CQLTester
     {
         try
         {
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().get();
+            Keyspace.open(KEYSPACE)
+                    .getColumnFamilyStore(currentTable())
+                    .forceFlush(UNIT_TESTS)
+                    .get();
             fail("FSWriteError expected.");
         }
         catch (ExecutionException e)

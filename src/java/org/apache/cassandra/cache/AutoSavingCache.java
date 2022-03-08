@@ -17,7 +17,12 @@
  */
 package org.apache.cassandra.cache;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.NoSuchFileException;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -25,6 +30,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.io.util.File;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,16 +40,15 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.io.util.CorruptFileException;
@@ -58,7 +63,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
     public interface IStreamFactory
     {
         InputStream getInputStream(File dataPath, File crcPath) throws IOException;
-        OutputStream getOutputStream(File dataPath, File crcPath) throws FileNotFoundException;
+        OutputStream getOutputStream(File dataPath, File crcPath);
     }
 
     private static final Logger logger = LoggerFactory.getLogger(AutoSavingCache.class);
@@ -112,7 +117,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
     public AutoSavingCache(ICache<K, V> cache, CacheService.CacheType cacheType, CacheSerializer<K, V> cacheloader)
     {
-        super(cacheType.toString(), cache);
+        super(cacheType, cache);
         this.cacheType = cacheType;
         this.cacheLoader = cacheloader;
     }
@@ -203,11 +208,11 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
                 //Check the schema has not changed since CFs are looked up by name which is ambiguous
                 UUID schemaVersion = new UUID(in.readLong(), in.readLong());
-                if (!schemaVersion.equals(Schema.instance.getVersion()))
+                if (!schemaVersion.equals(SchemaManager.instance.getVersion()))
                     throw new RuntimeException("Cache schema version "
-                                              + schemaVersion
-                                              + " does not match current schema version "
-                                              + Schema.instance.getVersion());
+                                               + schemaVersion
+                                               + " does not match current schema version "
+                                               + SchemaManager.instance.getVersion());
 
                 ArrayDeque<Future<Pair<K, V>>> futures = new ArrayDeque<>();
                 long loadByNanos = start + TimeUnit.SECONDS.toNanos(DatabaseDescriptor.getCacheLoadTimeout());
@@ -221,7 +226,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                     if (indexName.isEmpty())
                         indexName = null;
 
-                    ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tableId);
+                    ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(tableId);
                     if (indexName != null && cfs != null)
                         cfs = cfs.indexManager.getIndexByName(indexName).getBackingTable().orElse(null);
 
@@ -263,12 +268,12 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             catch (CorruptFileException e)
             {
                 JVMStabilityInspector.inspectThrowable(e);
-                logger.warn(String.format("Non-fatal checksum error reading saved cache %s", dataPath.getAbsolutePath()), e);
+                logger.warn(String.format("Non-fatal checksum error reading saved cache %s", dataPath.absolutePath()), e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.info(String.format("Harmless error reading saved cache %s", dataPath.getAbsolutePath()), t);
+                logger.info(String.format("Harmless error reading saved cache %s", dataPath.absolutePath()), t);
             }
             finally
             {
@@ -287,10 +292,10 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         return CompactionManager.instance.submitCacheWrite(getWriter(keysToSave));
     }
 
-    public class Writer extends CompactionInfo.Holder
+    public class Writer extends AbstractTableOperation
     {
         private final Iterator<K> keyIterator;
-        private final CompactionInfo info;
+        private final OperationProgress info;
         private long keysWritten;
         private final long keysEstimate;
 
@@ -318,12 +323,12 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             else
                 type = OperationType.UNKNOWN;
 
-            info = CompactionInfo.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
-                                                  type,
-                                                  0,
-                                                  keysEstimate,
-                                                  Unit.KEYS,
-                                                  UUIDGen.getTimeUUID());
+            info = OperationProgress.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
+                                                     type,
+                                                     0,
+                                                     keysEstimate,
+                                                     Unit.KEYS,
+                                                     UUIDGen.getTimeUUID());
         }
 
         public CacheService.CacheType cacheType()
@@ -331,7 +336,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             return cacheType;
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             // keyset can change in size, thus total can too
             // TODO need to check for this one... was: info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));
@@ -356,12 +361,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             {
 
                 //Need to be able to check schema version because CF names are ambiguous
-                UUID schemaVersion = Schema.instance.getVersion();
-                if (schemaVersion == null)
-                {
-                    Schema.instance.updateVersion();
-                    schemaVersion = Schema.instance.getVersion();
-                }
+                UUID schemaVersion = SchemaManager.instance.getVersion();
                 writer.writeLong(schemaVersion.getMostSignificantBits());
                 writer.writeLong(schemaVersion.getLeastSignificantBits());
 
@@ -369,7 +369,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 {
                     K key = keyIterator.next();
 
-                    ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(key.tableId);
+                    ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(key.tableId);
                     if (cfs == null)
                         continue; // the table or 2i has been dropped.
                     if (key.indexName != null)
@@ -382,7 +382,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                         break;
                 }
             }
-            catch (FileNotFoundException e)
+            catch (FileNotFoundException | NoSuchFileException e)
             {
                 throw new RuntimeException(e);
             }
@@ -394,13 +394,13 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             File cacheFile = getCacheDataPath(CURRENT_VERSION);
             File crcFile = getCacheCrcPath(CURRENT_VERSION);
 
-            cacheFile.delete(); // ignore error if it didn't exist
-            crcFile.delete();
+            cacheFile.tryDelete(); // ignore error if it didn't exist
+            crcFile.tryDelete();
 
-            if (!cacheFilePaths.left.renameTo(cacheFile))
+            if (!cacheFilePaths.left.tryMove(cacheFile))
                 logger.error("Unable to rename {} to {}", cacheFilePaths.left, cacheFile);
 
-            if (!cacheFilePaths.right.renameTo(crcFile))
+            if (!cacheFilePaths.right.tryMove(crcFile))
                 logger.error("Unable to rename {} to {}", cacheFilePaths.right, crcFile);
 
             logger.info("Saved {} ({} items) in {} ms", cacheType, keysWritten, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
@@ -410,15 +410,15 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         {
             File dataPath = getCacheDataPath(CURRENT_VERSION);
             File crcPath = getCacheCrcPath(CURRENT_VERSION);
-            return Pair.create(FileUtils.createTempFile(dataPath.getName(), null, dataPath.getParentFile()),
-                               FileUtils.createTempFile(crcPath.getName(), null, crcPath.getParentFile()));
+            return Pair.create(FileUtils.createTempFile(dataPath.name(), null, dataPath.parent()),
+                               FileUtils.createTempFile(crcPath.name(), null, crcPath.parent()));
         }
 
         private void deleteOldCacheFiles()
         {
-            File savedCachesDir = new File(DatabaseDescriptor.getSavedCachesLocation());
+            File savedCachesDir = DatabaseDescriptor.getSavedCachesLocation();
             assert savedCachesDir.exists() && savedCachesDir.isDirectory();
-            File[] files = savedCachesDir.listFiles();
+            File[] files = savedCachesDir.tryList();
             if (files != null)
             {
                 String cacheNameFormat = String.format("%s-%s.db", cacheType.toString(), CURRENT_VERSION);
@@ -427,11 +427,11 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                     if (!file.isFile())
                         continue; // someone's been messing with our directory.  naughty!
 
-                    if (file.getName().endsWith(cacheNameFormat)
-                     || file.getName().endsWith(cacheType.toString()))
+                    if (file.name().endsWith(cacheNameFormat)
+                     || file.name().endsWith(cacheType.toString()))
                     {
-                        if (!file.delete())
-                            logger.warn("Failed to delete {}", file.getAbsolutePath());
+                        if (!file.tryDelete())
+                            logger.warn("Failed to delete {}", file.absolutePath());
                     }
                 }
             }

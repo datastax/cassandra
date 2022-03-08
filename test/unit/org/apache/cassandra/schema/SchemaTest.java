@@ -19,6 +19,9 @@
 package org.apache.cassandra.schema;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.UUID;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -26,12 +29,18 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+import org.apache.cassandra.utils.FBUtilities;
 
-import static org.junit.Assert.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.mockito.Mockito.mock;
 
 public class SchemaTest
 {
@@ -46,31 +55,31 @@ public class SchemaTest
     {
         CommitLog.instance.start();
         SchemaLoader.cleanupAndLeaveDirs();
-        Schema.instance.loadFromDisk();
-        assertEquals(0, Schema.instance.getNonSystemKeyspaces().size());
+        SchemaManager.instance.loadFromDisk();
+        assertEquals(0, SchemaManager.instance.getNonSystemKeyspaces().size());
 
-        Gossiper.instance.start((int)(System.currentTimeMillis() / 1000));
+        Gossiper.instance.start((int) (System.currentTimeMillis() / 1000));
         Keyspace.setInitialized();
 
         try
         {
             // add a few.
-            MigrationManager.announceNewKeyspace(KeyspaceMetadata.create("ks0", KeyspaceParams.simple(3)));
-            MigrationManager.announceNewKeyspace(KeyspaceMetadata.create("ks1", KeyspaceParams.simple(3)));
+            saveKeyspaces();
+            SchemaManager.instance.reloadSchemaAndAnnounceVersion();
 
-            assertNotNull(Schema.instance.getKeyspaceMetadata("ks0"));
-            assertNotNull(Schema.instance.getKeyspaceMetadata("ks1"));
+            assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
+            assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            Schema.instance.unload(Schema.instance.getKeyspaceMetadata("ks0"));
-            Schema.instance.unload(Schema.instance.getKeyspaceMetadata("ks1"));
+            SchemaManager.instance.transform(keyspaces -> keyspaces.without(Arrays.asList("ks0", "ks1")));
 
-            assertNull(Schema.instance.getKeyspaceMetadata("ks0"));
-            assertNull(Schema.instance.getKeyspaceMetadata("ks1"));
+            assertNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
+            assertNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
 
-            Schema.instance.loadFromDisk();
+            saveKeyspaces();
+            SchemaManager.instance.reloadSchemaAndAnnounceVersion();
 
-            assertNotNull(Schema.instance.getKeyspaceMetadata("ks0"));
-            assertNotNull(Schema.instance.getKeyspaceMetadata("ks1"));
+            assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks0"));
+            assertNotNull(SchemaManager.instance.getKeyspaceMetadata("ks1"));
         }
         finally
         {
@@ -78,4 +87,30 @@ public class SchemaTest
         }
     }
 
+    @Test
+    public void testSchemaManagerMocking()
+    {
+        Keyspace.unsetInitialized();
+
+        SchemaUpdateHandler updateHandler = mock(SchemaUpdateHandler.class);
+        SchemaManager schemaManager = new SchemaManager(false, new LocalKeyspaces(true), updateHandler);
+        assertThat(schemaManager.getKeyspaceMetadata("ks")).isNull();
+
+        KeyspaceMetadata newKs = KeyspaceMetadata.create("ks", KeyspaceParams.simple(1));
+        SharedSchema before = new SharedSchema(schemaManager.sharedKeyspaces(), schemaManager.getVersion());
+        SharedSchema after = new SharedSchema(schemaManager.sharedKeyspaces().withAddedOrUpdated(newKs), UUID.randomUUID());
+        KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces());
+        SchemaTransformationResult transformation = new SchemaTransformationResult(before, after, diff);
+        schemaManager.mergeAndUpdateVersion(transformation, true);
+
+        assertThat(schemaManager.getKeyspaceMetadata("ks")).isEqualTo(newKs);
+        assertThat(schemaManager.getKeyspaceInstance("ks")).isNull(); // means that we didn't open the keyspace, which is expected since Keyspace is uninitialized
+    }
+
+    private void saveKeyspaces()
+    {
+        Collection<Mutation> mutations = Arrays.asList(SchemaKeyspace.makeCreateKeyspaceMutation(KeyspaceMetadata.create("ks0", KeyspaceParams.simple(3)), FBUtilities.timestampMicros()).build(),
+                                                       SchemaKeyspace.makeCreateKeyspaceMutation(KeyspaceMetadata.create("ks1", KeyspaceParams.simple(3)), FBUtilities.timestampMicros()).build());
+        SchemaKeyspace.applyChanges(mutations);
+    }
 }

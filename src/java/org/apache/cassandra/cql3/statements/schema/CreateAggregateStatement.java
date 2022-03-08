@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
@@ -32,12 +33,13 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.schema.Functions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
@@ -65,7 +67,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     private final boolean orReplace;
     private final boolean ifNotExists;
 
-    public CreateAggregateStatement(String keyspaceName,
+    public CreateAggregateStatement(String queryString,
+                                    String keyspaceName,
                                     String aggregateName,
                                     List<CQL3Type.Raw> rawArgumentTypes,
                                     CQL3Type.Raw rawStateType,
@@ -75,7 +78,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                     boolean orReplace,
                                     boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.aggregateName = aggregateName;
         this.rawArgumentTypes = rawArgumentTypes;
         this.rawStateType = rawStateType;
@@ -239,7 +242,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     {
         FunctionName name = new FunctionName(keyspaceName, aggregateName);
 
-        if (Schema.instance.findFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType())).isPresent() && orReplace)
+        if (SchemaManager.instance.findFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType())).isPresent() && orReplace)
             client.ensurePermission(Permission.ALTER, FunctionResource.functionFromCql(keyspaceName, aggregateName, rawArgumentTypes));
         else
             client.ensurePermission(Permission.CREATE, FunctionResource.keyspace(keyspaceName));
@@ -286,7 +289,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         return format("%s(%s)", finalFunctionName, rawStateType);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateAggregateStatement>
     {
         private final FunctionName aggregateName;
         private final List<CQL3Type.Raw> rawArgumentTypes;
@@ -316,11 +319,18 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateAggregateStatement prepare(ClientState state)
+        @Override
+        public CreateAggregateStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace());
+            if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+            {
+                rawArgumentTypes.forEach(t -> t.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper)));
+                rawStateType.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper));
+            }
 
-            return new CreateAggregateStatement(keyspaceName,
+            return new CreateAggregateStatement(rawCQLStatement,
+                                                keyspaceName,
                                                 aggregateName.name,
                                                 rawArgumentTypes,
                                                 rawStateType,

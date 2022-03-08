@@ -29,6 +29,7 @@ import org.junit.rules.TemporaryFolder;
 
 import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.GCInspector;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -99,11 +100,12 @@ public class JMXCompatabilityTest extends CQLTester
                                                     "org.apache.cassandra.db:type=HintedHandoffManager", // removed in CASSANDRA-15939
 
                                                     // dropped tables
-                                                    "org.apache.cassandra.metrics:type=Table,keyspace=system,scope=(schema_aggregates|schema_columnfamilies|schema_columns|schema_functions|schema_keyspaces|schema_triggers|schema_usertypes),name=.*",
+                                                    "org.apache.cassandra.metrics:type=Table,keyspace=system,scope=(schema_aggregates|schema_columnfamilies|schema_columns|schema_functions|schema_keyspaces|schema_triggers|schema_usertypes|sstable_activity),name=.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=views_builds_in_progress.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=range_xfers.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=hints.*",
-                                                    ".*keyspace=system,(scope|table|columnfamily)=batchlog.*");
+                                                    ".*keyspace=system,(scope|table|columnfamily)=batchlog.*",
+                                                    ".*keyspace=system,(scope|table|columnfamily)=sstable_activity.*"); // changed to sstable_activity_v2 in STAR-843
         List<String> excludeAttributes = Arrays.asList("RPCServerRunning", // removed in CASSANDRA-11115
                                                        "MaxNativeProtocolVersion");
         List<String> excludeOperations = Arrays.asList("startRPCServer", "stopRPCServer", // removed in CASSANDRA-11115
@@ -129,12 +131,12 @@ public class JMXCompatabilityTest extends CQLTester
                                                     "org.apache.cassandra.db:type=HintedHandoffManager", // removed in CASSANDRA-15939
 
                                                     // dropped tables
-                                                    "org.apache.cassandra.metrics:type=Table,keyspace=system,scope=(schema_aggregates|schema_columnfamilies|schema_columns|schema_functions|schema_keyspaces|schema_triggers|schema_usertypes),name=.*",
+                                                    "org.apache.cassandra.metrics:type=Table,keyspace=system,scope=(schema_aggregates|schema_columnfamilies|schema_columns|schema_functions|schema_keyspaces|schema_triggers|schema_usertypes|sstable_activity),name=.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=views_builds_in_progress.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=range_xfers.*",
                                                     ".*keyspace=system,(scope|table|columnfamily)=hints.*",
-                                                    ".*keyspace=system,(scope|table|columnfamily)=batchlog.*"
-        );
+                                                    ".*keyspace=system,(scope|table|columnfamily)=batchlog.*",
+                                                    ".*keyspace=system,(scope|table|columnfamily)=sstable_activity.*"); // changed to sstable_activity_v2 in STAR-843
         List<String> excludeAttributes = Arrays.asList("RPCServerRunning", // removed in CASSANDRA-11115
                                                        "MaxNativeProtocolVersion",
                                                        "StreamingSocketTimeout");
@@ -172,6 +174,11 @@ public class JMXCompatabilityTest extends CQLTester
             args.add("--exclude-object");
             args.add(a);
         });
+        if (SSTableFormat.Type.current() == SSTableFormat.Type.BTI)
+        {
+            args.add("--exclude-object");
+            args.add("org.apache.cassandra.metrics:type=Index,scope=RowIndexEntry,name=.*");
+        }
         excludeAttributes.forEach(a -> {
             args.add("--exclude-attribute");
             args.add(a);

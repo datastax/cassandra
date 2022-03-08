@@ -36,7 +36,7 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -153,6 +153,13 @@ public class ClientState
         this.driverVersion = source.driverVersion;
     }
 
+    private ClientState(AuthenticatedUser user)
+    {
+        this.isInternal = false;
+        this.remoteAddress = null;
+        this.user = user;
+    }
+
     /**
      * @return a ClientState object for internal C* calls (not limited by any kind of auth).
      */
@@ -174,6 +181,14 @@ public class ClientState
     public static ClientState forExternalCalls(SocketAddress remoteAddress)
     {
         return new ClientState((InetSocketAddress)remoteAddress);
+    }
+
+    /**
+     * @return a ClientState object for internal calls with the given user logged in (not limited by any kind of auth).
+     */
+    public static ClientState forExternalCalls(AuthenticatedUser user)
+    {
+        return new ClientState(user);
     }
 
     /**
@@ -317,7 +332,7 @@ public class ClientState
     {
         // Skip keyspace validation for non-authenticated users. Apparently, some client libraries
         // call set_keyspace() before calling login(), and we have to handle that.
-        if (user != null && Schema.instance.getKeyspaceMetadata(ks) == null)
+        if (user != null && SchemaManager.instance.getKeyspaceMetadata(ks) == null)
             throw new InvalidRequestException("Keyspace '" + ks + "' does not exist");
         keyspace = ks;
     }

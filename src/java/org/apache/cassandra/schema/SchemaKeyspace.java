@@ -89,6 +89,7 @@ final class SchemaKeyspace
               + "keyspace_name text,"
               + "durable_writes boolean,"
               + "replication frozen<map<text, text>>,"
+              + "graph_engine text,"
               + "PRIMARY KEY ((keyspace_name)))");
 
     private static final TableMetadata Tables =
@@ -102,6 +103,7 @@ final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>,"
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -112,6 +114,7 @@ final class SchemaKeyspace
               + "max_index_interval int,"
               + "memtable_flush_period_in_ms int,"
               + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
               + "read_repair_chance double," // no longer used, left for drivers' sake
               + "speculative_retry text,"
               + "additional_write_policy text,"
@@ -131,6 +134,7 @@ final class SchemaKeyspace
               + "kind text,"
               + "position int,"
               + "type text,"
+              + "required_for_liveness boolean,"
               + "PRIMARY KEY ((keyspace_name), table_name, column_name))");
 
     private static final TableMetadata DroppedColumns =
@@ -169,6 +173,7 @@ final class SchemaKeyspace
               + "comment text,"
               + "compaction frozen<map<text, text>>,"
               + "compression frozen<map<text, text>>,"
+              + "memtable frozen<map<text, text>>,"
               + "crc_check_chance double,"
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
@@ -179,10 +184,12 @@ final class SchemaKeyspace
               + "max_index_interval int,"
               + "memtable_flush_period_in_ms int,"
               + "min_index_interval int,"
+              + "nodesync frozen<map<text, text>>,"
               + "read_repair_chance double," // no longer used, left for drivers' sake
               + "speculative_retry text,"
               + "additional_write_policy text,"
               + "cdc boolean,"
+              + "version int,"
               + "read_repair text,"
               + "PRIMARY KEY ((keyspace_name), view_name))");
 
@@ -219,6 +226,9 @@ final class SchemaKeyspace
               + "language text,"
               + "return_type text,"
               + "called_on_null_input boolean,"
+              + "deterministic boolean,"
+              + "monotonic boolean,"
+              + "monotonic_on frozen<list<text>>,"
               + "PRIMARY KEY ((keyspace_name), function_name, argument_types))");
 
     private static final TableMetadata Aggregates =
@@ -233,6 +243,7 @@ final class SchemaKeyspace
               + "return_type text,"
               + "state_func text,"
               + "state_type text,"
+              + "deterministic boolean,"
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
     private static final List<TableMetadata> ALL_TABLE_METADATA =
@@ -257,32 +268,32 @@ final class SchemaKeyspace
     {
         Map<String, Mutation> mutations = new HashMap<>();
 
-        diff.created.forEach(k -> mutations.put(k.name, makeCreateKeyspaceMutation(k, timestamp).build()));
         diff.dropped.forEach(k -> mutations.put(k.name, makeDropKeyspaceMutation(k, timestamp).build()));
+        diff.created.forEach(k -> mutations.put(k.name, makeCreateKeyspaceMutation(k, timestamp).build()));
         diff.altered.forEach(kd ->
         {
             KeyspaceMetadata ks = kd.after;
 
             Mutation.SimpleBuilder builder = makeCreateKeyspaceMutation(ks.name, ks.params, timestamp);
 
-            kd.types.created.forEach(t -> addTypeToSchemaMutation(t, builder));
             kd.types.dropped.forEach(t -> addDropTypeToSchemaMutation(t, builder));
+            kd.types.created.forEach(t -> addTypeToSchemaMutation(t, builder));
             kd.types.altered(Difference.SHALLOW).forEach(td -> addTypeToSchemaMutation(td.after, builder));
 
-            kd.tables.created.forEach(t -> addTableToSchemaMutation(t, true, builder));
             kd.tables.dropped.forEach(t -> addDropTableToSchemaMutation(t, builder));
+            kd.tables.created.forEach(t -> addTableToSchemaMutation(t, true, builder));
             kd.tables.altered(Difference.SHALLOW).forEach(td -> addAlterTableToSchemaMutation(td.before, td.after, builder));
 
-            kd.views.created.forEach(v -> addViewToSchemaMutation(v, true, builder));
             kd.views.dropped.forEach(v -> addDropViewToSchemaMutation(v, builder));
+            kd.views.created.forEach(v -> addViewToSchemaMutation(v, true, builder));
             kd.views.altered(Difference.SHALLOW).forEach(vd -> addAlterViewToSchemaMutation(vd.before, vd.after, builder));
 
-            kd.udfs.created.forEach(f -> addFunctionToSchemaMutation((UDFunction) f, builder));
             kd.udfs.dropped.forEach(f -> addDropFunctionToSchemaMutation((UDFunction) f, builder));
+            kd.udfs.created.forEach(f -> addFunctionToSchemaMutation((UDFunction) f, builder));
             kd.udfs.altered(Difference.SHALLOW).forEach(fd -> addFunctionToSchemaMutation(fd.after, builder));
 
-            kd.udas.created.forEach(a -> addAggregateToSchemaMutation((UDAggregate) a, builder));
             kd.udas.dropped.forEach(a -> addDropAggregateToSchemaMutation((UDAggregate) a, builder));
+            kd.udas.created.forEach(a -> addAggregateToSchemaMutation((UDAggregate) a, builder));
             kd.udas.altered(Difference.SHALLOW).forEach(ad -> addAggregateToSchemaMutation(ad.after, builder));
 
             mutations.put(ks.name, builder.build());
@@ -296,8 +307,8 @@ final class SchemaKeyspace
      */
     static void saveSystemKeyspacesSchema()
     {
-        KeyspaceMetadata system = Schema.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME);
-        KeyspaceMetadata schema = Schema.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME);
+        KeyspaceMetadata system = SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME);
+        KeyspaceMetadata schema = SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME);
 
         long timestamp = FBUtilities.timestampMicros();
 
@@ -316,20 +327,21 @@ final class SchemaKeyspace
 
     static void truncate()
     {
+        logger.debug("Truncating schema tables...");
         ALL.reverse().forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
     private static void flush()
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+            ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush(ColumnFamilyStore.FlushReason.INTERNALLY_FORCED)));
     }
 
     /**
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
      * will be converted into UUID which would act as content-based version of the schema.
      */
-    static UUID calculateSchemaDigest()
+    public static UUID calculateSchemaDigest()
     {
         Digest digest = Digest.forSchema();
         for (String table : ALL)
@@ -541,6 +553,7 @@ final class SchemaKeyspace
                .add("caching", params.caching.asMap())
                .add("compaction", params.compaction.asMap())
                .add("compression", params.compression.asMap())
+               .add("memtable", params.memtable.asMap())
                .add("read_repair", params.readRepair.toString())
                .add("extensions", params.extensions);
 
@@ -951,6 +964,7 @@ final class SchemaKeyspace
                           .comment(row.getString("comment"))
                           .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
                           .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
+                          .memtable(MemtableParams.fromMap(row.getFrozenTextMap("memtable")))
                           .defaultTimeToLive(row.getInt("default_time_to_live"))
                           .extensions(row.getFrozenMap("extensions", UTF8Type.instance, BytesType.instance))
                           .gcGraceSeconds(row.getInt("gc_grace_seconds"))
@@ -1029,7 +1043,7 @@ final class SchemaKeyspace
                                  ? ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase())
                                  : ColumnMetadata.Kind.REGULAR;
         assert kind == ColumnMetadata.Kind.REGULAR || kind == ColumnMetadata.Kind.STATIC
-            : "Unexpected dropped column kind: " + kind.toString();
+            : "Unexpected dropped column kind: " + kind;
 
         ColumnMetadata column = new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, ColumnMetadata.NO_POSITION, kind);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
@@ -1156,7 +1170,7 @@ final class SchemaKeyspace
          * TODO: find a way to get rid of Schema.instance dependency; evaluate if the opimisation below makes a difference
          * in the first place. Remove if it isn't.
          */
-        org.apache.cassandra.cql3.functions.Function existing = Schema.instance.findFunction(name, argTypes).orElse(null);
+        org.apache.cassandra.cql3.functions.Function existing = SchemaManager.instance.findFunction(name, argTypes).orElse(null);
         if (existing instanceof UDFunction)
         {
             // This check prevents duplicate compilation of effectively the same UDF.

@@ -21,6 +21,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -38,7 +39,13 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -57,25 +64,23 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.mockito.Mockito;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SinglePartitionSliceCommandTest
@@ -180,7 +185,7 @@ public class SinglePartitionSliceCommandTest
                                                      ck1));
 
         if (flush)
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE_SCLICES).forceBlockingFlush();
+            Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE_SCLICES).forceBlockingFlush(UNIT_TESTS);
 
         AbstractClusteringIndexFilter clusteringFilter = createClusteringFilter(uniqueCk1, uniqueCk2, isSlice);
         ReadCommand cmd = SinglePartitionReadCommand.create(CFM_SLICES,
@@ -231,7 +236,7 @@ public class SinglePartitionSliceCommandTest
         Cell<?> cell = cellIterator.next();
         Assert.assertEquals(s, cell.column());
         Assert.assertEquals(ByteBufferUtil.bytesToHex(cell.buffer()), ByteBufferUtil.bytes("s"), cell.buffer());
-        Assert.assertFalse(cellIterator.hasNext());
+        assertFalse(cellIterator.hasNext());
     }
 
     @Test
@@ -240,7 +245,7 @@ public class SinglePartitionSliceCommandTest
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
 
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')");
-        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").isEmpty());
+        assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").isEmpty());
 
         ColumnFilter columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(s));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.NONE, false);
@@ -279,7 +284,7 @@ public class SinglePartitionSliceCommandTest
         }
 
         // check (de)serialized iterator for sstable static cell
-        Schema.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush();
+        SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush(UNIT_TESTS);
         try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
         {
             response = ReadResponse.createDataResponse(pi, cmd, executionController.getRepairedDataInfo());
@@ -302,8 +307,8 @@ public class SinglePartitionSliceCommandTest
     public void testReadOnRangeTombstoneMarker()
     {
         QueryProcessor.executeOnceInternal("CREATE TABLE IF NOT EXISTS ks.test_read_rt (k int, c1 int, c2 int, c3 int, v int, primary key (k, c1, c2, c3))");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "test_read_rt");
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata("ks", "test_read_rt");
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id);
 
         String template = "SELECT * FROM ks.test_read_rt %s";
         String pointRead = "WHERE k=1 and c1=1 and c2=1 and c3=1";
@@ -318,7 +323,7 @@ public class SinglePartitionSliceCommandTest
             QueryProcessor.executeOnceInternal("DELETE FROM ks.test_read_rt USING TIMESTAMP 10 WHERE k=1 AND c1=1");
 
             List<Unfiltered> memtableUnfiltereds = assertQueryReturnsSingleRT(query);
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
             List<Unfiltered> sstableUnfiltereds = assertQueryReturnsSingleRT(query);
 
             String errorMessage = String.format("Expected %s but got %s with postfix '%s'",
@@ -336,8 +341,8 @@ public class SinglePartitionSliceCommandTest
     public void testPartitionDeletionRowDeletionTie()
     {
         QueryProcessor.executeOnceInternal("CREATE TABLE ks.partition_row_deletion (k int, c int, v int, primary key (k, c))");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "partition_row_deletion");
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata("ks", "partition_row_deletion");
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id);
         cfs.disableAutoCompaction();
 
         BiFunction<Boolean, Boolean, List<Unfiltered>> tester = (flush, multiSSTable)->
@@ -356,17 +361,17 @@ public class SinglePartitionSliceCommandTest
                                                                   timestamp,
                                                                   "DELETE FROM ks.partition_row_deletion USING TIMESTAMP 10 WHERE k=1");
             if (flush && multiSSTable)
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
             QueryProcessor.executeOnceInternalWithNowAndTimestamp(nowInSec,
                                                                   timestamp,
                                                                   "DELETE FROM ks.partition_row_deletion USING TIMESTAMP 10 WHERE k=1 and c=1");
             if (flush)
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
 
             QueryProcessor.executeOnceInternal("INSERT INTO ks.partition_row_deletion(k,c,v) VALUES(1,1,1) using timestamp 11");
             if (flush)
             {
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
                 try
                 {
                     cfs.forceMajorCompaction();
@@ -403,8 +408,8 @@ public class SinglePartitionSliceCommandTest
     public void testPartitionDeletionRangeDeletionTie()
     {
         QueryProcessor.executeOnceInternal("CREATE TABLE ks.partition_range_deletion (k int, c1 int, c2 int, v int, primary key (k, c1, c2))");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "partition_range_deletion");
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata("ks", "partition_range_deletion");
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id);
         cfs.disableAutoCompaction();
 
         BiFunction<Boolean, Boolean, List<Unfiltered>> tester = (flush, multiSSTable) ->
@@ -424,17 +429,17 @@ public class SinglePartitionSliceCommandTest
                                                                   timestamp,
                                                                   "DELETE FROM ks.partition_range_deletion USING TIMESTAMP 10 WHERE k=1");
             if (flush && multiSSTable)
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
             QueryProcessor.executeOnceInternalWithNowAndTimestamp(nowInSec,
                                                                   timestamp,
                                                                   "DELETE FROM ks.partition_range_deletion USING TIMESTAMP 10 WHERE k=1 and c1=1");
             if (flush)
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
 
             QueryProcessor.executeOnceInternal("INSERT INTO ks.partition_range_deletion(k,c1,c2,v) VALUES(1,1,1,1) using timestamp 11");
             if (flush)
             {
-                cfs.forceBlockingFlush();
+                cfs.forceBlockingFlush(UNIT_TESTS);
                 try
                 {
                     cfs.forceMajorCompaction();
@@ -481,14 +486,14 @@ public class SinglePartitionSliceCommandTest
                                                             sliceFilter);
         String ret = cmd.toCQLString();
         Assert.assertNotNull(ret);
-        Assert.assertFalse(ret.isEmpty());
+        assertFalse(ret.isEmpty());
     }
 
     public static UnfilteredRowIterator getIteratorFromSinglePartition(String q)
     {
         SelectStatement stmt = (SelectStatement) QueryProcessor.parseStatement(q).prepare(ClientState.forInternalCalls());
 
-        SinglePartitionReadQuery.Group<SinglePartitionReadCommand> query = (SinglePartitionReadQuery.Group<SinglePartitionReadCommand>) stmt.getQuery(QueryOptions.DEFAULT, 0);
+        SinglePartitionReadQuery.Group<SinglePartitionReadCommand> query = (SinglePartitionReadQuery.Group<SinglePartitionReadCommand>) stmt.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, 0);
         Assert.assertEquals(1, query.queries.size());
         SinglePartitionReadCommand command = Iterables.getOnlyElement(query.queries);
         try (ReadExecutionController controller = ReadExecutionController.forCommand(command, false);
@@ -538,13 +543,13 @@ public class SinglePartitionSliceCommandTest
     public void sstableFiltering()
     {
         QueryProcessor.executeOnceInternal("CREATE TABLE ks.legacy_mc_inaccurate_min_max (k int, c1 int, c2 int, c3 int, v int, primary key (k, c1, c2, c3))");
-        TableMetadata metadata = Schema.instance.getTableMetadata("ks", "legacy_mc_inaccurate_min_max");
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
+        TableMetadata metadata = SchemaManager.instance.getTableMetadata("ks", "legacy_mc_inaccurate_min_max");
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(metadata.id);
 
         QueryProcessor.executeOnceInternal("INSERT INTO ks.legacy_mc_inaccurate_min_max (k, c1, c2, c3, v) VALUES (100, 2, 2, 2, 2)");
         QueryProcessor.executeOnceInternal("DELETE FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=1");
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=1 AND c2=1");
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=1 AND c2=1");
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=1 AND c2=1 AND c3=1"); // clustering names
 
@@ -560,10 +565,189 @@ public class SinglePartitionSliceCommandTest
         new Mutation(builder.build()).apply();
 
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=3 AND c2=2");
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=3 AND c2=2");
         assertQueryReturnsSingleRT("SELECT * FROM ks.legacy_mc_inaccurate_min_max WHERE k=100 AND c1=3 AND c2=2 AND c3=2"); // clustering names
 
+    }
+
+    @Test
+    public void testLowerBoundApplicableSingleColumnAsc()
+    {
+        String query = "INSERT INTO %s.%s (k, i) VALUES ('k1', %s)";
+        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE, query);
+        assertEquals(Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(0)),
+                                Util.clustering(metadata.comparator, BigInteger.valueOf(9))),
+                     sstable.getSSTableMetadata().coveredClustering);
+        DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
+
+        Slice slice1 = Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(3)), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice1, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice1, sstable, true));
+
+        Slice slice2 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, BigInteger.valueOf(3)));
+        assertTrue(lowerBoundApplicable(metadata, key, slice2, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice2, sstable, true));
+
+        // corner cases
+        Slice slice3 = Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(0)), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice3, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice3, sstable, true));
+
+        Slice slice4 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, BigInteger.valueOf(9)));
+        assertTrue(lowerBoundApplicable(metadata, key, slice4, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice4, sstable, true));
+    }
+
+    @Test
+    public void testLowerBoundApplicableSingleColumnDesc()
+    {
+        String TABLE_REVERSED = "tbl_reversed";
+        String createTable = String.format(
+        "CREATE TABLE %s.%s (k text, i varint, v int, primary key (k, i)) WITH CLUSTERING ORDER BY (i DESC)",
+        KEYSPACE, TABLE_REVERSED);
+        QueryProcessor.executeOnceInternal(createTable);
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE_REVERSED);
+        TableMetadata metadata = cfs.metadata();
+        String query = "INSERT INTO %s.%s (k, i) VALUES ('k1', %s)";
+        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
+        assertEquals(Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(9)),
+                                Util.clustering(metadata.comparator, BigInteger.valueOf(0))),
+                     sstable.getSSTableMetadata().coveredClustering);
+        DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
+
+        Slice slice1 = Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(8)), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice1, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice1, sstable, true));
+
+        Slice slice2 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, BigInteger.valueOf(8)));
+        assertTrue(lowerBoundApplicable(metadata, key, slice2, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice2, sstable, true));
+
+        // corner cases
+        Slice slice3 = Slice.make(Util.clustering(metadata.comparator, BigInteger.valueOf(9)), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice3, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice3, sstable, true));
+
+        Slice slice4 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, BigInteger.valueOf(0)));
+        assertTrue(lowerBoundApplicable(metadata, key, slice4, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice4, sstable, true));
+    }
+
+    @Test
+    public void testLowerBoundApplicableMultipleColumnsAsc()
+    {
+        String query = "INSERT INTO %s.%s (k, c1, c2) VALUES ('k1', 0, %s)";
+        SSTableReader sstable = createSSTable(CFM_SLICES, KEYSPACE, TABLE_SCLICES, query);
+        assertEquals(Slice.make(Util.clustering(CFM_SLICES.comparator, 0, 0),
+                                Util.clustering(CFM_SLICES.comparator, 0, 9)),
+                     sstable.getSSTableMetadata().coveredClustering);
+        DecoratedKey key = CFM_SLICES.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
+
+        Slice slice1 = Slice.make(Util.clustering(CFM_SLICES.comparator, 0, 3), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(CFM_SLICES, key, slice1, sstable, false));
+        assertTrue(lowerBoundApplicable(CFM_SLICES, key, slice1, sstable, true));
+
+        Slice slice2 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(CFM_SLICES.comparator, 0, 3));
+        assertTrue(lowerBoundApplicable(CFM_SLICES, key, slice2, sstable, false));
+        assertFalse(lowerBoundApplicable(CFM_SLICES, key, slice2, sstable, true));
+
+        // corner cases
+        Slice slice3 = Slice.make(Util.clustering(CFM_SLICES.comparator, 0, 0), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(CFM_SLICES, key, slice3, sstable, false));
+        assertTrue(lowerBoundApplicable(CFM_SLICES, key, slice3, sstable, true));
+
+        Slice slice4 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(CFM_SLICES.comparator, 0, 9));
+        assertTrue(lowerBoundApplicable(CFM_SLICES, key, slice4, sstable, false));
+        assertFalse(lowerBoundApplicable(CFM_SLICES, key, slice4, sstable, true));
+    }
+
+    @Test
+    public void testLowerBoundApplicableMultipleColumnsDesc()
+    {
+        String TABLE_REVERSED = "tbl_slices_reversed";
+        String createTable = String.format(
+        "CREATE TABLE %s.%s (k text, c1 int, c2 int, v int, primary key (k, c1, c2)) WITH CLUSTERING ORDER BY (c1 ASC, c2 DESC)",
+        KEYSPACE, TABLE_REVERSED);
+        QueryProcessor.executeOnceInternal(createTable);
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE_REVERSED);
+        TableMetadata metadata = cfs.metadata();
+
+        String query = "INSERT INTO %s.%s (k, c1, c2) VALUES ('k1', 0, %s)";
+        SSTableReader sstable = createSSTable(metadata, KEYSPACE, TABLE_REVERSED, query);
+        assertEquals(Slice.make(Util.clustering(metadata.comparator, 0, 9),
+                                Util.clustering(metadata.comparator, 0, 0)),
+                     sstable.getSSTableMetadata().coveredClustering);
+        DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
+
+        Slice slice1 = Slice.make(Util.clustering(metadata.comparator, 0, 8), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice1, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice1, sstable, true));
+
+        Slice slice2 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, 0, 8));
+        assertTrue(lowerBoundApplicable(metadata, key, slice2, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice2, sstable, true));
+
+        // corner cases
+        Slice slice3 = Slice.make(Util.clustering(metadata.comparator, 0, 9), ClusteringBound.TOP);
+        assertFalse(lowerBoundApplicable(metadata, key, slice3, sstable, false));
+        assertTrue(lowerBoundApplicable(metadata, key, slice3, sstable, true));
+
+        Slice slice4 = Slice.make(ClusteringBound.BOTTOM, Util.clustering(metadata.comparator, 0, 0));
+        assertTrue(lowerBoundApplicable(metadata, key, slice4, sstable, false));
+        assertFalse(lowerBoundApplicable(metadata, key, slice4, sstable, true));
+    }
+
+    private SSTableReader createSSTable(TableMetadata metadata, String keyspace, String table, String query)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        for (int i = 0; i < 10; i++)
+            QueryProcessor.executeInternal(String.format(query, keyspace, table, i));
+        cfs.forceBlockingFlush(UNIT_TESTS);
+        DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
+        ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, key));
+        assertEquals(1, view.sstables.size());
+        return view.sstables.get(0);
+    }
+
+    // extend the class to access lowerBound
+    private static class TestIteratorWithLowerBound extends UnfilteredRowIteratorWithLowerBound
+    {
+        public TestIteratorWithLowerBound(DecoratedKey partitionKey, SSTableReader sstable, Slices slices, boolean isReverseOrder, ColumnFilter selectedColumns, SSTableReadsListener listener)
+        {
+            super(partitionKey, sstable, slices, isReverseOrder, selectedColumns, listener);
+        }
+
+        boolean lowerBoundApplicable()
+        {
+            return lowerBound() != null;
+        }
+    }
+
+    private boolean lowerBoundApplicable(TableMetadata metadata, DecoratedKey key, Slice slice, SSTableReader sstable, boolean isReversed)
+    {
+        Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
+        slicesBuilder.add(slice);
+        Slices slices = slicesBuilder.build();
+        ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(slices, isReversed);
+
+        SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(metadata,
+                                                                           FBUtilities.nowInSeconds(),
+                                                                           ColumnFilter.all(metadata),
+                                                                           RowFilter.NONE,
+                                                                           DataLimits.NONE,
+                                                                           key,
+                                                                           filter);
+
+        try (TestIteratorWithLowerBound iter = new TestIteratorWithLowerBound(key,
+                                                                              sstable,
+                                                                              slices,
+                                                                              isReversed,
+                                                                              ColumnFilter.all(metadata),
+                                                                              Mockito.mock(SSTableReadsListener.class)))
+        {
+            return iter.lowerBoundApplicable();
+        }
     }
 
     private String toString(List<Unfiltered> unfiltereds, TableMetadata metadata)

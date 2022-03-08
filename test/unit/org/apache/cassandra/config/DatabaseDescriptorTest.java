@@ -18,30 +18,45 @@
 */
 package org.apache.cassandra.config;
 
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.nio.file.FileStore;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
 
-
 import com.google.common.base.Throwables;
+import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Multiset;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.utils.MBeanWrapper;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.when;
 
 public class DatabaseDescriptorTest
 {
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
     @BeforeClass
     public static void setupDatabaseDescriptor()
     {
@@ -63,6 +78,8 @@ public class DatabaseDescriptorTest
 
         config = DatabaseDescriptor.loadConfig();
         assertEquals("ConfigurationLoader Test", config.cluster_name);
+
+        System.clearProperty("cassandra.config.loader");
     }
 
     public static class TestLoader implements ConfigurationLoader
@@ -278,7 +295,7 @@ public class DatabaseDescriptorTest
     public void testExceptionsForInvalidConfigValues() {
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(-1);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKB(-1);
             fail("Should have received a ConfigurationException column_index_cache_size_in_kb = -1");
         }
         catch (ConfigurationException ignored) { }
@@ -286,7 +303,7 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(2 * 1024 * 1024);
+            DatabaseDescriptor.setColumnIndexCacheSizeInKB(2 * 1024 * 1024);
             fail("Should have received a ConfigurationException column_index_cache_size_in_kb = 2GiB");
         }
         catch (ConfigurationException ignored) { }
@@ -294,7 +311,7 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setColumnIndexSize(-1);
+            DatabaseDescriptor.setColumnIndexSizeInKB(-1);
             fail("Should have received a ConfigurationException column_index_size_in_kb = -1");
         }
         catch (ConfigurationException ignored) { }
@@ -302,7 +319,7 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setColumnIndexSize(2 * 1024 * 1024);
+            DatabaseDescriptor.setColumnIndexSizeInKB(2 * 1024 * 1024);
             fail("Should have received a ConfigurationException column_index_size_in_kb = 2GiB");
         }
         catch (ConfigurationException ignored) { }
@@ -310,15 +327,15 @@ public class DatabaseDescriptorTest
 
         try
         {
-            DatabaseDescriptor.setBatchSizeWarnThresholdInKB(-1);
-            fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = -1");
+            DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWarnThresholdInKB(-2);
+            fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = -2");
         }
         catch (ConfigurationException ignored) { }
-        Assert.assertEquals(5120, DatabaseDescriptor.getBatchSizeWarnThreshold());
+        Assert.assertEquals(65536, DatabaseDescriptor.getGuardrailsConfig().getBatchSizeWarnThreshold());
 
         try
         {
-            DatabaseDescriptor.setBatchSizeWarnThresholdInKB(2 * 1024 * 1024);
+            DatabaseDescriptor.getGuardrailsConfig().setBatchSizeWarnThresholdInKB(2 * 1024 * 1024);
             fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = 2GiB");
         }
         catch (ConfigurationException ignored) { }
@@ -589,5 +606,70 @@ public class DatabaseDescriptorTest
 
         Assert.assertEquals(Integer.valueOf(1), config.num_tokens);
         Assert.assertEquals(1, DatabaseDescriptor.tokensFromString(config.initial_token).size());
+    }
+
+    @Test
+    public void testDataFileDirectoriesMinTotalSpaceInGB() throws IOException
+    {
+        DatabaseDescriptor.setDataDirectories(new File[] {});
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
+
+        DatabaseDescriptor.setDataDirectories(new File[] { new File(temporaryFolder.newFolder("data"))});
+        assertTrue(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() > 0);
+
+        Multiset<FileStore> fileStoreMultiset = HashMultiset.create();
+
+        // single disk (i.e. mockFileStore1)
+        FileStore mockFileStore1 = Mockito.mock(FileStore.class);
+        when(mockFileStore1.getTotalSpace()).thenReturn(1L << 43); // 8 TB
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(8192L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks (i.e. mockFileStore1, mockFileStore2)
+        FileStore mockFileStore2 = Mockito.mock(FileStore.class);
+        when(mockFileStore2.getTotalSpace()).thenReturn(1L << 41); // 2 TB
+        fileStoreMultiset.add(mockFileStore2);
+        assertEquals(4096L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks with three directories. Two directories are on disk 1 (i.e. mockFileStore1)
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(6144L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        fileStoreMultiset.clear();
+
+        FileStore mockLargeFileStore = Mockito.mock(FileStore.class);
+        when(mockLargeFileStore.getTotalSpace()).thenReturn(-1L);
+        fileStoreMultiset.add(mockLargeFileStore);
+        assertEquals(Long.MAX_VALUE >> 30, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        FileStore mockSmallFileStore = Mockito.mock(FileStore.class);
+        when(mockSmallFileStore.getTotalSpace()).thenReturn(1L << 29); // 512 MB
+        fileStoreMultiset.add(mockSmallFileStore);
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+    }
+
+    @Test
+    public void testResetUnsafe()
+    {
+        assertTrue(DatabaseDescriptor.isDaemonInitialized());
+        assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+        assertNotNull(DatabaseDescriptor.getPartitioner());
+        assertNotNull(DatabaseDescriptor.getEndpointSnitch());
+        assertTrue(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+
+        try
+        {
+            DatabaseDescriptor.resetUnsafe();
+
+            assertFalse(DatabaseDescriptor.isDaemonInitialized());
+            assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+            assertNull(DatabaseDescriptor.getPartitioner());
+            assertNull(DatabaseDescriptor.getEndpointSnitch());
+            assertFalse(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+        }
+        finally
+        {
+            DatabaseDescriptor.daemonInitialization();
+        }
     }
 }

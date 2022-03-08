@@ -71,15 +71,17 @@ import org.apache.cassandra.locator.ReplicaUtils;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.reads.DigestResolver;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.locator.Replica.fullReplica;
 import static org.apache.cassandra.locator.ReplicaUtils.FULL_RANGE;
 import static org.apache.cassandra.net.Verb.INTERNAL_RSP;
+import static org.mockito.Mockito.mock;
 
 @Ignore
 public abstract  class AbstractReadRepairTest
@@ -222,7 +224,7 @@ public abstract  class AbstractReadRepairTest
         cfm = CreateTableStatement.parse(ddl, ksName).build();
         assert cfm.params.readRepair == repairStrategy;
         KeyspaceMetadata ksm = KeyspaceMetadata.create(ksName, KeyspaceParams.simple(3), Tables.of(cfm));
-        MigrationManager.announceNewKeyspace(ksm, false);
+        SchemaTestUtil.announceNewKeyspace(ksm);
 
         ks = Keyspace.open(ksName);
         cfs = ks.getColumnFamilyStore("tbl");
@@ -335,7 +337,7 @@ public abstract  class AbstractReadRepairTest
         ResultConsumer consumer = new ResultConsumer();
 
         Assert.assertEquals(epSet(), repair.getReadRecipients());
-        repair.startRepair(null, consumer);
+        repair.startRepair(mock(DigestResolver.class), consumer);
 
         Assert.assertEquals(epSet(target1, target2), repair.getReadRecipients());
         repair.maybeSendAdditionalReads();
@@ -354,7 +356,7 @@ public abstract  class AbstractReadRepairTest
         ResultConsumer consumer = new ResultConsumer();
 
         Assert.assertEquals(epSet(), repair.getReadRecipients());
-        repair.startRepair(null, consumer);
+        repair.startRepair(mock(DigestResolver.class), consumer);
 
         Assert.assertEquals(epSet(target1, target2), repair.getReadRecipients());
         repair.getReadCallback().onResponse(msg(target1, cell1));

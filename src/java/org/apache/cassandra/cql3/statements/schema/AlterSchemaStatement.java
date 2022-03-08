@@ -26,25 +26,34 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
 {
+    private final String rawCQLStatement;
     protected final String keyspaceName; // name of the keyspace affected by the statement
 
-    protected AlterSchemaStatement(String keyspaceName)
+    protected AlterSchemaStatement(String queryString, String keyspaceName)
     {
+        this.rawCQLStatement = queryString;
         this.keyspaceName = keyspaceName;
     }
 
-    public final void validate(ClientState state)
+    @Override
+    public String getRawCQLStatement()
+    {
+        return rawCQLStatement;
+    }
+
+    @Override
+    public void validate(QueryState state)
     {
         // no-op; validation is performed while executing the statement, in apply()
     }
@@ -99,17 +108,17 @@ abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspac
         if (SchemaConstants.isLocalSystemKeyspace(keyspaceName))
             throw ire("System keyspace '%s' is not user-modifiable", keyspaceName);
 
-        KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(keyspaceName);
+        KeyspaceMetadata keyspace = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
         if (null != keyspace && keyspace.isVirtual())
             throw ire("Virtual keyspace '%s' is not user-modifiable", keyspaceName);
 
         validateKeyspaceName();
 
-        KeyspacesDiff diff = MigrationManager.announce(this, locally);
+        SchemaTransformationResult result = SchemaManager.instance.transform(this, locally);
 
-        clientWarnings(diff).forEach(ClientWarn.instance::warn);
+        clientWarnings(result.diff).forEach(ClientWarn.instance::warn);
 
-        if (diff.isEmpty())
+        if (result.diff.isEmpty())
             return new ResultMessage.Void();
 
         /*
@@ -121,9 +130,9 @@ abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspac
          */
         AuthenticatedUser user = state.getClientState().getUser();
         if (null != user && !user.isAnonymous())
-            createdResources(diff).forEach(r -> grantPermissionsOnResource(r, user));
+            createdResources(result.diff).forEach(r -> grantPermissionsOnResource(r, user));
 
-        return new ResultMessage.SchemaChange(schemaChangeEvent(diff));
+        return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
     }
 
     private void validateKeyspaceName()
@@ -156,4 +165,5 @@ abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspac
     {
         return new InvalidRequestException(String.format(format, args));
     }
+
 }

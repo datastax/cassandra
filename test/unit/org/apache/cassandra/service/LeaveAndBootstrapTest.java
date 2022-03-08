@@ -34,7 +34,8 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
@@ -47,6 +48,7 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.*;
 
@@ -123,7 +125,7 @@ public class LeaveAndBootstrapTest
         PendingRangeCalculatorService.instance.blockUntilFinished();
 
         AbstractReplicationStrategy strategy;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : SchemaManager.instance.getNonLocalStrategyKeyspaces().names())
         {
             strategy = getStrategy(keyspaceName, tmd);
             for (Token token : keyTokens)
@@ -653,7 +655,7 @@ public class LeaveAndBootstrapTest
 
         assertFalse(tmd.isMember(hosts.get(2)));
 
-        // node hosts.get(4) goes to bootstrap
+        // node hosts.get(3) goes to bootstrap
         Gossiper.instance.injectApplicationState(hosts.get(3), ApplicationState.TOKENS, valueFactory.tokens(Collections.singleton(keyTokens.get(1))));
         ss.onChange(hosts.get(3), ApplicationState.STATUS, valueFactory.bootstrapping(Collections.<Token>singleton(keyTokens.get(1))));
 
@@ -666,7 +668,7 @@ public class LeaveAndBootstrapTest
         ss.onChange(hosts.get(2), ApplicationState.STATUS,
                 valueFactory.left(Collections.singleton(keyTokens.get(1)), Gossiper.computeExpireTime()));
 
-        assertTrue(tmd.getBootstrapTokens().size() == 0);
+        Assertions.assertThat(tmd.getBootstrapTokens()).isEmpty();
         assertFalse(tmd.isMember(hosts.get(2)));
         assertFalse(tmd.isLeaving(hosts.get(2)));
     }
@@ -686,8 +688,8 @@ public class LeaveAndBootstrapTest
         Util.createInitialRing(ss, partitioner, endpointTokens, new ArrayList<Token>(), hosts, new ArrayList<UUID>(), 2);
 
         InetAddressAndPort toRemove = hosts.get(1);
-        SystemKeyspace.updatePeerInfo(toRemove, "data_center", "dc42");
-        SystemKeyspace.updatePeerInfo(toRemove, "rack", "rack42");
+        Nodes.peers().update(toRemove, info -> info.setDataCenter("dc42"), false);
+        Nodes.peers().update(toRemove, info -> info.setRack("rack42"), false);
         assertEquals("rack42", SystemKeyspace.loadDcRackInfo().get(toRemove).get("rack"));
 
         // mark the node as removed
@@ -725,7 +727,7 @@ public class LeaveAndBootstrapTest
 
     private AbstractReplicationStrategy getStrategy(String keyspaceName, TokenMetadata tmd)
     {
-        KeyspaceMetadata ksmd = Schema.instance.getKeyspaceMetadata(keyspaceName);
+        KeyspaceMetadata ksmd = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
         return AbstractReplicationStrategy.createReplicationStrategy(
                 keyspaceName,
                 ksmd.params.replication.klass,
@@ -734,4 +736,26 @@ public class LeaveAndBootstrapTest
                 ksmd.params.replication.options);
     }
 
+    @Test
+    public void testRemoveExistingMember() throws UnknownHostException
+    {
+        // create a ring of 1 node
+        StorageService ss = StorageService.instance;
+        VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
+        List<UUID> hostIds = new ArrayList<>();
+        Util.createInitialRing(ss, partitioner, new ArrayList<Token>(), new ArrayList<Token>(), new ArrayList<InetAddressAndPort>(), hostIds, 1);
+
+        InetAddressAndPort removeNode = InetAddressAndPort.getByName("127.0.0.87");
+        UUID removeHostId = UUID.randomUUID();
+        Token token = ss.getTokenFactory().fromString("87");
+        Util.joinNodeToRing(removeNode, token, partitioner, removeHostId, 1);
+        UUID coordinatorHostID = hostIds.get(0);
+        Gossiper.instance.injectApplicationState(removeNode, ApplicationState.REMOVAL_COORDINATOR, valueFactory.removalCoordinator(coordinatorHostID));
+
+        TokenMetadata tmd = ss.getTokenMetadata();
+        assertEquals(removeNode, tmd.getEndpointForHostId(removeHostId));
+        ss.onChange(removeNode, ApplicationState.STATUS_WITH_PORT, valueFactory.removingNonlocal(UUID.randomUUID()));
+        assertTrue("Removed node should be marked as leaving", tmd.isLeaving(removeNode));
+        assertTrue("Removed node not in list of leaving nodes", ss.getLeavingNodes().contains(removeNode.getHostAddress(false)));
+    }
 }

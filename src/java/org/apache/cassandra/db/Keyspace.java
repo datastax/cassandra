@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -38,28 +37,32 @@ import java.util.stream.Stream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.exceptions.UncheckedInternalRequestExecutionException;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.ReplicationParams;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -101,6 +104,9 @@ public class Keyspace
     //Keyspaces in the case of Views (batchlog of view mutations)
     public static final OpOrder writeOrder = new OpOrder();
 
+    // Set during draining to indicate that no more mutations should be accepted
+    private volatile OpOrder.Barrier writeBarrier = null;
+
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
 
@@ -118,59 +124,37 @@ public class Keyspace
         initialized = true;
     }
 
+    /**
+     * Never use it in production code.
+     *
+     * Useful when creating a fake SchemaManager so that it does not manage Keyspace instances (and CFS)
+     */
+    @VisibleForTesting
+    public static void unsetInitialized()
+    {
+        initialized = false;
+    }
+
+    public static boolean isInitialized()
+    {
+        return initialized;
+    }
+
     public static Keyspace open(String keyspaceName)
     {
-        assert initialized || SchemaConstants.isLocalSystemKeyspace(keyspaceName);
-        return open(keyspaceName, Schema.instance, true);
+        assert initialized || SchemaConstants.isLocalSystemKeyspace(keyspaceName) : "Initialized: " + initialized;
+        return open(keyspaceName, SchemaManager.instance, true);
     }
 
     // to only be used by org.apache.cassandra.tools.Standalone* classes
-    public static Keyspace openWithoutSSTables(String keyspaceName)
+    public static Keyspace openWithoutSSTables(String keyspaceName) throws UnknownKeyspaceException
     {
-        return open(keyspaceName, Schema.instance, false);
+        return open(keyspaceName, SchemaManager.instance, false);
     }
 
-    @VisibleForTesting
-    static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables)
+    public static Keyspace open(String keyspaceName, SchemaProvider schema, boolean loadSSTables) throws UnknownKeyspaceException
     {
-        Keyspace keyspaceInstance = schema.getKeyspaceInstance(keyspaceName);
-
-        if (keyspaceInstance == null)
-        {
-            // Instantiate the Keyspace while holding the Schema lock. This both ensures we only do it once per
-            // keyspace, and also ensures that Keyspace construction sees a consistent view of the schema.
-            synchronized (schema)
-            {
-                keyspaceInstance = schema.getKeyspaceInstance(keyspaceName);
-                if (keyspaceInstance == null)
-                {
-                    // open and store the keyspace
-                    keyspaceInstance = new Keyspace(keyspaceName, schema, loadSSTables);
-                    schema.storeKeyspaceInstance(keyspaceInstance);
-                }
-            }
-        }
-        return keyspaceInstance;
-    }
-
-    public static Keyspace clear(String keyspaceName)
-    {
-        return clear(keyspaceName, Schema.instance);
-    }
-
-    public static Keyspace clear(String keyspaceName, Schema schema)
-    {
-        synchronized (schema)
-        {
-            Keyspace t = schema.removeKeyspaceInstance(keyspaceName);
-            if (t != null)
-            {
-                for (ColumnFamilyStore cfs : t.getColumnFamilyStores())
-                    t.unloadCf(cfs);
-                t.metric.release();
-            }
-            return t;
-        }
+        return schema.getOrCreateKeyspaceInstance(keyspaceName, () -> new Keyspace(keyspaceName, schema, loadSSTables));
     }
 
     public static ColumnFamilyStore openAndGetStore(TableMetadataRef tableRef)
@@ -337,12 +321,13 @@ public class Keyspace
         return list;
     }
 
-    private Keyspace(String keyspaceName, SchemaProvider schema, boolean loadSSTables)
+    private Keyspace(String keyspaceName, SchemaProvider schema, boolean loadSSTables) throws UnknownKeyspaceException
     {
         this.schema = schema;
         metadata = schema.getKeyspaceMetadata(keyspaceName);
-        assert metadata != null : "Unknown keyspace " + keyspaceName;
-        
+        if (metadata == null)
+            throw new UnknownKeyspaceException(keyspaceName);
+
         if (metadata.isVirtual())
             throw new IllegalStateException("Cannot initialize Keyspace with virtual metadata " + keyspaceName);
         createReplicationStrategy(metadata);
@@ -358,11 +343,18 @@ public class Keyspace
 
         this.repairManager = new CassandraKeyspaceRepairManager(this);
         this.writeHandler = new CassandraKeyspaceWriteHandler(this);
+
+        // If keyspace has been added, we need to recalculate pending ranges to make sure
+        // we send mutations to the correct set of bootstrapping nodes. Refer CASSANDRA-15433.
+        if (metadata.params.replication.klass != LocalStrategy.class)
+        {
+            PendingRangeCalculatorService.calculatePendingRanges(getReplicationStrategy(), keyspaceName);
+        }
     }
 
     private Keyspace(KeyspaceMetadata metadata)
     {
-        this.schema = Schema.instance;
+        this.schema = SchemaManager.instance;
         this.metadata = metadata;
         createReplicationStrategy(metadata);
         this.metric = new KeyspaceMetrics(this);
@@ -388,33 +380,42 @@ public class Keyspace
         if (!ksm.params.replication.equals(replicationParams))
         {
             logger.debug("New replication settings for keyspace {} - invalidating disk boundary caches", ksm.name);
-            columnFamilyStores.values().forEach(ColumnFamilyStore::invalidateDiskBoundaries);
+            columnFamilyStores.values().forEach(ColumnFamilyStore::invalidateLocalRangesAndDiskBoundaries);
         }
         replicationParams = ksm.params.replication;
     }
 
-    // best invoked on the compaction mananger.
-    public void dropCf(TableId tableId)
+    // best invoked on the compaction manager.
+    public void dropCf(TableId tableId, boolean dropData)
     {
-        assert columnFamilyStores.containsKey(tableId);
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)
             return;
 
-        cfs.getCompactionStrategyManager().shutdown();
-        CompactionManager.instance.interruptCompactionForCFs(cfs.concatWithIndexes(), (sstable) -> true, true);
+        cfs.onTableDropped();
+
         // wait for any outstanding reads/writes that might affect the CFS
-        cfs.keyspace.writeOrder.awaitNewBarrier();
+        writeOrder.awaitNewBarrier();
         cfs.readOrdering.awaitNewBarrier();
 
-        unloadCf(cfs);
+        unloadCf(cfs, dropData);
     }
 
     // disassociate a cfs from this keyspace instance.
-    private void unloadCf(ColumnFamilyStore cfs)
+    private void unloadCf(ColumnFamilyStore cfs, boolean dropData)
     {
-        cfs.forceBlockingFlush();
-        cfs.invalidate();
+        cfs.unloadCf();
+        cfs.invalidate(true, dropData);
+    }
+
+    /**
+     * Unloads all column family stores and releases metrics.
+     */
+    public void unload(boolean dropData)
+    {
+        for (ColumnFamilyStore cfs : getColumnFamilyStores())
+            unloadCf(cfs, dropData);
+        metric.release();
     }
 
     /**
@@ -472,26 +473,9 @@ public class Keyspace
         }
     }
 
-    public CompletableFuture<?> applyFuture(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public CompletableFuture<?> applyFuture(Mutation mutation, WriteOptions writeOptions, boolean isDeferrable)
     {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, true, true, new CompletableFuture<>());
-    }
-
-    public CompletableFuture<?> applyFuture(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable,
-                                            boolean isDeferrable)
-    {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable, isDeferrable, new CompletableFuture<>());
-    }
-
-    public void apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
-    {
-        apply(mutation, writeCommitLog, updateIndexes, true);
-    }
-
-    public void apply(final Mutation mutation,
-                      final boolean writeCommitLog)
-    {
-        apply(mutation, writeCommitLog, true, true);
+        return applyInternal(mutation, writeOptions, isDeferrable, new CompletableFuture<>());
     }
 
     /**
@@ -499,43 +483,51 @@ public class Keyspace
      * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
      * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
      *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param makeDurable    if true, don't return unless write has been made durable
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
+     * @param mutation the row to write.  Must not be modified after calling apply, since commitlog append
+     * may happen concurrently, depending on the CL Executor type.
+     * @param writeOptions describes desired write properties
      */
-    public void apply(final Mutation mutation,
-                      final boolean makeDurable,
-                      boolean updateIndexes,
-                      boolean isDroppable)
+    public void apply(final Mutation mutation, WriteOptions writeOptions)
     {
-        applyInternal(mutation, makeDurable, updateIndexes, isDroppable, false, null);
+        applyInternal(mutation, writeOptions, false, null);
+    }
+
+    /**
+     * Close this keyspace to further mutations, called when draining or shutting down.
+     *
+     * A final write barrier is issued and returned. After this barrier is set, new mutations
+     * will be rejected, see {@link Keyspace#applyInternal(Mutation, WriteOptions, boolean, CompletableFuture)}.
+     */
+    public OpOrder.Barrier stopMutations()
+    {
+        assert writeBarrier == null : "Keyspace has already been closed to mutations";
+        writeBarrier = writeOrder.newBarrier();
+        writeBarrier.issue();
+        return writeBarrier;
     }
 
     /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
      *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param makeDurable    if true, don't return unless write has been made durable
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
-     * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
+     * @param mutation the row to write.  Must not be modified after calling apply, since commitlog append
+     * may happen concurrently, depending on the CL Executor type.
+     * @param writeOptions describes desired write properties
+     * @param isDeferrable true if caller is not waiting for future to complete, so that future may be deferred
      */
     private CompletableFuture<?> applyInternal(final Mutation mutation,
-                                               final boolean makeDurable,
-                                               boolean updateIndexes,
-                                               boolean isDroppable,
-                                               boolean isDeferrable,
-                                               CompletableFuture<?> future)
+            WriteOptions writeOptions,
+            boolean isDeferrable,
+            CompletableFuture<?> future)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             throw new RuntimeException("Testing write failures");
 
+        if (writeBarrier != null)
+            return failDueToWriteBarrier(mutation, future);
+
         Lock[] locks = null;
 
-        boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
+        boolean requiresViewUpdate = writeOptions.requiresViewUpdate(viewManager, mutation);
 
         if (requiresViewUpdate)
         {
@@ -562,7 +554,7 @@ public class Keyspace
                     if (lock == null)
                     {
                         //throw WTE only if request is droppable
-                        if (isDroppable && (approxTime.isAfter(mutation.approxCreatedAtNanos + DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS))))
+                        if (writeOptions.isDroppable && (approxTime.isAfter(mutation.approxCreatedAtNanos + DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS))))
                         {
                             for (int j = 0; j < i; j++)
                                 locks[j].unlock();
@@ -587,7 +579,7 @@ public class Keyspace
                             // we will re-apply ourself to the queue and try again later
                             final CompletableFuture<?> mark = future;
                             Stage.MUTATION.execute(() ->
-                                                   applyInternal(mutation, makeDurable, true, isDroppable, true, mark)
+                                    applyInternal(mutation, writeOptions, true, mark)
                             );
                             return future;
                         }
@@ -620,14 +612,13 @@ public class Keyspace
             long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart.get();
             // Metrics are only collected for droppable write operations
             // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
-            if (isDroppable)
+            if (writeOptions.isDroppable)
             {
-                for(TableId tableId : tableIds)
+                for (TableId tableId : tableIds)
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
-        int nowInSec = FBUtilities.nowInSeconds();
-        try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
+        try (WriteContext ctx = getWriteHandler().beginWrite(mutation, writeOptions))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
@@ -644,21 +635,18 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
+                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeOptions, baseComplete);
                     }
                     catch (Throwable t)
                     {
                         JVMStabilityInspector.inspectThrowable(t);
                         logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s",
-                                                   upd.metadata().toString()), t);
+                                upd.metadata().toString()), t);
                         throw t;
                     }
                 }
 
-                UpdateTransaction indexTransaction = updateIndexes
-                                                     ? cfs.indexManager.newUpdateTransaction(upd, ctx, nowInSec)
-                                                     : UpdateTransaction.NO_OP;
-                cfs.getWriteHandler().write(upd, ctx, indexTransaction);
+                cfs.getWriteHandler().write(upd, ctx, writeOptions.updateIndexes);
 
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
@@ -680,16 +668,29 @@ public class Keyspace
         }
     }
 
+    private CompletableFuture<?> failDueToWriteBarrier(Mutation mutation, CompletableFuture<?> future)
+    {
+        assert writeBarrier != null : "Expected non null write barrier";
+
+        logger.debug(FBUtilities.Debug.getStackTrace());
+        logger.error("Attempted to apply mutation {} after final write barrier", mutation);
+        if (future != null)
+        {
+            future.completeExceptionally(new UncheckedInternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
+        }
+        throw new UncheckedInternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations");
+    }
+
     public AbstractReplicationStrategy getReplicationStrategy()
     {
         return replicationStrategy;
     }
 
-    public List<Future<?>> flush()
+    public List<Future<?>> flush(ColumnFamilyStore.FlushReason reason)
     {
         List<Future<?>> futures = new ArrayList<>(columnFamilyStores.size());
         for (ColumnFamilyStore cfs : columnFamilyStores.values())
-            futures.add(cfs.forceFlush());
+            futures.add(cfs.forceFlush(reason));
         return futures;
     }
 
@@ -759,7 +760,7 @@ public class Keyspace
 
     public static Iterable<Keyspace> all()
     {
-        return Iterables.transform(Schema.instance.getKeyspaces(), Keyspace::open);
+        return Iterables.transform(SchemaManager.instance.getKeyspaces(), Keyspace::open);
     }
 
     /**
@@ -767,17 +768,17 @@ public class Keyspace
      */
     public static Stream<Keyspace> allExisting()
     {
-        return Schema.instance.getKeyspaces().stream().map(Schema.instance::getKeyspaceInstance).filter(Objects::nonNull);
+        return SchemaManager.instance.getKeyspaces().stream().map(SchemaManager.instance::getKeyspaceInstance).filter(Objects::nonNull);
     }
 
     public static Iterable<Keyspace> nonSystem()
     {
-        return Iterables.transform(Schema.instance.getNonSystemKeyspaces(), Keyspace::open);
+        return Iterables.transform(SchemaManager.instance.getNonSystemKeyspaces().names(), Keyspace::open);
     }
 
     public static Iterable<Keyspace> nonLocalStrategy()
     {
-        return Iterables.transform(Schema.instance.getNonLocalStrategyKeyspaces(), Keyspace::open);
+        return Iterables.transform(SchemaManager.instance.getNonLocalStrategyKeyspaces().names(), Keyspace::open);
     }
 
     public static Iterable<Keyspace> system()

@@ -40,7 +40,6 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MerkleTrees;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -138,7 +137,7 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
                 state.trace("{}/{} ({}%) {} idx:{}{}",
                             new Object[] { FBUtilities.prettyPrintMemory(pi.currentBytes),
                                            FBUtilities.prettyPrintMemory(pi.totalBytes),
-                                           pi.currentBytes * 100 / pi.totalBytes,
+                                           pi.totalBytes == 0 ? 0 : (pi.currentBytes * 100 / pi.totalBytes),
                                            pi.direction == ProgressInfo.Direction.OUT ? "sent to" : "received from",
                                            pi.sessionIndex,
                                            pi.peer });

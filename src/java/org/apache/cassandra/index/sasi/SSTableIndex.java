@@ -17,11 +17,13 @@
  */
 package org.apache.cassandra.index.sasi;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.google.common.base.Function;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -33,17 +35,15 @@ import org.apache.cassandra.index.sasi.plan.Expression;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.concurrent.Ref;
-
-import org.apache.commons.lang3.builder.HashCodeBuilder;
-
-import com.google.common.base.Function;
 
 public class SSTableIndex
 {
     private final ColumnIndex columnIndex;
-    private final Ref<SSTableReader> sstableRef;
+    private final Ref<? extends SSTableReader> sstableRef;
     private final SSTableReader sstable;
     private final OnDiskIndex index;
     private final AtomicInteger references = new AtomicInteger(1);
@@ -174,9 +174,9 @@ public class SSTableIndex
 
         public DecoratedKey apply(Long offset)
         {
-            try
+            try (RandomAccessReader in = sstable.openKeyComponentReader())
             {
-                return sstable.keyAt(offset);
+                return sstable.keyAt(in, offset);
             }
             catch (IOException e)
             {

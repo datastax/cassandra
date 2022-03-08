@@ -36,21 +36,26 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.service.StorageService;
+
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
 @Ignore
-public class AbstractPendingRepairTest extends AbstractRepairTest
+public abstract class AbstractPendingRepairTest extends AbstractRepairTest
 {
     protected String ks;
     protected final String tbl = "tbl";
     protected TableMetadata cfm;
     protected ColumnFamilyStore cfs;
-    protected CompactionStrategyManager csm;
+    protected CompactionStrategyFactory strategyFactory;
+    protected CompactionStrategyContainer compactionStrategyContainer;
     protected static ActiveRepairService ARS;
 
-    private int nextSSTableKey = 0;
+    protected int nextSSTableKey = 0;
+    public abstract String createTableCql();
 
     @BeforeClass
     public static void setupClass()
@@ -62,18 +67,26 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         // cutoff messaging service
         MessagingService.instance().outboundSink.add((message, to) -> false);
         MessagingService.instance().inboundSink.add((message) -> false);
+        StorageService.instance.initServer();
     }
 
     @Before
     public void setup()
     {
         ks = "ks_" + System.currentTimeMillis();
-        cfm = CreateTableStatement.parse(String.format("CREATE TABLE %s.%s (k INT PRIMARY KEY, v INT)", ks, tbl), ks).build();
+        cfm = CreateTableStatement.parse(createTableCql(), ks).build();
         SchemaLoader.createKeyspace(ks, KeyspaceParams.simple(1), cfm);
-        cfs = Schema.instance.getColumnFamilyStoreInstance(cfm.id);
-        csm = cfs.getCompactionStrategyManager();
+        cfs = SchemaManager.instance.getColumnFamilyStoreInstance(cfm.id);
+        strategyFactory = cfs.getCompactionFactory();
+        compactionStrategyContainer = cfs.getCompactionStrategyContainer();
         nextSSTableKey = 0;
         cfs.disableAutoCompaction();
+    }
+
+    void handleOrphan(SSTableReader sstable)
+    {
+        compactionStrategyContainer.getStrategies(false, null)
+                                   .forEach(acs -> ((LegacyAbstractCompactionStrategy) acs).removeSSTable(sstable));
     }
 
     /**
@@ -86,7 +99,7 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         int pk = nextSSTableKey++;
         Set<SSTableReader> pre = cfs.getLiveSSTables();
         QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES(?, ?)", ks, tbl), pk, pk);
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         Set<SSTableReader> post = cfs.getLiveSSTables();
         Set<SSTableReader> diff = new HashSet<>(post);
         diff.removeAll(pre);
@@ -94,7 +107,7 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         SSTableReader sstable = diff.iterator().next();
         if (orphan)
         {
-            csm.getUnrepairedUnsafe().allStrategies().forEach(acs -> acs.removeSSTable(sstable));
+            handleOrphan(sstable);
         }
         return sstable;
     }

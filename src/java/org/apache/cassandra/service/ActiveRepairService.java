@@ -56,7 +56,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.IFailureDetectionEventListener;
@@ -70,6 +69,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.CommonRange;
+import org.apache.cassandra.repair.ParentRepairSessionListener;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.RepairSession;
@@ -88,6 +88,7 @@ import org.apache.cassandra.repair.messages.SyncResponse;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.PreviewKind;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.Pair;
@@ -96,6 +97,8 @@ import org.apache.cassandra.utils.UUIDGen;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.transform;
 import static org.apache.cassandra.net.Verb.PREPARE_MSG;
+import static org.apache.cassandra.net.Verb.SYNC_RSP;
+import static org.apache.cassandra.net.Verb.VALIDATION_RSP;
 
 /**
  * ActiveRepairService is the starting point for manual "active" repairs.
@@ -131,7 +134,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
     private static final Logger logger = LoggerFactory.getLogger(ActiveRepairService.class);
     // singleton enforcement
-    public static final ActiveRepairService instance = new ActiveRepairService(FailureDetector.instance, Gossiper.instance);
+    public static final ActiveRepairService instance = new ActiveRepairService(IFailureDetector.instance, Gossiper.instance);
 
     public static final long UNREPAIRED_SSTABLE = 0;
     public static final UUID NO_PENDING_REPAIR = null;
@@ -334,6 +337,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              String keyspace,
                                              RepairParallelism parallelismDegree,
                                              boolean isIncremental,
+                                             boolean pushRepair,
                                              boolean pullRepair,
                                              PreviewKind previewKind,
                                              boolean optimiseStreams,
@@ -347,7 +351,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace,
-                                                        parallelismDegree, isIncremental, pullRepair,
+                                                        parallelismDegree, isIncremental, pushRepair, pullRepair,
                                                         previewKind, optimiseStreams, cfnames);
 
         sessions.put(session.getId(), session);
@@ -411,7 +415,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         {
             session.forceShutdown(cause);
         }
+        Collection<Map.Entry<UUID, ParentRepairSession>> sessions = new ArrayList<>(parentRepairSessions.entrySet());
         parentRepairSessions.clear();
+
+        for (Map.Entry<UUID, ParentRepairSession> e : sessions)
+            ParentRepairSessionListener.instance.onRemoved(e.getKey(), e.getValue());
     }
 
     public void recordRepairStatus(int cmd, ParentRepairStatus parentRepairStatus, List<String> messages)
@@ -577,7 +585,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         for (InetAddressAndPort neighbour : endpoints)
         {
-            if (FailureDetector.instance.isAlive(neighbour))
+            if (IFailureDetector.instance.isAlive(neighbour))
             {
                 PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
                 Message<RepairMessage> msg = Message.out(PREPARE_MSG, message);
@@ -601,7 +609,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
         try
         {
-            if (!prepareLatch.await(DatabaseDescriptor.getRpcTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS))
+            if (!prepareLatch.await(DatabaseDescriptor.getRepairPrepareMessageTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS))
                 failRepair(parentRepairSession, "Did not get replies from all endpoints.");
         }
         catch (InterruptedException e)
@@ -628,7 +636,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         {
             try
             {
-                if (FailureDetector.instance.isAlive(endpoint))
+                if (IFailureDetector.instance.isAlive(endpoint))
                 {
                     CleanupMessage message = new CleanupMessage(parentRepairSession);
                     Message<CleanupMessage> msg = Message.out(Verb.CLEANUP_MSG, message);
@@ -671,13 +679,15 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (!registeredForEndpointChanges)
         {
             Gossiper.instance.register(this);
-            FailureDetector.instance.registerFailureDetectionEventListener(this);
+            IFailureDetector.instance.registerFailureDetectionEventListener(this);
             registeredForEndpointChanges = true;
         }
 
         if (!parentRepairSessions.containsKey(parentRepairSession))
         {
-            parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind));
+            ParentRepairSession session = new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind);
+            parentRepairSessions.put(parentRepairSession, session);
+            ParentRepairSessionListener.instance.onRegistered(parentRepairSession, session);
         }
     }
 
@@ -707,6 +717,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (session == null)
             return null;
 
+        ParentRepairSessionListener.instance.onRemoved(parentSessionId, session);
+
         if (session.hasSnapshots)
         {
             clearSnapshotExecutor.submit(() -> {
@@ -732,19 +744,17 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         RepairSession session = sessions.get(desc.sessionId);
         if (session == null)
             return;
-        switch (message.verb())
+
+        if (message.verb() == VALIDATION_RSP)
         {
-            case VALIDATION_RSP:
-                ValidationResponse validation = (ValidationResponse) message.payload;
-                session.validationComplete(desc, message.from(), validation.trees);
-                break;
-            case SYNC_RSP:
-                // one of replica is synced.
-                SyncResponse sync = (SyncResponse) message.payload;
-                session.syncComplete(desc, sync.nodes, sync.success, sync.summaries);
-                break;
-            default:
-                break;
+            ValidationResponse validation = (ValidationResponse) message.payload;
+            session.validationComplete(desc, message.from(), validation.trees);
+        }
+        else if (message.verb() == SYNC_RSP)
+        {
+            // one of replica is synced.
+            SyncResponse sync = (SyncResponse) message.payload;
+            session.syncComplete(desc, sync.nodes, sync.success, sync.summaries);
         }
     }
 

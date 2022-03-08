@@ -1,0 +1,21 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,4 +1,6 @@
+-<<<<<<<
++Future version (tbd)
++ * Require only MODIFY permission on base when updating table with MV (STAR-564)
++
+ 4.0.4
+ Merged from 3.0:
+  * Fix flaky test - test_cqlsh_completion.TestCqlshCompletion (CASSANDRA-17338)
+@@ -69,10 +71,6 @@
+  * Avoid removing batch when it's not created during view replication (CASSANDRA-16175)
+  * Make the addition of regular column to COMPACT tables throw an InvalidRequestException (CASSANDRA-14564)
+  * Race in CompactionExecutorTest (CASSANDRA-17239)
+-=======
+-Future version (tbd)
+- * Require only MODIFY permission on base when updating table with MV (STAR-564)
+->>>>>>>
+ 
+ 4.0.1
+  * Tolerate missing DNS entry when completing a host replacement (CASSANDRA-16873)

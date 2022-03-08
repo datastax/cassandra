@@ -25,18 +25,16 @@ import java.util.Set;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-
-import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
-import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.streaming.StreamReceiveTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.ThrottledUnfilteredIterator;
@@ -45,6 +43,7 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.streaming.IncomingStream;
@@ -78,7 +77,7 @@ public class CassandraStreamReceiver implements StreamReceiver
         this.session = session;
         // this is an "offline" transaction, as we currently manually expose the sstables once done;
         // this should be revisited at a later date, so that LifecycleTransaction manages all sstable state changes
-        this.txn = LifecycleTransaction.offline(OperationType.STREAM);
+        this.txn = LifecycleTransaction.offline(OperationType.STREAM, cfs.metadata);
         this.sstables = new ArrayList<>(totalFiles);
         this.requiresWritePath = requiresWritePath(cfs);
     }
@@ -182,7 +181,7 @@ public class CassandraStreamReceiver implements StreamReceiver
      * can be archived by the CDC process on discard.
      */
     private boolean requiresWritePath(ColumnFamilyStore cfs) {
-        return hasCDC(cfs) || (session.streamOperation().requiresViewBuild() && hasViews(cfs));
+        return hasCDC(cfs) || cfs.streamToMemtable() || (session.streamOperation().requiresViewBuild() && hasViews(cfs));
     }
 
     private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
@@ -191,6 +190,9 @@ public class CassandraStreamReceiver implements StreamReceiver
         for (SSTableReader reader : readers)
         {
             Keyspace ks = Keyspace.open(reader.getKeyspaceName());
+            WriteOptions opts = WriteOptions.forStreaming(
+                    session.streamOperation(),
+                    hasCdc);
             // When doing mutation-based repair we split each partition into smaller batches
             // ({@link Stream MAX_ROWS_PER_BATCH}) to avoid OOMing and generating heap pressure
             try (ISSTableScanner scanner = reader.getScanner();
@@ -204,9 +206,7 @@ public class CassandraStreamReceiver implements StreamReceiver
                     // If the CFS has CDC, however, these updates need to be written to the CommitLog
                     // so they get archived into the cdc_raw folder
                     ks.apply(new Mutation(PartitionUpdate.fromIterator(throttledPartitions.next(), filter)),
-                             hasCdc,
-                             true,
-                             false);
+                            opts);
                 }
             }
         }
@@ -235,7 +235,7 @@ public class CassandraStreamReceiver implements StreamReceiver
 
                 // add sstables (this will build secondary indexes too, see CASSANDRA-10130)
                 logger.debug("[Stream #{}] Received {} sstables from {} ({})", session.planId(), readers.size(), session.peer, readers);
-                cfs.addSSTables(readers);
+                cfs.addSSTables(readers, OperationType.STREAM);
 
                 //invalidate row and counter cache
                 if (cfs.isRowCacheEnabled() || cfs.metadata().isCounter())
@@ -273,7 +273,7 @@ public class CassandraStreamReceiver implements StreamReceiver
         // the streamed sstables.
         if (requiresWritePath)
         {
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.STREAMS_RECEIVED);
             abort();
         }
     }

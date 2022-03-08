@@ -1,0 +1,53 @@
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -22,19 +22,8 @@
+ import java.nio.ByteBuffer;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+-<<<<<<<
+ import java.util.*;
+-=======
+-import java.util.Collection;
+-import java.util.Collections;
+-import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedList;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Set;
+ import java.util.concurrent.ExecutionException;
+->>>>>>>
+ 
+ import com.google.common.collect.Iterators;
+ import org.junit.Assert;
+--- a/test/unit/org/apache/cassandra/db/RecoveryManagerFlushedTest.java
++++ b/test/unit/org/apache/cassandra/db/RecoveryManagerFlushedTest.java
+@@ -52,11 +52,9 @@
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
++
+ import static org.junit.Assert.assertEquals;
+->>>>>>>
+ 
+ @RunWith(Parameterized.class)
+ public class RecoveryManagerFlushedTest
+--- a/test/unit/org/apache/cassandra/db/commitlog/CommitLogTest.java
++++ b/test/unit/org/apache/cassandra/db/commitlog/CommitLogTest.java
+@@ -102,13 +102,10 @@
+ import org.apache.cassandra.utils.Pair;
+ import org.apache.cassandra.utils.vint.VIntCoding;
+ 
+-<<<<<<<
+ import org.junit.After;
+ 
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
+->>>>>>>
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
+ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;

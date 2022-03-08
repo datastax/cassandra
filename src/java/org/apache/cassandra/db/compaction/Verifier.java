@@ -19,6 +19,7 @@ package org.apache.cassandra.db.compaction;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.*;
@@ -32,28 +33,28 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.FileDigestValidator;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.BloomFilterSerializer;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.UUIDGen;
 
-import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.DataInputStream;
-import java.io.File;
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -67,18 +68,18 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
 
+import org.apache.cassandra.io.util.File;
+
 public class Verifier implements Closeable
 {
-    private final ColumnFamilyStore cfs;
+    private final CompactionRealm realm;
     private final SSTableReader sstable;
 
     private final CompactionController controller;
 
     private final ReadWriteLock fileAccessLock;
     private final RandomAccessReader dataFile;
-    private final RandomAccessReader indexFile;
     private final VerifyInfo verifyInfo;
-    private final RowIndexEntry.IndexSerializer rowIndexEntrySerializer;
     private final Options options;
     private final boolean isOffline;
     /**
@@ -93,25 +94,23 @@ public class Verifier implements Closeable
     private final OutputHandler outputHandler;
     private FileDigestValidator validator;
 
-    public Verifier(ColumnFamilyStore cfs, SSTableReader sstable, boolean isOffline, Options options)
+    public Verifier(CompactionRealm realm, SSTableReader sstable, boolean isOffline, Options options)
     {
-        this(cfs, sstable, new OutputHandler.LogOutput(), isOffline, options);
+        this(realm, sstable, new OutputHandler.LogOutput(), isOffline, options);
     }
 
-    public Verifier(ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    public Verifier(CompactionRealm realm, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
-        this.cfs = cfs;
+        this.realm = realm;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
-        this.rowIndexEntrySerializer = sstable.descriptor.version.getSSTableFormat().getIndexSerializer(cfs.metadata(), sstable.descriptor.version, sstable.header);
 
-        this.controller = new VerifyController(cfs);
+        this.controller = new VerifyController(realm);
 
         this.fileAccessLock = new ReentrantReadWriteLock();
         this.dataFile = isOffline
                         ? sstable.openDataReader()
                         : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
-        this.indexFile = RandomAccessReader.open(new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)));
         this.verifyInfo = new VerifyInfo(dataFile, sstable, fileAccessLock.readLock());
         this.options = options;
         this.isOffline = isOffline;
@@ -149,7 +148,7 @@ public class Verifier implements Closeable
 
         try
         {
-            outputHandler.debug("Deserializing index for "+sstable);
+            outputHandler.debug("Deserializing index for " + sstable);
             deserializeIndex(sstable);
         }
         catch (Throwable t)
@@ -158,16 +157,19 @@ public class Verifier implements Closeable
             markAndThrow(t);
         }
 
-        try
+        if (sstable.descriptor.getFormat().supportedComponents().contains(Component.SUMMARY))
         {
-            outputHandler.debug("Deserializing index summary for "+sstable);
-            deserializeIndexSummary(sstable);
-        }
-        catch (Throwable t)
-        {
-            outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup "+sstable.descriptor.filenameFor(Component.SUMMARY));
-            outputHandler.warn(t);
+            try
+            {
+                outputHandler.debug("Deserializing index summary for " + sstable);
+                deserializeIndexSummary(sstable);
+            }
+            catch (Throwable t)
+            {
+                outputHandler.output("Index summary is corrupt - if it is removed it will get rebuilt on startup " + sstable.descriptor.fileFor(Component.SUMMARY));
+                outputHandler.warn(t);
             markAndThrow(t, false);
+            }
         }
 
         try
@@ -182,12 +184,12 @@ public class Verifier implements Closeable
             markAndThrow(t);
         }
 
-        if (options.checkOwnsTokens && !isOffline && !(cfs.getPartitioner() instanceof LocalPartitioner))
+        if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
         {
             outputHandler.debug("Checking that all tokens are owned by the current node");
-            try (KeyIterator iter = new KeyIterator(sstable.descriptor, sstable.metadata()))
+            try (KeyIterator iter = KeyIterator.forSSTable(sstable))
             {
-                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(cfs.metadata.keyspace));
+                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(realm.metadataRef().keyspace));
                 if (ownedRanges.isEmpty())
                     return;
                 RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
@@ -213,7 +215,7 @@ public class Verifier implements Closeable
         {
             validator = null;
 
-            if (new File(sstable.descriptor.filenameFor(Component.DIGEST)).exists())
+            if (sstable.descriptor.fileFor(Component.DIGEST).exists())
             {
                 validator = DataIntegrityMetadata.fileDigestValidator(sstable.descriptor);
                 validator.validate();
@@ -239,16 +241,13 @@ public class Verifier implements Closeable
 
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
-        try
+        try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
         {
-            ByteBuffer nextIndexKey = ByteBufferUtil.readWithShortLength(indexFile);
-            {
-                long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
-                if (firstRowPositionFromIndex != 0)
-                    markAndThrow(new RuntimeException("firstRowPositionFromIndex != 0: "+firstRowPositionFromIndex));
-            }
+            if (indexIterator.dataPosition() != 0)
+                markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
-            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(cfs.metadata().keyspace));
+            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
+            realm.metadata().keyspace));
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
             DecoratedKey prevKey = null;
 
@@ -256,7 +255,7 @@ public class Verifier implements Closeable
             {
 
                 if (verifyInfo.isStopRequested())
-                    throw new CompactionInterruptedException(verifyInfo.getCompactionInfo());
+                    throw new CompactionInterruptedException(verifyInfo.getProgress());
 
                 rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at " + rowStart);
@@ -272,7 +271,7 @@ public class Verifier implements Closeable
                     // check for null key below
                 }
 
-                if (options.checkOwnsTokens && ownedRanges.size() > 0 && !(cfs.getPartitioner() instanceof LocalPartitioner))
+                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(realm.getPartitioner() instanceof LocalPartitioner))
                 {
                     try
                     {
@@ -285,14 +284,18 @@ public class Verifier implements Closeable
                     }
                 }
 
-                ByteBuffer currentIndexKey = nextIndexKey;
+                ByteBuffer currentIndexKey = indexIterator.key();
                 long nextRowPositionFromIndex = 0;
                 try
                 {
-                    nextIndexKey = indexFile.isEOF() ? null : ByteBufferUtil.readWithShortLength(indexFile);
-                    nextRowPositionFromIndex = indexFile.isEOF()
-                                             ? dataFile.length()
-                                             : rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+                    if (indexIterator.advance())
+                    {
+                        nextRowPositionFromIndex = indexIterator.dataPosition();
+                    }
+                    else
+                    {
+                        nextRowPositionFromIndex = dataFile.length();
+                    }
                 }
                 catch (Throwable th)
                 {
@@ -308,8 +311,6 @@ public class Verifier implements Closeable
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
                 outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSize)));
-
-                assert currentIndexKey != null || indexFile.isEOF();
 
                 try
                 {
@@ -413,28 +414,25 @@ public class Verifier implements Closeable
 
     private void deserializeIndex(SSTableReader sstable) throws IOException
     {
-        try (RandomAccessReader primaryIndex = RandomAccessReader.open(new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX))))
-        {
-            long indexSize = primaryIndex.length();
-
-            while ((primaryIndex.getFilePointer()) != indexSize)
-            {
-                ByteBuffer key = ByteBufferUtil.readWithShortLength(primaryIndex);
-                RowIndexEntry.Serializer.skip(primaryIndex, sstable.descriptor.version);
-            }
+        try (PartitionIndexIterator it = sstable.allKeysIterator()) {
+            //noinspection StatementWithEmptyBody
+            ByteBuffer last = it.key();
+            while (it.advance()) last = it.key(); // no-op, just check if index is readable
+            if (!Objects.equals(last, sstable.last.getKey()))
+                throw new CorruptSSTableException(new IOException("Failed to read partition index"), it.toString());
         }
     }
 
     private void deserializeIndexSummary(SSTableReader sstable) throws IOException
     {
-        File file = new File(sstable.descriptor.filenameFor(Component.SUMMARY));
-        TableMetadata metadata = cfs.metadata();
+        File file = sstable.descriptor.fileFor(Component.SUMMARY);
+        TableMetadata metadata = realm.metadata();
         try (DataInputStream iStream = new DataInputStream(Files.newInputStream(file.toPath())))
         {
             try (IndexSummary indexSummary = IndexSummary.serializer.deserialize(iStream,
-                                                               cfs.getPartitioner(),
-                                                               metadata.params.minIndexInterval,
-                                                               metadata.params.maxIndexInterval))
+                                                                                 realm.getPartitioner(),
+                                                                                 metadata.params.minIndexInterval,
+                                                                                 metadata.params.maxIndexInterval))
             {
                 ByteBufferUtil.readWithLength(iStream);
                 ByteBufferUtil.readWithLength(iStream);
@@ -444,11 +442,11 @@ public class Verifier implements Closeable
 
     private void deserializeBloomFilter(SSTableReader sstable) throws IOException
     {
-        Path bfPath = Paths.get(sstable.descriptor.filenameFor(Component.FILTER));
-        if (Files.exists(bfPath))
+        File bfPath = sstable.descriptor.fileFor(Component.FILTER);
+        if (bfPath.exists())
         {
-            try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(bfPath)));
-                 IFilter bf = BloomFilterSerializer.deserialize(stream, sstable.descriptor.version.hasOldBfFormat()))
+            try (FileInputStreamPlus stream = bfPath.newInputStream();
+                 IFilter bf = BloomFilter.serializer.deserialize(stream, sstable.descriptor.version.hasOldBfFormat()))
             {
             }
         }
@@ -460,7 +458,6 @@ public class Verifier implements Closeable
         try
         {
             FileUtils.closeQuietly(dataFile);
-            FileUtils.closeQuietly(indexFile);
         }
         finally
         {
@@ -485,8 +482,7 @@ public class Verifier implements Closeable
         {
             try
             {
-                sstable.mutateRepairedAndReload(ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
-                cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
+                realm.mutateRepairedWithLock(ImmutableList.of(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
             }
             catch(IOException ioe)
             {
@@ -500,12 +496,12 @@ public class Verifier implements Closeable
             throw new RuntimeException(e);
     }
 
-    public CompactionInfo.Holder getVerifyInfo()
+    public AbstractTableOperation getVerifyInfo()
     {
         return verifyInfo;
     }
 
-    private static class VerifyInfo extends CompactionInfo.Holder
+    private static class VerifyInfo extends AbstractTableOperation
     {
         private final RandomAccessReader dataFile;
         private final SSTableReader sstable;
@@ -520,17 +516,17 @@ public class Verifier implements Closeable
             verificationCompactionId = UUIDGen.getTimeUUID();
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             fileReadLock.lock();
             try
             {
-                return new CompactionInfo(sstable.metadata(),
-                                          OperationType.VERIFY,
-                                          dataFile.getFilePointer(),
-                                          dataFile.length(),
-                                          verificationCompactionId,
-                                          ImmutableSet.of(sstable));
+                return new OperationProgress(sstable.metadata(),
+                                             OperationType.VERIFY,
+                                             dataFile.getFilePointer(),
+                                             dataFile.length(),
+                                             verificationCompactionId,
+                                             ImmutableSet.of(sstable));
             }
             catch (Exception e)
             {
@@ -550,7 +546,7 @@ public class Verifier implements Closeable
 
     private static class VerifyController extends CompactionController
     {
-        public VerifyController(ColumnFamilyStore cfs)
+        public VerifyController(CompactionRealm cfs)
         {
             super(cfs, Integer.MAX_VALUE);
         }

@@ -33,7 +33,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 
@@ -57,9 +57,9 @@ public class StandaloneUpgrader
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            SchemaManager.instance.loadFromDisk();
 
-            if (Schema.instance.getTableMetadataRef(options.keyspace, options.cf) == null)
+            if (SchemaManager.instance.getTableMetadataRef(options.keyspace, options.cf) == null)
                 throw new IllegalArgumentException(String.format("Unknown keyspace/table %s.%s",
                                                                  options.keyspace,
                                                                  options.cf));
@@ -85,7 +85,7 @@ public class StandaloneUpgrader
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    SSTableReader sstable = entry.getKey().getFormat().getReaderFactory().openNoValidation(entry.getKey(), components, cfs);
                     if (sstable.descriptor.version.equals(SSTableFormat.Type.current().info.getLatestVersion()))
                     {
                         sstable.selfRef().release();

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -29,6 +28,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,10 +41,12 @@ import org.apache.cassandra.utils.Throwables;
  * A set of log replicas. This class mostly iterates over replicas when writing or reading,
  * ensuring consistency among them and hiding replication details from LogFile.
  *
+ * Note: this is used by {@link LogTransaction}
+ *
  * @see LogReplica
  * @see LogFile
  */
-public class LogReplicaSet implements AutoCloseable
+final class LogReplicaSet implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(LogReplicaSet.class);
 
@@ -61,7 +64,7 @@ public class LogReplicaSet implements AutoCloseable
 
     void addReplica(File file)
     {
-        File directory = file.getParentFile();
+        File directory = file.parent();
         assert !replicasByFile.containsKey(directory);
         try
         {
@@ -222,13 +225,28 @@ public class LogReplicaSet implements AutoCloseable
      */
     void append(LogRecord record)
     {
-        Throwable err = Throwables.perform(null, replicas().stream().map(r -> () -> r.append(record)));
+        Throwable err = null;
+        int failed = 0;
+        for (LogReplica replica : replicas())
+        {
+            try
+            {
+                replica.append(record);
+            }
+            catch (Throwable t)
+            {
+                logger.warn("Failed to add record to a replica: {}", t.getMessage());
+                err = Throwables.merge(err, t);
+                failed++;
+            }
+        }
+
         if (err != null)
         {
-            if (!record.isFinal() || err.getSuppressed().length == replicas().size() -1)
+            if (!record.isFinal() || failed == replicas().size())
                 Throwables.maybeFail(err);
 
-            logger.error("Failed to add record '{}' to some replicas '{}'", record, this);
+            logger.error("Failed to add record '{}' to some replicas '{}'", record, this, err);
         }
     }
 
@@ -266,8 +284,8 @@ public class LogReplicaSet implements AutoCloseable
     }
 
     @VisibleForTesting
-    List<String> getFilePaths()
+    List<File> getFilePaths()
     {
-        return replicas().stream().map(LogReplica::file).map(File::getPath).collect(Collectors.toList());
+        return replicas().stream().map(LogReplica::file).collect(Collectors.toList());
     }
 }

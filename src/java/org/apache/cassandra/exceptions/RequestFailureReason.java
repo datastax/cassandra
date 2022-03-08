@@ -35,7 +35,11 @@ public enum RequestFailureReason
     UNKNOWN                  (0),
     READ_TOO_MANY_TOMBSTONES (1),
     TIMEOUT                  (2),
-    INCOMPATIBLE_SCHEMA      (3);
+    INCOMPATIBLE_SCHEMA      (3),
+    INDEX_NOT_AVAILABLE      (4),
+    UNKNOWN_COLUMN           (5),
+    UNKNOWN_TABLE            (6),
+    REMOTE_STORAGE_FAILURE   (7);
 
     public static final Serializer serializer = new Serializer();
 
@@ -44,6 +48,13 @@ public enum RequestFailureReason
     RequestFailureReason(int code)
     {
         this.code = code;
+    }
+
+    public int codeForNativeProtocol()
+    {
+        // We explicitly indicated in the protocol spec that drivers should not error out on unknown code, and we
+        // currently support a superset of the OSS codes, so we don't yet worry about the version.
+        return code;
     }
 
     private static final RequestFailureReason[] codeToReasonMap;

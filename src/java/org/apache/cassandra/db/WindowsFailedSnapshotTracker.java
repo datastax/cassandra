@@ -19,21 +19,21 @@
 package org.apache.cassandra.db;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.FileReader;
 import org.apache.cassandra.io.util.FileUtils;
 
+import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
 
 public class WindowsFailedSnapshotTracker
 {
@@ -44,7 +44,7 @@ public class WindowsFailedSnapshotTracker
     // Need to handle null for unit tests
     public static final String TODELETEFILE = System.getenv("CASSANDRA_HOME") == null
                  ? ".toDelete"
-                 : System.getenv("CASSANDRA_HOME") + File.separator + ".toDelete";
+                 : System.getenv("CASSANDRA_HOME") + File.pathSeparator() + ".toDelete";
 
     public static void deleteOldSnapshots()
     {
@@ -62,8 +62,8 @@ public class WindowsFailedSnapshotTracker
                         // Skip folders that aren't a subset of temp or a data folder. We don't want people to accidentally
                         // delete something important by virtue of adding something invalid to the .toDelete file.
                         boolean validFolder = FileUtils.isSubDirectory(new File(System.getenv("TEMP")), f);
-                        for (String s : DatabaseDescriptor.getAllDataFileLocations())
-                            validFolder |= FileUtils.isSubDirectory(new File(s), f);
+                        for (File file : DatabaseDescriptor.getAllDataFileLocations())
+                            validFolder |= FileUtils.isSubDirectory(file, f);
 
                         if (!validFolder)
                         {
@@ -81,7 +81,7 @@ public class WindowsFailedSnapshotTracker
                 }
 
                 // Only delete the old .toDelete file if we succeed in deleting all our known bad snapshots.
-                Files.delete(Paths.get(TODELETEFILE));
+                new File(TODELETEFILE).delete();
             }
             catch (IOException e)
             {
@@ -91,7 +91,7 @@ public class WindowsFailedSnapshotTracker
 
         try
         {
-            _failedSnapshotFile = new PrintWriter(new FileWriter(TODELETEFILE, true));
+            _failedSnapshotFile = new PrintWriter(new OutputStreamWriter(new FileOutputStreamPlus(TODELETEFILE, APPEND)));
         }
         catch (IOException e)
         {

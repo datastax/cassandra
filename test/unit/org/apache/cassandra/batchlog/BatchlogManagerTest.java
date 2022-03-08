@@ -28,9 +28,9 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -55,6 +55,7 @@ import org.apache.cassandra.utils.UUIDGen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.*;
 
 public class BatchlogManagerTest
@@ -153,7 +154,7 @@ public class BatchlogManagerTest
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
-        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
+        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush(UNIT_TESTS);
 
         assertEquals(100, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
@@ -201,8 +202,8 @@ public class BatchlogManagerTest
     @Test
     public void testTruncatedReplay() throws InterruptedException, ExecutionException
     {
-        TableMetadata cf2 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD2);
-        TableMetadata cf3 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD3);
+        TableMetadata cf2 = SchemaManager.instance.getTableMetadata(KEYSPACE1, CF_STANDARD2);
+        TableMetadata cf3 = SchemaManager.instance.getTableMetadata(KEYSPACE1, CF_STANDARD3);
         // Generate 2000 mutations (1000 batchlog entries) and put them all into the batchlog.
         // Each batchlog entry with a mutation for Standard2 and Standard3.
         // In the middle of the process, 'truncate' Standard2.
@@ -223,7 +224,7 @@ public class BatchlogManagerTest
             long timestamp = System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
 
             if (i == 500)
-                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2),
+                SystemKeyspace.saveTruncationRecord(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata.id,
                                                     timestamp,
                                                     CommitLogPosition.NONE);
 
@@ -237,7 +238,7 @@ public class BatchlogManagerTest
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
-        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
+        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush(UNIT_TESTS);
 
         // Force batchlog replay and wait for it to complete.
         BatchlogManager.instance.startBatchlogReplay().get();
@@ -365,7 +366,7 @@ public class BatchlogManagerTest
         assertEquals(1, BatchlogManager.instance.countAllBatches() - initialAllBatches);
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
-        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
+        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush(UNIT_TESTS);
 
         assertEquals(1, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);

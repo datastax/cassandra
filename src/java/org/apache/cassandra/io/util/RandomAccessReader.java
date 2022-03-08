@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteOrder;
 
@@ -65,6 +64,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private void reBufferAt(long position)
     {
         bufferHolder.release();
+        bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
         bufferHolder = rebufferer.rebuffer(position);
         buffer = bufferHolder.buffer();
         buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
@@ -85,9 +85,10 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return bufferHolder.offset() + buffer.position();
     }
 
-    public String getPath()
+    @Override
+    public File getFile()
     {
-        return getChannel().filePath();
+        return getChannel().getFile();
     }
 
     public ChannelProxy getChannel()
@@ -206,7 +207,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
         if (newPosition > length())
             throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode",
-                                                         newPosition, getPath(), length()));
+                                                             newPosition, getFile(), length()));
         reBufferAt(newPosition);
     }
 

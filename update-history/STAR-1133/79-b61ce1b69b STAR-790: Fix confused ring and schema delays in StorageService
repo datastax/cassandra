@@ -1,0 +1,16 @@
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -1140,12 +1140,8 @@
+             logger.info("Joining ring by operator request");
+             try
+             {
+-<<<<<<<
+-                joinTokenRing(0);
+-                doAuthSetup(false);
+-=======
+                 joinTokenRing(SCHEMA_DELAY_MILLIS, 0);
+->>>>>>>
++                doAuthSetup(false);
+             }
+             catch (ConfigurationException e)
+             {

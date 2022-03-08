@@ -1,0 +1,27 @@
+--- a/src/java/org/apache/cassandra/db/ReadCommand.java
++++ b/src/java/org/apache/cassandra/db/ReadCommand.java
+@@ -426,7 +426,11 @@
+ 
+     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
+ 
+-<<<<<<<
++    public ReadExecutionController executionController(boolean trackRepairedStatus)
++    {
++        return ReadExecutionController.forCommand(this, trackRepairedStatus);
++    }
++
+     /**
+      * Allow to post-process the result of the query after it has been reconciled on the coordinator
+      * but before it is passed to the CQL layer to return the ResultSet.
+@@ -442,11 +446,6 @@
+     public PartitionIterator executeInternal(ReadExecutionController controller)
+     {
+         return postReconciliationProcessing(UnfilteredPartitionIterators.filter(executeLocally(controller), nowInSec()));
+-=======
+-    public ReadExecutionController executionController(boolean trackRepairedStatus)
+-    {
+-        return ReadExecutionController.forCommand(this, trackRepairedStatus);
+->>>>>>>
+     }
+ 
+     public ReadExecutionController executionController()

@@ -58,12 +58,14 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.UnbufferedDataOutputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
+
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
 public class CompactionAllocationTest
 {
@@ -384,10 +386,10 @@ public class CompactionAllocationTest
         }
 
         ColumnFamilyStore cfs = workload.getCfs();
-        ActiveCompactions active = new ActiveCompactions();
+        ActiveOperations active = new ActiveOperations();
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
 
-        CompactionTasks tasks = cfs.getCompactionStrategyManager()
+        CompactionTasks tasks = cfs.getCompactionStrategyContainer()
                                    .getUserDefinedTasks(sstables, FBUtilities.nowInSeconds());
         Assert.assertFalse(tasks.isEmpty());
 
@@ -460,7 +462,7 @@ public class CompactionAllocationTest
         SchemaLoader.createKeyspace(ksname, KeyspaceParams.simple(1),
                                     CreateTableStatement.parse("CREATE TABLE tbl (k INT PRIMARY KEY, v INT)", ksname).build());
 
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(Schema.instance.getTableMetadata(ksname, "tbl").id);
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(SchemaManager.instance.getTableMetadata(ksname, "tbl").id);
         Assert.assertNotNull(cfs);
         cfs.disableAutoCompaction();
         List<Runnable> reads = new ArrayList<>(numSSTable * (overlap ? 1 : sstablePartitions));
@@ -483,11 +485,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{f});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());
@@ -569,7 +571,7 @@ public class CompactionAllocationTest
         SchemaLoader.createKeyspace(ksname, KeyspaceParams.simple(1),
                                     CreateTableStatement.parse("CREATE TABLE tbl (k text, c text, v1 text, v2 text, v3 text, v4 text, PRIMARY KEY (k, c))", ksname).build());
 
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(Schema.instance.getTableMetadata(ksname, "tbl").id);
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(SchemaManager.instance.getTableMetadata(ksname, "tbl").id);
         Assert.assertNotNull(cfs);
         cfs.disableAutoCompaction();
         int rowsPerPartition = 200;
@@ -598,11 +600,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());
@@ -668,7 +670,7 @@ public class CompactionAllocationTest
         SchemaLoader.createKeyspace(ksname, KeyspaceParams.simple(1),
                                     CreateTableStatement.parse("CREATE TABLE tbl (k text, c text, v1 text, v2 text, v3 text, v4 text, PRIMARY KEY (k, c))", ksname).build());
 
-        ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(Schema.instance.getTableMetadata(ksname, "tbl").id);
+        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(SchemaManager.instance.getTableMetadata(ksname, "tbl").id);
         Assert.assertNotNull(cfs);
         cfs.disableAutoCompaction();
         int rowWidth = 100;
@@ -698,11 +700,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());

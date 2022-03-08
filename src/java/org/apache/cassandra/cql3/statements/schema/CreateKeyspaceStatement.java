@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -32,14 +33,14 @@ import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams.Option;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -50,11 +51,11 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
 
     private final KeyspaceAttributes attrs;
     private final boolean ifNotExists;
-    private final HashSet<String> clientWarnings = new HashSet<>();
 
-    public CreateKeyspaceStatement(String keyspaceName, KeyspaceAttributes attrs, boolean ifNotExists)
+    public CreateKeyspaceStatement(String queryString, String keyspaceName,
+                                   KeyspaceAttributes attrs, boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.attrs = attrs;
         this.ifNotExists = ifNotExists;
     }
@@ -113,7 +114,8 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
-        int keyspaceCount = Schema.instance.getKeyspaces().size();
+        HashSet<String> clientWarnings = new HashSet<>();
+        int keyspaceCount = SchemaManager.instance.getKeyspaces().size();
         if (keyspaceCount > DatabaseDescriptor.keyspaceCountWarnThreshold())
         {
             String msg = String.format("Cluster already contains %d keyspaces. Having a large number of keyspaces will significantly slow down schema dependent cluster operations.",
@@ -122,10 +124,15 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
             clientWarnings.add(msg);
         }
 
+        if (attrs.hasProperty("graph_engine"))
+        {
+            clientWarnings.add("The unsupported graph property 'graph_engine' was ignored.");
+        }
+
         return clientWarnings;
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateKeyspaceStatement>
     {
         public final String keyspaceName;
         private final KeyspaceAttributes attrs;
@@ -138,9 +145,10 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateKeyspaceStatement prepare(ClientState state)
+        @Override
+        public CreateKeyspaceStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            return new CreateKeyspaceStatement(keyspaceName, attrs, ifNotExists);
+            return new CreateKeyspaceStatement(rawCQLStatement, keyspaceMapper.apply(keyspaceName), attrs, ifNotExists);
         }
     }
 }

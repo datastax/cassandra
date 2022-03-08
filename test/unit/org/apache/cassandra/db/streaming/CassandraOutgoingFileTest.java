@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.streaming;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -39,6 +40,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -78,7 +80,7 @@ public class CassandraOutgoingFileTest
             .build()
             .applyUnsafe();
         }
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
         CompactionManager.instance.performMaximal(store, false);
 
         sstable = store.getLiveSSTables().iterator().next();
@@ -98,7 +100,7 @@ public class CassandraOutgoingFileTest
     }
 
     @Test
-    public void validateFullyContainedIn_PartialOverlap_Fails()
+    public void validateFullyContainedIn_PartialOverlap_Fails() throws IOException
     {
         List<Range<Token>> requestedRanges = Arrays.asList(new Range<>(store.getPartitioner().getMinimumToken(), getTokenAtIndex(2)));
 
@@ -111,7 +113,7 @@ public class CassandraOutgoingFileTest
     }
 
     @Test
-    public void validateFullyContainedIn_SplitRange_Succeeds()
+    public void validateFullyContainedIn_SplitRange_Succeeds() throws IOException
     {
         List<Range<Token>> requestedRanges = Arrays.asList(new Range<>(store.getPartitioner().getMinimumToken(), getTokenAtIndex(4)),
                                                          new Range<>(getTokenAtIndex(2), getTokenAtIndex(6)),
@@ -126,12 +128,12 @@ public class CassandraOutgoingFileTest
         assertTrue(cof.contained(sections, sstable));
     }
 
-    private DecoratedKey getKeyAtIndex(int i)
+    private DecoratedKey getKeyAtIndex(int i) throws IOException
     {
         int count = 0;
         DecoratedKey key;
 
-        try (KeyIterator iter = new KeyIterator(sstable.descriptor, sstable.metadata()))
+        try (KeyIterator iter = KeyIterator.forSSTable(sstable))
         {
             do
             {
@@ -142,7 +144,7 @@ public class CassandraOutgoingFileTest
         return key;
     }
 
-    private Token getTokenAtIndex(int i)
+    private Token getTokenAtIndex(int i) throws IOException
     {
         return getKeyAtIndex(i).getToken();
     }

@@ -37,7 +37,9 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Utility methods to make ByteBuffers less painful
@@ -296,6 +298,26 @@ public class ByteBufferUtil
         FastByteOperations.copy(src, srcPos, dst, dstPos, length);
     }
 
+    /**
+     * Transfer bytes from one ByteBuffer to another.
+     * This function acts as System.arrayCopy() but for ByteBuffers.
+     *
+     * @param src the source ByteBuffer
+     * @param srcPos starting position in the source ByteBuffer
+     * @param dst the destination ByteBuffer
+     * @param dstPos starting position in the destination ByteBuffer
+     * @param length the number of bytes to copy
+     */
+    public static void arrayCopy(ByteBuffer src, int srcPos, ByteBuffer dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
+    public static void arrayCopy(ByteBuffer src, int srcPos, byte[] dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
     public static int put(ByteBuffer src, ByteBuffer trg)
     {
         int length = Math.min(src.remaining(), trg.remaining());
@@ -422,6 +444,28 @@ public class ByteBufferUtil
     {
         int skip = readShortLength(in);
         in.skipBytesFully(skip);
+    }
+
+    /**
+     * Returns true if the buffer at the current position in the input matches given buffer.
+     * If true, the input is positioned at the end of the consumed buffer.
+     * If false, the position of the input is undefined.
+     * <p>
+     * The matched buffer is unchanged
+     *
+     * @throws IOException
+     */
+    public static boolean equalsWithShortLength(FileDataInput in, ByteBuffer toMatch) throws IOException
+    {
+        int length = readShortLength(in);
+        if (length != toMatch.remaining())
+            return false;
+        int limit = toMatch.limit();
+        for (int i = toMatch.position(); i < limit; ++i)
+            if (toMatch.get(i) != in.readByte())
+                return false;
+
+        return true;
     }
 
     public static ByteBuffer read(DataInput in, int length) throws IOException
@@ -674,13 +718,13 @@ public class ByteBufferUtil
 
     public static boolean canMinimize(ByteBuffer buf)
     {
-        return buf != null && (buf.capacity() > buf.remaining() || !buf.hasArray());
+        return buf != null && (!buf.hasArray() || buf.array().length > buf.remaining());
     }
 
     /** trims size of bytebuffer to exactly number of bytes in it, to do not hold too much memory */
     public static ByteBuffer minimalBufferFor(ByteBuffer buf)
     {
-        return buf.capacity() > buf.remaining() || !buf.hasArray() ? ByteBuffer.wrap(getArray(buf)) : buf;
+        return !buf.hasArray() || buf.array().length > buf.remaining() ? ByteBuffer.wrap(getArray(buf)) : buf;
     }
 
     public static ByteBuffer[] minimizeBuffers(ByteBuffer[] src)
@@ -857,5 +901,27 @@ public class ByteBufferUtil
         }
 
         return true;
+    }
+
+    public static int toBytes(ByteSource byteSource, byte[] bytes)
+    {
+        int n = 0;
+
+        while (true)
+        {
+            int b = byteSource.next();
+
+            if (b == ByteSource.END_OF_STREAM) break;
+
+            if (n >= bytes.length)
+            {
+                throw new RuntimeException(String.format("Number of bytes read, %d, exceeds the buffer size of %d.", n + 1, bytes.length));
+            }
+
+            bytes[n] = (byte)b;
+            n++;
+        }
+
+        return n;
     }
 }

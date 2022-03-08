@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.util.concurrent.RateLimiter;
@@ -33,9 +34,9 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -46,6 +47,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -70,6 +72,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
         this.delegate = delegate;
         this.first = delegate.first;
         this.last = delegate.last;
+    }
+
+    @Override
+    public PartitionIndexIterator allKeysIterator() throws IOException
+    {
+        return delegate.allKeysIterator();
     }
 
     @Override
@@ -253,19 +261,19 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public void cacheKey(DecoratedKey key, RowIndexEntry info)
+    public void cacheKey(DecoratedKey key, BigTableRowIndexEntry info)
     {
         delegate.cacheKey(key, info);
     }
 
     @Override
-    public RowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
+    public BigTableRowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
     {
         return delegate.getCachedPosition(key, updateStats);
     }
 
     @Override
-    protected RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    protected BigTableRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
     {
         return delegate.getCachedPosition(unifiedKey, updateStats);
     }
@@ -277,9 +285,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+    protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
-        return delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
+        return (BigTableRowIndexEntry) delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
     }
 
     @Override
@@ -289,15 +297,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
     {
-        return delegate.iterator(file, key, indexEntry, slices, selectedColumns, reversed);
-    }
-
-    @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly)
-    {
-        return delegate.simpleIterator(file, key, indexEntry, tombstoneOnly);
+        return delegate.simpleIterator(dfile, key, tombstoneOnly);
     }
 
     @Override
@@ -331,7 +333,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public void markObsolete(Runnable tidier)
+    public void markObsolete(AbstractLogTransaction.ReaderTidier tidier)
     {
         delegate.markObsolete(tidier);
     }
@@ -415,9 +417,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAt(long indexPosition) throws IOException
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException
     {
-        return delegate.keyAt(indexPosition);
+        return delegate.keyAt(reader);
     }
 
     @Override
@@ -451,31 +453,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public long getBloomFilterFalsePositiveCount()
-    {
-        return delegate.getBloomFilterFalsePositiveCount();
-    }
-
-    @Override
-    public long getRecentBloomFilterFalsePositiveCount()
-    {
-        return delegate.getRecentBloomFilterFalsePositiveCount();
-    }
-
-    @Override
-    public long getBloomFilterTruePositiveCount()
-    {
-        return delegate.getBloomFilterTruePositiveCount();
-    }
-
-    @Override
-    public long getRecentBloomFilterTruePositiveCount()
-    {
-        return delegate.getRecentBloomFilterTruePositiveCount();
-    }
-
-    @Override
-    public InstrumentingCache<KeyCacheKey, RowIndexEntry> getKeyCache()
+    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
     {
         return delegate.getKeyCache();
     }
@@ -607,6 +585,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
+    public RandomAccessReader openKeyComponentReader()
+    {
+        return delegate.openKeyComponentReader();
+    }
+
+    @Override
     public ChannelProxy getDataChannel()
     {
         return delegate.getDataChannel();
@@ -673,7 +657,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    void setup(boolean trackHotness)
+    public void setup(boolean trackHotness)
     {
         delegate.setup(trackHotness);
     }
@@ -709,12 +693,6 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public String getIndexFilename()
-    {
-        return delegate.getIndexFilename();
-    }
-
-    @Override
     public String getColumnFamilyName()
     {
         return delegate.getColumnFamilyName();
@@ -727,9 +705,15 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public List<String> getAllFilePaths()
+    public Set<Component> getComponents()
     {
-        return delegate.getAllFilePaths();
+        return delegate.getComponents();
+    }
+
+    @Override
+    public int getComponentSize()
+    {
+        return delegate.getComponentSize();
     }
 
     @Override
@@ -755,4 +739,17 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     {
         return delegate.getBounds();
     }
+
+    @Override
+    public boolean hasIndex()
+    {
+        return delegate.hasIndex();
+    }
+
+    @Override
+    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    {
+        return delegate.scrubPartitionsIterator();
+    }
+
 }

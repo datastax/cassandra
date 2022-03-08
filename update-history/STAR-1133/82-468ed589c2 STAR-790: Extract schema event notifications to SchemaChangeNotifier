@@ -1,0 +1,37 @@
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -37,15 +37,12 @@
+ import org.antlr.runtime.*;
+ import org.apache.cassandra.concurrent.ScheduledExecutors;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+-<<<<<<<
+ import org.apache.cassandra.cql3.functions.UDAggregate;
+ import org.apache.cassandra.cql3.functions.UDFunction;
+-import org.apache.cassandra.schema.KeyspaceMetadata;
+-=======
+ import org.apache.cassandra.metrics.ClientRequestMetrics;
+ import org.apache.cassandra.metrics.ClientRequestsMetrics;
+ import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+->>>>>>>
++import org.apache.cassandra.schema.KeyspaceMetadata;
+ import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.schema.SchemaChangeListener;
+ import org.apache.cassandra.schema.SchemaConstants;
+@@ -821,17 +818,13 @@
+         internalStatements.clear();
+     }
+ 
+-<<<<<<<
+     @VisibleForTesting
+     public static void clearPreparedStatementsCache()
+     {
+         preparedStatements.asMap().clear();
+     }
+ 
+-    private static class StatementInvalidatingListener extends SchemaChangeListener
+-=======
+     private static class StatementInvalidatingListener implements SchemaChangeListener
+->>>>>>>
+     {
+         private static void removeInvalidPreparedStatements(String ksName, String cfName)
+         {

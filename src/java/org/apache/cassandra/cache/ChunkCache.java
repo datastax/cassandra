@@ -22,11 +22,15 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.MoreExecutors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -39,6 +43,8 @@ import org.apache.cassandra.utils.memory.BufferPools;
 public class ChunkCache
         implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
+    private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
+
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
@@ -50,6 +56,8 @@ public class ChunkCache
 
     private final LoadingCache<Key, Buffer> cache;
     public final ChunkCacheMetrics metrics;
+
+    private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     static class Key
     {
@@ -140,7 +148,7 @@ public class ChunkCache
     private ChunkCache(BufferPool pool)
     {
         bufferPool = pool;
-        metrics = new ChunkCacheMetrics(this);
+        metrics = ChunkCacheMetrics.create(this);
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(MoreExecutors.directExecutor())
@@ -180,15 +188,7 @@ public class ChunkCache
         if (!enabled)
             return file;
 
-        return instance.wrap(file);
-    }
-
-    public void invalidatePosition(FileHandle dfile, long position)
-    {
-        if (!(dfile.rebuffererFactory() instanceof CachingRebufferer))
-            return;
-
-        ((CachingRebufferer) dfile.rebuffererFactory()).invalidate(position);
+        return instance.wrapper.apply(file);
     }
 
     public void invalidateFile(String fileName)
@@ -200,8 +200,16 @@ public class ChunkCache
     public void enable(boolean enabled)
     {
         ChunkCache.enabled = enabled;
+        wrapper = this::wrap;
         cache.invalidateAll();
         metrics.reset();
+    }
+
+    @VisibleForTesting
+    public void intercept(Function<RebuffererFactory, RebuffererFactory> interceptor)
+    {
+        final Function<ChunkReader, RebuffererFactory> prevWrapper = wrapper;
+        wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
     }
 
     // TODO: Invalidate caches for obsoleted/MOVED_START tables?
@@ -226,15 +234,28 @@ public class ChunkCache
         @Override
         public Buffer rebuffer(long position)
         {
+            int spin = 0;
             try
             {
                 long pageAlignedPos = position & alignmentMask;
                 Buffer buf;
-                do
-                    buf = cache.get(new Key(source, pageAlignedPos)).reference();
-                while (buf == null);
+                Key key = new Key(source, pageAlignedPos);
+                while (true)
+                {
+                    buf = cache.get(key).reference();
+                    if (buf != null)
+                        return buf;
 
-                return buf;
+                    if (++spin == 1000)
+                    {
+                        String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
+                                                   "This is likely due to the chunk cache being too small for the " +
+                                                   "number of concurrently running requests.", key);
+                        throw new RuntimeException(msg);
+                        // Note: this might also be caused by reference counting errors, especially double release of
+                        // chunks.
+                    }
+                }
             }
             catch (Throwable t)
             {
@@ -243,16 +264,17 @@ public class ChunkCache
             }
         }
 
-        public void invalidate(long position)
-        {
-            long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos));
-        }
-
         @Override
         public Rebufferer instantiateRebufferer()
         {
             return this;
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
+            long pageAlignedPos = position & alignmentMask;
+            cache.invalidate(new Key(source, pageAlignedPos));
         }
 
         @Override

@@ -21,7 +21,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
 
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -45,7 +45,7 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
 
     public boolean append(UnfilteredRowIterator partition)
     {
-        RowIndexEntry<?> indexEntry = writer.append(partition);
+        RowIndexEntry indexEntry = writer.append(partition);
         return indexEntry != null;
     }
 
@@ -75,9 +75,19 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         return writer.getFilename();
     }
 
-    public long getFilePointer()
+    public long getBytesWritten()
     {
         return writer.getFilePointer();
+    }
+
+    public long getOnDiskBytesWritten()
+    {
+        return writer.getEstimatedOnDiskBytesWritten();
+    }
+
+    public int getSegmentCount()
+    {
+        return 1;
     }
 
     public TableId getTableId()
@@ -115,10 +125,10 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
                                             TableMetadataRef metadata,
                                             MetadataCollector metadataCollector,
                                             SerializationHeader header,
-                                            Collection<Index> indexes,
+                                            Collection<Index.Group> indexGroups,
                                             LifecycleNewTracker lifecycleNewTracker)
     {
-        SSTableWriter writer = SSTableWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, indexes, lifecycleNewTracker);
+        SSTableWriter writer = SSTableWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, indexGroups, lifecycleNewTracker);
         return new SimpleSSTableMultiWriter(writer, lifecycleNewTracker);
     }
 }

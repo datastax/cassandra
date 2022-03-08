@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -33,10 +34,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.StorageMetrics;
@@ -47,7 +47,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
 
-public class IndexSummaryRedistribution extends CompactionInfo.Holder
+public class IndexSummaryRedistribution extends AbstractTableOperation
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexSummaryRedistribution.class);
 
@@ -84,7 +84,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         List<SSTableReader> redistribute = new ArrayList<>();
         for (LifecycleTransaction txn : transactions.values())
         {
-            redistribute.addAll(txn.originals());
+            redistribute.addAll(SSTableReader.selectOnlyBigTableReaders(txn.originals(), Collectors.toList()));
         }
 
         long total = nonRedistributingOffHeapSize;
@@ -99,7 +99,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         for (SSTableReader sstable : redistribute)
         {
             if (isStopRequested())
-                throw new CompactionInterruptedException(getCompactionInfo());
+                throw new CompactionInterruptedException(getProgress());
 
             if (sstable.getReadMeter() != null)
             {
@@ -119,7 +119,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         logger.trace("Index summaries for compacting SSTables are using {} MB of space",
                      (memoryPoolBytes - remainingBytes) / 1024.0 / 1024.0);
         List<SSTableReader> newSSTables;
-        try (Refs<SSTableReader> refs = Refs.ref(sstablesByHotness))
+        try (Refs<? extends SSTableReader> refs = Refs.ref(sstablesByHotness))
         {
             newSSTables = adjustSamplingLevels(sstablesByHotness, transactions, totalReadsPerSec, remainingBytes);
 
@@ -152,7 +152,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         for (SSTableReader sstable : sstables)
         {
             if (isStopRequested())
-                throw new CompactionInterruptedException(getCompactionInfo());
+                throw new CompactionInterruptedException(getProgress());
 
             int minIndexInterval = sstable.metadata().params.minIndexInterval;
             int maxIndexInterval = sstable.metadata().params.maxIndexInterval;
@@ -249,7 +249,7 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         for (ResampleEntry entry : toDownsample)
         {
             if (isStopRequested())
-                throw new CompactionInterruptedException(getCompactionInfo());
+                throw new CompactionInterruptedException(getProgress());
 
             SSTableReader sstable = entry.sstable;
             logger.trace("Re-sampling index summary for {} from {}/{} to {}/{} of the original number of entries",
@@ -328,9 +328,14 @@ public class IndexSummaryRedistribution extends CompactionInfo.Holder
         return Pair.create(willNotDownsample, toDownsample.subList(noDownsampleCutoff, toDownsample.size()));
     }
 
-    public CompactionInfo getCompactionInfo()
+    public OperationProgress getProgress()
     {
-        return CompactionInfo.withoutSSTables(null, OperationType.INDEX_SUMMARY, (memoryPoolBytes - remainingSpace), memoryPoolBytes, Unit.BYTES, compactionId);
+        return OperationProgress.withoutSSTables(null,
+                                                 OperationType.INDEX_SUMMARY,
+                                                 (memoryPoolBytes - remainingSpace),
+                                                 memoryPoolBytes,
+                                                 Unit.BYTES,
+                                                 compactionId);
     }
 
     public boolean isGlobal()

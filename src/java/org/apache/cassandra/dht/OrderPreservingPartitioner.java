@@ -29,10 +29,13 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.Pair;
@@ -128,6 +131,11 @@ public class OrderPreservingPartitioner implements IPartitioner
 
     private final Token.TokenFactory tokenFactory = new Token.TokenFactory()
     {
+        public Token fromComparableBytes(ByteSource.Peekable comparableBytes, ByteComparable.Version version)
+        {
+            return new StringToken(ByteSourceInverse.getString(comparableBytes));
+        }
+
         public ByteBuffer toByteArray(Token token)
         {
             StringToken stringToken = (StringToken) token;
@@ -194,6 +202,12 @@ public class OrderPreservingPartitioner implements IPartitioner
         {
             return EMPTY_SIZE + ObjectSizes.sizeOf(token);
         }
+
+        @Override
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            return ByteSource.of((String) token, version);
+        }
     }
 
     public StringToken getToken(ByteBuffer key)
@@ -225,9 +239,9 @@ public class OrderPreservingPartitioner implements IPartitioner
             lastToken = node;
         }
 
-        for (String ks : Schema.instance.getKeyspaces())
+        for (String ks : SchemaManager.instance.getKeyspaces())
         {
-            for (TableMetadata cfmd : Schema.instance.getTablesAndViews(ks))
+            for (TableMetadata cfmd : SchemaManager.instance.getTablesAndViews(ks))
             {
                 for (Range<Token> r : sortedRanges)
                 {

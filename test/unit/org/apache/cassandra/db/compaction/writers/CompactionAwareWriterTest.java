@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.compaction.writers;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.*;
 
@@ -27,16 +26,18 @@ import org.junit.*;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 
 public class CompactionAwareWriterTest extends CQLTester
@@ -182,7 +183,7 @@ public class CompactionAwareWriterTest extends CQLTester
             sstables.add(MockSchema.sstable(i, 1000, getCurrentColumnFamilyStore()));
 
         Directories dirs = new Directories(getCurrentColumnFamilyStore().metadata(), dataDirs);
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.COMPACTION, sstables);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.COMPACTION, getColumnFamilyStore().metadata, sstables);
         CompactionAwareWriter writer = new MaxSSTableSizeWriter(getCurrentColumnFamilyStore(), dirs, txn, sstables, 2000, 1);
         // init case
         writer.maybeSwitchWriter(null);
@@ -206,7 +207,7 @@ public class CompactionAwareWriterTest extends CQLTester
         assert txn.originals().size() == 1;
         int rowsWritten = 0;
         int nowInSec = FBUtilities.nowInSeconds();
-        try (AbstractCompactionStrategy.ScannerList scanners = cfs.getCompactionStrategyManager().getScanners(txn.originals());
+        try (ScannerList scanners = cfs.getCompactionStrategy().getScanners(txn.originals());
              CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(nowInSec));
              CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID()))
         {
@@ -231,7 +232,7 @@ public class CompactionAwareWriterTest extends CQLTester
                 execute(String.format("INSERT INTO %s.%s(k, t, v) VALUES (?, ?, ?)", KEYSPACE, TABLE), i, j, b);
 
         ColumnFamilyStore cfs = getColumnFamilyStore();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         if (cfs.getLiveSSTables().size() > 1)
         {
             // we want just one big sstable to avoid doing actual compaction in compact() above

@@ -17,21 +17,13 @@
  */
 package org.apache.cassandra.io.compress;
 
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.io.BufferedOutputStream;
 import java.io.DataInput;
-import java.io.DataInputStream;
 import java.io.DataOutput;
-import java.io.DataOutputStream;
 import java.io.EOFException;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.NoSuchFileException;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.SortedSet;
@@ -52,12 +44,14 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.schema.CompressionParams;
-import org.apache.cassandra.utils.SyncUtil;
-import org.apache.cassandra.utils.concurrent.Transactional;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
  * Holds metadata about compressed file
@@ -71,7 +65,7 @@ public class CompressionMetadata
     public final long compressedFileLength;
     private final Memory chunkOffsets;
     private final long chunkOffsetsSize;
-    public final String indexFilePath;
+    public final File indexFilePath;
     public final CompressionParams parameters;
 
     /**
@@ -85,12 +79,12 @@ public class CompressionMetadata
      *
      * @return metadata about given compressed file.
      */
-    public static CompressionMetadata create(String dataFilePath)
+    public static CompressionMetadata create(File dataFilePath)
     {
-        return createWithLength(dataFilePath, new File(dataFilePath).length());
+        return createWithLength(dataFilePath, dataFilePath.length());
     }
 
-    public static CompressionMetadata createWithLength(String dataFilePath, long compressedLength)
+    public static CompressionMetadata createWithLength(File dataFilePath, long compressedLength)
     {
         return new CompressionMetadata(Descriptor.fromFilename(dataFilePath), compressedLength);
     }
@@ -98,15 +92,15 @@ public class CompressionMetadata
     @VisibleForTesting
     public CompressionMetadata(Descriptor desc, long compressedLength)
     {
-        this(desc.filenameFor(Component.COMPRESSION_INFO), compressedLength, desc.version.hasMaxCompressedLength());
+        this(desc.fileFor(Component.COMPRESSION_INFO), compressedLength, desc.version.hasMaxCompressedLength());
     }
 
     @VisibleForTesting
-    public CompressionMetadata(String indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
+    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
     {
         this.indexFilePath = indexFilePath;
 
-        try (DataInputStream stream = new DataInputStream(Files.newInputStream(Paths.get(indexFilePath))))
+        try (FileInputStreamPlus stream = indexFilePath.newInputStream())
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
@@ -134,7 +128,7 @@ public class CompressionMetadata
             compressedFileLength = compressedLength;
             chunkOffsets = readChunkOffsets(stream);
         }
-        catch (FileNotFoundException e)
+        catch (FileNotFoundException | NoSuchFileException e)
         {
             throw new RuntimeException(e);
         }
@@ -148,7 +142,7 @@ public class CompressionMetadata
 
     // do not call this constructor directly, unless used in testing
     @VisibleForTesting
-    public CompressionMetadata(String filePath, CompressionParams parameters, Memory offsets, long offsetsSize, long dataLength, long compressedLength)
+    public CompressionMetadata(File filePath, CompressionParams parameters, Memory offsets, long offsetsSize, long dataLength, long compressedLength)
     {
         this.indexFilePath = filePath;
         this.parameters = parameters;
@@ -335,7 +329,7 @@ public class CompressionMetadata
     {
         // path to the file
         private final CompressionParams parameters;
-        private final String filePath;
+        private final File filePath;
         private int maxCount = 100;
         private SafeMemory offsets = new SafeMemory(maxCount * 8L);
         private int count = 0;
@@ -343,13 +337,13 @@ public class CompressionMetadata
         // provided by user when setDescriptor
         private long dataLength, chunkCount;
 
-        private Writer(CompressionParams parameters, String path)
+        private Writer(CompressionParams parameters, File path)
         {
             this.parameters = parameters;
             filePath = path;
         }
 
-        public static Writer open(CompressionParams parameters, String path)
+        public static Writer open(CompressionParams parameters, File path)
         {
             return new Writer(parameters, path);
         }
@@ -412,17 +406,16 @@ public class CompressionMetadata
             }
 
             // flush the data to disk
-            try (FileOutputStream fos = new FileOutputStream(filePath);
-                 DataOutputStream out = new DataOutputStream(new BufferedOutputStream(fos)))
+            try (FileOutputStreamPlus out = new FileOutputStreamPlus(filePath))
             {
                 writeHeader(out, dataLength, count);
                 for (int i = 0; i < count; i++)
                     out.writeLong(offsets.getLong(i * 8L));
 
                 out.flush();
-                SyncUtil.sync(fos);
+                out.sync();
             }
-            catch (FileNotFoundException fnfe)
+            catch (FileNotFoundException | NoSuchFileException fnfe)
             {
                 throw Throwables.propagate(fnfe);
             }

@@ -1,0 +1,32 @@
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -100,12 +100,6 @@
+ import org.apache.cassandra.locator.ReplicaPlans;
+ import org.apache.cassandra.locator.Replicas;
+ import org.apache.cassandra.metrics.CASClientRequestMetrics;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
+-import org.apache.cassandra.metrics.ClientRequestMetrics;
+-import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
+->>>>>>>
+ import org.apache.cassandra.metrics.ReadRepairMetrics;
+ import org.apache.cassandra.metrics.StorageMetrics;
+ import org.apache.cassandra.net.ForwardingInfo;
+@@ -174,16 +168,6 @@
+             return new AtomicInteger(0);
+         }
+     };
+-<<<<<<<
+-=======
+-    private static final ClientRequestMetrics readMetrics = new ClientRequestMetrics("Read");
+-    private static final ClientWriteRequestMetrics writeMetrics = new ClientWriteRequestMetrics("Write");
+-    private static final CASClientWriteRequestMetrics casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite");
+-    private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("CASRead");
+-    private static final ViewWriteMetrics viewWriteMetrics = new ViewWriteMetrics("ViewWrite");
+-    private static final Map<ConsistencyLevel, ClientRequestMetrics> readMetricsMap = new EnumMap<>(ConsistencyLevel.class);
+-    private static final Map<ConsistencyLevel, ClientWriteRequestMetrics> writeMetricsMap = new EnumMap<>(ConsistencyLevel.class);
+->>>>>>>
+ 
+     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
+     private static final boolean disableSerialReadLinearizability =

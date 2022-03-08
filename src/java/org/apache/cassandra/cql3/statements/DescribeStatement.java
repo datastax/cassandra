@@ -114,7 +114,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     }
 
     @Override
-    public final void validate(ClientState state)
+    public final void validate(QueryState state)
     {
     }
 
@@ -132,8 +132,8 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     @Override
     public ResultMessage executeLocally(QueryState state, QueryOptions options)
     {
-        Keyspaces keyspaces = Schema.instance.snapshot();
-        UUID schemaVersion = Schema.instance.getVersion();
+        Keyspaces keyspaces = SchemaManager.instance.snapshot();
+        UUID schemaVersion = SchemaManager.instance.getVersion();
 
         keyspaces = Keyspaces.builder()
                              .add(keyspaces)
@@ -157,14 +157,17 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         //
 
         long offset = getOffset(pagingState, schemaVersion);
-        int pageSize = options.getPageSize();
+        PageSize pageSize = options.getPageSize();
+
+        if (pageSize.isDefined() && pageSize.getUnit() != PageSize.PageUnit.ROWS)
+            throw new InvalidRequestException("Paging in bytes is not supported for describe statement. Please specify the page size in rows.");
 
         Stream<? extends T> stream = describe(state.getClientState(), keyspaces);
 
         if (offset > 0L)
             stream = stream.skip(offset);
-        if (pageSize > 0)
-            stream = stream.limit(pageSize);
+        if (pageSize.isDefined())
+            stream = stream.limit(pageSize.getSize());
 
         List<List<ByteBuffer>> rows = stream.map(e -> toRow(e, includeInternalDetails))
                                             .collect(Collectors.toList());
@@ -172,9 +175,9 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(metadata(state.getClientState()));
         ResultSet result = new ResultSet(resultMetadata, rows);
 
-        if (pageSize > 0 && rows.size() == pageSize)
+        if (pageSize.isDefined() && rows.size() == pageSize.getSize())
         {
-            result.metadata.setHasMorePages(getPagingState(offset + pageSize, schemaVersion));
+            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getSize(), schemaVersion));
         }
 
         return new ResultMessage.Rows(result);

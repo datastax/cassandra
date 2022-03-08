@@ -62,19 +62,12 @@ public interface QueryHandler
 
         public final MD5Digest resultMetadataId;
 
-        /**
-         * Contains the CQL statement source if the statement has been "regularly" perpared via
-         * {@link QueryHandler#prepare(String, ClientState, Map)}.
-         * Other usages of this class may or may not contain the CQL statement source.
-         */
-        public final String rawCQLStatement;
         public final String keyspace;
         public final boolean fullyQualified;
 
-        public Prepared(CQLStatement statement, String rawCQLStatement, boolean fullyQualified, String keyspace)
+        public Prepared(CQLStatement statement, boolean fullyQualified, String keyspace)
         {
             this.statement = statement;
-            this.rawCQLStatement = rawCQLStatement;
             this.resultMetadataId = ResultSet.ResultMetadata.fromPrepared(statement).getResultMetadataId();
             this.fullyQualified = fullyQualified;
             this.keyspace = keyspace;

@@ -26,8 +26,8 @@ import java.util.Set;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
@@ -58,9 +58,9 @@ public class SSTableExpiredBlockers
 
         String keyspace = args[args.length - 2];
         String columnfamily = args[args.length - 1];
-        Schema.instance.loadFromDisk(false);
+        SchemaManager.instance.loadFromDisk();
 
-        TableMetadata metadata = Schema.instance.validateTable(keyspace, columnfamily);
+        TableMetadata metadata = SchemaManager.instance.validateTable(keyspace, columnfamily);
 
         Keyspace ks = Keyspace.openWithoutSSTables(keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(columnfamily);
@@ -72,12 +72,12 @@ public class SSTableExpiredBlockers
             {
                 try
                 {
-                    SSTableReader reader = SSTableReader.open(sstable.getKey());
+                    SSTableReader reader = sstable.getKey().getFormat().getReaderFactory().open(sstable.getKey());
                     sstables.add(reader);
                 }
                 catch (Throwable t)
                 {
-                    out.println("Couldn't open sstable: " + sstable.getKey().filenameFor(Component.DATA)+" ("+t.getMessage()+")");
+                    out.println("Couldn't open sstable: " + sstable.getKey().fileFor(Component.DATA)+" ("+t.getMessage()+")");
                 }
             }
         }

@@ -1,0 +1,82 @@
+--- a/src/java/org/apache/cassandra/schema/SchemaManager.java
++++ b/src/java/org/apache/cassandra/schema/SchemaManager.java
+@@ -632,14 +632,10 @@
+         updateVersionAndAnnounce();
+     }
+ 
+-<<<<<<<
+     /**
+      * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+      */
+-    public synchronized SchemaTransformationResult transform(SchemaTransformation transformation, boolean locally, long now) throws UnknownHostException
+-=======
+     public synchronized SchemaTransformationResult transform(SchemaTransformation transformation, boolean locally, long now)
+->>>>>>>
+     {
+         KeyspacesDiff diff;
+         Keyspaces before = snapshot();
+--- a/test/unit/org/apache/cassandra/service/StorageServiceServerTest.java
++++ b/test/unit/org/apache/cassandra/service/StorageServiceServerTest.java
+@@ -30,18 +30,15 @@
+ import com.google.common.collect.HashMultimap;
+ import com.google.common.collect.Multimap;
+ 
+-<<<<<<<
+-import org.apache.cassandra.db.SystemKeyspace;
+-=======
+-import org.junit.AfterClass;
+->>>>>>>
+ import org.junit.Assert;
++import org.junit.AfterClass;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.audit.AuditLogManager;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.Keyspace;
++import org.apache.cassandra.db.SystemKeyspace;
+ import org.apache.cassandra.db.WindowsFailedSnapshotTracker;
+ import org.apache.cassandra.db.commitlog.CommitLog;
+ import org.apache.cassandra.dht.Murmur3Partitioner;
+@@ -61,6 +58,8 @@
+ import org.apache.cassandra.utils.FBUtilities;
+ import org.assertj.core.api.Assertions;
+ 
++import static org.apache.cassandra.ServerTestUtils.cleanup;
++import static org.apache.cassandra.ServerTestUtils.mkdirs;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assume.assumeTrue;
+@@ -92,19 +91,6 @@
+     }
+ 
+     @Test
+-<<<<<<<
+-=======
+-    public void testRegularMode() throws ConfigurationException
+-    {
+-        for (String path : DatabaseDescriptor.getAllDataFileLocations())
+-        {
+-            // verify that storage directories are there.
+-            assertTrue(new File(path).exists());
+-        }
+-    }
+-
+-    @Test
+->>>>>>>
+     public void testGetAllRangesEmpty()
+     {
+         List<Token> toks = Collections.emptyList();
+diff --git a/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java b/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
+index 380daa0525..d39bf7efce 100644
+--- a/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
++++ b/test/unit/org/apache/cassandra/schema/MigrationManagerDropKSTest.java
+@@ -74,7 +74,7 @@ public class MigrationManagerDropKSTest
+         cfs.forceBlockingFlush(UNIT_TESTS);
+         assertTrue(!cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().isEmpty());
+ 
+-        MigrationManager.announceKeyspaceDrop(ks.name);
++        SchemaTestUtil.announceKeyspaceDrop(ks.name);
+ 
+         assertNull(SchemaManager.instance.getKeyspaceMetadata(ks.name));
+ 

@@ -68,7 +68,7 @@ import org.apache.cassandra.net.BufferPoolAllocator;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SharedDefaultFileRegion;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -87,6 +87,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.junit.Assert.assertTrue;
 
@@ -128,7 +129,7 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
             .build()
             .applyUnsafe();
         }
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
         CompactionManager.instance.performMaximal(store, false);
 
         Token start = ByteOrderedPartitioner.instance.getTokenFactory().fromString(Long.toHexString(0));
@@ -247,7 +248,7 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
 
         // rewrite index summary file with new min/max index interval
         TableMetadata origin = store.metadata();
-        MigrationManager.announceTableUpdate(origin.unbuild().minIndexInterval(1).maxIndexInterval(2).build(), true);
+        SchemaTestUtil.announceTableUpdate(origin.unbuild().minIndexInterval(1).maxIndexInterval(2).build());
 
         try (LifecycleTransaction txn = store.getTracker().tryModify(sstable, OperationType.INDEX_SUMMARY))
         {
@@ -257,7 +258,7 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
         }
 
         // reset min/max index interval
-        MigrationManager.announceTableUpdate(origin, true);
+        SchemaTestUtil.announceTableUpdate(origin);
         return true;
     }
 

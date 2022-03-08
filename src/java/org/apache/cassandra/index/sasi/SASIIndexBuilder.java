@@ -20,15 +20,15 @@
  */
 package org.apache.cassandra.index.sasi;
 
-import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.UUID;
 
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -36,11 +36,13 @@ import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sasi.conf.ColumnIndex;
 import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.sstable.KeyIterator;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -58,7 +60,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
-            totalIndexBytes += getPrimaryIndexLength(sstable);
+            totalIndexBytes += sstable.uncompressedLength();
 
         this.cfs = cfs;
         this.sstables = sstables;
@@ -78,63 +80,57 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 
                 long previousKeyPosition = 0;
-                try (KeyIterator keys = new KeyIterator(sstable.descriptor, cfs.metadata()))
+                try (PartitionIndexIterator keys = sstable.allKeysIterator())
                 {
-                    while (keys.hasNext())
+                    while (!keys.isExhausted())
                     {
                         if (isStopRequested())
-                            throw new CompactionInterruptedException(getCompactionInfo());
+                            throw new CompactionInterruptedException(getProgress());
 
-                        final DecoratedKey key = keys.next();
-                        final long keyPosition = keys.getKeyPosition();
+                        final DecoratedKey key = sstable.decorateKey(keys.key());
+                        final long keyPosition = keys.keyPosition();
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        try
-                        {
-                            RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                            dataFile.seek(indexEntry.position);
-                            ByteBufferUtil.readWithShortLength(dataFile); // key
+                        RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                        dataFile.seek(indexEntry.position);
+                        ByteBufferUtil.readWithShortLength(dataFile); // key
 
-                            try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
-                            {
-                                // if the row has statics attached, it has to be indexed separately
-                                if (cfs.metadata().hasStaticColumns())
-                                    indexWriter.nextUnfilteredCluster(partition.staticRow());
-
-                                while (partition.hasNext())
-                                    indexWriter.nextUnfilteredCluster(partition.next());
-                            }
-                        }
-                        catch (IOException ex)
+                        try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
                         {
-                            throw new FSReadError(ex, sstable.getFilename());
+                            // if the row has statics attached, it has to be indexed separately
+                            if (cfs.metadata().hasStaticColumns())
+                                indexWriter.nextUnfilteredCluster(partition.staticRow());
+
+                            while (partition.hasNext())
+                                indexWriter.nextUnfilteredCluster(partition.next());
                         }
 
-                        bytesProcessed += keyPosition - previousKeyPosition;
-                        previousKeyPosition = keyPosition;
+                        keys.advance();
+                        long dataPosition = keys.isExhausted() ? sstable.uncompressedLength() : keys.dataPosition();
+                        bytesProcessed += dataPosition - previousKeyPosition;
+                        previousKeyPosition = dataPosition;
                     }
 
                     completeSSTable(indexWriter, sstable, indexes.values());
+                }
+                catch (IOException ex)
+                {
+                    throw new FSReadError(ex, sstable.getFilename());
                 }
             }
         }
     }
 
-    public CompactionInfo getCompactionInfo()
+    @Override
+    public OperationProgress getProgress()
     {
-        return new CompactionInfo(cfs.metadata(),
-                                  OperationType.INDEX_BUILD,
-                                  bytesProcessed,
-                                  totalSizeInBytes,
-                                  compactionId,
-                                  sstables.keySet());
-    }
-
-    private long getPrimaryIndexLength(SSTable sstable)
-    {
-        File primaryIndex = new File(sstable.getIndexFilename());
-        return primaryIndex.exists() ? primaryIndex.length() : 0;
+        return new OperationProgress(cfs.metadata(),
+                                     OperationType.INDEX_BUILD,
+                                     bytesProcessed,
+                                     totalSizeInBytes,
+                                     compactionId,
+                                     sstables.keySet());
     }
 
     private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)
@@ -143,7 +139,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
         for (ColumnIndex index : indexes)
         {
-            File tmpIndex = new File(sstable.descriptor.filenameFor(index.getComponent()));
+            File tmpIndex = sstable.descriptor.fileFor(index.getComponent());
             if (!tmpIndex.exists()) // no data was inserted into the index for given sstable
                 continue;
 

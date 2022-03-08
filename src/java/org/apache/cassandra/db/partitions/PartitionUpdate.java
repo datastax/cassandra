@@ -22,18 +22,22 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import net.openhft.chronicle.core.util.ThrowingFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
@@ -57,9 +61,10 @@ public class PartitionUpdate extends AbstractBTreePartition
 {
     protected static final Logger logger = LoggerFactory.getLogger(PartitionUpdate.class);
 
-    public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer();
+    @SuppressWarnings("Convert2MethodRef")
+    public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer(tableId -> SchemaManager.instance.getExistingTableMetadata(tableId));
 
-    private final Holder holder;
+    private final BTreePartitionData holder;
     private final DeletionInfo deletionInfo;
     private final TableMetadata metadata;
 
@@ -67,7 +72,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     private PartitionUpdate(TableMetadata metadata,
                             DecoratedKey key,
-                            Holder holder,
+                            BTreePartitionData holder,
                             MutableDeletionInfo deletionInfo,
                             boolean canHaveShadowedData)
     {
@@ -89,7 +94,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     public static PartitionUpdate emptyUpdate(TableMetadata metadata, DecoratedKey key)
     {
         MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
-        Holder holder = new Holder(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
+        BTreePartitionData holder = new BTreePartitionData(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
         return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
     }
 
@@ -106,7 +111,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     public static PartitionUpdate fullPartitionDelete(TableMetadata metadata, DecoratedKey key, long timestamp, int nowInSec)
     {
         MutableDeletionInfo deletionInfo = new MutableDeletionInfo(timestamp, nowInSec);
-        Holder holder = new Holder(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
+        BTreePartitionData holder = new BTreePartitionData(RegularAndStaticColumns.NONE, BTree.empty(), deletionInfo, Rows.EMPTY_STATIC_ROW, EncodingStats.NO_STATS);
         return new PartitionUpdate(metadata, key, holder, deletionInfo, false);
     }
 
@@ -123,7 +128,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     public static PartitionUpdate singleRowUpdate(TableMetadata metadata, DecoratedKey key, Row row, Row staticRow)
     {
         MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
-        Holder holder = new Holder(
+        BTreePartitionData holder = new BTreePartitionData(
             new RegularAndStaticColumns(
                 staticRow == null ? Columns.NONE : Columns.from(staticRow.columns()),
                 row == null ? Columns.NONE : Columns.from(row.columns())
@@ -179,7 +184,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     public static PartitionUpdate fromIterator(UnfilteredRowIterator iterator, ColumnFilter filter)
     {
         iterator = UnfilteredRowIterators.withOnlyQueriedData(iterator, filter);
-        Holder holder = build(iterator, 16);
+        BTreePartitionData holder = build(iterator, 16);
         MutableDeletionInfo deletionInfo = (MutableDeletionInfo) holder.deletionInfo;
         return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), holder, deletionInfo, false);
     }
@@ -200,7 +205,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     {
         iterator = RowIterators.withOnlyQueriedData(iterator, filter);
         MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
-        Holder holder = build(iterator, deletionInfo, true, 16);
+        BTreePartitionData holder = build(iterator, deletionInfo, true, 16);
         return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), holder, deletionInfo, false);
     }
 
@@ -355,7 +360,7 @@ public class PartitionUpdate extends AbstractBTreePartition
         return holder.columns;
     }
 
-    protected Holder holder()
+    protected BTreePartitionData holder()
     {
         return holder;
     }
@@ -622,8 +627,17 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     public static class PartitionUpdateSerializer
     {
+        private final ThrowingFunction<? super TableId, ? extends TableMetadata, ? extends UnknownTableException> tableMetadataResolver;
+
+        public PartitionUpdateSerializer(ThrowingFunction<? super TableId, ? extends TableMetadata, ? extends UnknownTableException> tableMetadataResolver)
+        {
+            this.tableMetadataResolver = tableMetadataResolver;
+        }
+
         public void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
         {
+            Preconditions.checkArgument(version != MessagingService.VERSION_DSE_68,
+                                        "Can't serialize to version " + version);
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 assert !iter.isReverseOrder();
@@ -635,7 +649,13 @@ public class PartitionUpdate extends AbstractBTreePartition
 
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
-            TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
+            TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
+            if (version == MessagingService.VERSION_DSE_68)
+            {
+                // ignore maxTimestamp
+                in.readLong();
+            }
+
             UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
             if (header.isEmpty)
                 return emptyUpdate(metadata, header.key);
@@ -662,7 +682,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             MutableDeletionInfo deletionInfo = deletionBuilder.build();
             return new PartitionUpdate(metadata,
                                        header.key,
-                                       new Holder(header.sHeader.columns(), rows.build(), deletionInfo, header.staticRow, header.sHeader.stats()),
+                                       new BTreePartitionData(header.sHeader.columns(), rows.build(), deletionInfo, header.staticRow, header.sHeader.stats()),
                                        deletionInfo,
                                        false);
         }
@@ -672,7 +692,8 @@ public class PartitionUpdate extends AbstractBTreePartition
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 return update.metadata.id.serializedSize()
-                     + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+                       + (version == MessagingService.VERSION_DSE_68 ? TypeSizes.LONG_SIZE : 0)
+                       + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
             }
         }
     }
@@ -757,7 +778,7 @@ public class PartitionUpdate extends AbstractBTreePartition
                        RegularAndStaticColumns columns,
                        int initialRowCapacity,
                        boolean canHaveShadowedData,
-                       Holder holder)
+                       BTreePartitionData holder)
         {
             this(metadata, key, columns, initialRowCapacity, canHaveShadowedData, holder.staticRow, holder.deletionInfo, holder.tree);
         }
@@ -866,11 +887,11 @@ public class PartitionUpdate extends AbstractBTreePartition
             isBuilt = true;
             return new PartitionUpdate(metadata,
                                        partitionKey(),
-                                       new Holder(columns,
-                                                  merged,
-                                                  deletionInfo,
-                                                  staticRow,
-                                                  newStats),
+                                       new BTreePartitionData(columns,
+                                                              merged,
+                                                              deletionInfo,
+                                                              staticRow,
+                                                              newStats),
                                        deletionInfo,
                                        canHaveShadowedData);
         }

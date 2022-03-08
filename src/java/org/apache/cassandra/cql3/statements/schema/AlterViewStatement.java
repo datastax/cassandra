@@ -17,14 +17,18 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
+import java.util.function.UnaryOperator;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -33,12 +37,22 @@ public final class AlterViewStatement extends AlterSchemaStatement
 {
     private final String viewName;
     private final TableAttributes attrs;
+    private QueryState state;
 
-    public AlterViewStatement(String keyspaceName, String viewName, TableAttributes attrs)
+    public AlterViewStatement(String queryString, String keyspaceName, String viewName,
+            TableAttributes attrs)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.viewName = viewName;
         this.attrs = attrs;
+    }
+
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // save the query state to use it for guardrails validation in #apply
+        this.state = state;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -54,6 +68,9 @@ public final class AlterViewStatement extends AlterSchemaStatement
 
         attrs.validate();
 
+        Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
+        Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
+
         TableParams params = attrs.asAlteredTableParams(view.metadata.params);
 
         if (params.gcGraceSeconds == 0)
@@ -66,7 +83,7 @@ public final class AlterViewStatement extends AlterSchemaStatement
         if (params.defaultTimeToLive > 0)
         {
             throw ire("Forbidden default_time_to_live detected for a materialized view. " +
-                      "Data in a materialized view always expire at the same time than " +
+                      "Data in a materialized view always expires at the same time as " +
                       "the corresponding data in the parent table. default_time_to_live " +
                       "must be set to zero, see CASSANDRA-12868 for more information");
         }
@@ -82,7 +99,7 @@ public final class AlterViewStatement extends AlterSchemaStatement
 
     public void authorize(ClientState client)
     {
-        ViewMetadata view = Schema.instance.getView(keyspaceName, viewName);
+        ViewMetadata view = SchemaManager.instance.getView(keyspaceName, viewName);
         if (null != view)
             client.ensureTablePermission(keyspaceName, view.baseTableName, Permission.ALTER);
     }
@@ -98,7 +115,7 @@ public final class AlterViewStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, viewName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<AlterViewStatement>
     {
         private final QualifiedName name;
         private final TableAttributes attrs;
@@ -109,10 +126,11 @@ public final class AlterViewStatement extends AlterSchemaStatement
             this.attrs = attrs;
         }
 
-        public AlterViewStatement prepare(ClientState state)
+        @Override
+        public AlterViewStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new AlterViewStatement(keyspaceName, name.getName(), attrs);
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+            return new AlterViewStatement(rawCQLStatement, keyspaceName, name.getName(), attrs);
         }
     }
 }

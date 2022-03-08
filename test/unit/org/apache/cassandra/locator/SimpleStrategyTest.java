@@ -19,6 +19,7 @@ package org.apache.cassandra.locator;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.UUID;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -40,7 +42,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
@@ -159,7 +161,7 @@ public class SimpleStrategyTest
     {
         TokenMetadata tmd;
         AbstractReplicationStrategy strategy;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : SchemaManager.instance.getNonLocalStrategyKeyspaces().names())
         {
             tmd = new TokenMetadata();
             strategy = getStrategy(keyspaceName, tmd, new SimpleSnitch());
@@ -181,6 +183,15 @@ public class SimpleStrategyTest
                 assertEquals(new HashSet<>(correctEndpoints), replicas.endpoints());
             }
         }
+    }
+
+    @Test
+    public void testSimpleStrategyKeyspacesArePartitioned()
+    {
+        //local strategy keyspaces should not be returned here since they are not partitioned
+        Collection<String> partitionedKeyspaces = SchemaManager.instance.getPartitionedKeyspaces().names();
+        assertEquals(2, partitionedKeyspaces.size());
+        assertEquals(Sets.newHashSet(KEYSPACE1, MULTIDC), Sets.newHashSet(partitionedKeyspaces));
     }
 
     @Test
@@ -214,7 +225,7 @@ public class SimpleStrategyTest
         tmd.addBootstrapToken(bsToken, bootstrapEndpoint);
 
         AbstractReplicationStrategy strategy = null;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : SchemaManager.instance.getNonLocalStrategyKeyspaces().names())
         {
             strategy = getStrategy(keyspaceName, tmd, new SimpleSnitch());
 
@@ -354,7 +365,7 @@ public class SimpleStrategyTest
 
     private AbstractReplicationStrategy getStrategy(String keyspaceName, TokenMetadata tmd, IEndpointSnitch snitch)
     {
-        KeyspaceMetadata ksmd = Schema.instance.getKeyspaceMetadata(keyspaceName);
+        KeyspaceMetadata ksmd = SchemaManager.instance.getKeyspaceMetadata(keyspaceName);
         return AbstractReplicationStrategy.createReplicationStrategy(
                                                                     keyspaceName,
                                                                     ksmd.params.replication.klass,

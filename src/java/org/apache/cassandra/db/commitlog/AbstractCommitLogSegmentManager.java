@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -31,11 +30,13 @@ import org.slf4j.LoggerFactory;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SimpleCachedBufferPool;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -74,7 +75,7 @@ public abstract class AbstractCommitLogSegmentManager
      */
     private volatile CommitLogSegment allocatingFrom = null;
 
-    final String storageDirectory;
+    final File storageDirectory;
 
     /**
      * Tracks commitlog size, in multiples of the segment size.  We need to do this so we can "promise" size
@@ -93,7 +94,7 @@ public abstract class AbstractCommitLogSegmentManager
 
     private volatile SimpleCachedBufferPool bufferPool;
 
-    AbstractCommitLogSegmentManager(final CommitLog commitLog, String storageDirectory)
+    AbstractCommitLogSegmentManager(final CommitLog commitLog, File storageDirectory)
     {
         this.commitLog = commitLog;
         this.storageDirectory = storageDirectory;
@@ -151,9 +152,14 @@ public abstract class AbstractCommitLogSegmentManager
 
         // For encrypted segments we want to keep the compression buffers on-heap as we need those bytes for encryption,
         // and we want to avoid copying from off-heap (compression buffer) to on-heap encryption APIs
-        BufferType bufferType = commitLog.configuration.useEncryption() || !commitLog.configuration.useCompression()
-                              ? BufferType.ON_HEAP
-                              : commitLog.configuration.getCompressor().preferredBufferType();
+        CommitLog.Configuration config = commitLog.configuration;
+        BufferType bufferType = config.useEncryption() 
+                                ? BufferType.ON_HEAP 
+                                : config.useCompression() 
+                                  ? commitLog.configuration.getCompressor().preferredBufferType() 
+                                  : DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.standard 
+                                    ? BufferType.OFF_HEAP 
+                                    : BufferType.ON_HEAP;
 
         this.bufferPool = new SimpleCachedBufferPool(DatabaseDescriptor.getCommitLogMaxCompressionBuffersInPool(),
                                                      DatabaseDescriptor.getCommitLogSegmentSize(),
@@ -189,7 +195,7 @@ public abstract class AbstractCommitLogSegmentManager
                 if (flushingSize + unused >= 0)
                     break;
             }
-            flushDataFrom(segmentsToRecycle, false);
+            flushDataFrom(segmentsToRecycle, Collections.emptyList(), false);
         }
     }
 
@@ -281,7 +287,7 @@ public abstract class AbstractCommitLogSegmentManager
      * This is necessary to avoid resurrecting data during replay if a user creates a new table with
      * the same name and ID. See CASSANDRA-16986 for more details.
      */
-    void forceRecycleAll(Iterable<TableId> droppedTables)
+    void forceRecycleAll(Collection<TableId> droppedTables)
     {
         List<CommitLogSegment> segmentsToRecycle = new ArrayList<>(activeSegments);
         CommitLogSegment last = segmentsToRecycle.get(segmentsToRecycle.size() - 1);
@@ -295,7 +301,7 @@ public abstract class AbstractCommitLogSegmentManager
         Keyspace.writeOrder.awaitNewBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
-        Future<?> future = flushDataFrom(segmentsToRecycle, true);
+        Future<?> future = flushDataFrom(segmentsToRecycle, droppedTables, true);
         try
         {
             future.get();
@@ -381,7 +387,7 @@ public abstract class AbstractCommitLogSegmentManager
      *
      * @return a Future that will finish when all the flushes are complete.
      */
-    private Future<?> flushDataFrom(List<CommitLogSegment> segments, boolean force)
+    private Future<?> flushDataFrom(List<CommitLogSegment> segments, Collection<TableId> droppedTables, boolean force)
     {
         if (segments.isEmpty())
             return Futures.immediateFuture(null);
@@ -394,7 +400,9 @@ public abstract class AbstractCommitLogSegmentManager
         {
             for (TableId dirtyTableId : segment.getDirtyTableIds())
             {
-                TableMetadata metadata = Schema.instance.getTableMetadata(dirtyTableId);
+                TableMetadata metadata = droppedTables.contains(dirtyTableId)
+                                         ? null
+                                         : SchemaManager.instance.getTableMetadata(dirtyTableId);
                 if (metadata == null)
                 {
                     // even though we remove the schema entry before a final flush when dropping a CF,
@@ -405,9 +413,20 @@ public abstract class AbstractCommitLogSegmentManager
                 else if (!flushes.containsKey(dirtyTableId))
                 {
                     final ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(dirtyTableId);
-                    // can safely call forceFlush here as we will only ever block (briefly) for other attempts to flush,
-                    // no deadlock possibility since switchLock removal
-                    flushes.put(dirtyTableId, force ? cfs.forceFlush() : cfs.forceFlush(maxCommitLogPosition));
+
+                    if (cfs.memtableWritesAreDurable())
+                    {
+                        // The memtable does not need this data to be preserved (we only wrote it for PITR and CDC)
+                        segment.markClean(dirtyTableId, CommitLogPosition.NONE, segment.getCurrentCommitLogPosition());
+                    }
+                    else
+                    {
+                        // can safely call forceFlush here as we will only ever block (briefly) for other attempts to flush,
+                        // no deadlock possibility since switchLock removal
+                        flushes.put(dirtyTableId, force
+                                                  ? cfs.forceFlush(ColumnFamilyStore.FlushReason.INTERNALLY_FORCED)
+                                                  : cfs.forceFlush(maxCommitLogPosition));
+                    }
                 }
             }
         }

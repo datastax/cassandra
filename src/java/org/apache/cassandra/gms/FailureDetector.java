@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.*;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.Replica;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,10 +71,6 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
         else
             return DEFAULT_MAX_PAUSE;
     }
-
-    public static final IFailureDetector instance = new FailureDetector();
-    public static final Predicate<InetAddressAndPort> isEndpointAlive = instance::isAlive;
-    public static final Predicate<Replica> isReplicaAlive = r -> isEndpointAlive.test(r.endpoint());
 
     // this is useless except to provide backwards compatibility in phi_convict_threshold,
     // because everyone seems pretty accustomed to the default of 8, and users who have
@@ -254,7 +251,7 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, (path == null) ? null : path.toFile());
+            throw new FSWriteError(e, path);
         }
     }
 

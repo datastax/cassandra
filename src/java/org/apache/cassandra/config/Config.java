@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
@@ -107,6 +108,8 @@ public class Config
 
     public volatile long truncate_request_timeout_in_ms = 60000L;
 
+    public volatile long repair_prepare_message_timeout_in_ms = 10000L;
+
     public Integer streaming_connections_per_host = 1;
     public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
 
@@ -128,6 +131,7 @@ public class Config
     public Integer memtable_heap_space_in_mb;
     public Integer memtable_offheap_space_in_mb;
     public Float memtable_cleanup_threshold = null;
+    public Map<String, String> memtable = null;
 
     // Limit the maximum depth of repair session merkle trees
     @Deprecated
@@ -197,6 +201,8 @@ public class Config
     public volatile boolean native_transport_allow_older_protocols = true;
     public volatile long native_transport_max_concurrent_requests_in_bytes_per_ip = -1L;
     public volatile long native_transport_max_concurrent_requests_in_bytes = -1L;
+    public volatile boolean native_transport_rate_limiting_enabled = false;
+    public volatile int native_transport_max_requests_per_second = 1000000;
     public int native_transport_receive_queue_capacity_in_bytes = 1 << 20; // 1MiB
 
     @Deprecated
@@ -216,12 +222,28 @@ public class Config
     /* if the size of columns or super-columns are more than this, indexing will kick in */
     public int column_index_size_in_kb = 64;
     public volatile int column_index_cache_size_in_kb = 2;
-    public volatile int batch_size_warn_threshold_in_kb = 5;
-    public volatile int batch_size_fail_threshold_in_kb = 50;
-    public Integer unlogged_batch_across_partitions_warn_threshold = 10;
+    /**
+     * @deprecated Migrated to 'guardrails.batch_size_warn_threshold_in_kb'
+     */
+    @Deprecated
+    public int batch_size_warn_threshold_in_kb = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.batch_size_fail_threshold_in_kb'
+     */
+    @Deprecated
+    public int batch_size_fail_threshold_in_kb = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.unlogged_batch_across_partitions_warn_threshold'
+     */
+    @Deprecated
+    public Integer unlogged_batch_across_partitions_warn_threshold = 0;
     public volatile Integer concurrent_compactors;
     public volatile int compaction_throughput_mb_per_sec = 16;
-    public volatile int compaction_large_partition_warning_threshold_mb = 100;
+    /**
+     * @deprecated Migrated to 'guardrails.compaction_large_partition_warning_threshold_mb'
+     */
+    @Deprecated
+    public int compaction_large_partition_warning_threshold_mb = 0;
     public int min_free_space_per_drive_in_mb = 50;
 
     public volatile int concurrent_materialized_view_builders = 1;
@@ -264,6 +286,8 @@ public class Config
     public Integer periodic_commitlog_sync_lag_block_in_ms;
     public TransparentDataEncryptionOptions transparent_data_encryption_options = new TransparentDataEncryptionOptions();
 
+    public StorageFlagsConfig storage_flags = new StorageFlagsConfig();
+
     public Integer max_mutation_size_in_kb;
 
     // Change-data-capture logs
@@ -294,12 +318,14 @@ public class Config
     public ParameterizedClass hints_compression;
 
     public volatile boolean incremental_backups = false;
-    public boolean trickle_fsync = false;
+    public boolean trickle_fsync = true;
     public int trickle_fsync_interval_in_kb = 10240;
 
     public volatile int sstable_preemptive_open_interval_in_mb = 50;
 
-    public volatile boolean key_cache_migrate_during_compaction = true;
+    @Deprecated // CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782)
+    public volatile boolean key_cache_migrate_during_compaction = false;
+
     public Long key_cache_size_in_mb = null;
     public volatile int key_cache_save_period = 14400;
     public volatile int key_cache_keys_to_save = Integer.MAX_VALUE;
@@ -346,10 +372,18 @@ public class Config
 
     public boolean inter_dc_tcp_nodelay = true;
 
-    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.heap_buffers;
+    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
 
-    public volatile int tombstone_warn_threshold = 1000;
-    public volatile int tombstone_failure_threshold = 100000;
+    /**
+     * @deprecated Migrated to 'guardrails.tombstone_warn_threshold'
+     */
+    @Deprecated
+    public int tombstone_warn_threshold = 0;
+    /**
+     * @deprecated Migrated to 'guardrails.tombstone_failure_threshold'
+     */
+    @Deprecated
+    public int tombstone_failure_threshold = 0;
 
     public final ReplicaFilteringProtectionOptions replica_filtering_protection = new ReplicaFilteringProtectionOptions();
 
@@ -480,6 +514,7 @@ public class Config
     public volatile boolean automatic_sstable_upgrade = false;
     public volatile int max_concurrent_automatic_sstable_upgrades = 1;
     public boolean stream_entire_sstables = true;
+    public boolean netty_zerocopy_enabled = true;
 
     public volatile AuditLogOptions audit_logging_options = new AuditLogOptions();
     public volatile FullQueryLoggerOptions full_query_logging_options = new FullQueryLoggerOptions();
@@ -521,6 +556,10 @@ public class Config
      */
     public volatile int validation_preview_purge_head_start_in_sec = 60 * 60;
 
+    public boolean emulate_dbaas_defaults = false;
+    
+    public GuardrailsConfig guardrails = new GuardrailsConfig();
+
     /**
      * The intial capacity for creating RangeTombstoneList.
      */
@@ -529,6 +568,10 @@ public class Config
      * The growth factor to enlarge a RangeTombstoneList.
      */
     public volatile double range_tombstone_list_growth_factor = 1.5;
+
+    public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
+
+    public volatile int aggregation_subpage_size_in_kb = 2048;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
@@ -637,9 +680,27 @@ public class Config
 
     public enum CommitFailurePolicy
     {
+        /**
+         * This will stop Gossip and the inter-node transports, and kill the syncing thread.
+         */
         stop,
+        /**
+         * This will kill the syncing thread.
+         */
         stop_commit,
+        /**
+         * This will set a flag that will reject all mutations that require the CL. This flag
+         * will be cleared after a successful sync. This flag is only set for errors when sync-ing
+         * the CL segments, it is identical to ignore for other errors.
+         */
+        fail_writes,
+        /**
+         * This will ignore the error, a new sync will be attempted after a full polling period.
+         */
         ignore,
+        /**
+         * This will kill the process.
+         */
         die,
     }
 

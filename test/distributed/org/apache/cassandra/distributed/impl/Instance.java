@@ -20,7 +20,6 @@ package org.apache.cassandra.distributed.impl;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
@@ -36,7 +35,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import javax.management.ListenerNotFoundException;
 import javax.management.Notification;
@@ -60,11 +58,11 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator40;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.Cluster;
@@ -95,6 +93,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
@@ -102,8 +101,8 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.schema.MigrationManager;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -130,10 +129,11 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.concurrent.Ref;
-import org.apache.cassandra.utils.progress.jmx.JMXBroadcastExecutor;
 import org.apache.cassandra.utils.memory.BufferPools;
+import org.apache.cassandra.utils.progress.jmx.JMXBroadcastExecutor;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -185,7 +185,13 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         String suite = System.getProperty("suitename", "suitename_IS_UNDEFINED");
         String clusterId = ClusterIDDefiner.getId();
         String instanceId = InstanceIDDefiner.getInstanceId();
-        return new FileLogAction(new File(String.format("build/test/logs/%s/%s/%s/%s/system.log", tag, suite, clusterId, instanceId)));
+        File f = new File(String.format("build/test/logs/%s/%s/%s/%s/system.log", tag, suite, clusterId, instanceId));
+        // when creating a cluster globally in a test class we get the logs without the suite, try finding those logs:
+        if (!f.exists())
+            f = new File(String.format("build/test/logs/%s/%s/%s/system.log", tag, clusterId, instanceId));
+        if (!f.exists())
+            throw new AssertionError("Unable to locate system.log under " + new File("build/test/logs").absolutePath() + "; make sure ICluster.setup() is called or extend TestBaseImpl and do not define a static beforeClass function with @BeforeClass");
+        return new FileLogAction(f);
     }
 
     @Override
@@ -224,7 +230,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     {
         // we do not use method reference syntax here, because we need to sync on the node-local schema instance
         //noinspection Convert2MethodRef
-        return Schema.instance.getVersion();
+        return SchemaManager.instance.getVersion();
     }
 
     public void startup()
@@ -247,7 +253,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 QueryState queryState = new QueryState(state);
 
                 CQLStatement statement = QueryProcessor.parseStatement(query, queryState.getClientState());
-                statement.validate(state);
+                statement.validate(queryState);
 
                 QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
                 statement.executeLocally(queryState, options);
@@ -437,7 +443,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
     public void flush(String keyspace)
     {
-        runOnInstance(() -> FBUtilities.waitOnFutures(Keyspace.open(keyspace).flush()));
+        runOnInstance(() -> FBUtilities.waitOnFutures(Keyspace.open(keyspace).flush(UNIT_TESTS)));
     }
 
     public void forceCompact(String keyspace, String table)
@@ -494,7 +500,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 try
                 {
                     // load schema from disk
-                    Schema.instance.loadFromDisk();
+                    SchemaManager.instance.loadFromDisk();
                 }
                 catch (Exception e)
                 {
@@ -509,12 +515,14 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Replay any CommitLogSegments found on disk
                 try
                 {
-                    CommitLog.instance.recoverSegmentsOnDisk();
+                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
                 }
                 catch (IOException e)
                 {
                     throw new RuntimeException(e);
                 }
+
+                Nodes.getInstance().reload();
 
                 // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
                 StorageService.instance.populateTokenMetadata();
@@ -529,7 +537,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 {
                     // Even though we don't use MessagingService, access the static SocketFactory
                     // instance here so that we start the static event loop state
-//                    -- not sure what that means?  SocketFactory.instance.getClass();
+                    //  -- not sure what that means?  SocketFactory.instance.getClass();
                     registerMockMessaging(cluster);
                 }
                 registerInboundFilter(cluster);
@@ -541,9 +549,8 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 StorageService.instance.registerDaemon(CassandraDaemon.getInstanceForTesting());
                 if (config.has(GOSSIP))
                 {
-                    MigrationManager.setUptimeFn(() -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
                     StorageService.instance.initServer();
-                    StorageService.instance.removeShutdownHook();
+                    JVMStabilityInspector.removeShutdownHooks();
                     Gossiper.waitToSettle();
                 }
                 else
@@ -594,11 +601,11 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
     private void mkdirs()
     {
-        new File(config.getString("saved_caches_directory")).mkdirs();
-        new File(config.getString("hints_directory")).mkdirs();
-        new File(config.getString("commitlog_directory")).mkdirs();
+        new File(config.getString("saved_caches_directory")).tryCreateDirectories();
+        new File(config.getString("hints_directory")).tryCreateDirectories();
+        new File(config.getString("commitlog_directory")).tryCreateDirectories();
         for (String dir : (String[]) config.get("data_file_directories"))
-            new File(dir).mkdirs();
+            new File(dir).tryCreateDirectories();
     }
 
     private Config loadConfig(IInstanceConfig overrides)
@@ -707,7 +714,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
             if (config.has(GOSSIP) || config.has(NETWORK))
             {
-                StorageService.instance.shutdownServer();
+                JVMStabilityInspector.removeShutdownHooks();
             }
 
             error = parallelRun(error, executor, StorageService.instance::disableAutoCompaction);
@@ -726,7 +733,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                                 () -> PendingRangeCalculatorService.instance.shutdownAndWait(1L, MINUTES),
                                 () -> BufferPools.shutdownLocalCleaner(1L, MINUTES),
                                 () -> Ref.shutdownReferenceReaper(1L, MINUTES),
-                                () -> Memtable.MEMORY_POOL.shutdownAndWait(1L, MINUTES),
+                                () -> AbstractAllocatorMemtable.MEMORY_POOL.shutdownAndWait(1L, MINUTES),
                                 () -> DiagnosticSnapshotService.instance.shutdownAndWait(1L, MINUTES),
                                 () -> ScheduledExecutors.shutdownAndWait(1L, MINUTES),
                                 () -> SSTableReader.shutdownBlocking(1L, MINUTES),

@@ -1,0 +1,125 @@
+--- a/src/java/org/apache/cassandra/db/SinglePartitionReadCommand.java
++++ b/src/java/org/apache/cassandra/db/SinglePartitionReadCommand.java
+@@ -659,16 +659,9 @@
+                     break;
+                 }
+ 
+-<<<<<<<
+                 boolean intersects = intersects(sstable);
+                 boolean hasRequiredStatics = hasRequiredStatics(sstable);
+                 boolean hasPartitionLevelDeletions = hasPartitionLevelDeletions(sstable);
+-=======
+-                if (shouldInclude(sstable))
+-                {
+-                    if (!sstable.isRepaired())
+-                        controller.updateMinOldestUnrepairedTombstone(sstable.getMinLocalDeletionTime());
+->>>>>>>
+ 
+                 if (!intersects && !hasRequiredStatics && !hasPartitionLevelDeletions)
+                 {
+@@ -686,12 +679,6 @@
+                     if (!hasRequiredStatics) { // => has partition level deletions
+                         if (!iter.partitionLevelDeletion().isLive())
+                         {
+-<<<<<<<
+-=======
+-                            if (!sstable.isRepaired())
+-                                controller.updateMinOldestUnrepairedTombstone(sstable.getMinLocalDeletionTime());
+-                            inputCollector.addSSTableIterator(sstable, iter);
+->>>>>>>
+                             includedDueToTombstones++;
+                         }
+                         else
+@@ -703,7 +690,7 @@
+                 }
+ 
+                 if (!sstable.isRepaired())
+-                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
++                    controller.updateMinOldestUnrepairedTombstone(Math.min(controller.oldestUnrepairedTombstone(), sstable.getMinLocalDeletionTime()));
+ 
+                 inputCollector.addSSTableIterator(sstable, iter);
+                 if (hasPartitionLevelDeletions)
+@@ -884,43 +871,6 @@
+                 // however: if it is set, it impacts everything and must be included. Getting that top-level partition deletion costs us
+                 // some seek in general however (unless the partition is indexed and is in the key cache), so we first check if the sstable
+                 // has any tombstone at all as a shortcut.
+-<<<<<<<
+-=======
+-                if (!sstable.mayHaveTombstones())
+-                    continue; // no tombstone at all, we can skip that sstable
+-
+-                // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
+-                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
+-                                                                                       sstable,
+-                                                                                       partitionKey(),
+-                                                                                       filter.getSlices(metadata()),
+-                                                                                       columnFilter(),
+-                                                                                       filter.isReversed(),
+-                                                                                       metricsCollector))
+-                {
+-                    if (!iter.partitionLevelDeletion().isLive())
+-                    {
+-                        result = add(UnfilteredRowIterators.noRowsIterator(iter.metadata(),
+-                                                                           iter.partitionKey(),
+-                                                                           Rows.EMPTY_STATIC_ROW,
+-                                                                           iter.partitionLevelDeletion(),
+-                                                                           filter.isReversed()),
+-                                     result,
+-                                     filter,
+-                                     sstable.isRepaired(),
+-                                     controller);
+-                    }
+-                    else
+-                    {
+-                        result = add(RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false),
+-                                     result,
+-                                     filter,
+-                                     sstable.isRepaired(),
+-                                     controller);
+-                    }
+-                }
+-
+->>>>>>>
+                 continue;
+             }
+ 
+@@ -941,26 +891,20 @@
+                                                                        filter.isReversed()),
+                                  result,
+                                  filter,
+-                                 sstable.isRepaired());
++                                 sstable.isRepaired(),
++                                 controller);
+                 }
+                 else
+                 {
+                     if (!hasRequiredStatics && iter.isEmpty())
+                         continue;
+ 
+-<<<<<<<
+                     result = add(RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false),
+                                  result,
+                                  filter,
+-                                 sstable.isRepaired());
++                                 sstable.isRepaired(),
++                                 controller);
+                 }
+-=======
+-                result = add(RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false),
+-                             result,
+-                             filter,
+-                             sstable.isRepaired(),
+-                             controller);
+->>>>>>>
+             }
+         }
+ 
+@@ -1031,7 +975,7 @@
+                         toRemove = new TreeSet<>(result.metadata().comparator);
+                     toRemove.add(clustering);
+                 }
+-            } 
++            }
+         }
+ 
+         try (UnfilteredRowIterator iterator = result.unfilteredIterator(columnFilter(), clusterings, false))

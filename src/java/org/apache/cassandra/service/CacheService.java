@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -45,6 +46,10 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifier;
+import org.apache.cassandra.io.sstable.SSTableUniqueIdentifierFactory;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -63,15 +68,22 @@ public class CacheService implements CacheServiceMBean
 
     public enum CacheType
     {
-        KEY_CACHE("KeyCache"),
-        ROW_CACHE("RowCache"),
-        COUNTER_CACHE("CounterCache");
+        KEY_CACHE("KeyCache", "key_cache"),
+        ROW_CACHE("RowCache", "row_cache"),
+        COUNTER_CACHE("CounterCache", "counter_cache");
 
         private final String name;
+        private final String micrometerMetricsPrefix;
 
-        CacheType(String typeName)
+        CacheType(String typeName, String micrometerMetricsPrefix)
         {
-            name = typeName;
+            this.name = typeName;
+            this.micrometerMetricsPrefix = micrometerMetricsPrefix;
+        }
+
+        public String micrometerMetricsPrefix()
+        {
+            return micrometerMetricsPrefix;
         }
 
         public String toString()
@@ -82,7 +94,7 @@ public class CacheService implements CacheServiceMBean
 
     public final static CacheService instance = new CacheService();
 
-    public final AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache;
+    public final AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache;
     public final AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache;
     public final AutoSavingCache<CounterCacheKey, ClockAndCount> counterCache;
 
@@ -98,7 +110,7 @@ public class CacheService implements CacheServiceMBean
     /**
      * @return auto saving cache object
      */
-    private AutoSavingCache<KeyCacheKey, RowIndexEntry> initKeyCache()
+    private AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> initKeyCache()
     {
         logger.info("Initializing key cache with capacity of {} MBs.", DatabaseDescriptor.getKeyCacheSizeInMB());
 
@@ -106,9 +118,9 @@ public class CacheService implements CacheServiceMBean
 
         // as values are constant size we can use singleton weigher
         // where 48 = 40 bytes (average size of the key) + 8 bytes (size of value)
-        ICache<KeyCacheKey, RowIndexEntry> kc;
+        ICache<KeyCacheKey, BigTableRowIndexEntry> kc;
         kc = CaffeineCache.create(keyCacheInMemoryCapacity);
-        AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer());
+        AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer());
 
         int keyCacheKeysToSave = DatabaseDescriptor.getKeyCacheKeysToSave();
 
@@ -414,16 +426,16 @@ public class CacheService implements CacheServiceMBean
         }
     }
 
-    public static class KeyCacheSerializer implements CacheSerializer<KeyCacheKey, RowIndexEntry>
+    public static class KeyCacheSerializer implements CacheSerializer<KeyCacheKey, BigTableRowIndexEntry>
     {
         // For column families with many SSTables the linear nature of getSSTables slowed down KeyCache loading
         // by orders of magnitude. So we cache the sstables once and rely on cleanupAfterDeserialize to cleanup any
         // cached state we may have accumulated during the load.
-        Map<Pair<String, String>, Map<Integer, SSTableReader>> cachedSSTableReaders = new ConcurrentHashMap<>();
+        Map<Pair<String, String>, Map<SSTableUniqueIdentifier, SSTableReader>> cachedSSTableReaders = new ConcurrentHashMap<>();
 
         public void serialize(KeyCacheKey key, DataOutputPlus out, ColumnFamilyStore cfs) throws IOException
         {
-            RowIndexEntry entry = CacheService.instance.keyCache.getInternal(key);
+            BigTableRowIndexEntry entry = CacheService.instance.keyCache.getInternal(key);
             if (entry == null)
                 return;
 
@@ -431,14 +443,15 @@ public class CacheService implements CacheServiceMBean
             tableMetadata.id.serialize(out);
             out.writeUTF(tableMetadata.indexName().orElse(""));
             ByteArrayUtil.writeWithLength(key.key, out);
-            out.writeInt(key.desc.generation);
+            out.writeInt(Integer.MIN_VALUE); // backwards compatibility for "int based generation only"
+            ByteBufferUtil.writeWithShortLength(key.desc.generation.asBytes(), out);
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
-            key.desc.getFormat().getIndexSerializer(cfs.metadata(), key.desc.version, header).serializeForCache(entry, out);
+            new BigTableRowIndexEntry.Serializer(key.desc.version, header).serializeForCache(entry, out);
         }
 
-        public Future<Pair<KeyCacheKey, RowIndexEntry>> deserialize(DataInputPlus input, ColumnFamilyStore cfs) throws IOException
+        public Future<Pair<KeyCacheKey, BigTableRowIndexEntry>> deserialize(DataInputPlus input, ColumnFamilyStore cfs) throws IOException
         {
             boolean skipEntry = cfs == null || !cfs.isKeyCacheEnabled();
 
@@ -452,12 +465,16 @@ public class CacheService implements CacheServiceMBean
             }
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
+            SSTableUniqueIdentifier generationId = generation == Integer.MIN_VALUE
+                                  ? SSTableUniqueIdentifierFactory.instance.fromBytes(ByteBufferUtil.readWithShortLength(input))
+                                  : new SequenceBasedSSTableUniqueIdentifier(generation); // Backwards compatibility for "int based generation sstables"
+
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
             SSTableReader reader = null;
             if (!skipEntry)
             {
                 Pair<String, String> qualifiedName = Pair.create(cfs.metadata.keyspace, cfs.metadata.name);
-                Map<Integer, SSTableReader> generationToSSTableReader = cachedSSTableReaders.get(qualifiedName);
+                Map<SSTableUniqueIdentifier, SSTableReader> generationToSSTableReader = cachedSSTableReaders.get(qualifiedName);
                 if (generationToSSTableReader == null)
                 {
                     generationToSSTableReader = new HashMap<>(cfs.getLiveSSTables().size());
@@ -468,7 +485,7 @@ public class CacheService implements CacheServiceMBean
 
                     cachedSSTableReaders.putIfAbsent(qualifiedName, generationToSSTableReader);
                 }
-                reader = generationToSSTableReader.get(generation);
+                reader = generationToSSTableReader.get(generationId);
             }
 
             if (skipEntry || reader == null)
@@ -477,20 +494,28 @@ public class CacheService implements CacheServiceMBean
                 // wrong is during upgrade, in which case we fail at deserialization. This is not a huge deal however since 1) this is unlikely enough that
                 // this won't affect many users (if any) and only once, 2) this doesn't prevent the node from starting and 3) CASSANDRA-10219 shows that this
                 // part of the code has been broken for a while without anyone noticing (it is, btw, still broken until CASSANDRA-10219 is fixed).
-                RowIndexEntry.Serializer.skipForCache(input);
+                BigTableRowIndexEntry.Serializer.skipForCache(input);
                 return null;
             }
 
-            RowIndexEntry.IndexSerializer<?> indexSerializer = reader.descriptor.getFormat().getIndexSerializer(reader.metadata(),
-                                                                                                                reader.descriptor.version,
-                                                                                                                reader.header);
-            RowIndexEntry<?> entry = indexSerializer.deserializeForCache(input);
+            BigTableRowIndexEntry.IndexSerializer<?> indexSerializer = new BigTableRowIndexEntry.Serializer(reader.descriptor.version, reader.header);
+            BigTableRowIndexEntry entry = indexSerializer.deserializeForCache(input);
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 
         public void cleanupAfterDeserialize()
         {
             cachedSSTableReaders.clear();
+        }
+
+        private SSTableReader findDesc(SSTableUniqueIdentifier generation, Iterable<SSTableReader> collection)
+        {
+            for (SSTableReader sstable : collection)
+            {
+                if (Objects.equals(sstable.descriptor.generation, generation))
+                    return sstable;
+            }
+            return null;
         }
     }
 }

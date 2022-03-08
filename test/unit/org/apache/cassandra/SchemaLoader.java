@@ -18,7 +18,12 @@
 package org.apache.cassandra;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.AuthSchemaChangeListener;
@@ -29,6 +34,7 @@ import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.cql3.statements.schema.CreateTypeStatement;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.*;
@@ -39,7 +45,6 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.index.sasi.disk.OnDiskIndexBuilder;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -241,7 +246,7 @@ public class SchemaLoader
         // if you're messing with low-level sstable stuff, it can be useful to inject the schema directly
         // Schema.instance.load(schemaDefinition());
         for (KeyspaceMetadata ksm : schema)
-            MigrationManager.announceNewKeyspace(ksm, false);
+            SchemaTestUtil.announceNewKeyspace(ksm);
 
         if (Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")))
             useCompression(schema, compressionParams(CompressionParams.DEFAULT_CHUNK_LENGTH));
@@ -249,7 +254,7 @@ public class SchemaLoader
 
     public static void createKeyspace(String name, KeyspaceParams params)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of()), true);
+        SchemaTestUtil.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of()));
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata.Builder... builders)
@@ -258,17 +263,17 @@ public class SchemaLoader
         for (TableMetadata.Builder builder : builders)
             tables.add(builder.build());
 
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables.build()), true);
+        SchemaTestUtil.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables.build()));
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, TableMetadata... tables)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables)), true);
+        SchemaTestUtil.announceNewKeyspace(KeyspaceMetadata.create(name, params, Tables.of(tables)));
     }
 
     public static void createKeyspace(String name, KeyspaceParams params, Tables tables, Types types)
     {
-        MigrationManager.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()), true);
+        SchemaTestUtil.announceNewKeyspace(KeyspaceMetadata.create(name, params, tables, Views.none(), types, Functions.none()));
     }
 
     public static void setupAuth(IRoleManager roleManager, IAuthenticator authenticator, IAuthorizer authorizer, INetworkAuthorizer networkAuthorizer)
@@ -277,12 +282,12 @@ public class SchemaLoader
         DatabaseDescriptor.setAuthenticator(authenticator);
         DatabaseDescriptor.setAuthorizer(authorizer);
         DatabaseDescriptor.setNetworkAuthorizer(networkAuthorizer);
-        MigrationManager.announceNewKeyspace(AuthKeyspace.metadata(), true);
+        SchemaTestUtil.announceNewKeyspace(AuthKeyspace.metadata());
         DatabaseDescriptor.getRoleManager().setup();
         DatabaseDescriptor.getAuthenticator().setup();
         DatabaseDescriptor.getAuthorizer().setup();
         DatabaseDescriptor.getNetworkAuthorizer().setup();
-        Schema.instance.registerListener(new AuthSchemaChangeListener());
+        SchemaManager.instance.registerListener(new AuthSchemaChangeListener());
     }
 
     public static ColumnMetadata integerColumn(String ksName, String cfName)
@@ -329,7 +334,7 @@ public class SchemaLoader
     {
         for (KeyspaceMetadata ksm : schema)
             for (TableMetadata cfm : ksm.tablesAndViews())
-                MigrationManager.announceTableUpdate(cfm.unbuild().compression(compressionParams.copy()).build(), true);
+                SchemaTestUtil.announceTableUpdate(cfm.unbuild().compression(compressionParams.copy()).build());
     }
 
     public static TableMetadata.Builder counterCFMD(String ksName, String cfName)
@@ -729,7 +734,7 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
 
     public static void insertData(String keyspace, String columnFamily, int offset, int numberOfRows)
     {
-        TableMetadata cfm = Schema.instance.getTableMetadata(keyspace, columnFamily);
+        TableMetadata cfm = SchemaManager.instance.getTableMetadata(keyspace, columnFamily);
 
         for (int i = offset; i < offset + numberOfRows; i++)
         {
@@ -746,6 +751,37 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
     public static void cleanupSavedCaches()
     {
         ServerTestUtils.cleanupSavedCaches();
+    }
+
+    /**
+     * Simple method that allows creating a table given it's CQL definition.
+     *
+     * <p>The method also creates the keyspace of the table if needs be (using a simple strategy with 1 replica) and
+     * can also create a few UDT (also from their CQL definition) if needed for the created table.
+     *
+     * <p>This method does not complain if any of the created entity already exists.
+     */
+    public static void load(String keyspace, String schemaCQL, String... typesCQL)
+    {
+        KeyspaceMetadata ksm = KeyspaceMetadata.create(keyspace,
+                                                       KeyspaceParams.simple(1),
+                                                       Tables.none(),
+                                                       Views.none(),
+                                                       Types.none(),
+                                                       Functions.none());
+        SchemaManager.instance.transform(SchemaTransformations.addKeyspace(ksm, true));
+
+        for (String typeCQL : typesCQL)
+        {
+            Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
+            SchemaTransformation t = SchemaTransformations.addOrUpdateType(CreateTypeStatement.parse(typeCQL,
+                                                                                                     keyspace, types));
+            SchemaManager.instance.transform(t);
+        }
+
+        Types types = SchemaManager.instance.getKeyspaceMetadata(keyspace).types;
+        TableMetadata metadata = CreateTableStatement.parse(schemaCQL, keyspace, types).build();
+        SchemaManager.instance.transform(SchemaTransformations.addTable(metadata, true));
     }
 
     private static CompressionParams compressionParams(int chunkLength)

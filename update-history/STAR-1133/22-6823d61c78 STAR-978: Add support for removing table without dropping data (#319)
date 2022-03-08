@@ -1,0 +1,72 @@
+--- a/src/java/org/apache/cassandra/schema/SchemaManager.java
++++ b/src/java/org/apache/cassandra/schema/SchemaManager.java
+@@ -44,6 +44,7 @@
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.db.KeyspaceNotDefinedException;
++import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.db.SystemKeyspace;
+ import org.apache.cassandra.db.marshal.AbstractType;
+ import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
+@@ -56,15 +57,7 @@
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+ import org.apache.cassandra.service.PendingRangeCalculatorService;
+-import org.apache.cassandra.service.StorageService;
+ 
+-<<<<<<<
+-=======
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-
+-import static java.lang.String.format;
+->>>>>>>
+ import static com.google.common.collect.Iterables.size;
+ import static java.lang.String.format;
+ import static org.apache.cassandra.config.DatabaseDescriptor.isDaemonInitialized;
+diff --git a/src/java/org/apache/cassandra/schema/SchemaManager.java b/src/java/org/apache/cassandra/schema/SchemaManager.java
+index 9dec30352c..ef0f5c741f 100644
+--- a/src/java/org/apache/cassandra/schema/SchemaManager.java
++++ b/src/java/org/apache/cassandra/schema/SchemaManager.java
+@@ -44,6 +44,7 @@ import org.apache.cassandra.cql3.functions.FunctionName;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.db.KeyspaceNotDefinedException;
++import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.db.SystemKeyspace;
+ import org.apache.cassandra.db.marshal.AbstractType;
+ import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
+@@ -56,11 +57,9 @@ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+ import org.apache.cassandra.service.PendingRangeCalculatorService;
+-import org.apache.cassandra.service.StorageService;
+ 
+ import static com.google.common.collect.Iterables.size;
+ import static java.lang.String.format;
+-import static com.google.common.collect.Iterables.size;
+ import static org.apache.cassandra.config.DatabaseDescriptor.isDaemonInitialized;
+ import static org.apache.cassandra.config.DatabaseDescriptor.isToolInitialized;
+ 
+diff --git a/src/java/org/apache/cassandra/service/AtomicMutator.java b/src/java/org/apache/cassandra/service/AtomicMutator.java
+index 1f594b56f4..b457bad774 100644
+--- a/src/java/org/apache/cassandra/service/AtomicMutator.java
++++ b/src/java/org/apache/cassandra/service/AtomicMutator.java
+@@ -25,7 +25,7 @@ import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.exceptions.OverloadedException;
+ import org.apache.cassandra.exceptions.UnavailableException;
+ import org.apache.cassandra.exceptions.WriteTimeoutException;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
+ 
+ public interface AtomicMutator
+ {
+@@ -33,7 +33,7 @@ public interface AtomicMutator
+             ConsistencyLevel consistencyLevel,
+             boolean requireQuorumForRemove,
+             long queryStartNanoTime,
+-            CoordinatorClientRequestMetrics metrics,
++            ClientRequestsMetrics metrics,
+             ClientState clientState)
+             throws UnavailableException, OverloadedException, WriteTimeoutException;
+ }

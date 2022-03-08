@@ -17,10 +17,8 @@
  */
 package org.apache.cassandra.fql;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -43,6 +41,7 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryEvents;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
@@ -51,6 +50,8 @@ import org.apache.cassandra.utils.binlog.BinLog;
 import org.apache.cassandra.utils.binlog.BinLogOptions;
 import org.apache.cassandra.utils.concurrent.WeightedQueue;
 import org.github.jamm.MemoryLayoutSpecification;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * A logger that logs entire query contents after the query finishes (or times out).
@@ -80,9 +81,7 @@ public class FullQueryLogger implements QueryEvents.Listener
     public static final String QUERIES = "queries";
     public static final String VALUES = "values";
 
-    private static final int EMPTY_BYTEBUFFER_SIZE = Ints.checkedCast(ObjectSizes.sizeOfEmptyHeapByteBuffer());
-
-    private static final int EMPTY_LIST_SIZE = Ints.checkedCast(ObjectSizes.measureDeep(new ArrayList(0)));
+    private static final int EMPTY_LIST_SIZE = Ints.checkedCast(ObjectSizes.measureDeep(new ArrayList<>(0)));
     private static final int EMPTY_BYTEBUF_SIZE;
 
     private static final int OBJECT_HEADER_SIZE = MemoryLayoutSpecification.SPEC.getObjectHeaderSize();
@@ -210,7 +209,7 @@ public class FullQueryLogger implements QueryEvents.Listener
             //Then decide whether to clean the last used path, possibly configured by JMX
             if (binLog != null && binLog.path != null)
             {
-                File pathFile = binLog.path.toFile();
+                File pathFile = new File(binLog.path);
                 if (pathFile.exists())
                 {
                     pathsToClean.add(pathFile);
@@ -278,11 +277,11 @@ public class FullQueryLogger implements QueryEvents.Listener
                              long batchTimeMillis,
                              Message.Response response)
     {
-        Preconditions.checkNotNull(type, "type was null");
-        Preconditions.checkNotNull(queries, "queries was null");
-        Preconditions.checkNotNull(values, "value was null");
-        Preconditions.checkNotNull(queryOptions, "queryOptions was null");
-        Preconditions.checkNotNull(queryState, "queryState was null");
+        checkNotNull(type, "type was null");
+        checkNotNull(queries, "queries was null");
+        checkNotNull(values, "value was null");
+        checkNotNull(queryOptions, "queryOptions was null");
+        checkNotNull(queryState, "queryState was null");
         Preconditions.checkArgument(batchTimeMillis > 0, "batchTimeMillis must be > 0");
 
         //Don't construct the wrapper if the log is disabled
@@ -311,9 +310,9 @@ public class FullQueryLogger implements QueryEvents.Listener
                              long queryTimeMillis,
                              Message.Response response)
     {
-        Preconditions.checkNotNull(query, "query was null");
-        Preconditions.checkNotNull(queryOptions, "queryOptions was null");
-        Preconditions.checkNotNull(queryState, "queryState was null");
+        checkNotNull(query, "query was null");
+        checkNotNull(queryOptions, "queryOptions was null");
+        checkNotNull(queryState, "queryState was null");
         Preconditions.checkArgument(queryTimeMillis > 0, "queryTimeMillis must be > 0");
 
         //Don't construct the wrapper if the log is disabled
@@ -383,18 +382,19 @@ public class FullQueryLogger implements QueryEvents.Listener
             int weight = super.weight();
 
             // weight, queries, values, batch type
-            weight += 4 +                    // cached weight
-                      2 * EMPTY_LIST_SIZE +  // queries + values lists
-                      OBJECT_REFERENCE_SIZE; // batchType reference, worst case
+            weight += Integer.BYTES +            // cached weight
+                      2 * EMPTY_LIST_SIZE +      // queries + values lists
+                      3 * OBJECT_REFERENCE_SIZE; // batchType and two lists references
 
-            for (String query : queries)
-                weight += ObjectSizes.sizeOf(query);
+            for (int i = 0, queriesSize = queries.size(); i < queriesSize; i++)
+                weight += ObjectSizes.sizeOf(checkNotNull(queries.get(i))) + OBJECT_REFERENCE_SIZE;
 
-            for (List<ByteBuffer> subValues : values)
+            for (int j = 0, valuesSize = values.size(); j < valuesSize; j++)
             {
-                weight += EMPTY_LIST_SIZE;
-                for (ByteBuffer value : subValues)
-                    weight += EMPTY_BYTEBUFFER_SIZE + value.capacity();
+                List<ByteBuffer> subValues = checkNotNull(values.get(j));
+                weight += EMPTY_LIST_SIZE + OBJECT_REFERENCE_SIZE;
+                for (int i = 0, subValuesSize = subValues.size(); i < subValuesSize; i++)
+                    weight += ObjectSizes.sizeOnHeapOf(checkNotNull(subValues.get(i))) + OBJECT_REFERENCE_SIZE;
             }
 
             this.weight = weight;
@@ -413,19 +413,16 @@ public class FullQueryLogger implements QueryEvents.Listener
             wire.write(BATCH_TYPE).text(batchType.name());
             ValueOut valueOut = wire.write(QUERIES);
             valueOut.int32(queries.size());
-            for (String query : queries)
-            {
-                valueOut.text(query);
-            }
+            for (int i = 0, queriesSize = queries.size(); i < queriesSize; i++)
+                valueOut.text(queries.get(i));
             valueOut = wire.write(VALUES);
             valueOut.int32(values.size());
-            for (List<ByteBuffer> subValues : values)
+            for (int i = 0, valuesSize = values.size(); i < valuesSize; i++)
             {
+                List<ByteBuffer> subValues = values.get(i);
                 valueOut.int32(subValues.size());
-                for (ByteBuffer value : subValues)
-                {
-                    valueOut.bytes(BytesStore.wrap(value));
-                }
+                for (int j = 0, subValuesSize = subValues.size(); j < subValuesSize; j++)
+                    valueOut.bytes(BytesStore.wrap(subValues.get(j)));
             }
         }
 
@@ -511,14 +508,12 @@ public class FullQueryLogger implements QueryEvents.Listener
         public int weight()
         {
             return OBJECT_HEADER_SIZE
-                 + 8                                                  // queryStartTime
-                 + 4                                                  // protocolVersion
-                 + EMPTY_BYTEBUF_SIZE + queryOptionsBuffer.capacity() // queryOptionsBuffer
-                 + 8                                                  // generatedTimestamp
-                 + 4                                                  // generatedNowInSeconds
-                 + (keyspace != null
-                    ? Ints.checkedCast(ObjectSizes.sizeOf(keyspace))  // keyspace
-                    : OBJECT_REFERENCE_SIZE);                         // null
+                 + Long.BYTES                                                                 // queryStartTime
+                 + Integer.BYTES                                                              // protocolVersion
+                 + OBJECT_REFERENCE_SIZE + EMPTY_BYTEBUF_SIZE + queryOptionsBuffer.capacity() // queryOptionsBuffer
+                 + Long.BYTES                                                                 // generatedTimestamp
+                 + Integer.BYTES                                                              // generatedNowInSeconds
+                 + OBJECT_REFERENCE_SIZE + Ints.checkedCast(ObjectSizes.sizeOf(keyspace));    // keyspace
         }
     }
 

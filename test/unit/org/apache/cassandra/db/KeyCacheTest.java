@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.AfterClass;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -44,6 +45,8 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -54,6 +57,7 @@ import org.hamcrest.Matchers;
 import org.mockito.Mockito;
 import org.mockito.internal.stubbing.answers.AnswersWithDelay;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThat;
@@ -109,14 +113,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadShallowIndexEntry() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(0);
         testKeyCacheLoad(COLUMN_FAMILY2);
     }
 
     @Test
     public void testKeyCacheLoadIndexInfoOnHeap() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(8);
         testKeyCacheLoad(COLUMN_FAMILY5);
     }
 
@@ -132,22 +136,22 @@ public class KeyCacheTest
 
         // insert data and force to disk
         SchemaLoader.insertData(KEYSPACE1, cf, 0, 100);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         // populate the cache
         readData(KEYSPACE1, cf, 0, 100);
         assertKeyCacheSize(100, KEYSPACE1, cf);
 
         // really? our caches don't implement the map interface? (hence no .addAll)
-        Map<KeyCacheKey, RowIndexEntry> savedMap = new HashMap<>();
-        Map<KeyCacheKey, RowIndexEntry.IndexInfoRetriever> savedInfoMap = new HashMap<>();
+        Map<KeyCacheKey, BigTableRowIndexEntry> savedMap = new HashMap<>();
+        Map<KeyCacheKey, BigTableRowIndexEntry.IndexInfoRetriever> savedInfoMap = new HashMap<>();
         for (Iterator<KeyCacheKey> iter = CacheService.instance.keyCache.keyIterator();
              iter.hasNext();)
         {
             KeyCacheKey k = iter.next();
             if (k.desc.ksname.equals(KEYSPACE1) && k.desc.cfname.equals(cf))
             {
-                RowIndexEntry rie = CacheService.instance.keyCache.get(k);
+                BigTableRowIndexEntry rie = CacheService.instance.keyCache.get(k);
                 savedMap.put(k, rie);
                 SSTableReader sstr = readerForKey(k);
                 savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile()));
@@ -164,18 +168,18 @@ public class KeyCacheTest
         assertKeyCacheSize(savedMap.size(), KEYSPACE1, cf);
 
         // probably it's better to add equals/hashCode to RowIndexEntry...
-        for (Map.Entry<KeyCacheKey, RowIndexEntry> entry : savedMap.entrySet())
+        for (Map.Entry<KeyCacheKey, BigTableRowIndexEntry> entry : savedMap.entrySet())
         {
-            RowIndexEntry expected = entry.getValue();
-            RowIndexEntry actual = CacheService.instance.keyCache.get(entry.getKey());
+            BigTableRowIndexEntry expected = entry.getValue();
+            BigTableRowIndexEntry actual = CacheService.instance.keyCache.get(entry.getKey());
             assertEquals(expected.position, actual.position);
             assertEquals(expected.columnsIndexCount(), actual.columnsIndexCount());
             for (int i = 0; i < expected.columnsIndexCount(); i++)
             {
                 SSTableReader actualSstr = readerForKey(entry.getKey());
-                try (RowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile()))
+                try (BigTableRowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile()))
                 {
-                    RowIndexEntry.IndexInfoRetriever expectedIir = savedInfoMap.get(entry.getKey());
+                    BigTableRowIndexEntry.IndexInfoRetriever expectedIir = savedInfoMap.get(entry.getKey());
                     assertEquals(expectedIir.columnsIndex(i), actualIir.columnsIndex(i));
                 }
             }
@@ -209,14 +213,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadWithLostTableShallowIndexEntry() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(0);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY3);
     }
 
     @Test
     public void testKeyCacheLoadWithLostTableIndexInfoOnHeap() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(8);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY6);
     }
 
@@ -232,7 +236,7 @@ public class KeyCacheTest
 
         // insert data and force to disk
         SchemaLoader.insertData(KEYSPACE1, cf, 0, 100);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         Collection<SSTableReader> firstFlushTables = ImmutableList.copyOf(store.getLiveSSTables());
 
@@ -242,7 +246,7 @@ public class KeyCacheTest
 
         // insert some new data and force to disk
         SchemaLoader.insertData(KEYSPACE1, cf, 100, 50);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
 
         // check that it's fine
         readData(KEYSPACE1, cf, 100, 50);
@@ -272,14 +276,14 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheShallowIndexEntry() throws ExecutionException, InterruptedException
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(0);
         testKeyCache(COLUMN_FAMILY1);
     }
 
     @Test
     public void testKeyCacheIndexInfoOnHeap() throws ExecutionException, InterruptedException
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKB(8);
         testKeyCache(COLUMN_FAMILY4);
     }
 
@@ -303,7 +307,7 @@ public class KeyCacheTest
         new RowUpdateBuilder(cfs.metadata(), 0, "key2").clustering("2").build().applyUnsafe();
 
         // to make sure we have SSTable
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // reads to cache key position
         Util.getAll(Util.cmd(cfs, "key1").build());
@@ -341,6 +345,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadNegativeCacheLoadTime() throws Exception
     {
+        Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
         DatabaseDescriptor.setCacheLoadTimeout(-1);
         String cf = COLUMN_FAMILY7;
 
@@ -357,6 +362,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadTwoTablesTime() throws Exception
     {
+        Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
         DatabaseDescriptor.setCacheLoadTimeout(60);
         String columnFamily1 = COLUMN_FAMILY8;
         String columnFamily2 = COLUMN_FAMILY_K2_1;
@@ -380,6 +386,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadCacheLoadTimeExceedingLimit() throws Exception
     {
+        Assume.assumeTrue(SSTableFormat.Type.current() == SSTableFormat.Type.BIG);
         DatabaseDescriptor.setCacheLoadTimeout(2);
         int delayMillis = 1000;
         int numberOfRows = 100;
@@ -426,7 +433,7 @@ public class KeyCacheTest
 
             // insert data and force to disk
             SchemaLoader.insertData(keyspace, cf, 0, numberOfRows);
-            store.forceBlockingFlush();
+            store.forceBlockingFlush(UNIT_TESTS);
         }
         for(Pair<String, String> entry : tables)
         {
@@ -462,6 +469,10 @@ public class KeyCacheTest
             if (k.desc.ksname.equals(keyspace) && k.desc.cfname.equals(columnFamily))
                 size++;
         }
-        assertEquals(expected, size);
+
+        if (SSTableFormat.Type.current() == SSTableFormat.Type.BIG)
+            assertEquals(expected, size);
+        else
+            assertEquals(0, size);
     }
 }

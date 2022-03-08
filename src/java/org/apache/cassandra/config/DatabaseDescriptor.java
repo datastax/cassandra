@@ -17,13 +17,10 @@
  */
 package org.apache.cassandra.config;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.*;
 import java.nio.file.FileStore;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -31,15 +28,20 @@ import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Multiset;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogOptions;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.auth.AllowAllInternodeAuthenticator;
 import org.apache.cassandra.auth.AuthConfig;
@@ -56,9 +58,10 @@ import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerCDC;
 import org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
-import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.io.util.SpinningDiskOptimizationStrategy;
 import org.apache.cassandra.io.util.SsdDiskOptimizationStrategy;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
@@ -126,6 +129,13 @@ public class DatabaseDescriptor
     // depend on the configured IAuthenticator, so defer creating it until that's been set.
     private static IRoleManager roleManager;
 
+    private static File[] dataDirectories = new File[0];
+    private static File localSystemDataFileDirectory;
+    private static File commitlogDirectory;
+    private static File hintsDirectory;
+    private static File savedCachesDirectory;
+    private static File cdcRawDirectory;
+
     private static long preparedStatementsCacheSizeInMB;
 
     private static long keyCacheSizeInMB;
@@ -142,7 +152,8 @@ public class DatabaseDescriptor
     private static boolean clientInitialized;
     private static boolean toolInitialized;
     private static boolean daemonInitialized;
-
+    private static boolean enableMemtableAndCommitLog;
+    
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
     private static volatile boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
@@ -156,6 +167,43 @@ public class DatabaseDescriptor
     private static Function<CommitLog, AbstractCommitLogSegmentManager> commitLogSegmentMgrProvider = c -> DatabaseDescriptor.isCDCEnabled()
                                        ? new CommitLogSegmentManagerCDC(c, DatabaseDescriptor.getCommitLogLocation())
                                        : new CommitLogSegmentManagerStandard(c, DatabaseDescriptor.getCommitLogLocation());
+
+    static void updateInitialized(boolean clientInitialized, boolean toolInitialized, boolean daemonInitialized)
+    {
+        DatabaseDescriptor.clientInitialized = clientInitialized;
+        DatabaseDescriptor.toolInitialized = toolInitialized;
+        DatabaseDescriptor.daemonInitialized = daemonInitialized;
+    }
+
+    /**
+     * This method can be called from tests if we need to re-initialize the DD
+     * again with a new config, partitioner or snitch. Note that this method will
+     * not delete directories or null the config, it simply resets the variables
+     * that prevent changing config or directories.
+     * <p/>
+     * It cannot set the config to null because this would cause NPEs in the
+     * schedulers that are still running.
+     * <p/>
+     * It cannot delete directories because on remote storage this would result
+     * in errors if the test containers for remote storage are being shutdown
+     * concurrently. The caller should delete any directories if required.
+     * TODO If you run into problems with undeleted directories or with the 
+     * caller deleting them, please add additional details here.
+     * <p/>
+     * This method is called by integration tests that run in the same JVM.
+     */
+    @VisibleForTesting
+    public static void resetUnsafe()
+    {
+        updateInitialized(false, false, false);
+
+        setPartitionerUnsafe(null);
+        IEndpointSnitch oldSnitch = getEndpointSnitch();
+        if (oldSnitch instanceof DynamicEndpointSnitch)
+            ((DynamicEndpointSnitch)oldSnitch).close();
+        setEndpointSnitch(null);
+        EndpointSnitchInfo.unregisterMBean();
+    }
 
     public static void daemonInitialization() throws ConfigurationException
     {
@@ -176,6 +224,10 @@ public class DatabaseDescriptor
 
         setConfig(config.get());
         applyAll();
+
+        createAllDirectories();
+        applyGuardrails(); // requires created directories
+
         AuthConfig.applyAuth();
     }
 
@@ -222,6 +274,8 @@ public class DatabaseDescriptor
         applySnitch();
 
         applyEncryptionContext();
+
+        createAllDirectories();
     }
 
     /**
@@ -283,6 +337,20 @@ public class DatabaseDescriptor
         return daemonInitialized;
     }
 
+    /**
+     * Enables lifecycle transactions via {@link org.apache.cassandra.db.lifecycle.Tracker} and
+     * memtable via {@link org.apache.cassandra.db.ColumnFamilyStore}.
+     */
+    public static void setEnableMemtableAndCommitLog()
+    {
+        enableMemtableAndCommitLog = true;
+    }
+    
+    public static boolean enableMemtableAndCommitLog()
+    {
+        return daemonInitialized || enableMemtableAndCommitLog;
+    }
+
     public static Config getRawConfig()
     {
         return conf;
@@ -339,7 +407,8 @@ public class DatabaseDescriptor
         }
     }
 
-    private static void setConfig(Config config)
+    @VisibleForTesting
+    public static void setConfig(Config config)
     {
         conf = config;
     }
@@ -362,6 +431,13 @@ public class DatabaseDescriptor
         applyEncryptionContext();
 
         applySslContext();
+    }
+
+    private static void applyGuardrails()
+    {
+        conf.guardrails.applyConfig();
+        conf.guardrails.validate();
+        getGuardrailsConfig().validateAfterDataDirectoriesExist();
     }
 
     private static void applySimpleConfig()
@@ -411,7 +487,7 @@ public class DatabaseDescriptor
         /* evaluate the DiskAccessMode Config directive, which also affects indexAccessMode selection */
         if (conf.disk_access_mode == Config.DiskAccessMode.auto)
         {
-            conf.disk_access_mode = hasLargeAddressSpace() ? Config.DiskAccessMode.mmap : Config.DiskAccessMode.standard;
+            conf.disk_access_mode = Config.DiskAccessMode.standard;
             indexAccessMode = conf.disk_access_mode;
             logger.info("DiskAccessMode 'auto' determined to be {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
         }
@@ -540,27 +616,22 @@ public class DatabaseDescriptor
         {
             conf.native_transport_max_concurrent_requests_in_bytes_per_ip = Runtime.getRuntime().maxMemory() / 40;
         }
+        
+        if (conf.native_transport_rate_limiting_enabled)
+            logger.info("Native transport rate-limiting enabled at {} requests/second.", conf.native_transport_max_requests_per_second);
+        else
+            logger.info("Native transport rate-limiting disabled.");
 
         if (conf.commitlog_total_space_in_mb == null)
         {
             final int preferredSizeInMB = 8192;
-            try
-            {
-                // use 1/4 of available space.  See discussion on #10013 and #10199
-                final long totalSpaceInBytes = guessFileStore(conf.commitlog_directory).getTotalSpace();
-                conf.commitlog_total_space_in_mb = calculateDefaultSpaceInMB("commitlog",
-                                                                             conf.commitlog_directory,
-                                                                             "commitlog_total_space_in_mb",
-                                                                             preferredSizeInMB,
-                                                                             totalSpaceInBytes, 1, 4);
-
-            }
-            catch (IOException e)
-            {
-                logger.debug("Error checking disk space", e);
-                throw new ConfigurationException(String.format("Unable to check disk space available to '%s'. Perhaps the Cassandra user does not have the necessary permissions",
-                                                               conf.commitlog_directory), e);
-            }
+            // use 1/4 of available space.  See discussion on #10013 and #10199
+            final long totalSpaceInBytes = tryGetSpace(conf.commitlog_directory, FileStore::getTotalSpace);
+            conf.commitlog_total_space_in_mb = calculateDefaultSpaceInMB("commitlog",
+                                                                         conf.commitlog_directory,
+                                                                         "commitlog_total_space_in_mb",
+                                                                         preferredSizeInMB,
+                                                                         totalSpaceInBytes, 1, 4);
         }
 
         if (conf.cdc_enabled)
@@ -577,25 +648,16 @@ public class DatabaseDescriptor
             if (conf.cdc_total_space_in_mb == 0)
             {
                 final int preferredSizeInMB = 4096;
-                try
-                {
-                    // use 1/8th of available space.  See discussion on #10013 and #10199 on the CL, taking half that for CDC
-                    final long totalSpaceInBytes = guessFileStore(conf.cdc_raw_directory).getTotalSpace();
-                    conf.cdc_total_space_in_mb = calculateDefaultSpaceInMB("cdc",
-                                                                           conf.cdc_raw_directory,
-                                                                           "cdc_total_space_in_mb",
-                                                                           preferredSizeInMB,
-                                                                           totalSpaceInBytes, 1, 8);
-                }
-                catch (IOException e)
-                {
-                    logger.debug("Error checking disk space", e);
-                    throw new ConfigurationException(String.format("Unable to check disk space available to '%s'. Perhaps the Cassandra user does not have the necessary permissions",
-                                                                   conf.cdc_raw_directory), e);
-                }
+                // use 1/8th of available space.  See discussion on #10013 and #10199 on the CL, taking half that for CDC
+                final long totalSpaceInBytes = tryGetSpace(conf.cdc_raw_directory, FileStore::getTotalSpace);
+                conf.cdc_total_space_in_mb = calculateDefaultSpaceInMB("cdc",
+                                                                       conf.cdc_raw_directory,
+                                                                       "cdc_total_space_in_mb",
+                                                                       preferredSizeInMB,
+                                                                       totalSpaceInBytes, 1, 8);
             }
 
-            logger.info("cdc_enabled is true. Starting casssandra node with Change-Data-Capture enabled.");
+            logger.info("cdc_enabled is true. Starting cassandra node with Change-Data-Capture enabled.");
         }
 
         if (conf.saved_caches_directory == null)
@@ -604,7 +666,7 @@ public class DatabaseDescriptor
         }
         if (conf.data_file_directories == null || conf.data_file_directories.length == 0)
         {
-            conf.data_file_directories = new String[]{ storagedir("data_file_directories") + File.separator + "data" };
+            conf.data_file_directories = new String[]{ storagedir("data_file_directories") + File.pathSeparator() + "data" };
         }
 
         long dataFreeBytes = 0;
@@ -622,7 +684,7 @@ public class DatabaseDescriptor
             if (datadir.equals(conf.saved_caches_directory))
                 throw new ConfigurationException("saved_caches_directory must not be the same as any data_file_directories", false);
 
-            dataFreeBytes = saturatedSum(dataFreeBytes, getUnallocatedSpace(datadir));
+            dataFreeBytes = saturatedSum(dataFreeBytes, tryGetSpace(datadir, FileStore::getUnallocatedSpace));
         }
         if (dataFreeBytes < 64 * ONE_GB) // 64 GB
             logger.warn("Only {} free across all data volumes. Consider adding more capacity to your cluster or removing obsolete snapshots",
@@ -637,7 +699,7 @@ public class DatabaseDescriptor
             if (conf.local_system_data_file_directory.equals(conf.hints_directory))
                 throw new ConfigurationException("local_system_data_file_directory must not be the same as the hints_directory", false);
 
-            long freeBytes = getUnallocatedSpace(conf.local_system_data_file_directory);
+            long freeBytes = tryGetSpace(conf.local_system_data_file_directory, FileStore::getUnallocatedSpace);
 
             if (freeBytes < ONE_GB)
                 logger.warn("Only {} free in the system data volume. Consider adding more capacity or removing obsolete snapshots",
@@ -755,6 +817,48 @@ public class DatabaseDescriptor
         if (conf.user_defined_function_fail_timeout < conf.user_defined_function_warn_timeout)
             throw new ConfigurationException("user_defined_function_warn_timeout must less than user_defined_function_fail_timeout", false);
 
+        if (conf.compaction_large_partition_warning_threshold_mb != 0)
+        {
+            logger.warn("Found deprecated property 'compaction_large_partition_warning_threshold_mb' in config - migrate to `guardrails.partition_size_warn_threshold_in_mb`. " +
+                        "The value of 'guardrails.partition_size_warn_threshold_in_mb' is overwritten by 'compaction_large_partition_warning_threshold_mb'.");
+            getGuardrailsConfig().partition_size_warn_threshold_in_mb = conf.compaction_large_partition_warning_threshold_mb;
+        }
+
+        if (conf.tombstone_failure_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'tombstone_failure_threshold' in config - migrate to 'guardrails.tombstone_failure_threshold'. " +
+                        "The value of 'guardrails.tombstone_failure_threshold' is overwritten by 'tombstone_failure_threshold'.");
+            getGuardrailsConfig().tombstone_failure_threshold = conf.tombstone_failure_threshold;
+        }
+
+        if (conf.tombstone_warn_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'tombstone_warn_threshold' in config - migrate to 'guardrails.tombstone_warn_threshold'. " +
+                        "The value of 'guardrails.tombstone_warn_threshold' is overwritten by 'tombstone_warn_threshold'.");
+            getGuardrailsConfig().tombstone_warn_threshold = conf.tombstone_warn_threshold;
+        }
+
+        if (conf.batch_size_fail_threshold_in_kb != 0)
+        {
+            logger.warn("Found deprecated property 'batch_size_fail_threshold_in_kb' in config - migrate to 'guardrails.batch_size_fail_threshold_in_kb'. " +
+                        "The value of 'guardrails.batch_size_fail_threshold_in_kb' is overwritten by 'batch_size_fail_threshold_in_kb'.");
+            getGuardrailsConfig().batch_size_fail_threshold_in_kb = conf.batch_size_fail_threshold_in_kb;
+        }
+
+        if (conf.batch_size_warn_threshold_in_kb != 0)
+        {
+            logger.warn("Found deprecated property 'batch_size_warn_threshold_in_kb' in config - migrate to 'guardrails.batch_size_warn_threshold_in_kb'. " +
+                        "The value of 'guardrails.batch_size_warn_threshold_in_kb' is overwritten by 'batch_size_warn_threshold_in_kb'.");
+            getGuardrailsConfig().batch_size_warn_threshold_in_kb = conf.batch_size_warn_threshold_in_kb;
+        }
+
+        if (conf.unlogged_batch_across_partitions_warn_threshold != 0)
+        {
+            logger.warn("Found deprecated property 'unlogged_batch_across_partitions_warn_threshold' in config - migrate to 'guardrails.unlogged_batch_across_partitions_warn_threshold'. " +
+                        "The value of 'guardrails.unlogged_batch_across_partitions_warn_threshold' is overwritten by 'unlogged_batch_across_partitions_warn_threshold'.");
+            getGuardrailsConfig().unlogged_batch_across_partitions_warn_threshold = conf.unlogged_batch_across_partitions_warn_threshold;
+        }
+
         if (!conf.allow_insecure_udfs && !conf.enable_user_defined_functions_threads)
             throw new ConfigurationException("To be able to set enable_user_defined_functions_threads: false you need to set allow_insecure_udfs: true - this is an unsafe configuration and is not recommended.");
 
@@ -838,6 +942,11 @@ public class DatabaseDescriptor
         }
 
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
+
+        if (conf.aggregation_subpage_size_in_kb < 1)
+            throw new ConfigurationException("aggregation_subpage_size_in_kb must be greater than 0");
+
+        setAggregationSubPageSize(getAggregationSubPageSize());
     }
 
     @VisibleForTesting
@@ -863,7 +972,7 @@ public class DatabaseDescriptor
 
     private static String storagedirFor(String type)
     {
-        return storagedir(type + "_directory") + File.separator + type;
+        return storagedir(type + "_directory") + File.pathSeparator() + type;
     }
 
     private static String storagedir(String errMsgType)
@@ -1128,7 +1237,7 @@ public class DatabaseDescriptor
             throw new ConfigurationException("Missing endpoint_snitch directive", false);
         }
         snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
-        EndpointSnitchInfo.create();
+        EndpointSnitchInfo.registerMBean();
 
         localDC = snitch.getLocalDatacenter();
         localComparator = (replica1, replica2) -> {
@@ -1183,45 +1292,9 @@ public class DatabaseDescriptor
         return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
-    private static FileStore guessFileStore(String dir) throws IOException
+    private static long tryGetSpace(String dir, PathUtils.IOToLongFunction<FileStore> getSpace)
     {
-        Path path = Paths.get(dir);
-        while (true)
-        {
-            try
-            {
-                return FileUtils.getFileStore(path);
-            }
-            catch (IOException e)
-            {
-                if (e instanceof NoSuchFileException)
-                {
-                    path = path.getParent();
-                    if (path == null)
-                    {
-                        throw new ConfigurationException("Unable to find filesystem for '" + dir + "'.");
-                    }
-                }
-                else
-                {
-                    throw e;
-                }
-            }
-        }
-    }
-
-    private static long getUnallocatedSpace(String directory)
-    {
-        try
-        {
-            return guessFileStore(directory).getUnallocatedSpace();
-        }
-        catch (IOException e)
-        {
-            logger.debug("Error checking disk space", e);
-            throw new ConfigurationException(String.format("Unable to check disk space available to %s. Perhaps the Cassandra user does not have the necessary permissions",
-                                                           directory), e);
-        }
+        return PathUtils.tryGetSpace(new File(dir).toPath(), getSpace, e -> { throw new ConfigurationException("Unable check disk space in '" + dir + "'. Perhaps the Cassandra user does not have the necessary permissions"); });
     }
 
     public static IEndpointSnitch createEndpointSnitch(boolean dynamic, String snitchClassName) throws ConfigurationException
@@ -1388,29 +1461,30 @@ public class DatabaseDescriptor
             if (conf.data_file_directories.length == 0)
                 throw new ConfigurationException("At least one DataFileDirectory must be specified", false);
 
-            for (String dataFileDirectory : conf.data_file_directories)
-                FileUtils.createDirectory(dataFileDirectory);
+            dataDirectories = new File[conf.data_file_directories.length];
+            for (int i = 0; i < conf.data_file_directories.length; i++)
+                dataDirectories[i] = StorageProvider.instance.createDirectory(conf.data_file_directories[i], StorageProvider.DirectoryType.DATA);
 
             if (conf.local_system_data_file_directory != null)
-                FileUtils.createDirectory(conf.local_system_data_file_directory);
+                localSystemDataFileDirectory = StorageProvider.instance.createDirectory(conf.local_system_data_file_directory, StorageProvider.DirectoryType.LOCAL_SYSTEM_DATA);
 
             if (conf.commitlog_directory == null)
                 throw new ConfigurationException("commitlog_directory must be specified", false);
-            FileUtils.createDirectory(conf.commitlog_directory);
+            commitlogDirectory = StorageProvider.instance.createDirectory(conf.commitlog_directory, StorageProvider.DirectoryType.COMMITLOG);
 
             if (conf.hints_directory == null)
                 throw new ConfigurationException("hints_directory must be specified", false);
-            FileUtils.createDirectory(conf.hints_directory);
+            hintsDirectory = StorageProvider.instance.createDirectory(conf.hints_directory, StorageProvider.DirectoryType.HINTS);
 
             if (conf.saved_caches_directory == null)
                 throw new ConfigurationException("saved_caches_directory must be specified", false);
-            FileUtils.createDirectory(conf.saved_caches_directory);
+            savedCachesDirectory = StorageProvider.instance.createDirectory(conf.saved_caches_directory, StorageProvider.DirectoryType.SAVED_CACHES);
 
             if (conf.cdc_enabled)
             {
                 if (conf.cdc_raw_directory == null)
                     throw new ConfigurationException("cdc_raw_directory must be specified", false);
-                FileUtils.createDirectory(conf.cdc_raw_directory);
+                cdcRawDirectory = StorageProvider.instance.createDirectory(conf.cdc_raw_directory, StorageProvider.DirectoryType.CDC);
             }
         }
         catch (ConfigurationException e)
@@ -1461,7 +1535,7 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static void setColumnIndexSize(int val)
+    public static void setColumnIndexSizeInKB(int val)
     {
         checkValidForByteConversion(val, "column_index_size_in_kb", ByteUnit.KIBI_BYTES);
         conf.column_index_size_in_kb = val;
@@ -1477,46 +1551,10 @@ public class DatabaseDescriptor
         return conf.column_index_cache_size_in_kb;
     }
 
-    public static void setColumnIndexCacheSize(int val)
+    public static void setColumnIndexCacheSizeInKB(int val)
     {
         checkValidForByteConversion(val, "column_index_cache_size_in_kb", ByteUnit.KIBI_BYTES);
         conf.column_index_cache_size_in_kb = val;
-    }
-
-    public static int getBatchSizeWarnThreshold()
-    {
-        return (int) ByteUnit.KIBI_BYTES.toBytes(conf.batch_size_warn_threshold_in_kb);
-    }
-
-    public static int getBatchSizeWarnThresholdInKB()
-    {
-        return conf.batch_size_warn_threshold_in_kb;
-    }
-
-    public static long getBatchSizeFailThreshold()
-    {
-        return ByteUnit.KIBI_BYTES.toBytes(conf.batch_size_fail_threshold_in_kb);
-    }
-
-    public static int getBatchSizeFailThresholdInKB()
-    {
-        return conf.batch_size_fail_threshold_in_kb;
-    }
-
-    public static int getUnloggedBatchAcrossPartitionsWarnThreshold()
-    {
-        return conf.unlogged_batch_across_partitions_warn_threshold;
-    }
-
-    public static void setBatchSizeWarnThresholdInKB(int threshold)
-    {
-        checkValidForByteConversion(threshold, "batch_size_warn_threshold_in_kb", ByteUnit.KIBI_BYTES);
-        conf.batch_size_warn_threshold_in_kb = threshold;
-    }
-
-    public static void setBatchSizeFailThresholdInKB(int threshold)
-    {
-        conf.batch_size_fail_threshold_in_kb = threshold;
     }
 
     public static Collection<String> getInitialTokens()
@@ -1675,6 +1713,16 @@ public class DatabaseDescriptor
         conf.truncate_request_timeout_in_ms = timeOutInMillis;
     }
 
+    public static long getRepairPrepareMessageTimeout(TimeUnit unit)
+    {
+        return unit.convert(conf.repair_prepare_message_timeout_in_ms, MILLISECONDS);
+    }
+
+    public static void setRepairPrepareMessageTimeout(long timeOutInMillis)
+    {
+        conf.repair_prepare_message_timeout_in_ms = timeOutInMillis;
+    }
+
     public static boolean hasCrossNodeTimeout()
     {
         return conf.cross_node_timeout;
@@ -1799,8 +1847,6 @@ public class DatabaseDescriptor
         conf.compaction_throughput_mb_per_sec = value;
     }
 
-    public static long getCompactionLargePartitionWarningThreshold() { return ByteUnit.MEBI_BYTES.toBytes(conf.compaction_large_partition_warning_threshold_mb); }
-
     public static int getConcurrentValidations()
     {
         return conf.concurrent_validations;
@@ -1865,7 +1911,13 @@ public class DatabaseDescriptor
      */
     public static boolean useSpecificLocationForLocalSystemData()
     {
-        return conf.local_system_data_file_directory != null;
+        return localSystemDataFileDirectory != null;
+    }
+
+    @VisibleForTesting
+    public static void setSpecificLocationForLocalSystemData(File systemDir)
+    {
+        localSystemDataFileDirectory = systemDir;
     }
 
     /**
@@ -1876,13 +1928,12 @@ public class DatabaseDescriptor
      *
      * @return the locations where should be stored the local system keyspaces data
      */
-    public static String[] getLocalSystemKeyspacesDataFileLocations()
+    public static File[] getLocalSystemKeyspacesDataFileLocations()
     {
         if (useSpecificLocationForLocalSystemData())
-            return new String[] {conf.local_system_data_file_directory};
+            return new File[] {localSystemDataFileDirectory};
 
-        return conf.data_file_directories.length == 0  ? conf.data_file_directories
-                                                       : new String[] {conf.data_file_directories[0]};
+        return dataDirectories.length == 0  ? dataDirectories : new File[] {dataDirectories[0]};
     }
 
     /**
@@ -1890,9 +1941,9 @@ public class DatabaseDescriptor
      *
      * @return the locations where the non local system keyspaces data should be stored.
      */
-    public static String[] getNonLocalSystemKeyspacesDataFileLocations()
+    public static File[] getNonLocalSystemKeyspacesDataFileLocations()
     {
-        return conf.data_file_directories;
+        return dataDirectories;
     }
 
     /**
@@ -1900,23 +1951,73 @@ public class DatabaseDescriptor
      *
      * @return the list of all the directories where the data files can be stored.
      */
-    public static String[] getAllDataFileLocations()
+    public static File[] getAllDataFileLocations()
     {
-        if (conf.local_system_data_file_directory == null)
-            return conf.data_file_directories;
+        if (!useSpecificLocationForLocalSystemData())
+            return dataDirectories;
 
-        return ArrayUtils.addFirst(conf.data_file_directories, conf.local_system_data_file_directory);
-    }
-
-    public static String getCommitLogLocation()
-    {
-        return conf.commitlog_directory;
+        return ArrayUtils.addFirst(dataDirectories, localSystemDataFileDirectory);
     }
 
     @VisibleForTesting
-    public static void setCommitLogLocation(String value)
+    public static void setDataDirectories(File[] newDataDirectories)
     {
-        conf.commitlog_directory = value;
+        dataDirectories = newDataDirectories;
+    }
+
+    /**
+     * @return Minimum total space for all the data file directories in GB.
+     *         0 if fail to get the total space, or total space is under 1 GB.
+     */
+    public static long getDataFileDirectoriesMinTotalSpaceInGB()
+    {
+        File[] dataDirectories = getAllDataFileLocations();
+        if (dataDirectories.length == 0)
+        {
+            return 0L;
+        }
+
+        Multiset<FileStore> fileStores = HashMultiset.create();
+        for (File dir : dataDirectories)
+        {
+            try
+            {
+                fileStores.add(Files.getFileStore(dir.toPath()));
+            }
+            catch (IOException ioe)
+            {
+                logger.warn("Unable to get FileStore of {}. {}", dir, ioe);
+            }
+        }
+        return getDataFileDirectoriesMinTotalSpaceInGB(fileStores);
+    }
+
+    @VisibleForTesting
+    static long getDataFileDirectoriesMinTotalSpaceInGB(Multiset<FileStore> fileStores)
+    {
+        return fileStores.entrySet().stream().mapToLong(entry -> {
+            long totalSpace = 0L;
+            try
+            {
+                totalSpace = PathUtils.handleLargeFileSystem(entry.getElement().getTotalSpace());
+            }
+            catch (IOException ioe)
+            {
+                logger.warn("Unable to get total space of {}. {}", entry.getElement(), ioe);
+            }
+            return (totalSpace >> 30) / entry.getCount();
+        }).min().orElse(0L) * fileStores.size();
+    }
+
+    public static File getCommitLogLocation()
+    {
+        return commitlogDirectory;
+    }
+
+    @VisibleForTesting
+    public static void setCommitLogLocation(File commitLogLocation)
+    {
+        commitlogDirectory = commitLogLocation;
     }
 
     public static ParameterizedClass getCommitLogCompression()
@@ -1959,26 +2060,6 @@ public class DatabaseDescriptor
         return (int) ByteUnit.KIBI_BYTES.toBytes(conf.max_mutation_size_in_kb);
     }
 
-    public static int getTombstoneWarnThreshold()
-    {
-        return conf.tombstone_warn_threshold;
-    }
-
-    public static void setTombstoneWarnThreshold(int threshold)
-    {
-        conf.tombstone_warn_threshold = threshold;
-    }
-
-    public static int getTombstoneFailureThreshold()
-    {
-        return conf.tombstone_failure_threshold;
-    }
-
-    public static void setTombstoneFailureThreshold(int threshold)
-    {
-        conf.tombstone_failure_threshold = threshold;
-    }
-
     public static int getCachedReplicaRowsWarnThreshold()
     {
         return conf.replica_filtering_protection.cached_rows_warn_threshold;
@@ -2012,9 +2093,9 @@ public class DatabaseDescriptor
         conf.commitlog_segment_size_in_mb = sizeMegabytes;
     }
 
-    public static String getSavedCachesLocation()
+    public static File getSavedCachesLocation()
     {
-        return conf.saved_caches_directory;
+        return savedCachesDirectory;
     }
 
     public static Set<InetAddressAndPort> getSeeds()
@@ -2314,6 +2395,28 @@ public class DatabaseDescriptor
         conf.native_transport_max_concurrent_requests_in_bytes = maxConcurrentRequestsInBytes;
     }
 
+    public static int getNativeTransportMaxRequestsPerSecond()
+    {
+        return conf.native_transport_max_requests_per_second;
+    }
+
+    public static void setNativeTransportMaxRequestsPerSecond(int perSecond)
+    {
+        Preconditions.checkArgument(perSecond > 0, "native_transport_max_requests_per_second must be greater than zero");
+        conf.native_transport_max_requests_per_second = perSecond;
+    }
+
+    public static void setNativeTransportRateLimitingEnabled(boolean enabled)
+    {
+        logger.info("native_transport_rate_limiting_enabled set to {}", enabled);
+        conf.native_transport_rate_limiting_enabled = enabled;
+    }
+
+    public static boolean getNativeTransportRateLimitingEnabled()
+    {
+        return conf.native_transport_rate_limiting_enabled;
+    }
+
     public static int getCommitLogSyncPeriod()
     {
         return conf.commitlog_sync_period_in_ms;
@@ -2467,14 +2570,14 @@ public class DatabaseDescriptor
 
     public static File getHintsDirectory()
     {
-        return new File(conf.hints_directory);
+        return hintsDirectory;
     }
 
     public static File getSerializedCachePath(CacheType cacheType, String version, String extension)
     {
         String name = cacheType.toString()
                 + (version == null ? "" : '-' + version + '.' + extension);
-        return new File(conf.saved_caches_directory, name);
+        return new File(savedCachesDirectory, name);
     }
 
     public static int getDynamicUpdateInterval()
@@ -2636,11 +2739,13 @@ public class DatabaseDescriptor
         return conf.commitlog_total_space_in_mb;
     }
 
+    @Deprecated // CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782)
     public static boolean shouldMigrateKeycacheOnCompaction()
     {
         return conf.key_cache_migrate_during_compaction;
     }
 
+    @Deprecated // CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782)
     public static void setMigrateKeycacheOnCompaction(boolean migrateCacheEntry)
     {
         conf.key_cache_migrate_during_compaction = migrateCacheEntry;
@@ -2777,6 +2882,31 @@ public class DatabaseDescriptor
         return conf.streaming_connections_per_host;
     }
 
+    public static boolean supportsSSTableReadMeter()
+    {
+        return conf.storage_flags.supports_sstable_read_meter;
+    }
+
+    public static boolean supportsBlacklistingDirectory()
+    {
+        return conf.storage_flags.supports_blacklisting_directory;
+    }
+
+    public static boolean supportsHardlinksForEntireSSTableStreaming()
+    {
+        return conf.storage_flags.supports_hardlinks_for_entire_sstable_streaming;
+    }
+
+    public static boolean supportsFlushBeforeStreaming()
+    {
+        return conf.storage_flags.supports_flush_before_streaming;
+    }
+
+    public static boolean nettyZerocopyEnabled()
+    {
+        return conf.netty_zerocopy_enabled;
+    }
+
     public static boolean streamEntireSSTables()
     {
         return conf.stream_entire_sstables;
@@ -2858,6 +2988,11 @@ public class DatabaseDescriptor
     public static Float getMemtableCleanupThreshold()
     {
         return conf.memtable_cleanup_threshold;
+    }
+
+    public static Map<String, String> getMemtableOptions()
+    {
+        return conf.memtable;
     }
 
     public static int getIndexSummaryResizeIntervalInMinutes()
@@ -3028,9 +3163,9 @@ public class DatabaseDescriptor
         conf.cdc_enabled = cdc_enabled;
     }
 
-    public static String getCDCLogLocation()
+    public static File getCDCLogLocation()
     {
-        return conf.cdc_raw_directory;
+        return cdcRawDirectory;
     }
 
     public static int getCDCSpaceInMB()
@@ -3420,5 +3555,53 @@ public class DatabaseDescriptor
             logger.info("Setting force_new_prepared_statement_behaviour to {}", value);
             conf.force_new_prepared_statement_behaviour = value;
         }
+    }
+
+    public static int getSAISegmentWriteBufferSpace()
+    {
+        return conf.sai_options.segment_write_buffer_space_mb;
+    }
+
+    public static void setSAISegmentWriteBufferSpace(int bufferSpace)
+    {
+        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+    }
+
+    public static double getSAIZeroCopyUsedThreshold()
+    {
+        return conf.sai_options.zerocopy_used_threshold;
+    }
+
+    public static void setSAIZeroCopyUsedThreshold(double threshold)
+    {
+        conf.sai_options.zerocopy_used_threshold = threshold;
+    }
+    
+    public static GuardrailsConfig getGuardrailsConfig()
+    {
+        return conf.guardrails;
+    }
+
+    @VisibleForTesting
+    public static boolean setEmulateDbaasDefaults(boolean dbaasDefaults)
+    {
+        return conf.emulate_dbaas_defaults = dbaasDefaults;
+    }
+
+    public static boolean isEmulateDbaasDefaults()
+    {
+        return conf.emulate_dbaas_defaults;
+    }
+
+    public static PageSize getAggregationSubPageSize()
+    {
+        return PageSize.inBytes(conf.aggregation_subpage_size_in_kb * 1024);
+    }
+
+    public static void setAggregationSubPageSize(PageSize pageSize)
+    {
+        Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.BYTES);
+        Preconditions.checkArgument(pageSize.bytes() >= 1024);
+        conf.aggregation_subpage_size_in_kb = pageSize.bytes() / 1024;
     }
 }

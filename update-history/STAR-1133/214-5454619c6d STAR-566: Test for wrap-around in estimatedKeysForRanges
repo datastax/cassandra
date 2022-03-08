@@ -1,0 +1,27 @@
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -92,15 +92,11 @@
+         SchemaLoader.createKeyspace(KEYSPACE1,
+                                     KeyspaceParams.simple(1),
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD),
+-<<<<<<<
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2)
+                                                 .minIndexInterval(8)
+                                                 .maxIndexInterval(8),  // ensure close key count estimation
+-=======
+-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2),
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD3),
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_MOVE_AND_OPEN),
+->>>>>>>
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_COMPRESSED).compression(CompressionParams.DEFAULT),
+                                     SchemaLoader.compositeIndexCFMD(KEYSPACE1, CF_INDEXED, true),
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_LOW_INDEX_INTERVAL)
+@@ -111,7 +107,7 @@
+                                                 .minIndexInterval(4)
+                                                 .maxIndexInterval(4)
+                                                 .bloomFilterFpChance(0.99));
+-        
++
+         // All tests in this class assume auto-compaction is disabled.
+         CompactionManager.instance.disableAutoCompaction();
+     }

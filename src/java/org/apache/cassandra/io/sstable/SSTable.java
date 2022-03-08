@@ -17,36 +17,46 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.*;
+import java.io.FileNotFoundException;
+import java.io.IOError;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Sets;
-import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 
+import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
@@ -71,7 +81,7 @@ public abstract class SSTable
     public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
 
     public final Descriptor descriptor;
-    protected final Set<Component> components;
+    public final Set<Component> components;
     public final boolean compression;
 
     public DecoratedKey first;
@@ -79,6 +89,8 @@ public abstract class SSTable
 
     protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
+    private static final int SAMPLES_CAP = 10000;
+    private static final int BYTES_CAP = 10000000;
 
     protected SSTable(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, DiskOptimizationStrategy optimizationStrategy)
     {
@@ -111,17 +123,17 @@ public abstract class SSTable
         logger.info("Deleting sstable: {}", desc);
         // remove the DATA component first if it exists
         if (components.contains(Component.DATA))
-            FileUtils.deleteWithConfirm(desc.filenameFor(Component.DATA));
+            FileUtils.deleteWithConfirm(desc.fileFor(Component.DATA));
         for (Component component : components)
         {
             if (component.equals(Component.DATA) || component.equals(Component.SUMMARY))
                 continue;
 
-            FileUtils.deleteWithConfirm(desc.filenameFor(component));
+            FileUtils.deleteWithConfirm(desc.fileFor(component));
         }
 
         if (components.contains(Component.SUMMARY))
-            FileUtils.delete(desc.filenameFor(Component.SUMMARY));
+            FileUtils.delete(desc.fileFor(Component.SUMMARY));
 
         return true;
     }
@@ -129,6 +141,11 @@ public abstract class SSTable
     public TableMetadata metadata()
     {
         return metadata.get();
+    }
+
+    public TableMetadataRef metadataRef()
+    {
+        return metadata;
     }
 
     public IPartitioner getPartitioner()
@@ -154,12 +171,12 @@ public abstract class SSTable
 
     public String getFilename()
     {
-        return descriptor.filenameFor(Component.DATA);
+        return getDataFile().path();
     }
 
-    public String getIndexFilename()
+    public File getDataFile()
     {
-        return descriptor.filenameFor(Component.PRIMARY_INDEX);
+        return descriptor.fileFor(Component.DATA);
     }
 
     public String getColumnFamilyName()
@@ -172,12 +189,19 @@ public abstract class SSTable
         return descriptor.ksname;
     }
 
-    public List<String> getAllFilePaths()
+    public SSTableUniqueIdentifier getGeneration()
     {
-        List<String> ret = new ArrayList<>(components.size());
-        for (Component component : components)
-            ret.add(descriptor.filenameFor(component));
-        return ret;
+        return descriptor.generation;
+    }
+
+    public Set<Component> getComponents()
+    {
+        return components;
+    }
+
+    public int getComponentSize()
+    {
+        return components.size();
     }
 
     /**
@@ -231,9 +255,10 @@ public abstract class SSTable
         {
             try
             {
+                SSTableWatcher.instance.discoverComponents(desc);
                 return readTOC(desc);
             }
-            catch (FileNotFoundException e)
+            catch (FileNotFoundException | NoSuchFileException e)
             {
                 Set<Component> components = discoverComponentsFor(desc);
                 if (components.isEmpty())
@@ -258,28 +283,31 @@ public abstract class SSTable
         for (Component.Type componentType : knownTypes)
         {
             Component component = new Component(componentType);
-            if (new File(desc.filenameFor(component)).exists())
+            if (desc.fileFor(component).exists())
                 components.add(component);
         }
         return components;
     }
 
     /** @return An estimate of the number of keys contained in the given index file. */
-    public static long estimateRowsFromIndex(RandomAccessReader ifile, Descriptor descriptor) throws IOException
+    public static long estimateRowsFromIndex(PartitionIndexIterator iterator) throws IOException
     {
         // collect sizes for the first 10000 keys, or first 10 megabytes of data
-        final int SAMPLES_CAP = 10000, BYTES_CAP = (int)Math.min(10000000, ifile.length());
-        int keys = 0;
-        while (ifile.getFilePointer() < BYTES_CAP && keys < SAMPLES_CAP)
+        try
         {
-            ByteBufferUtil.skipShortLength(ifile);
-            RowIndexEntry.Serializer.skip(ifile, descriptor.version);
-            keys++;
+            int keys = 0;
+            while (!iterator.isExhausted() && iterator.indexPosition() < BYTES_CAP && keys < SAMPLES_CAP)
+            {
+                iterator.advance();
+                keys++;
+            }
+            assert keys > 0 && iterator.indexPosition() > 0 && iterator.indexLength() > 0 : "Unexpected empty index file";
+            return iterator.indexLength() / (iterator.indexPosition() / keys);
         }
-        assert keys > 0 && ifile.getFilePointer() > 0 && ifile.length() > 0 : "Unexpected empty index file: " + ifile;
-        long estimatedRows = ifile.length() / (ifile.getFilePointer() / keys);
-        ifile.seek(0);
-        return estimatedRows;
+        finally
+        {
+            iterator.reset();
+        }
     }
 
     public long bytesOnDisk()
@@ -287,7 +315,7 @@ public abstract class SSTable
         long bytes = 0;
         for (Component component : components)
         {
-            bytes += new File(descriptor.filenameFor(component)).length();
+            bytes += descriptor.fileFor(component).length();
         }
         return bytes;
     }
@@ -304,7 +332,8 @@ public abstract class SSTable
      * Reads the list of components from the TOC component.
      * @return set of components found in the TOC
      */
-    protected static Set<Component> readTOC(Descriptor descriptor) throws IOException
+    @VisibleForTesting
+    public static Set<Component> readTOC(Descriptor descriptor) throws IOException
     {
         return readTOC(descriptor, true);
     }
@@ -316,14 +345,14 @@ public abstract class SSTable
      */
     protected static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
     {
-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
-        List<String> componentNames = Files.readLines(tocFile, Charset.defaultCharset());
+        File tocFile = descriptor.fileFor(Component.TOC);
+        List<String> componentNames = Files.readAllLines(tocFile.toPath());
         Set<Component> components = Sets.newHashSetWithExpectedSize(componentNames.size());
         for (String componentName : componentNames)
         {
             Component component = new Component(Component.Type.fromRepresentation(componentName), componentName);
-            if (skipMissing && !new File(descriptor.filenameFor(component)).exists())
-                logger.error("Missing component: {}", descriptor.filenameFor(component));
+            if (skipMissing && !descriptor.fileFor(component).exists())
+                logger.error("Missing component: {}", descriptor.fileFor(component));
             else
                 components.add(component);
         }
@@ -331,12 +360,23 @@ public abstract class SSTable
     }
 
     /**
+     * Rewrite TOC components by deleting existing TOC file and append new components
+     */
+    private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
+    {
+        File tocFile = descriptor.fileFor(Component.TOC);
+        if (!tocFile.tryDelete())
+            logger.error("Failed to delete TOC component for " + descriptor);
+        appendTOC(descriptor, components);
+    }
+
+    /**
      * Appends new component names to the TOC component.
      */
     protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
     {
-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
-        try (PrintWriter w = new PrintWriter(new FileWriter(tocFile, true)))
+        File tocFile = descriptor.fileFor(Component.TOC);
+        try (PrintWriter w = new PrintWriter(tocFile.newWriter(APPEND)))
         {
             for (Component component : components)
                 w.println(component.name);
@@ -355,9 +395,48 @@ public abstract class SSTable
      */
     public synchronized void addComponents(Collection<Component> newComponents)
     {
-        Collection<Component> componentsToAdd = Collections2.filter(newComponents, Predicates.not(Predicates.in(components)));
+        registerComponents(newComponents, null);
+    }
+
+    /**
+     * Registers new custom components into sstable and update size tracking
+     * @param newComponents collection of components to be added
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
         appendTOC(descriptor, componentsToAdd);
         components.addAll(componentsToAdd);
+
+        if (tracker == null)
+            return;
+
+        for (Component component : componentsToAdd)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(file.length());
+        }
+    }
+
+    /**
+     * Unregisters custom components from sstable and update size tracking
+     * @param removeComponents collection of components to be remove
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
+    {
+        Collection<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components.removeAll(componentsToRemove);
+        rewriteTOC(descriptor, components);
+
+        for (Component component : componentsToRemove)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(-file.length());
+        }
     }
 
     public AbstractBounds<Token> getBounds()
@@ -372,5 +451,15 @@ public abstract class SSTable
         Preconditions.checkArgument(!isTransient || (pendingRepair != NO_PENDING_REPAIR),
                                     "isTransient can only be true for sstables pending repair");
 
+    }
+
+    public DecoratedKey getFirst()
+    {
+        return first;
+    }
+
+    public DecoratedKey getLast()
+    {
+        return last;
     }
 }

@@ -44,6 +44,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -232,23 +233,23 @@ public class CachingBench extends CQLTester
         int startTombCount = countTombstoneMarkers(cfs);
         int startRowDeletions = countRowDeletions(cfs);
         int startTableCount = cfs.getLiveSSTables().size();
-        long startSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long startSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
         System.out.println("\nCompession: " + cfs.getCompressionParameters().toString());
         System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0).toString());
         if (cacheEnabled)
             System.out.format("Cache size %s requests %,d hit ratio %f\n",
-                FileUtils.stringifyFileSize(ChunkCache.instance.metrics.size.getValue()),
-                ChunkCache.instance.metrics.requests.getCount(),
-                ChunkCache.instance.metrics.hitRate.getValue());
+                FileUtils.stringifyFileSize(ChunkCache.instance.metrics.size()),
+                ChunkCache.instance.metrics.requests(),
+                ChunkCache.instance.metrics.hitRate());
         else
         {
-            assertThat(ChunkCache.instance.metrics.requests.getCount()).as("Chunk cache had requests: %s",
-                                                                           ChunkCache.instance.metrics.requests.getCount())
+            assertThat(ChunkCache.instance.metrics.requests()).as("Chunk cache had requests: %s",
+                                                                           ChunkCache.instance.metrics.requests())
                                                                        .isLessThan(COUNT);
             System.out.println("Cache disabled");
         }
 
-        assertThat(ChunkCache.instance.metrics.missLatency.getCount()).isGreaterThan(0);
+        assertThat(ChunkCache.instance.metrics.missLatency()).isGreaterThan(0);
 
         System.out.println(String.format("Operations completed in %.3fs", (onEndTime - onStartTime) * 1e-3));
         if (!CONCURRENT_COMPACTIONS)
@@ -265,7 +266,7 @@ public class CachingBench extends CQLTester
         int endTombCount = countTombstoneMarkers(cfs);
         int endRowDeletions = countRowDeletions(cfs);
         int endTableCount = cfs.getLiveSSTables().size();
-        long endSize = SSTableReader.getTotalBytes(cfs.getLiveSSTables());
+        long endSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
 
         System.out.println(String.format("Major compaction completed in %.3fs",
                 (endTime - startTime) * 1e-3));

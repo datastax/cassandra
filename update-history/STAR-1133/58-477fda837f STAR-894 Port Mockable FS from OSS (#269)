@@ -1,0 +1,729 @@
+--- a/src/java/org/apache/cassandra/config/CassandraRelevantProperties.java
++++ b/src/java/org/apache/cassandra/config/CassandraRelevantProperties.java
+@@ -159,14 +159,12 @@
+      */
+     REPLACEMENT_ALLOW_EMPTY("cassandra.allow_empty_replace_address", "true"),
+ 
+-<<<<<<<
+     /**
+      * Whether {@link org.apache.cassandra.db.ConsistencyLevel#NODE_LOCAL} should be allowed.
+      */
+     ENABLE_NODELOCAL_QUERIES("cassandra.enable_nodelocal_queries", "false"),
+-=======
++
+     CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings", "false"),
+->>>>>>>
+ 
+     //cassandra properties (without the "cassandra." prefix)
+ 
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -1861,12 +1861,7 @@
+                 for (SSTableReader ssTable : currentView.sstables)
+                 {
+                     File snapshotDirectory = Directories.getSnapshotDirectory(ssTable.descriptor, snapshotName);
+-<<<<<<<
+-                    rateLimiter.acquire(SSTableReader.componentsFor(ssTable.descriptor).size());
+-                    ssTable.createLinks(snapshotDirectory.path()); // hard links
+-=======
+-                    ssTable.createLinks(snapshotDirectory.getPath(), rateLimiter); // hard links
+->>>>>>>
++                    ssTable.createLinks(snapshotDirectory.path(), rateLimiter); // hard links
+                     filesJSONArr.add(ssTable.descriptor.relativeFilenameFor(Component.DATA));
+ 
+                     if (logger.isTraceEnabled())
+--- a/src/java/org/apache/cassandra/db/lifecycle/LogFile.java
++++ b/src/java/org/apache/cassandra/db/lifecycle/LogFile.java
+@@ -322,27 +322,13 @@
+         assert type == Type.ADD || type == Type.REMOVE;
+ 
+         for (SSTableReader sstable : tables)
+-<<<<<<<
+             maybeCreateReplica(sstable);
+-=======
+-        {
+-            File directory = sstable.descriptor.directory;
+-            String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
+-            replicas.maybeCreateReplica(directory, fileName, records);
+-        }
+->>>>>>>
+         return LogRecord.make(type, tables);
+     }
+ 
+     private LogRecord makeAddRecord(SSTable table)
+     {
+-<<<<<<<
+-        File directory = table.descriptor.directory;
+-        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
+-        replicas.maybeCreateReplica(directory, fileName, records);
+-=======
+         maybeCreateReplica(table);
+->>>>>>>
+         return LogRecord.make(Type.ADD, table);
+     }
+ 
+@@ -358,18 +344,11 @@
+         return record.asType(type);
+     }
+ 
+-<<<<<<<
+-        File directory = table.descriptor.directory;
+-        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
+-        replicas.maybeCreateReplica(directory, fileName, records);
+-        return record.asType(type);
+-=======
+     private void maybeCreateReplica(SSTable sstable)
+     {
+         File directory = sstable.descriptor.directory;
+-        String fileName = StringUtils.join(directory, File.separator, getFileName());
++        String fileName = StringUtils.join(directory, File.pathSeparator(), getFileName());
+         replicas.maybeCreateReplica(directory, fileName, onDiskRecords);
+->>>>>>>
+     }
+ 
+     void addRecord(LogRecord record)
+--- a/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/SSTableReader.java
+@@ -1728,13 +1728,9 @@
+             File sourceFile = new File(descriptor.filenameFor(component));
+             if (!sourceFile.exists())
+                 continue;
+-<<<<<<<
+-            File targetLink = new File(snapshotDirectoryPath, sourceFile.name());
+-=======
+             if (null != limiter)
+                 limiter.acquire();
+-            File targetLink = new File(snapshotDirectoryPath, sourceFile.getName());
+->>>>>>>
++            File targetLink = new File(snapshotDirectoryPath, sourceFile.name());
+             FileUtils.createHardLink(sourceFile, targetLink);
+         }
+     }
+--- a/test/distributed/org/apache/cassandra/distributed/test/ring/BootstrapTest.java
++++ b/test/distributed/org/apache/cassandra/distributed/test/ring/BootstrapTest.java
+@@ -125,9 +125,5 @@
+                         .collect(Collectors.toMap(nodeId -> nodeId,
+                                                   nodeId -> (Long) cluster.get(nodeId).executeInternal("SELECT count(*) FROM " + KEYSPACE + ".tbl")[0][0]));
+     }
+-<<<<<<<
+ 
+ }
+-=======
+-}
+->>>>>>>
+--- a/test/unit/org/apache/cassandra/Util.java
++++ b/test/unit/org/apache/cassandra/Util.java
+@@ -30,10 +30,7 @@
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.nio.file.attribute.FileTime;
+-<<<<<<<
+ import java.time.Duration;
+-import java.util.*;
+-=======
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.Collection;
+@@ -44,7 +41,6 @@
+ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+->>>>>>>
+ import java.util.concurrent.Callable;
+ import java.util.concurrent.Future;
+ import java.util.concurrent.TimeUnit;
+--- a/test/unit/org/apache/cassandra/auth/RoleTestUtils.java
++++ b/test/unit/org/apache/cassandra/auth/RoleTestUtils.java
+@@ -123,7 +123,6 @@
+         ColumnFamilyStore rolesTable = Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.ROLES);
+         return rolesTable.metric.readLatency.latency.getCount();
+     }
+-<<<<<<<
+ 
+     public static RoleOptions getLoginRoleOptions()
+     {
+@@ -134,6 +133,3 @@
+         return roleOptions;
+     }
+ }
+-=======
+-}
+->>>>>>>
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -22,14 +22,7 @@
+ import java.nio.ByteBuffer;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+-import java.util.Collection;
+-import java.util.Collections;
+-import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedList;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Set;
++import java.util.*;
+ 
+ import com.google.common.collect.Iterators;
+ import org.junit.Assert;
+@@ -39,12 +32,6 @@
+ import org.junit.Test;
+ 
+ import com.googlecode.concurrenttrees.common.Iterables;
+-<<<<<<<
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+-import org.apache.cassandra.SchemaLoader;
+-import org.apache.cassandra.UpdateBuilder;
+-import org.apache.cassandra.Util;
+-=======
+ import org.json.simple.JSONArray;
+ import org.json.simple.JSONObject;
+ import org.json.simple.parser.JSONParser;
+@@ -57,12 +44,10 @@
+ 
+ import com.google.common.collect.Iterators;
+ import org.apache.cassandra.*;
+->>>>>>>
+ import org.apache.cassandra.cql3.Operator;
+ import org.apache.cassandra.db.lifecycle.SSTableSet;
+-import org.apache.cassandra.db.partitions.FilteredPartition;
+-import org.apache.cassandra.db.rows.Cell;
+-import org.apache.cassandra.db.rows.Row;
++import org.apache.cassandra.db.partitions.*;
++import org.apache.cassandra.db.rows.*;
+ import org.apache.cassandra.exceptions.ConfigurationException;
+ import org.apache.cassandra.io.sstable.Component;
+ import org.apache.cassandra.io.sstable.Descriptor;
+@@ -80,10 +65,6 @@
+ import org.json.simple.parser.JSONParser;
+ 
+ import static junit.framework.Assert.assertNotNull;
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.junit.Assert.assertEquals;
+-import static org.junit.Assert.assertFalse;
+-import static org.junit.Assert.assertTrue;
+ 
+ public class ColumnFamilyStoreTest
+ {
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -19,11 +19,6 @@
+ package org.apache.cassandra.db;
+ 
+ import java.io.BufferedWriter;
+-<<<<<<<
+-=======
+-import java.io.File;
+-import java.io.FileInputStream;
+->>>>>>>
+ import java.io.IOException;
+ import java.io.RandomAccessFile;
+ import java.net.UnknownHostException;
+@@ -37,18 +32,10 @@
+ 
+ import com.google.common.base.Charsets;
+ import org.apache.commons.lang3.StringUtils;
+-<<<<<<<
+ import org.junit.Assume;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+-import org.junit.runner.RunWith;
+ 
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+-=======
+-import org.junit.BeforeClass;
+-import org.junit.Test;
+-
+->>>>>>>
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+ import org.apache.cassandra.batchlog.Batch;
+@@ -80,11 +67,6 @@
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.UUIDGen;
+ 
+-<<<<<<<
+-=======
+-import org.junit.Assume;
+-
+->>>>>>>
+ import static org.apache.cassandra.SchemaLoader.counterCFMD;
+ import static org.apache.cassandra.SchemaLoader.createKeyspace;
+ import static org.apache.cassandra.SchemaLoader.loadSchema;
+--- a/test/unit/org/apache/cassandra/db/commitlog/CommitLogTest.java
++++ b/test/unit/org/apache/cassandra/db/commitlog/CommitLogTest.java
+@@ -102,12 +102,9 @@
+ import org.apache.cassandra.utils.Pair;
+ import org.apache.cassandra.utils.vint.VIntCoding;
+ 
+-<<<<<<<
+-=======
+ import org.junit.After;
+ 
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+->>>>>>>
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
+ import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
+ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+@@ -230,7 +227,7 @@
+     public void testHeaderOnlyFileFiltering() throws Exception
+     {
+         Assume.assumeTrue(!DatabaseDescriptor.getEncryptionContext().isEnabled());
+-        
++
+         File directory = new File(Files.createTempDir());
+ 
+         CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, DatabaseDescriptor.getEncryptionContext());
+--- a/test/unit/org/apache/cassandra/db/compaction/AntiCompactionTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/AntiCompactionTest.java
+@@ -68,11 +68,8 @@
+ import org.apache.cassandra.utils.concurrent.Refs;
+ import org.apache.cassandra.utils.concurrent.Transactional;
+ 
+-<<<<<<<
+-import static org.apache.cassandra.Util.assertOnDiskState;
+-=======
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+->>>>>>>
++import static org.apache.cassandra.Util.assertOnDiskState;
+ import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
+ import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
+ import static org.hamcrest.CoreMatchers.is;
+--- a/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
+@@ -23,15 +23,13 @@
+ import java.util.Collections;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.Map;
+ import java.util.UUID;
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.atomic.AtomicInteger;
+-<<<<<<<
+-import java.util.function.BiPredicate;
+-=======
+ import java.util.stream.Collectors;
+ import java.util.stream.StreamSupport;
+->>>>>>>
++import java.util.function.BiPredicate;
+ 
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.ImmutableMap;
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableRewriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableRewriterTest.java
+@@ -69,15 +69,11 @@
+ import org.apache.cassandra.utils.FBUtilities;
+ import org.apache.cassandra.utils.UUIDGen;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-import static org.junit.Assert.*;
+-=======
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+->>>>>>>
+ import static org.mockito.Mockito.mock;
+ import static org.mockito.Mockito.when;
+ 
+--- a/test/unit/org/apache/cassandra/net/PrunableArrayQueueTest.java
++++ b/test/unit/org/apache/cassandra/net/PrunableArrayQueueTest.java
+@@ -134,7 +134,6 @@
+             assertEquals((Integer) i, queue.poll());
+         assertTrue(queue.isEmpty());
+     }
+-<<<<<<<
+ 
+     @Test
+     public void testUnreliablePruner()
+@@ -202,6 +201,3 @@
+         }
+     }
+ }
+-=======
+-}
+->>>>>>>
+--- a/test/unit/org/apache/cassandra/tools/CompactionStressTest.java
++++ b/test/unit/org/apache/cassandra/tools/CompactionStressTest.java
+@@ -20,11 +20,7 @@
+ 
+ import org.junit.Test;
+ 
+-<<<<<<<
+-=======
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+ import org.apache.cassandra.io.util.File;
+->>>>>>>
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ 
+ public class CompactionStressTest extends OfflineToolUtils
+--- a/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java
++++ b/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java
+@@ -23,11 +23,7 @@
+ 
+ import org.junit.Test;
+ 
+-<<<<<<<
+-=======
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+ import org.apache.cassandra.io.util.File;
+->>>>>>>
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.assertj.core.api.Assertions;
+--- a/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
++++ b/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
+@@ -18,11 +18,6 @@
+ 
+ package org.apache.cassandra.tools;
+ 
+-<<<<<<<
+-import java.io.File;
+-=======
+-import java.io.IOException;
+->>>>>>>
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
+@@ -30,17 +25,14 @@
+ import java.util.Set;
+ import java.util.stream.Collectors;
+ 
+-<<<<<<<
+-import com.google.common.io.Files;
+-=======
+ import org.junit.Before;
+->>>>>>>
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.cql3.CQLTester;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.io.util.File;
++import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.assertj.core.api.Assertions;
+ 
+@@ -53,6 +45,7 @@
+ {
+     private static String sstableFileName;
+     private static File sstablesDir;
++    private static File sstablesBackupDir;
+     private static List<File> origSstables;
+ 
+     @Before
+@@ -133,12 +126,6 @@
+         Set<SSTableReader> sstables = cfs.getLiveSSTables();
+         sstableFileName = sstables.iterator().next().getFilename();
+         assertTrue("Generated sstable must be at least 1MB", (new File(sstableFileName)).length() > 1024*1024);
+-<<<<<<<
+-        sstablesDir = new File(sstableFileName).getParentFile();
+-        origSstables = Arrays.asList(sstablesDir.listFiles());
+-        System.setProperty(Util.ALLOW_TOOL_REINIT_FOR_TEST, "true"); // Necessary for testing
+-    }
+-=======
+         sstablesDir = new File(sstableFileName).parent();
+         sstablesBackupDir = new File(sstablesDir.absolutePath() + "/testbackup");
+         sstablesBackupDir.tryCreateDirectory();
+@@ -147,14 +134,7 @@
+         // Back up orig sstables
+         origSstables.stream().forEach(f -> {
+             if (f.isFile())
+-                try
+-                {
+-                    Files.copy(f.toJavaIOFile(), new File(sstablesBackupDir.absolutePath() + "/" + f.name()).toJavaIOFile());
+-                }
+-                catch(IOException e)
+-                {
+-                    throw new RuntimeException(e);
+-                }
++                FileUtils.copyWithConfirm(f, new File(sstablesBackupDir.absolutePath() + "/" + f.name()));
+         });
+ 
+         System.setProperty(Util.ALLOW_TOOL_REINIT_FOR_TEST, "true"); // Necessary for testing
+@@ -168,17 +148,9 @@
+         });
+         Arrays.stream(Objects.requireNonNull(sstablesBackupDir.tryList())).forEach(f -> {
+             if (f.isFile())
+-                try
+-                {
+-                    Files.copy(f.toJavaIOFile(), new File(sstablesDir.absolutePath() + '/' + f.name()).toJavaIOFile());
+-                }
+-                catch(IOException e)
+-                {
+-                    throw new RuntimeException(e);
+-                }
++                FileUtils.copyWithConfirm(f, new File(sstablesDir.absolutePath() + '/' + f.name()));
+         });
+ 
+         SSTableReader.resetTidying();
+     }
+->>>>>>>
+ }
+diff --git a/src/java/org/apache/cassandra/db/commitlog/CommitLog.java b/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
+index 0e988cdfda..afe06dcea8 100644
+--- a/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
++++ b/src/java/org/apache/cassandra/db/commitlog/CommitLog.java
+@@ -19,6 +19,7 @@ package org.apache.cassandra.db.commitlog;
+ 
+ import java.io.IOException;
+ import java.nio.ByteBuffer;
++import java.nio.file.FileStore;
+ import java.util.*;
+ import java.util.function.BiPredicate;
+ import java.util.function.Function;
+@@ -40,6 +41,7 @@ import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+ import org.apache.cassandra.io.util.DataOutputBuffer;
+ import org.apache.cassandra.io.util.DataOutputBufferFixed;
+ import org.apache.cassandra.io.util.FileUtils;
++import org.apache.cassandra.io.util.PathUtils;
+ import org.apache.cassandra.metrics.CommitLogMetrics;
+ import org.apache.cassandra.net.MessagingService;
+ import org.apache.cassandra.schema.CompressionParams;
+@@ -498,7 +500,7 @@ public class CommitLog implements CommitLogMBean
+ 
+     public static long freeDiskSpace()
+     {
+-        return FileUtils.getFreeSpace(new File(DatabaseDescriptor.getCommitLogLocation()));
++        return PathUtils.tryGetSpace(new File(DatabaseDescriptor.getCommitLogLocation()).toPath(), FileStore::getUsableSpace) - DatabaseDescriptor.getMinFreeSpacePerDriveInBytes();
+     }
+ 
+     @VisibleForTesting
+diff --git a/test/unit/org/apache/cassandra/db/VerifyTest.java b/test/unit/org/apache/cassandra/db/VerifyTest.java
+index a7ec521a13..f697a62747 100644
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -19,8 +19,6 @@
+ package org.apache.cassandra.db;
+ 
+ import java.io.BufferedWriter;
+-import java.io.File;
+-import java.io.FileInputStream;
+ import java.io.IOException;
+ import java.io.RandomAccessFile;
+ import java.net.UnknownHostException;
+@@ -34,15 +32,10 @@ import java.util.zip.CheckedInputStream;
+ 
+ import com.google.common.base.Charsets;
+ import org.apache.commons.lang3.StringUtils;
+-import org.junit.BeforeClass;
+-import org.junit.Test;
+-import org.apache.commons.lang3.StringUtils;
+ import org.junit.Assume;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+-import org.junit.runner.RunWith;
+ 
+-import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+ import org.apache.cassandra.batchlog.Batch;
+@@ -74,8 +67,6 @@ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.UUIDGen;
+ 
+-import org.junit.Assume;
+-
+ import static org.apache.cassandra.SchemaLoader.counterCFMD;
+ import static org.apache.cassandra.SchemaLoader.createKeyspace;
+ import static org.apache.cassandra.SchemaLoader.loadSchema;
+diff --git a/test/unit/org/apache/cassandra/db/compaction/writers/CompactionAwareWriterTest.java b/test/unit/org/apache/cassandra/db/compaction/writers/CompactionAwareWriterTest.java
+index b653ba7f40..b64b404702 100644
+--- a/test/unit/org/apache/cassandra/db/compaction/writers/CompactionAwareWriterTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/writers/CompactionAwareWriterTest.java
+@@ -17,7 +17,6 @@
+  */
+ package org.apache.cassandra.db.compaction.writers;
+ 
+-import java.io.File;
+ import java.nio.ByteBuffer;
+ import java.util.*;
+ 
+@@ -33,6 +32,7 @@ import org.apache.cassandra.db.compaction.OperationType;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+ import org.apache.cassandra.io.sstable.ScannerList;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
++import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.schema.MockSchema;
+ import org.apache.cassandra.utils.FBUtilities;
+ import org.apache.cassandra.utils.UUIDGen;
+diff --git a/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java b/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java
+index 7beeceeae5..6e3ba6e687 100644
+--- a/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java
++++ b/test/unit/org/apache/cassandra/db/lifecycle/LogTransactionTest.java
+@@ -34,7 +34,6 @@ import java.util.stream.Collectors;
+ import com.google.common.collect.ImmutableSet;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Sets;
+-import org.junit.Assert;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+@@ -233,8 +232,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
+     public void testUntrackIdenticalLogFilesOnDisk() throws Throwable
+     {
+         ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
+-        File datadir1 = Files.createTempDirectory("datadir1").toFile();
+-        File datadir2 = Files.createTempDirectory("datadir2").toFile();
++        File datadir1 = new File(Files.createTempDirectory("datadir1"));
++        File datadir2 = new File(Files.createTempDirectory("datadir2"));
+         SSTableReader sstable1 = sstable(datadir1, cfs, 1, 128);
+         SSTableReader sstable2 = sstable(datadir2, cfs, 1, 128);
+ 
+diff --git a/test/unit/org/apache/cassandra/index/sasi/SASIIndexTest.java b/test/unit/org/apache/cassandra/index/sasi/SASIIndexTest.java
+index c77a70a0ff..4315a30e9f 100644
+--- a/test/unit/org/apache/cassandra/index/sasi/SASIIndexTest.java
++++ b/test/unit/org/apache/cassandra/index/sasi/SASIIndexTest.java
+@@ -17,7 +17,6 @@
+  */
+ package org.apache.cassandra.index.sasi;
+ 
+-import java.io.File;
+ import java.io.FileReader;
+ import java.io.FileWriter;
+ import java.io.IOException;
+@@ -44,6 +43,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
+ import org.apache.cassandra.cql3.UntypedResultSet;
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.index.sasi.plan.SASIIndexSearcher;
++import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.schema.ColumnMetadata;
+ import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.schema.TableMetadata;
+@@ -166,7 +166,7 @@ public class SASIIndexTest
+         try
+         {
+             store.snapshot(snapshotName);
+-            FileReader reader = new FileReader(store.getDirectories().getSnapshotManifestFile(snapshotName));
++            FileReader reader = new FileReader(store.getDirectories().getSnapshotManifestFile(snapshotName).toJavaIOFile());
+             JSONObject manifest = (JSONObject) new JSONParser().parse(reader);
+             JSONArray files = (JSONArray) manifest.get("files");
+ 
+diff --git a/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java b/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
+index 7d8ca0d6b9..992a95491f 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/CQLSSTableWriterTest.java
+@@ -23,6 +23,7 @@ import java.util.Arrays;
+ import java.util.Collections;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.Map;
+ import java.util.UUID;
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.atomic.AtomicInteger;
+diff --git a/test/unit/org/apache/cassandra/tools/CompactionStressTest.java b/test/unit/org/apache/cassandra/tools/CompactionStressTest.java
+index c183f44100..395d357b19 100644
+--- a/test/unit/org/apache/cassandra/tools/CompactionStressTest.java
++++ b/test/unit/org/apache/cassandra/tools/CompactionStressTest.java
+@@ -20,7 +20,6 @@ package org.apache.cassandra.tools;
+ 
+ import org.junit.Test;
+ 
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+ import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ 
+diff --git a/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java b/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java
+index 28cbe79d49..7cd0783344 100644
+--- a/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java
++++ b/test/unit/org/apache/cassandra/tools/SSTableRepairedAtSetterTest.java
+@@ -23,7 +23,6 @@ import java.nio.file.Files;
+ 
+ import org.junit.Test;
+ 
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+ import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+diff --git a/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java b/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
+index cddbda79b9..3b28c1d5dd 100644
+--- a/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
++++ b/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
+@@ -18,8 +18,6 @@
+ 
+ package org.apache.cassandra.tools;
+ 
+-import java.io.File;
+-import java.io.IOException;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
+@@ -34,6 +32,7 @@ import org.apache.cassandra.cql3.CQLTester;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.io.util.File;
++import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.assertj.core.api.Assertions;
+ 
+@@ -46,6 +45,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
+ {
+     private static String sstableFileName;
+     private static File sstablesDir;
++    private static File sstablesBackupDir;
+     private static List<File> origSstables;
+ 
+     @Before
+@@ -134,14 +134,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
+         // Back up orig sstables
+         origSstables.stream().forEach(f -> {
+             if (f.isFile())
+-                try
+-                {
+-                    Files.copy(f.toJavaIOFile(), new File(sstablesBackupDir.absolutePath() + "/" + f.name()).toJavaIOFile());
+-                }
+-                catch(IOException e)
+-                {
+-                    throw new RuntimeException(e);
+-                }
++                FileUtils.copyWithConfirm(f, new File(sstablesBackupDir.absolutePath() + "/" + f.name()));
+         });
+ 
+         System.setProperty(Util.ALLOW_TOOL_REINIT_FOR_TEST, "true"); // Necessary for testing
+@@ -155,14 +148,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
+         });
+         Arrays.stream(Objects.requireNonNull(sstablesBackupDir.tryList())).forEach(f -> {
+             if (f.isFile())
+-                try
+-                {
+-                    Files.copy(f.toJavaIOFile(), new File(sstablesDir.absolutePath() + '/' + f.name()).toJavaIOFile());
+-                }
+-                catch(IOException e)
+-                {
+-                    throw new RuntimeException(e);
+-                }
++                FileUtils.copyWithConfirm(f, new File(sstablesDir.absolutePath() + '/' + f.name()));
+         });
+ 
+         SSTableReader.resetTidying();
+diff --git a/test/unit/org/apache/cassandra/tools/StandaloneVerifierOnSSTablesTest.java b/test/unit/org/apache/cassandra/tools/StandaloneVerifierOnSSTablesTest.java
+index 9ca7312ab4..6026ebde5c 100644
+--- a/test/unit/org/apache/cassandra/tools/StandaloneVerifierOnSSTablesTest.java
++++ b/test/unit/org/apache/cassandra/tools/StandaloneVerifierOnSSTablesTest.java
+@@ -18,7 +18,6 @@
+ 
+ package org.apache.cassandra.tools;
+ 
+-import java.io.File;
+ import java.io.RandomAccessFile;
+ 
+ import org.apache.commons.io.FileUtils;
+@@ -35,6 +34,7 @@ import org.apache.cassandra.db.PartitionPosition;
+ import org.apache.cassandra.db.compaction.CompactionManager;
+ import org.apache.cassandra.io.sstable.Component;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
++import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+@@ -101,7 +101,7 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
+             File testDataDir = new File("test/data/legacy-sstables/ma/legacy_tables/legacy_ma_simple");
+             for (File cfsDir : cfs.getDirectories().getCFDirectories())
+             {
+-                FileUtils.copyDirectory(testDataDir, cfsDir);
++                FileUtils.copyDirectory(testDataDir.toJavaIOFile(), cfsDir.toJavaIOFile());
+             }
+         });
+ 

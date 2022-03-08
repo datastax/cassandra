@@ -43,9 +43,11 @@ import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
+
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
 @Ignore
 public abstract class AbstractPendingAntiCompactionTest
@@ -93,8 +95,8 @@ public abstract class AbstractPendingAntiCompactionTest
         TableMetadata cfm2 = CreateTableStatement.parse(String.format("CREATE TABLE %s.%s (k INT PRIMARY KEY, v INT)", ks, tbl2), ks).indexes(indexes.build()).build();
 
         SchemaLoader.createKeyspace(ks, KeyspaceParams.simple(1), cfm, cfm2);
-        cfs = Schema.instance.getColumnFamilyStoreInstance(cfm.id);
-        cfs2 = Schema.instance.getColumnFamilyStoreInstance(cfm2.id);
+        cfs = SchemaManager.instance.getColumnFamilyStoreInstance(cfm.id);
+        cfs2 = SchemaManager.instance.getColumnFamilyStoreInstance(cfm2.id);
     }
 
     void makeSSTables(int num)
@@ -109,7 +111,7 @@ public abstract class AbstractPendingAntiCompactionTest
             int val = i * rowsPerSSTable;  // multiplied to prevent ranges from overlapping
             for (int j = 0; j < rowsPerSSTable; j++)
                 QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, cfs.getTableName()), val + j, val + j);
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
         }
         Assert.assertEquals(num, cfs.getLiveSSTables().size());
     }

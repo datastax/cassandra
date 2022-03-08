@@ -1,0 +1,30 @@
+--- a/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
++++ b/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
+@@ -767,13 +767,6 @@
+         if (conf.user_defined_function_fail_timeout < conf.user_defined_function_warn_timeout)
+             throw new ConfigurationException("user_defined_function_warn_timeout must less than user_defined_function_fail_timeout", false);
+ 
+-<<<<<<<
+-        if (!conf.allow_insecure_udfs && !conf.enable_user_defined_functions_threads)
+-            throw new ConfigurationException("To be able to set enable_user_defined_functions_threads: false you need to set allow_insecure_udfs: true - this is an unsafe configuration and is not recommended.");
+-
+-        if (conf.allow_extra_insecure_udfs)
+-            logger.warn("Allowing java.lang.System.* access in UDFs is dangerous and not recommended. Set allow_extra_insecure_udfs: false to disable.");
+-=======
+         if (conf.compaction_large_partition_warning_threshold_mb != 0)
+         {
+             logger.warn("Found deprecated property 'compaction_large_partition_warning_threshold_mb' in config - migrate to `guardrails.partition_size_warn_threshold_in_mb`. " +
+@@ -815,7 +808,12 @@
+                         "The value of 'guardrails.unlogged_batch_across_partitions_warn_threshold' is overwritten by 'unlogged_batch_across_partitions_warn_threshold'.");
+             getGuardrailsConfig().unlogged_batch_across_partitions_warn_threshold = conf.unlogged_batch_across_partitions_warn_threshold;
+         }
+->>>>>>>
++
++        if (!conf.allow_insecure_udfs && !conf.enable_user_defined_functions_threads)
++            throw new ConfigurationException("To be able to set enable_user_defined_functions_threads: false you need to set allow_insecure_udfs: true - this is an unsafe configuration and is not recommended.");
++
++        if (conf.allow_extra_insecure_udfs)
++            logger.warn("Allowing java.lang.System.* access in UDFs is dangerous and not recommended. Set allow_extra_insecure_udfs: false to disable.");
+ 
+         if (conf.commitlog_segment_size_in_mb <= 0)
+             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "

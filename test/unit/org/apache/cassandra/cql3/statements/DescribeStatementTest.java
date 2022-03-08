@@ -37,7 +37,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -465,7 +465,7 @@ public class DescribeStatementTest extends CQLTester
     {
         String table = createTable("CREATE TABLE %s (pk1 text, pk2 int, c int, s decimal static, v1 text, v2 int, v3 int, PRIMARY KEY ((pk1, pk2), c ))");
 
-        TableId id = Schema.instance.getTableMetadata(KEYSPACE, table).id;
+        TableId id = SchemaManager.instance.getTableMetadata(KEYSPACE, table).id;
 
         String tableCreateStatement = "CREATE TABLE " + KEYSPACE + "." + table + " (\n" +
                                       "    pk1 text,\n" +
@@ -477,25 +477,37 @@ public class DescribeStatementTest extends CQLTester
                                       "    v3 int,\n" +
                                       "    PRIMARY KEY ((pk1, pk2), c)\n" +
                                       ") WITH ID = " + id + "\n" +
-                                      "    AND CLUSTERING ORDER BY (c ASC)\n" +
-                                      "    AND " + tableParametersCql();
+                                      "    AND CLUSTERING ORDER BY (c ASC)\n";
 
         assertRowsNet(executeDescribeNet("DESCRIBE TABLE " + KEYSPACE + "." + table + " WITH INTERNALS"),
                       row(KEYSPACE,
                           "table",
                           table,
-                          tableCreateStatement));
+                          tableCreateStatement +
+                          "    AND " + tableParametersCql()));
 
         String dropStatement = "ALTER TABLE " + KEYSPACE + "." + table + " DROP v3 USING TIMESTAMP 1589286942065000;";
 
         execute(dropStatement);
 
+        String tableCreateStatementAfterDrop = "CREATE TABLE " + KEYSPACE + "." + table + " (\n" +
+                                      "    pk1 text,\n" +
+                                      "    pk2 int,\n" +
+                                      "    c int,\n" +
+                                      "    s decimal static,\n" +
+                                      "    v1 text,\n" +
+                                      "    v2 int,\n" +
+                                      "    PRIMARY KEY ((pk1, pk2), c)\n" +
+                                      ") WITH ID = " + id + "\n" +
+                                      "    AND CLUSTERING ORDER BY (c ASC)\n";
+
         assertRowsNet(executeDescribeNet("DESCRIBE TABLE " + KEYSPACE + "." + table + " WITH INTERNALS"),
                       row(KEYSPACE,
                           "table",
                           table,
-                          tableCreateStatement + "\n" +
-                          dropStatement));
+                          tableCreateStatementAfterDrop +
+                          "    AND DROPPED COLUMN RECORD v3 int USING TIMESTAMP 1589286942065000" + "\n" +
+                          "    AND " + tableParametersCql()));
 
         String addStatement = "ALTER TABLE " + KEYSPACE + "." + table + " ADD v3 int;";
 
@@ -505,9 +517,9 @@ public class DescribeStatementTest extends CQLTester
                       row(KEYSPACE,
                           "table",
                           table,
-                          tableCreateStatement + "\n" +
-                          dropStatement + "\n" +
-                          addStatement));
+                          tableCreateStatement +
+                          "    AND DROPPED COLUMN RECORD v3 int USING TIMESTAMP 1589286942065000" + "\n" +
+                          "    AND " + tableParametersCql()));
     }
 
     @Test
@@ -558,32 +570,38 @@ public class DescribeStatementTest extends CQLTester
     {
         String table = createTable("CREATE TABLE %s (pk text, v1 text, v2 int, v3 int, PRIMARY KEY (pk))");
 
-        TableId id = Schema.instance.getTableMetadata(KEYSPACE, table).id;
+        TableId id = SchemaManager.instance.getTableMetadata(KEYSPACE, table).id;
 
         String tableCreateStatement = "CREATE TABLE " + KEYSPACE + "." + table + " (\n" +
                                       "    pk text PRIMARY KEY,\n" +
                                       "    v1 text,\n" +
                                       "    v2 int,\n" +
                                       "    v3 int\n" +
-                                      ") WITH ID = " + id + "\n" +
-                                      "    AND " + tableParametersCql();
-
-        assertRowsNet(executeDescribeNet("DESCRIBE TABLE " + KEYSPACE + "." + table + " WITH INTERNALS"),
-                      row(KEYSPACE,
-                          "table",
-                          table,
-                          tableCreateStatement));
-
-        String dropStatement = "ALTER TABLE " + KEYSPACE + "." + table + " DROP v3 USING TIMESTAMP 1589286942065000;";
-
-        execute(dropStatement);
-
+                                      ") WITH ID = " + id;
+        
         assertRowsNet(executeDescribeNet("DESCRIBE TABLE " + KEYSPACE + "." + table + " WITH INTERNALS"),
                       row(KEYSPACE,
                           "table",
                           table,
                           tableCreateStatement + "\n" +
-                          dropStatement));
+                          "    AND " + tableParametersCql()));
+        String dropStatement = "ALTER TABLE " + KEYSPACE + "." + table + " DROP v3 USING TIMESTAMP 1589286942065000;";
+
+        execute(dropStatement);
+
+        String tableCreateStatementAfterDrop = "CREATE TABLE " + KEYSPACE + "." + table + " (\n" +
+                                      "    pk text PRIMARY KEY,\n" +
+                                      "    v1 text,\n" +
+                                      "    v2 int\n" +
+                                      ") WITH ID = " + id;
+
+        assertRowsNet(executeDescribeNet("DESCRIBE TABLE " + KEYSPACE + "." + table + " WITH INTERNALS"),
+                      row(KEYSPACE,
+                          "table",
+                          table,
+                          tableCreateStatementAfterDrop + "\n" +
+                          "    AND DROPPED COLUMN RECORD v3 int USING TIMESTAMP 1589286942065000" + "\n" +
+                          "    AND " + tableParametersCql()));
 
         String tableCreateStatementWithoutDroppedColumn = "CREATE TABLE " + KEYSPACE + "." + table + " (\n" +
                                                           "    pk text PRIMARY KEY,\n" +
@@ -834,6 +852,7 @@ public class DescribeStatementTest extends CQLTester
                "    AND comment = ''\n" +
                "    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}\n" +
                "    AND compression = {'chunk_length_in_kb': '16', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}\n" +
+               "    AND memtable = {}\n" +
                "    AND crc_check_chance = 1.0\n" +
                "    AND default_time_to_live = 0\n" +
                "    AND extensions = {}\n" +

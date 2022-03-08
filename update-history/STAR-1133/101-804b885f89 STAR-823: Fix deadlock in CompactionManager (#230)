@@ -1,0 +1,50 @@
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionManager.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionManager.java
+@@ -1742,13 +1742,9 @@
+         @Override
+         public void afterExecute(Runnable r, Throwable t)
+         {
+-<<<<<<<
+-            DebuggableThreadPoolExecutor.maybeResetLocalSessionWrapper(r);
+-=======
+             exactRunningTasks.decrementAndGet();
+ 
+-            DebuggableThreadPoolExecutor.maybeResetTraceSessionWrapper(r);
+->>>>>>>
++            DebuggableThreadPoolExecutor.maybeResetLocalSessionWrapper(r);
+ 
+             if (t == null)
+                 t = DebuggableThreadPoolExecutor.extractThrowable(r);
+--- a/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
+@@ -143,15 +143,10 @@
+         cfs.enableAutoCompaction();
+ 
+         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
+-<<<<<<<
+-        Util.spinAssertEquals(true, () -> CompactionManager.instance.compactingCF.count(cfs) == 0, 5);
++        Util.spinAssertEquals(true, () -> CompactionManager.instance.getOngoingBackgroundCompactionsCount() == 0, 5);
+         cfs.forceBlockingFlush(UNIT_TESTS);
+-=======
+-        assertEquals(0, CompactionManager.instance.getOngoingBackgroundCompactionsCount());
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+->>>>>>>
+ 
+-        Util.spinAssertEquals(true, () -> CompactionManager.instance.compactingCF.count(cfs) == 0, 5);
++        Util.spinAssertEquals(true, () -> cfs.getCompactingSSTables().size() == 0, 5);
+         FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(cfs));
+         assertEquals(0, CompactionManager.instance.getOngoingBackgroundCompactionsCount());
+     }
+diff --git a/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java b/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
+index 0481b0867a..8a5cfcbc81 100644
+--- a/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
+@@ -146,7 +146,7 @@ public class CompactionsBytemanTest extends CQLTester
+         Util.spinAssertEquals(true, () -> CompactionManager.instance.getOngoingBackgroundCompactionsCount() == 0, 5);
+         cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+-        Util.spinAssertEquals(true, () -> CompactionManager.instance.compactingCF.count(cfs) == 0, 5);
++        Util.spinAssertEquals(true, () -> cfs.getCompactingSSTables().size() == 0, 5);
+         FBUtilities.waitOnFuture(CompactionManager.instance.submitBackground(cfs));
+         assertEquals(0, CompactionManager.instance.getOngoingBackgroundCompactionsCount());
+     }
