@@ -40,7 +40,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_TRUNCATE_STATEMENT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TRUNCATE_STATEMENT_DRIVER;
 
 public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeyspaceCqlStatement
 {
@@ -156,27 +156,41 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
             QualifiedName qual = qualifiedName;
             if (!ks.equals(qual.getKeyspace()))
                 qual = new QualifiedName(ks, qual.getName());
+            return driver.createTruncateStatement(rawCQLStatement, qual);
+        }
+    }
 
-            // local keyspaces are always local so don't use the remote statement even if it has been configured
-            if (!REMOTE_TRUNCATE_STATEMENT.isPresent() ||
-                SchemaManager.isKeyspaceWithLocalStrategy(super.keyspace()))
-            {
-                return new TruncateStatement(rawCQLStatement, qual);
-            }
+    private static TruncateStatementDriver getDriverFromProperty()
+    {
+        try
+        {
+            return (TruncateStatementDriver)FBUtilities.classForName(TRUNCATE_STATEMENT_DRIVER.getString(),
+                                     "Truncate statement driver")
+                       .getConstructor().newInstance();
+        }
+        catch (NoSuchMethodException | IllegalAccessException | InstantiationException |
+               InvocationTargetException e)
+        {
+            throw new RuntimeException("Unable to find a truncate statement driver with name " +
+                                       TRUNCATE_STATEMENT_DRIVER.getString(), e);
+        }
+    }
 
-            Class<TruncateStatement> factoryClass = FBUtilities.classForName(REMOTE_TRUNCATE_STATEMENT.getString(),
-                                                                             "Remote truncate statement");
-            try
-            {
-                return factoryClass.getConstructor(String.class, QualifiedName.class)
-                                   .newInstance(rawCQLStatement, qual);
-            }
-            catch (NoSuchMethodException | IllegalAccessException | InstantiationException |
-                   InvocationTargetException e)
-            {
-                throw new RuntimeException("Unable to find correct constructor for " +
-                                           REMOTE_TRUNCATE_STATEMENT.getString(), e);
-            }
+    private static final TruncateStatementDriver driver = TRUNCATE_STATEMENT_DRIVER.isPresent() ?
+                                                          getDriverFromProperty() :
+                                                          new DefaultTruncateStatementDriver();
+
+    public static interface TruncateStatementDriver
+    {
+        public TruncateStatement createTruncateStatement(String rawCQLStatement, QualifiedName qual);
+    }
+
+    public static final class DefaultTruncateStatementDriver implements  TruncateStatementDriver
+    {
+        @Override
+        public TruncateStatement createTruncateStatement(String rawCQLStatement, QualifiedName qual)
+        {
+            return new TruncateStatement(rawCQLStatement, qual);
         }
     }
 }

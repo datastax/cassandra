@@ -24,10 +24,17 @@ import org.apache.cassandra.cql3.CQLTester;
 
 public class TruncateTest extends CQLTester
 {
+    static {
+        System.setProperty("cassandra.truncate_statement_driver",
+                           EmptyTruncateStatement.TestTruncateStatementDriver.class.getName());
+    }
+
+    public static boolean emptyTruncate = false;
+
     @After
     public void afterTest()
     {
-        System.clearProperty("cassandra.remote_truncate_statement");
+        emptyTruncate = false;
     }
 
     @Test
@@ -56,7 +63,7 @@ public class TruncateTest extends CQLTester
     @Test
     public void testRemoteTruncateStmt() throws Throwable
     {
-        System.setProperty("cassandra.remote_truncate_statement", RemoteTruncateStatement.class.getName());
+        emptyTruncate = true;
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY(a, b))");
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
 

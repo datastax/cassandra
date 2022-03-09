@@ -30,9 +30,22 @@ import org.apache.cassandra.transport.messages.ResultMessage;
  * A class extending TruncateStatement to test calling a remote implementation provided through
  * configuration properties. Used in TruncateTest.
  */
-public class RemoteTruncateStatement extends TruncateStatement
+public class EmptyTruncateStatement extends TruncateStatement
 {
-    public RemoteTruncateStatement(String queryString, QualifiedName name)
+
+    public static class TestTruncateStatementDriver implements TruncateStatement.TruncateStatementDriver
+    {
+        @Override
+        public TruncateStatement createTruncateStatement(String queryString, QualifiedName name)
+        {
+            if (TruncateTest.emptyTruncate)
+                return new EmptyTruncateStatement(queryString, name);
+            else
+                return new TruncateStatement(queryString, name);
+        }
+    }
+
+    public EmptyTruncateStatement(String queryString, QualifiedName name)
     {
         super(queryString, name);
     }
