@@ -886,8 +886,8 @@
     </target>
 
     <!-- creates release tarballs -->
-    <target name="artifacts" depends="_artifacts-init,check,gen-doc,sources-jar"
-            description="Create DSE DB tarball and maven artifacts">
+    <target name="artifacts" depends="_artifacts-init,eclipse-warnings,gen-doc,sources-jar,javadoc-jar"
+            description="Create DSE DB release artifacts">
       <tar compression="gzip" longfile="gnu"
         destfile="${build.dir}/${final.name}-bin.tar.gz">
 
@@ -1162,6 +1162,8 @@
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
+        <jvmarg value="-Dcassandra.disable_tcactive_openssl=true" />
+        <jvmarg value="-Dcassandra.use_nix_recursive_delete=true"/>
         <jvmarg line="${_std-test-jvmargs} " />
         <jvmarg line="${test.jvm.args}" />
         <optjvmargs/>
