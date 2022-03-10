@@ -21,9 +21,11 @@ package org.apache.cassandra.io.util;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
@@ -416,5 +418,14 @@ public class FileTest
     {
         File file = new File("somewhere/a/");
         Assert.assertEquals(new File("../b"), file.relativize(new File("somewhere/b")));
+    }
+
+    @Test
+    public void testDeleteFail()
+    {
+        File file = new File(UUID.randomUUID().toString());
+        Assertions.assertThatExceptionOfType(UncheckedIOException.class)
+                  .isThrownBy(file::deleteRecursive)
+                  .withCauseInstanceOf(NoSuchFileException.class);
     }
 }

@@ -103,7 +103,7 @@ public final class PathUtils
     private static Consumer<Path> onDeletion = path -> {
         if (StorageService.instance.isDaemonSetupCompleted())
             setDeletionListener(ignore -> {});
-        else
+        else if (logger.isTraceEnabled())
             logger.trace("Deleting file during startup: {}", path);
     };
 
@@ -399,7 +399,7 @@ public final class PathUtils
      */
     public static void deleteRecursive(Path path)
     {
-        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == java.nio.file.FileSystems.getDefault())
+        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == FileSystems.getDefault())
         {
             deleteRecursiveUsingNixCommand(path, false);
             return;
@@ -419,6 +419,12 @@ public final class PathUtils
      */
     public static void deleteQuietly(Path path)
     {
+        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == FileSystems.getDefault())
+        {
+            deleteRecursiveUsingNixCommand(path, true);
+            return;
+        }
+
         if (isDirectory(path))
             forEach(path, PathUtils::deleteQuietly);
 
