@@ -1,0 +1,299 @@
+--- a/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java
+@@ -634,39 +634,14 @@
+             this.parsedStatements = parsedStatements;
+         }
+ 
+-<<<<<<<
+-        // Not doing this in the constructor since we only need this for prepared statements
+-        @Override
+-        public boolean isFullyQualified()
+-        {
+-            for (ModificationStatement.Parsed statement : parsedStatements)
+-                if (!statement.isFullyQualified())
+-                    return false;
+-
+-            return true;
+-        }
+-
+-        @Override
+-        public void setKeyspace(ClientState state) throws InvalidRequestException
+-=======
+         private void setKeyspace(ClientState state) throws InvalidRequestException
+->>>>>>>
+         {
+             for (ModificationStatement.Parsed statement : parsedStatements)
+                 statement.setKeyspace(state);
+         }
+ 
+         @Override
+-<<<<<<<
+         public BatchStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
+-=======
+-        public String keyspace()
+-        {
+-            return null;
+-        }
+-
+-        public BatchStatement prepare(ClientState state)
+->>>>>>>
+         {
+             setKeyspace(state);
+ 
+--- a/src/java/org/apache/cassandra/cql3/statements/ModificationStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/ModificationStatement.java
+@@ -68,11 +68,7 @@
+ /*
+  * Abstract parent class of individual modifications, i.e. INSERT, UPDATE and DELETE.
+  */
+-<<<<<<<
+-public abstract class ModificationStatement implements CQLStatement, SingleKeyspaceStatement
+-=======
+ public abstract class ModificationStatement implements CQLStatement.SingleKeyspaceCqlStatement
+->>>>>>>
+ {
+     protected static final Logger logger = LoggerFactory.getLogger(ModificationStatement.class);
+ 
+--- a/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/SelectStatement.java
+@@ -92,11 +92,7 @@
+  * QueryHandler implementations, so before reducing their accessibility
+  * due consideration should be given.
+  */
+-<<<<<<<
+-public class SelectStatement implements CQLStatement, SingleKeyspaceStatement
+-=======
+ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
+->>>>>>>
+ {
+     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
+ 
+--- a/src/java/org/apache/cassandra/cql3/statements/UseStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/UseStatement.java
+@@ -29,7 +29,7 @@
+ import org.apache.commons.lang3.builder.ToStringBuilder;
+ import org.apache.commons.lang3.builder.ToStringStyle;
+ 
+-public class UseStatement extends CQLStatement.Raw implements CQLStatement, SingleKeyspaceStatement
++public class UseStatement extends CQLStatement.Raw implements CQLStatement.SingleKeyspaceCqlStatement
+ {
+     private final String keyspace;
+ 
+@@ -78,10 +78,7 @@
+         return new AuditLogContext(AuditLogEntryType.USE_KEYSPACE, keyspace);
+     }
+ 
+-<<<<<<<
+-=======
+     @Override
+->>>>>>>
+     public String keyspace()
+     {
+         return keyspace;
+--- a/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java
+@@ -27,7 +27,6 @@
+ import org.apache.cassandra.cql3.CQLStatement;
+ import org.apache.cassandra.cql3.QueryOptions;
+ import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
+-import org.apache.cassandra.cql3.statements.SingleKeyspaceStatement;
+ import org.apache.cassandra.exceptions.InvalidRequestException;
+ import org.apache.cassandra.schema.*;
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+@@ -36,11 +35,7 @@
+ import org.apache.cassandra.transport.Event.SchemaChange;
+ import org.apache.cassandra.transport.messages.ResultMessage;
+ 
+-<<<<<<<
+-abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+-=======
+-public abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation, SingleKeyspaceStatement
+->>>>>>>
++public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+ {
+     private final String rawCQLStatement;
+     protected final String keyspaceName; // name of the keyspace affected by the statement
+@@ -140,12 +135,6 @@
+         return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
+     }
+ 
+-    @Override
+-    public String keyspace()
+-    {
+-        return keyspaceName;
+-    }
+-
+     private void validateKeyspaceName()
+     {
+         if (!SchemaConstants.isValidName(keyspaceName))
+diff --git a/src/java/org/apache/cassandra/cql3/CQLStatement.java b/src/java/org/apache/cassandra/cql3/CQLStatement.java
+index b6dece1dd8..a79b8d77f8 100644
+--- a/src/java/org/apache/cassandra/cql3/CQLStatement.java
++++ b/src/java/org/apache/cassandra/cql3/CQLStatement.java
+@@ -130,8 +130,14 @@ public interface CQLStatement
+         public abstract CQLStatement prepare(ClientState state);
+     }
+ 
++    /**
++     * A marker for the statements (prepared) which run against an exact keyspace.
++     */
+     public static interface SingleKeyspaceCqlStatement extends CQLStatement
+     {
++        /**
++         * Returns a keyspace name associated with this statement.
++         */
+         public String keyspace();
+     }
+ }
+diff --git a/src/java/org/apache/cassandra/cql3/QueryHandler.java b/src/java/org/apache/cassandra/cql3/QueryHandler.java
+index a2b5b5a215..41aaa99414 100644
+--- a/src/java/org/apache/cassandra/cql3/QueryHandler.java
++++ b/src/java/org/apache/cassandra/cql3/QueryHandler.java
+@@ -62,11 +62,6 @@ public interface QueryHandler
+ 
+         public final MD5Digest resultMetadataId;
+ 
+-        /**
+-         * Contains the CQL statement source if the statement has been "regularly" perpared via
+-         * {@link QueryHandler#prepare(String, ClientState, Map)}.
+-         * Other usages of this class may or may not contain the CQL statement source.
+-         */
+         public final String keyspace;
+         public final boolean fullyQualified;
+ 
+diff --git a/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java b/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java
+index ba79ec0529..9ae0918033 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/BatchStatement.java
+@@ -634,31 +634,14 @@ public class BatchStatement implements CQLStatement
+             this.parsedStatements = parsedStatements;
+         }
+ 
+-        // Not doing this in the constructor since we only need this for prepared statements
+-        @Override
+-        public boolean isFullyQualified()
+-        {
+-            for (ModificationStatement.Parsed statement : parsedStatements)
+-                if (!statement.isFullyQualified())
+-                    return false;
+-
+-            return true;
+-        }
+-
+-        @Override
+-        public void setKeyspace(ClientState state) throws InvalidRequestException
++        private void setKeyspace(ClientState state) throws InvalidRequestException
+         {
+             for (ModificationStatement.Parsed statement : parsedStatements)
+                 statement.setKeyspace(state);
+         }
+ 
+         @Override
+-        public String keyspace()
+-        {
+-            return null;
+-        }
+-
+-        public BatchStatement prepare(ClientState state)
++        public BatchStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
+         {
+             setKeyspace(state);
+ 
+diff --git a/src/java/org/apache/cassandra/cql3/statements/QualifiedStatement.java b/src/java/org/apache/cassandra/cql3/statements/QualifiedStatement.java
+index 7d214ffc1e..b7df8e60a1 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/QualifiedStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/QualifiedStatement.java
+@@ -27,7 +27,7 @@ import org.apache.cassandra.service.ClientState;
+ /**
+  * Abstract class for statements that work on sub-keyspace level (tables, views, indexes, functions, etc.)
+  */
+-public abstract class QualifiedStatement<R extends SingleKeyspaceStatement> extends RawKeyspaceAwareStatement<R>
++public abstract class QualifiedStatement<R extends CQLStatement.SingleKeyspaceCqlStatement> extends RawKeyspaceAwareStatement<R>
+ {
+     final QualifiedName qualifiedName;
+ 
+diff --git a/src/java/org/apache/cassandra/cql3/statements/TruncateStatement.java b/src/java/org/apache/cassandra/cql3/statements/TruncateStatement.java
+index fe980221ac..179af2cd2a 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/TruncateStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/TruncateStatement.java
+@@ -37,7 +37,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
+ import org.apache.commons.lang3.builder.ToStringBuilder;
+ import org.apache.commons.lang3.builder.ToStringStyle;
+ 
+-public class TruncateStatement extends QualifiedStatement<TruncateStatement> implements CQLStatement, SingleKeyspaceStatement
++public class TruncateStatement extends QualifiedStatement<TruncateStatement> implements CQLStatement.SingleKeyspaceCqlStatement
+ {
+     public TruncateStatement(QualifiedName name)
+     {
+diff --git a/src/java/org/apache/cassandra/cql3/statements/UseStatement.java b/src/java/org/apache/cassandra/cql3/statements/UseStatement.java
+index 4dff7c0d07..0d66a0fb0c 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/UseStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/UseStatement.java
+@@ -29,7 +29,7 @@ import org.apache.cassandra.service.QueryState;
+ import org.apache.commons.lang3.builder.ToStringBuilder;
+ import org.apache.commons.lang3.builder.ToStringStyle;
+ 
+-public class UseStatement extends CQLStatement.Raw implements CQLStatement, SingleKeyspaceStatement
++public class UseStatement extends CQLStatement.Raw implements CQLStatement.SingleKeyspaceCqlStatement
+ {
+     private final String keyspace;
+ 
+diff --git a/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java b/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java
+index 27eaece50e..1cd645c2fd 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/schema/AlterSchemaStatement.java
+@@ -27,7 +27,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.cql3.CQLStatement;
+ import org.apache.cassandra.cql3.QueryOptions;
+ import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
+-import org.apache.cassandra.cql3.statements.SingleKeyspaceStatement;
+ import org.apache.cassandra.exceptions.InvalidRequestException;
+ import org.apache.cassandra.schema.*;
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+@@ -36,7 +35,7 @@ import org.apache.cassandra.service.QueryState;
+ import org.apache.cassandra.transport.Event.SchemaChange;
+ import org.apache.cassandra.transport.messages.ResultMessage;
+ 
+-public abstract public class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation, SingleKeyspaceStatement
++public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+ {
+     private final String rawCQLStatement;
+     protected final String keyspaceName; // name of the keyspace affected by the statement
+@@ -136,12 +135,6 @@ public abstract public class AlterSchemaStatement implements CQLStatement.Single
+         return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
+     }
+ 
+-    @Override
+-    public String keyspace()
+-    {
+-        return keyspaceName;
+-    }
+-
+     private void validateKeyspaceName()
+     {
+         if (!SchemaConstants.isValidName(keyspaceName))
+diff --git a/src/java/org/apache/cassandra/cql3/statements/schema/AlterViewStatement.java b/src/java/org/apache/cassandra/cql3/statements/schema/AlterViewStatement.java
+index f991aaf1a2..35db9c1bd7 100644
+--- a/src/java/org/apache/cassandra/cql3/statements/schema/AlterViewStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/schema/AlterViewStatement.java
+@@ -22,7 +22,6 @@ import java.util.function.UnaryOperator;
+ import org.apache.cassandra.audit.AuditLogContext;
+ import org.apache.cassandra.audit.AuditLogEntryType;
+ import org.apache.cassandra.auth.Permission;
+-import org.apache.cassandra.cql3.CQLStatement;
+ import org.apache.cassandra.cql3.QualifiedName;
+ import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
+ import org.apache.cassandra.guardrails.Guardrails;
+diff --git a/src/java/org/apache/cassandra/transport/messages/ExecuteMessage.java b/src/java/org/apache/cassandra/transport/messages/ExecuteMessage.java
+index 795e458734..a023056339 100644
+--- a/src/java/org/apache/cassandra/transport/messages/ExecuteMessage.java
++++ b/src/java/org/apache/cassandra/transport/messages/ExecuteMessage.java
+@@ -135,7 +135,7 @@ public class ExecuteMessage extends Message.Request
+             {
+                 state.getClientState().warnAboutUseWithPreparedStatements(statementId, prepared.keyspace);
+                 String msg = String.format("Tried to execute a prepared unqalified statement on a keyspace it was not prepared on. " +
+-                                           " Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
++                                           "Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
+                                            statementId, state.getClientState().getRawKeyspace(), prepared.keyspace);
+                 nospam.error(msg);
+             }

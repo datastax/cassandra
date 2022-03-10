@@ -1,0 +1,40 @@
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -180,7 +180,7 @@
+             return 30 * 1000;
+         }
+     }
+-    
++
+     public volatile VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(TokenMetadataProvider.instance.getTokenMetadata().partitioner);
+ 
+     private Thread drainOnShutdown = null;
+@@ -1183,12 +1183,7 @@
+         executePreJoinTasks(didBootstrap);
+         setTokens(tokens);
+ 
+-<<<<<<<
+         assert getTokenMetadata().sortedTokens().size() > 0;
+-        doAuthSetup(false);
+-=======
+-        assert tokenMetadata.sortedTokens().size() > 0;
+->>>>>>>
+     }
+ 
+     @VisibleForTesting
+@@ -2828,15 +2823,9 @@
+         updatePeerInfo(endpoint);
+         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
+         UUID hostId = Gossiper.instance.getHostId(endpoint);
+-<<<<<<<
+         InetAddressAndPort existing = getTokenMetadata().getEndpointForHostId(hostId);
+-        if (replacing && isReplacingSameAddress() && Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null
+-            && (hostId.equals(Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress()))))
+-=======
+-        InetAddressAndPort existing = tokenMetadata.getEndpointForHostId(hostId);
+         if (replacing && isReplacingSameHostAddressAndHostId(hostId))
+         {
+->>>>>>>
+             logger.warn("Not updating token metadata for {} because I am replacing it", endpoint);
+         }
+         else

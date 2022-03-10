@@ -1,0 +1,16 @@
+--- a/src/java/org/apache/cassandra/cql3/statements/schema/CreateKeyspaceStatement.java
++++ b/src/java/org/apache/cassandra/cql3/statements/schema/CreateKeyspaceStatement.java
+@@ -79,13 +79,7 @@
+             throw ire("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
+ 
+         keyspace.params.validate(keyspaceName);
+-<<<<<<<
+-        Keyspaces keyspaces = schema.withAddedOrUpdated(keyspace);
+-
+-        return keyspaces;
+-=======
+         return schema.withAddedOrUpdated(keyspace);
+->>>>>>>
+     }
+ 
+     SchemaChange schemaChangeEvent(KeyspacesDiff diff)

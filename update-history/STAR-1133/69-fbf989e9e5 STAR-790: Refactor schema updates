@@ -1,0 +1,210 @@
+--- a/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/CQLSSTableWriter.java
+@@ -46,11 +46,8 @@
+ import org.apache.cassandra.cql3.statements.ModificationStatement;
+ import org.apache.cassandra.cql3.statements.UpdateStatement;
+ import org.apache.cassandra.db.Clustering;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.db.SystemKeyspace;
+ import org.apache.cassandra.db.marshal.AbstractType;
+->>>>>>>
+ import org.apache.cassandra.dht.IPartitioner;
+ import org.apache.cassandra.dht.Murmur3Partitioner;
+ import org.apache.cassandra.exceptions.InvalidRequestException;
+@@ -522,13 +519,6 @@
+                                      "Local keyspaces were not loaded. If this is running as a client, please make sure to add %s=true system property.", SchemaManager.FORCE_LOAD_LOCAL_KEYSPACES_PROP);
+             synchronized (CQLSSTableWriter.class)
+             {
+-<<<<<<<
+-=======
+-                if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME) == null)
+-                    SchemaManager.instance.load(SchemaManager.getSystemKeyspaceMetadata());
+-                if (SchemaManager.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME) == null)
+-                    SchemaManager.instance.load(SystemKeyspace.metadata());
+->>>>>>>
+ 
+                 String keyspaceName = schemaStatement.keyspace();
+ 
+--- a/src/java/org/apache/cassandra/schema/SchemaManager.java
++++ b/src/java/org/apache/cassandra/schema/SchemaManager.java
+@@ -42,11 +42,8 @@
+ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.service.PendingRangeCalculatorService;
+ import org.apache.cassandra.service.StorageService;
+->>>>>>>
+ 
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+@@ -101,7 +98,18 @@
+                              : new OfflineSchemaUpdateHandler(this::mergeAndUpdateVersion);
+     }
+ 
+-<<<<<<<
++    public void startSync()
++    {
++        logger.debug("Starting update handler");
++        updateHandler.start();
++    }
++
++    public boolean waitUntilReady(Duration timeout)
++    {
++        logger.debug("Waiting for update handler to be ready...");
++        return updateHandler.waitUntilReady(timeout);
++    }
++
+     /**
+      * Add entries to system_schema.* for the hardcoded system keyspaces
+      *
+@@ -138,25 +146,6 @@
+      * Schema version may be updated as the result.
+      */
+     public void loadFromDisk()
+-=======
+-    public void startSync()
+->>>>>>>
+-    {
+-        logger.debug("Starting update handler");
+-        updateHandler.start();
+-    }
+-
+-    public boolean waitUntilReady(Duration timeout)
+-    {
+-        logger.debug("Waiting for update handler to be ready...");
+-        return updateHandler.waitUntilReady(timeout);
+-    }
+-
+-    /**
+-     * load keyspace (keyspace) definitions, but do not initialize the keyspace instances.
+-     * Schema version may be updated as the result.
+-     */
+-    public void loadFromDisk()
+     {
+         SchemaDiagnostics.schemaLoading(this);
+         updateHandler.reset(true);
+@@ -589,11 +578,7 @@
+      *
+      * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+      */
+-<<<<<<<
+     private void updateVersion(UUID version)
+-=======
+-    public synchronized void updateVersion()
+->>>>>>>
+     {
+         this.version = version;
+         SchemaDiagnostics.versionUpdated(this);
+@@ -673,26 +658,12 @@
+         updateVersion(result.after.getVersion());
+     }
+ 
+-<<<<<<<
+-    /**
+-     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+-     */
+-    public synchronized SchemaTransformationResult transform(SchemaTransformation transformation, boolean locally, long now)
+-=======
+     public SchemaTransformationResult transform(SchemaTransformation transformation)
+->>>>>>>
+     {
+         return transform(transformation, false);
+     }
+ 
+-<<<<<<<
+-    /**
+-     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+-     */
+-    synchronized void merge(Collection<Mutation> mutations)
+-=======
+     public SchemaTransformationResult transform(SchemaTransformation transformation, boolean local)
+->>>>>>>
+     {
+         return updateHandler.apply(transformation, local);
+     }
+--- a/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java
++++ b/src/java/org/apache/cassandra/schema/SchemaPullVerbHandler.java
+@@ -53,15 +53,10 @@
+     public void doVerb(Message<NoPayload> message)
+     {
+         logger.trace("Received schema pull request from {}", message.from());
+-<<<<<<<
+         List<Consumer<Message<NoPayload>>> handlers = this.handlers;
+         if (handlers.isEmpty())
+             throw new UnsupportedOperationException("There is no handler registered for schema pull verb");
+ 
+         handlers.forEach(h -> h.accept(message));
+-=======
+-        Message<Collection<Mutation>> response = message.responseWith(SchemaManager.instance.schemaKeyspaceAsMutations());
+-        MessagingService.instance().send(response, message.from());
+->>>>>>>
+     }
+ }
+\ No newline at end of file
+diff --git a/test/unit/org/apache/cassandra/cql3/KeyCacheCqlTest.java b/test/unit/org/apache/cassandra/cql3/KeyCacheCqlTest.java
+index 4768f5c83c..b78939e80b 100644
+--- a/test/unit/org/apache/cassandra/cql3/KeyCacheCqlTest.java
++++ b/test/unit/org/apache/cassandra/cql3/KeyCacheCqlTest.java
+@@ -30,15 +30,14 @@ import org.junit.Test;
+ 
+ import org.apache.cassandra.cache.KeyCacheKey;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+-import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+-import org.apache.cassandra.schema.SchemaKeyspace;
+ import org.apache.cassandra.schema.SchemaManager;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.metrics.CacheMetrics;
+ import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+ import org.apache.cassandra.schema.CachingParams;
++import org.apache.cassandra.schema.SchemaTestUtil;
+ import org.apache.cassandra.schema.TableMetadataRef;
+ import org.apache.cassandra.service.CacheService;
+ import org.apache.cassandra.service.StorageService;
+@@ -318,7 +317,7 @@ public class KeyCacheCqlTest extends CQLTester
+         }
+ 
+         dropTable("DROP TABLE %s");
+-        assert SchemaManager.instance.isSameVersion(SchemaKeyspace.calculateSchemaDigest());
++        assert SchemaManager.instance.isSameVersion(SchemaTestUtil.calculateSchemaDigest());
+ 
+         //Test loading for a dropped 2i/table
+         CacheService.instance.keyCache.clear();
+diff --git a/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java b/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java
+index 8189a1ebb9..11804bf645 100644
+--- a/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewSchemaTest.java
+@@ -934,7 +934,7 @@ public class ViewSchemaTest extends CQLTester
+ 
+         ColumnFamilyStore mv = Keyspace.open(keyspace()).getColumnFamilyStore(view);
+ 
+-        assertTrue(SchemaCQLHelper.getTableMetadataAsCQL(mv.metadata(), true, true, true)
++        assertTrue(SchemaCQLHelper.getTableMetadataAsCQL(mv.metadata(), mv.keyspace.getMetadata(), true, true, true)
+                                   .startsWith(String.format(viewSnapshotSchema,
+                                                             keyspace(),
+                                                             view,
+diff --git a/test/unit/org/apache/cassandra/schema/SchemaTestUtil.java b/test/unit/org/apache/cassandra/schema/SchemaTestUtil.java
+index 6b1e218ce8..74336dc7c5 100644
+--- a/test/unit/org/apache/cassandra/schema/SchemaTestUtil.java
++++ b/test/unit/org/apache/cassandra/schema/SchemaTestUtil.java
+@@ -23,6 +23,7 @@ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.List;
+ import java.util.Set;
++import java.util.UUID;
+ 
+ import org.apache.commons.lang3.tuple.Pair;
+ import org.slf4j.Logger;
+@@ -144,4 +145,8 @@ public class SchemaTestUtil
+         FBUtilities.waitOnFuture(Stage.MIGRATION.submit(() -> {}), Duration.ofSeconds(10)); // simply wait for stage executor to complete previously scheduled tasks
+     }
+ 
++    public static UUID calculateSchemaDigest()
++    {
++        return SchemaKeyspace.calculateSchemaDigest();
++    }
+ }

@@ -1,0 +1,1438 @@
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -2349,12 +2349,7 @@
+         final long truncatedAt;
+         final CommitLogPosition replayAfter;
+ 
+-<<<<<<<
+-        if (!noSnapshot && (keyspace.getMetadata().params.durableWrites || DatabaseDescriptor.isAutoSnapshot()))
+-=======
+-        if ((keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable())  // need to clear dirty regions
+-            || snapshot) // need sstable for snapshot
+->>>>>>>
++        if (!noSnapshot && ((keyspace.getMetadata().params.durableWrites && !memtableWritesAreDurable()) || DatabaseDescriptor.isAutoSnapshot()))
+         {
+             replayAfter = forceBlockingFlush(FlushReason.TRUNCATE);
+             viewManager.forceBlockingFlush(FlushReason.TRUNCATE);
+--- a/src/java/org/apache/cassandra/db/PartitionRangeReadCommand.java
++++ b/src/java/org/apache/cassandra/db/PartitionRangeReadCommand.java
+@@ -270,12 +270,8 @@
+             {
+                 @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
+                 Memtable.MemtableUnfilteredPartitionIterator iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+-<<<<<<<
+-                controller.updateMinOldestUnrepairedTombstone(iter.getMinLocalDeletionTime());
+-=======
+                 if (useMinLocalDeletionTime)
+-                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, iter.getMinLocalDeletionTime());
+->>>>>>>
++                    controller.updateMinOldestUnrepairedTombstone(iter.getMinLocalDeletionTime());
+                 inputCollector.addMemtableIterator(RTBoundValidator.validate(iter, RTBoundValidator.Stage.MEMTABLE, false));
+             }
+ 
+--- a/test/unit/org/apache/cassandra/cql3/ViewComplexDeletionsTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewComplexDeletionsTest.java
+@@ -33,13 +33,7 @@
+ import org.apache.cassandra.schema.SchemaConstants;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-=======
+-import static org.apache.cassandra.cql3.ViewComplexTest.createView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateViewWithFlush;
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ 
+ /* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670)
+@@ -54,234 +48,6 @@
+  */
+ public class ViewComplexDeletionsTest extends ViewComplexTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ViewComplexTest.versions();
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        ViewComplexTest.startup();
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        ViewComplexTest.beginSetup(views);
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        ViewComplexTest.endTearDown(views, version, this);
+-    }
+-
+-    // for now, unselected column cannot be fully supported, SEE CASSANDRA-11500
+-    @Ignore
+-    @Test
+-    public void testPartialDeleteUnselectedColumn() throws Throwable
+-    {
+-        boolean flush = true;
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        createTable("CREATE TABLE %s (k int, c int, a int, b int, PRIMARY KEY (k, c))");
+-        createView("mv",
+-                   "CREATE MATERIALIZED VIEW %s AS SELECT k,c FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (k,c)",
+-                   version,
+-                   this,
+-                   views);
+-        Keyspace ks = Keyspace.open(keyspace());
+-        ks.getColumnFamilyStore("mv").disableAutoCompaction();
+-
+-        updateView("UPDATE %s USING TIMESTAMP 10 SET b=1 WHERE k=1 AND c=1", version, this);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, 1));
+-        assertRows(execute("SELECT * from mv"), row(1, 1));
+-        updateView("DELETE b FROM %s USING TIMESTAMP 11 WHERE k=1 AND c=1", version, this);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertEmpty(execute("SELECT * from %s"));
+-        assertEmpty(execute("SELECT * from mv"));
+-        updateView("UPDATE %s USING TIMESTAMP 1 SET a=1 WHERE k=1 AND c=1", version, this);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRows(execute("SELECT * from %s"), row(1, 1, 1, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1));
+-
+-        execute("truncate %s;");
+-
+-        // removal generated by unselected column should not shadow PK update with smaller timestamp
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 18 SET a=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, 1, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1));
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 20 SET a=null WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"));
+-        assertRows(execute("SELECT * from mv"));
+-
+-        updateViewWithFlush("INSERT INTO %s(k,c) VALUES(1,1) USING TIMESTAMP 15", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1));
+-    }
+-
+-    @Test
+-    public void testPartialDeleteSelectedColumnWithFlush() throws Throwable
+-    {
+-        testPartialDeleteSelectedColumn(true);
+-    }
+-
+-    @Test
+-    public void testPartialDeleteSelectedColumnWithoutFlush() throws Throwable
+-    {
+-        testPartialDeleteSelectedColumn(false);
+-    }
+-
+-    private void testPartialDeleteSelectedColumn(boolean flush) throws Throwable
+-    {
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        createTable("CREATE TABLE %s (k int, c int, a int, b int, e int, f int, PRIMARY KEY (k, c))");
+-        createView("mv",
+-                   "CREATE MATERIALIZED VIEW %s AS SELECT a, b, c, k FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (k,c)",
+-                   version,
+-                   this,
+-                   views);
+-        Keyspace ks = Keyspace.open(keyspace());
+-        ks.getColumnFamilyStore("mv").disableAutoCompaction();
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 10 SET b=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, 1, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, 1));
+-
+-        updateViewWithFlush("DELETE b FROM %s USING TIMESTAMP 11 WHERE k=1 AND c=1", flush, version, this);
+-        assertEmpty(execute("SELECT * from %s"));
+-        assertEmpty(execute("SELECT * from mv"));
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 1 SET a=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, 1, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, 1, null));
+-
+-        updateViewWithFlush("DELETE a FROM %s USING TIMESTAMP 1 WHERE k=1 AND c=1", flush, version, this);
+-        assertEmpty(execute("SELECT * from %s"));
+-        assertEmpty(execute("SELECT * from mv"));
+-
+-        // view livenessInfo should not be affected by selected column ts or tb
+-        updateViewWithFlush("INSERT INTO %s(k,c) VALUES(1,1) USING TIMESTAMP 0", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 12 SET b=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, 1, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, 1));
+-
+-        updateViewWithFlush("DELETE b FROM %s USING TIMESTAMP 13 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+-
+-        updateViewWithFlush("DELETE FROM %s USING TIMESTAMP 14 WHERE k=1 AND c=1", flush, version, this);
+-        assertEmpty(execute("SELECT * from %s"));
+-        assertEmpty(execute("SELECT * from mv"));
+-
+-        updateViewWithFlush("INSERT INTO %s(k,c) VALUES(1,1) USING TIMESTAMP 15", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+-
+-        updateViewWithFlush("UPDATE %s USING TTL 3 SET b=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, 1, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, 1));
+-
+-        TimeUnit.SECONDS.sleep(4);
+-
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+-
+-        updateViewWithFlush("DELETE FROM %s USING TIMESTAMP 15 WHERE k=1 AND c=1", flush, version, this);
+-        assertEmpty(execute("SELECT * from %s"));
+-        assertEmpty(execute("SELECT * from mv"));
+-
+-        execute("truncate %s;");
+-
+-        // removal generated by unselected column should not shadow selected column with smaller timestamp
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 18 SET e=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, null, null, 1, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 18 SET e=null WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"));
+-        assertRows(execute("SELECT * from mv"));
+-
+-        updateViewWithFlush("UPDATE %s USING TIMESTAMP 16 SET a=1 WHERE k=1 AND c=1", flush, version, this);
+-        assertRows(execute("SELECT * from %s"), row(1, 1, 1, null, null, null));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, 1, null));
+-    }
+-
+-    @Test
+-    public void testRangeDeletionWithFlush() throws Throwable
+-    {
+-        testRangeDeletion(true);
+-    }
+-
+-    @Test
+-    public void testRangeDeletionWithoutFlush() throws Throwable
+-    {
+-        testRangeDeletion(false);
+-    }
+-
+-    public void testRangeDeletion(boolean flush) throws Throwable
+-    {
+-        // for partition range deletion, need to know that existing row is shadowed instead of not existed.
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView("mv_test1",
+-                   "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (a, b)",
+-                   version,
+-                   this,
+-                   views);
+-
+-        Keyspace ks = Keyspace.open(keyspace());
+-        ks.getColumnFamilyStore("mv_test1").disableAutoCompaction();
+-
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?) using timestamp 0", 1, 1, 1, 1);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"), row(1, 1, 1, 1));
+-
+-        // remove view row
+-        updateView("UPDATE %s using timestamp 1 set b = null WHERE a=1", version, this);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"));
+-        // remove base row, no view updated generated.
+-        updateView("DELETE FROM %s using timestamp 2 where a=1", version, this);
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"));
+-
+-        // restor view row with b,c column. d is still tombstone
+-        updateView("UPDATE %s using timestamp 3 set b = 1,c = 1 where a=1", version, this); // upsert
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT * FROM mv_test1"), row(1, 1, 1, null));
+-    }
+-
+->>>>>>>
+     @Test
+     public void testCommutativeRowDeletionFlush() throws Throwable
+     {
+@@ -505,11 +271,11 @@
+ 
+         ColumnFamilyStore batchlog = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES);
+         batchlog.disableAutoCompaction();
+-        batchlog.forceBlockingFlush();
++        batchlog.forceBlockingFlush(UNIT_TESTS);
+         int batchlogSSTables = batchlog.getLiveSSTables().size();
+ 
+         updateView("INSERT INTO %s(k1, v1) VALUES(1, 1)");
+-        batchlog.forceBlockingFlush();
++        batchlog.forceBlockingFlush(UNIT_TESTS);
+         assertEquals(batchlogSSTables, batchlog.getLiveSSTables().size());
+     }
+ }
+--- a/test/unit/org/apache/cassandra/cql3/ViewComplexLivenessTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewComplexLivenessTest.java
+@@ -24,13 +24,7 @@
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-=======
+-import static org.apache.cassandra.cql3.ViewComplexTest.createView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateViewWithFlush;
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ 
+ /* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+@@ -98,76 +92,6 @@
+     }
+ 
+     @Test
+-<<<<<<<
+-=======
+-    public void testExpiredLivenessLimitWithFlush() throws Throwable
+-    {
+-        // CASSANDRA-13883
+-        testExpiredLivenessLimit(true);
+-    }
+-
+-    @Test
+-    public void testExpiredLivenessLimitWithoutFlush() throws Throwable
+-    {
+-        // CASSANDRA-13883
+-        testExpiredLivenessLimit(false);
+-    }
+-
+-    private void testExpiredLivenessLimit(boolean flush) throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int);");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        Keyspace ks = Keyspace.open(keyspace());
+-
+-        createView("mv1",
+-                   "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND a IS NOT NULL PRIMARY KEY (k, a);",
+-                   version,
+-                   this,
+-                   views);
+-        createView("mv2",
+-                   "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND a IS NOT NULL PRIMARY KEY (a, k);",
+-                   version,
+-                   this,
+-                   views);
+-        ks.getColumnFamilyStore("mv1").disableAutoCompaction();
+-        ks.getColumnFamilyStore("mv2").disableAutoCompaction();
+-
+-        for (int i = 1; i <= 100; i++)
+-            updateView("INSERT INTO %s(k, a, b) VALUES (?, ?, ?);", version, this, i, i, i);
+-        for (int i = 1; i <= 100; i++)
+-        {
+-            if (i % 50 == 0)
+-                continue;
+-            // create expired liveness
+-            updateView("DELETE a FROM %s WHERE k = ?;", version, this, i);
+-        }
+-        if (flush)
+-        {
+-            ks.getColumnFamilyStore("mv1").forceBlockingFlush(UNIT_TESTS);
+-            ks.getColumnFamilyStore("mv2").forceBlockingFlush(UNIT_TESTS);
+-        }
+-
+-        for (String view : Arrays.asList("mv1", "mv2"))
+-        {
+-            // paging
+-            assertEquals(1, executeNetWithPaging(version, String.format("SELECT k,a,b FROM %s limit 1", view), 1).all().size());
+-            assertEquals(2, executeNetWithPaging(version, String.format("SELECT k,a,b FROM %s limit 2", view), 1).all().size());
+-            assertEquals(2, executeNetWithPaging(version, String.format("SELECT k,a,b FROM %s", view), 1).all().size());
+-            assertRowsNet(version, executeNetWithPaging(version, String.format("SELECT k,a,b FROM %s ", view), 1),
+-                          row(50, 50, 50),
+-                          row(100, 100, 100));
+-            // limit
+-            assertEquals(1, execute(String.format("SELECT k,a,b FROM %s limit 1", view)).size());
+-            assertRowsIgnoringOrder(execute(String.format("SELECT k,a,b FROM %s limit 2", view)),
+-                                    row(50, 50, 50),
+-                                    row(100, 100, 100));
+-        }
+-    }
+-
+-    @Test
+->>>>>>>
+     public void testStrictLivenessTombstone() throws Throwable
+     {
+         createTable("create table %s (p int primary key, v1 int, v2 int)");
+@@ -185,15 +109,9 @@
+         updateView("Insert into %s (p, v1, v2) values (1, 1, 1)");
+         assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from " + name), row(1, 1, 1));
+ 
+-<<<<<<<
+         updateView("Update %s set v1 = null WHERE p = 1");
+-        FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from " + name));
+-=======
+-        updateView("Update %s set v1 = null WHERE p = 1", version, this);
+         FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from mv"));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from " + name));
+ 
+         cfs.forceMajorCompaction(); // before gc grace second, strict-liveness tombstoned dead row remains
+         assertEquals(1, cfs.getLiveSSTables().size());
+@@ -204,15 +122,9 @@
+         cfs.forceMajorCompaction(); // after gc grace second, no data left
+         assertEquals(0, cfs.getLiveSSTables().size());
+ 
+-<<<<<<<
+         updateView("Update %s using ttl 5 set v1 = 1 WHERE p = 1");
+-        FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from " + name), row(1, 1, 1));
+-=======
+-        updateView("Update %s using ttl 5 set v1 = 1 WHERE p = 1", version, this);
+         FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from mv"), row(1, 1, 1));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT p, v1, v2 from " + name), row(1, 1, 1));
+ 
+         cfs.forceMajorCompaction(); // before ttl+gc_grace_second, strict-liveness ttled dead row remains
+         assertEquals(1, cfs.getLiveSSTables().size());
+--- a/test/unit/org/apache/cassandra/cql3/ViewComplexTTLTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewComplexTTLTest.java
+@@ -23,14 +23,8 @@
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-import static org.apache.cassandra.cql3.ViewComplexTest.createView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateViewWithFlush;
+-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.junit.Assert.assertEquals;
+->>>>>>>
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ import static org.junit.Assert.assertTrue;
+ 
+ /* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+--- a/test/unit/org/apache/cassandra/cql3/ViewComplexTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewComplexTest.java
+@@ -49,85 +49,6 @@
+  */
+ public class ViewComplexTest extends ViewComplexTester
+ {
+-<<<<<<<
+-=======
+-    @Parameterized.Parameter
+-    public ProtocolVersion version;
+-
+-    @Parameterized.Parameters()
+-    public static Collection<Object[]> versions()
+-    {
+-        return ProtocolVersion.SUPPORTED.stream()
+-                                        .map(v -> new Object[]{v})
+-                                        .collect(Collectors.toList());
+-    }
+-
+-    private final List<String> views = new ArrayList<>();
+-
+-    @BeforeClass
+-    public static void startup()
+-    {
+-        requireNetwork();
+-    }
+-
+-    @Before
+-    public void begin()
+-    {
+-        beginSetup(views);
+-    }
+-
+-    public static void beginSetup(List<String> views)
+-    {
+-        views.clear();
+-    }
+-
+-    @After
+-    public void end() throws Throwable
+-    {
+-        endTearDown(views, version, this);
+-    }
+-
+-    public static void endTearDown(List<String> views, ProtocolVersion version, CQLTester cqlTester) throws Throwable
+-    {
+-        for (String viewName : views)
+-            cqlTester.executeNet(version, "DROP MATERIALIZED VIEW " + viewName);
+-    }
+-
+-    public static void createView(String name, String query, ProtocolVersion version, CQLTester cqlTester, List<String> views) throws Throwable
+-    {
+-        try
+-        {
+-            cqlTester.executeNet(version, String.format(query, name));
+-            // If exception is thrown, the view will not be added to the list; since it shouldn't have been created, this is
+-            // the desired behavior
+-            views.add(name);
+-        }
+-        catch (OperationTimedOutException ex)
+-        {
+-            // ... except for timeout, when we actually do not know whether the view was created or not
+-            views.add(name);
+-            throw ex;
+-        }
+-    }
+-
+-    public static void updateView(String query, ProtocolVersion version, CQLTester cqlTester, Object... params) throws Throwable
+-    {
+-        updateViewWithFlush(query, false, version, cqlTester, params);
+-    }
+-
+-    public static void updateViewWithFlush(String query, boolean flush, ProtocolVersion version, CQLTester cqlTester, Object... params) throws Throwable
+-    {
+-        cqlTester.executeNet(version, query, params);
+-        while (!(((SEPExecutor) Stage.VIEW_MUTATION.executor()).getPendingTaskCount() == 0
+-                && ((SEPExecutor) Stage.VIEW_MUTATION.executor()).getActiveTaskCount() == 0))
+-        {
+-            Thread.sleep(1);
+-        }
+-        if (flush)
+-            Keyspace.open(cqlTester.keyspace()).flush(UNIT_TESTS);
+-    }
+-
+->>>>>>>
+     @Test
+     public void testNonBaseColumnInViewPkWithFlush() throws Throwable
+     {
+@@ -188,85 +109,7 @@
+         if (flush)
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from %s"), row(1, 1, null, 1));
+-<<<<<<<
+         assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from " + mv), row(1, 1, null, 1));
+-=======
+-        assertRowsIgnoringOrder(execute("SELECT p1, p2, v1, v2 from mv"), row(1, 1, null, 1));
+-    }
+-
+-    @Test
+-    public void testCellTombstoneAndShadowableTombstonesWithFlush() throws Throwable
+-    {
+-        testCellTombstoneAndShadowableTombstones(true);
+-    }
+-
+-    @Test
+-    public void testCellTombstoneAndShadowableTombstonesWithoutFlush() throws Throwable
+-    {
+-        testCellTombstoneAndShadowableTombstones(false);
+-    }
+-
+-    private void testCellTombstoneAndShadowableTombstones(boolean flush) throws Throwable
+-    {
+-        createTable("create table %s (p int primary key, v1 int, v2 int)");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        Keyspace ks = Keyspace.open(keyspace());
+-
+-        createView("mv",
+-                   "create materialized view %s as select * from %%s where p is not null and v1 is not null primary key (v1, p);",
+-                   version,
+-                   this,
+-                   views);
+-        ks.getColumnFamilyStore("mv").disableAutoCompaction();
+-
+-        // sstable 1, Set initial values TS=1
+-        updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 1;", version, this);
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3), row(3, 1L));
+-        // sstable 2
+-        updateView("UPdate %s using timestamp 2 set v2 = null where p = 3", version, this);
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from mv WHERE v1 = ? AND p = ?", 1, 3),
+-                                row(null, null));
+-        // sstable 3
+-        updateView("UPdate %s using timestamp 3 set v1 = 2 where p = 3", version, this);
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(2, 3, null, null));
+-        // sstable 4
+-        updateView("UPdate %s using timestamp 4 set v1 = 1 where p = 3", version, this);
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, null, null));
+-
+-        if (flush)
+-        {
+-            // compact sstable 2 and 3;
+-            ColumnFamilyStore cfs = ks.getColumnFamilyStore("mv");
+-            List<String> sstables = cfs.getLiveSSTables()
+-                                       .stream()
+-                                       .sorted(Comparator.comparingInt(s -> s.descriptor.generation))
+-                                       .map(s -> s.getFilename())
+-                                       .collect(Collectors.toList());
+-            String dataFiles = String.join(",", Arrays.asList(sstables.get(1), sstables.get(2)));
+-            CompactionManager.instance.forceUserDefinedCompaction(dataFiles);
+-        }
+-        // cell-tombstone in sstable 4 is not compacted away, because the shadowable tombstone is shadowed by new row.
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, null, null));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv limit 1"), row(1, 3, null, null));
+->>>>>>>
+     }
+ 
+     @Test
+--- a/test/unit/org/apache/cassandra/cql3/ViewComplexUpdatesTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewComplexUpdatesTest.java
+@@ -25,15 +25,9 @@
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-/* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+-=======
+-import static org.apache.cassandra.cql3.ViewComplexTest.createView;
+-import static org.apache.cassandra.cql3.ViewComplexTest.updateView;
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ 
+-/* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670)
+->>>>>>>
++/* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+  * Any changes here check if they apply to the other classes:
+  * - ViewComplexUpdatesTest
+  * - ViewComplexDeletionsTest
+@@ -174,44 +168,24 @@
+ 
+         updateView("UPDATE %s SET l=l+[1,2,3] WHERE k = 1 AND c = 1");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRows(execute("SELECT * from " + mv), row(1, 1, null, null));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+->>>>>>>
++        assertRows(execute("SELECT * from " + mv), row(1, 1, null, null));
+ 
+         updateView("UPDATE %s SET l=l-[1,2] WHERE k = 1 AND c = 1");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRows(execute("SELECT * from " + mv), row(1, 1, null, null));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, null));
+->>>>>>>
++        assertRows(execute("SELECT * from " + mv), row(1, 1, null, null));
+ 
+         updateView("UPDATE %s SET b=3 WHERE k=1 AND c=1");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRows(execute("SELECT * from " + mv), row(1, 1, null, 3));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRows(execute("SELECT * from mv"), row(1, 1, null, 3));
+->>>>>>>
++        assertRows(execute("SELECT * from " + mv), row(1, 1, null, 3));
+ 
+         updateView("UPDATE %s SET b=null, l=l-[3], s=s-{3} WHERE k = 1 AND c = 1");
+         if (flush)
+         {
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-            ks.getColumnFamilyStore(mv).forceMajorCompaction();
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-            ks.getColumnFamilyStore("mv").forceMajorCompaction();
+->>>>>>>
++            ks.getColumnFamilyStore(mv).forceMajorCompaction();
+         }
+         assertRowsIgnoringOrder(execute("SELECT k,c,a,b from %s"));
+         assertRowsIgnoringOrder(execute("SELECT * from " + mv));
+@@ -258,45 +232,24 @@
+         // reset value
+         updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 6;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+         // increase pk's timestamp to 20
+         updateView("Insert into %s (p) values (3) using timestamp 20;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+         // change v1's to 2 and remove existing view row with ts7
+         updateView("UPdate %s using timestamp 7 set v1 = 2 where p = 3;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
++            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(2, 3, 3, 6L));
+         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv + " limit 1"), row(2, 3, 3, 6L));
+-=======
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(2, 3, 3, 6L));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv limit 1"), row(2, 3, 3, 6L));
+->>>>>>>
+         // change v1's to 1 and remove existing view row with ts8
+         updateView("UPdate %s using timestamp 8 set v1 = 1 where p = 3;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from mv"), row(1, 3, 3, 6L));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, 3, 6L));
+     }
+ 
+     @Test
+@@ -331,69 +284,38 @@
+         // sstable-1, Set initial values TS=1
+         updateView("INSERT INTO %s(k, a, b) VALUES (1, 1, 1) USING TIMESTAMP 1;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
++            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 1));
+         updateView("UPDATE %s USING TIMESTAMP 10 SET b = 2 WHERE k = 1;");
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+         if (flush)
+-            FBUtilities.waitOnFutures(ks.flush());
++            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+         updateView("UPDATE %s USING TIMESTAMP 2 SET a = 2 WHERE k = 1;");
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 2, 2));
+         if (flush)
+-            FBUtilities.waitOnFutures(ks.flush());
++            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+         ks.getColumnFamilyStore(mv).forceMajorCompaction();
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 2, 2));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv + " limit 1"), row(1, 2, 2));
+         updateView("UPDATE %s USING TIMESTAMP 11 SET a = 1 WHERE k = 1;");
+         if (flush)
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+-=======
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 1));
+-        updateView("UPDATE %s USING TIMESTAMP 10 SET b = 2 WHERE k = 1;", version, this);
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
+-        updateView("UPDATE %s USING TIMESTAMP 2 SET a = 2 WHERE k = 1;", version, this);
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 2, 2));
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        ks.getColumnFamilyStore("mv").forceMajorCompaction();
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 2, 2));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv limit 1"), row(1, 2, 2));
+-        updateView("UPDATE %s USING TIMESTAMP 11 SET a = 1 WHERE k = 1;", version, this);
+-        if (flush)
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, 1, 2));
+ 
+         // set non-key base column as tombstone, view row is removed with shadowable
+         updateView("UPDATE %s USING TIMESTAMP 12 SET a = null WHERE k = 1;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, null, 2));
+ 
+         // column b should be alive
+         updateView("UPDATE %s USING TIMESTAMP 13 SET a = 1 WHERE k = 1;");
+         if (flush)
+-<<<<<<<
+-            FBUtilities.waitOnFutures(ks.flush());
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+-=======
+             FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        assertRowsIgnoringOrder(execute("SELECT k,a,b from mv"), row(1, 1, 2));
+->>>>>>>
++        assertRowsIgnoringOrder(execute("SELECT k,a,b from " + mv), row(1, 1, 2));
+         assertRowsIgnoringOrder(execute("SELECT k,a,b from %s"), row(1, 1, 2));
+ 
+         assertInvalidMessage(String.format("Cannot drop column a on base table %s with materialized views", baseTable), "ALTER TABLE %s DROP a");
+--- a/test/unit/org/apache/cassandra/cql3/ViewFilteringTest.java
++++ b/test/unit/org/apache/cassandra/cql3/ViewFilteringTest.java
+@@ -32,13 +32,9 @@
+ import org.apache.cassandra.db.SystemKeyspace;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-/* ViewFilteringTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+-=======
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ 
+-/* ViewFilteringTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670)
+->>>>>>>
++/* ViewFilteringTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
+  * Any changes here check if they apply to the other classes
+  * - ViewFilteringPKTest
+  * - ViewFilteringClustering1Test
+@@ -531,419 +527,5 @@
+                    row(1, 0, 2),
+                    row(1, 1, 3)
+         );
+-    } 
+-<<<<<<<
+-=======
+-
+-    @Test
+-    public void testAllTypes() throws Throwable
+-    {
+-        String myType = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
+-        String columnNames = "asciival, " +
+-                             "bigintval, " +
+-                             "blobval, " +
+-                             "booleanval, " +
+-                             "dateval, " +
+-                             "decimalval, " +
+-                             "doubleval, " +
+-                             "floatval, " +
+-                             "inetval, " +
+-                             "intval, " +
+-                             "textval, " +
+-                             "timeval, " +
+-                             "timestampval, " +
+-                             "timeuuidval, " +
+-                             "uuidval," +
+-                             "varcharval, " +
+-                             "varintval, " +
+-                             "frozenlistval, " +
+-                             "frozensetval, " +
+-                             "frozenmapval, " +
+-                             "tupleval, " +
+-                             "udtval";
+-
+-        createTable(
+-        "CREATE TABLE %s (" +
+-        "asciival ascii, " +
+-        "bigintval bigint, " +
+-        "blobval blob, " +
+-        "booleanval boolean, " +
+-        "dateval date, " +
+-        "decimalval decimal, " +
+-        "doubleval double, " +
+-        "floatval float, " +
+-        "inetval inet, " +
+-        "intval int, " +
+-        "textval text, " +
+-        "timeval time, " +
+-        "timestampval timestamp, " +
+-        "timeuuidval timeuuid, " +
+-        "uuidval uuid," +
+-        "varcharval varchar, " +
+-        "varintval varint, " +
+-        "frozenlistval frozen<list<int>>, " +
+-        "frozensetval frozen<set<uuid>>, " +
+-        "frozenmapval frozen<map<ascii, int>>," +
+-        "tupleval frozen<tuple<int, ascii, uuid>>," +
+-        "udtval frozen<" + myType + ">, " +
+-        "PRIMARY KEY (" + columnNames + "))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView(
+-        "mv_test",
+-        "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE " +
+-        "asciival = 'abc' AND " +
+-        "bigintval = 123 AND " +
+-        "blobval = 0xfeed AND " +
+-        "booleanval = true AND " +
+-        "dateval = '1987-03-23' AND " +
+-        "decimalval = 123.123 AND " +
+-        "doubleval = 123.123 AND " +
+-        "floatval = 123.123 AND " +
+-        "inetval = '127.0.0.1' AND " +
+-        "intval = 123 AND " +
+-        "textval = 'abc' AND " +
+-        "timeval = '07:35:07.000111222' AND " +
+-        "timestampval = 123123123 AND " +
+-        "timeuuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+-        "uuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+-        "varcharval = 'abc' AND " +
+-        "varintval = 123123123 AND " +
+-        "frozenlistval = [1, 2, 3] AND " +
+-        "frozensetval = {6BDDC89A-5644-11E4-97FC-56847AFE9799} AND " +
+-        "frozenmapval = {'a': 1, 'b': 2} AND " +
+-        "tupleval = (1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799) AND " +
+-        "udtval = {a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}} " +
+-        "PRIMARY KEY (" + columnNames + ")");
+-
+-        execute("INSERT INTO %s (" + columnNames + ") VALUES (" +
+-                "'abc'," +
+-                "123," +
+-                "0xfeed," +
+-                "true," +
+-                "'1987-03-23'," +
+-                "123.123," +
+-                "123.123," +
+-                "123.123," +
+-                "'127.0.0.1'," +
+-                "123," +
+-                "'abc'," +
+-                "'07:35:07.000111222'," +
+-                "123123123," +
+-                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+-                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+-                "'abc'," +
+-                "123123123," +
+-                "[1, 2, 3]," +
+-                "{6BDDC89A-5644-11E4-97FC-56847AFE9799}," +
+-                "{'a': 1, 'b': 2}," +
+-                "(1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799)," +
+-                "{a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}})");
+-
+-        assert !execute("SELECT * FROM mv_test").isEmpty();
+-
+-        executeNet(version, "ALTER TABLE %s RENAME inetval TO foo");
+-        assert !execute("SELECT * FROM mv_test").isEmpty();
+-    }
+-
+-    @Test
+-    public void testMVCreationWithNonPrimaryRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        try {
+-            createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND d = 1 PRIMARY KEY (a, b, c)");
+-            dropView("mv_test");
+-        } catch(Exception e) {
+-            throw new RuntimeException("MV creation with non primary column restrictions failed.", e);
+-        }
+-
+-        dropTable("DROP TABLE %s");
+-    }
+-
+-    @Test
+-    public void testNonPrimaryRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 0, 1, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 1, 1, 0);
+-
+-        // only accept rows where c = 1
+-        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (a, b, c)");
+-
+-        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+-            Thread.sleep(10);
+-
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // insert new rows that do not match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 0, 0, 0);
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 1, 2, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // insert new row that does match the filter
+-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, 2, 1, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // update rows that don't match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 2, 2, 0);
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 1, 2, 1);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 0),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // update a row that does match the filter
+-        execute("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 1, 1, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // delete rows that don't match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 2, 0);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0),
+-                                row(1, 2, 1, 0)
+-        );
+-
+-        // delete a row that does match the filter
+-        execute("DELETE FROM %s WHERE a = ? AND b = ?", 1, 2);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0),
+-                                row(1, 0, 1, 1),
+-                                row(1, 1, 1, 0)
+-        );
+-
+-        // delete a partition that matches the filter
+-        execute("DELETE FROM %s WHERE a = ?", 1);
+-        assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
+-                                row(0, 0, 1, 0),
+-                                row(0, 1, 1, 0)
+-        );
+-
+-        dropView("mv_test");
+-        dropTable("DROP TABLE %s");
+-    }
+-
+-    @Test
+-    public void complexRestrictedTimestampUpdateTestWithFlush() throws Throwable
+-    {
+-        complexRestrictedTimestampUpdateTest(true);
+-    }
+-
+-    @Test
+-    public void complexRestrictedTimestampUpdateTestWithoutFlush() throws Throwable
+-    {
+-        complexRestrictedTimestampUpdateTest(false);
+-    }
+-
+-    public void complexRestrictedTimestampUpdateTest(boolean flush) throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (a int, b int, c int, d int, e int, PRIMARY KEY (a, b))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-        Keyspace ks = Keyspace.open(keyspace());
+-
+-        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (c, a, b)");
+-        ks.getColumnFamilyStore("mv").disableAutoCompaction();
+-
+-        //Set initial values TS=0, matching the restriction and verify view
+-        executeNet(version, "INSERT INTO %s (a, b, c, d) VALUES (0, 0, 1, 0) USING TIMESTAMP 0");
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //update c's timestamp TS=2
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //change c's value and TS=3, tombstones c=1 and adds c=0 record
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 0, 0, 0));
+-
+-        if(flush)
+-        {
+-            ks.getColumnFamilyStore("mv").forceMajorCompaction();
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        }
+-
+-        //change c's value back to 1 with TS=4, check we can see d
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        if (flush)
+-        {
+-            ks.getColumnFamilyStore("mv").forceMajorCompaction();
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-        }
+-
+-        assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
+-
+-        //Add e value @ TS=1
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 1 SET e = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //Change d value @ TS=2
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET d = ? WHERE a = ? and b = ? ", 2, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
+-
+-        if (flush)
+-            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
+-
+-        //Change d value @ TS=3
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? and b = ? ", 1, 0, 0);
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(1));
+-
+-        //Tombstone c
+-        executeNet(version, "DELETE FROM %s WHERE a = ? and b = ?", 0, 0);
+-        assertRowsIgnoringOrder(execute("SELECT d from mv"));
+-        assertRows(execute("SELECT d from mv"));
+-
+-        //Add back without D
+-        executeNet(version, "INSERT INTO %s (a, b, c) VALUES (0, 0, 1)");
+-
+-        //Make sure D doesn't pop back in.
+-        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row((Object) null));
+-
+-        //New partition
+-        // insert a row with timestamp 0
+-        executeNet(version, "INSERT INTO %s (a, b, c, d, e) VALUES (?, ?, ?, ?, ?) USING TIMESTAMP 0", 1, 0, 1, 0, 0);
+-
+-        // overwrite pk and e with timestamp 1, but don't overwrite d
+-        executeNet(version, "INSERT INTO %s (a, b, c, e) VALUES (?, ?, ?, ?) USING TIMESTAMP 1", 1, 0, 1, 0);
+-
+-        // delete with timestamp 0 (which should only delete d)
+-        executeNet(version, "DELETE FROM %s USING TIMESTAMP 0 WHERE a = ? AND b = ?", 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, null, 0)
+-        );
+-
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? AND b = ?", 1, 1, 1);
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? AND b = ?", 1, 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, null, 0)
+-        );
+-
+-        executeNet(version, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? AND b = ?", 0, 1, 0);
+-        assertRows(execute("SELECT a, b, c, d, e from mv WHERE c = ? and a = ? and b = ?", 1, 1, 0),
+-                   row(1, 0, 1, 0, 0)
+-        );
+-    }
+-
+-    @Test
+-    public void testRestrictedRegularColumnTimestampUpdates() throws Throwable
+-    {
+-        // Regression test for CASSANDRA-10910
+-
+-        createTable("CREATE TABLE %s (" +
+-                    "k int PRIMARY KEY, " +
+-                    "c int, " +
+-                    "val int)");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView("mv_rctstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND c = 1 PRIMARY KEY (k,c)");
+-
+-        updateView("UPDATE %s SET c = ?, val = ? WHERE k = ?", 0, 0, 0);
+-        updateView("UPDATE %s SET val = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s SET c = ? WHERE k = ?", 1, 0);
+-        assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(1, 0, 1));
+-
+-        updateView("TRUNCATE %s");
+-
+-        updateView("UPDATE %s USING TIMESTAMP 1 SET c = ?, val = ? WHERE k = ?", 0, 0, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 2 SET val = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 4 SET c = ? WHERE k = ?", 1, 0);
+-        updateView("UPDATE %s USING TIMESTAMP 3 SET val = ? WHERE k = ?", 2, 0);
+-        assertRows(execute("SELECT c, k, val FROM mv_rctstest"), row(1, 0, 2));
+-    }
+-
+-    @Test
+-    public void testOldTimestampsWithRestrictions() throws Throwable
+-    {
+-        createTable("CREATE TABLE %s (" +
+-                    "k int, " +
+-                    "c int, " +
+-                    "val text, " + "" +
+-                    "PRIMARY KEY(k, c))");
+-
+-        execute("USE " + keyspace());
+-        executeNet(version, "USE " + keyspace());
+-
+-        createView("mv_tstest", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE val IS NOT NULL AND k IS NOT NULL AND c IS NOT NULL AND val = 'baz' PRIMARY KEY (val,k,c)");
+-
+-        for (int i = 0; i < 100; i++)
+-            updateView("INSERT into %s (k,c,val)VALUES(?,?,?)", 0, i % 2, "baz");
+-
+-        Keyspace.open(keyspace()).getColumnFamilyStore(currentTable()).forceBlockingFlush(UNIT_TESTS);
+-
+-        Assert.assertEquals(2, execute("select * from %s").size());
+-        Assert.assertEquals(2, execute("select * from mv_tstest").size());
+-
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 0"), row("baz"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0), row(1));
+-
+-        //Make sure an old TS does nothing
+-        updateView("UPDATE %s USING TIMESTAMP 100 SET val = ? where k = ? AND c = ?", "bar", 0, 1);
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 1"), row("baz"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0), row(1));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"));
+-
+-        //Latest TS
+-        updateView("UPDATE %s SET val = ? where k = ? AND c = ?", "bar", 0, 1);
+-        assertRows(execute("SELECT val from %s where k = 0 and c = 1"), row("bar"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "bar"));
+-        assertRows(execute("SELECT c from mv_tstest where k = 0 and val = ?", "baz"), row(0));
+     }
+->>>>>>>
+ }
+--- a/test/unit/org/apache/cassandra/cql3/validation/operations/AlterTest.java
++++ b/test/unit/org/apache/cassandra/cql3/validation/operations/AlterTest.java
+@@ -40,11 +40,7 @@
+ 
+ import static java.lang.String.format;
+ import static org.junit.Assert.assertEquals;
+-<<<<<<<
+-=======
+-import static org.junit.Assert.assertNull;
+ import static org.junit.Assert.assertSame;
+->>>>>>>
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+ 
+@@ -460,7 +456,7 @@
+ 
+         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
+-                                  SchemaKeyspace.TABLES),
++                                  SchemaKeyspaceTables.TABLES),
+                            KEYSPACE,
+                            currentTable()),
+                    row(map()));
+@@ -471,7 +467,7 @@
+ 
+         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
+-                                  SchemaKeyspace.TABLES),
++                                  SchemaKeyspaceTables.TABLES),
+                            KEYSPACE,
+                            currentTable()),
+                    row(map("class", "SkipListMemtable")));
+@@ -483,7 +479,7 @@
+ 
+         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
+-                                  SchemaKeyspace.TABLES),
++                                  SchemaKeyspaceTables.TABLES),
+                            KEYSPACE,
+                            currentTable()),
+                    row(map("class", "org.apache.cassandra.db.memtable.TrieMemtable")));
+@@ -494,7 +490,7 @@
+ 
+         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
+-                                  SchemaKeyspace.TABLES),
++                                  SchemaKeyspaceTables.TABLES),
+                            KEYSPACE,
+                            currentTable()),
+                    row(map("class", CreateTest.TestMemtableFactory.class.getName(),
+@@ -506,7 +502,7 @@
+ 
+         assertRows(execute(format("SELECT memtable FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                   SchemaConstants.SCHEMA_KEYSPACE_NAME,
+-                                  SchemaKeyspace.TABLES),
++                                  SchemaKeyspaceTables.TABLES),
+                            KEYSPACE,
+                            currentTable()),
+                    row(map()));
+--- a/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/CompactionsBytemanTest.java
+@@ -39,6 +39,7 @@
+ import org.jboss.byteman.contrib.bmunit.BMRules;
+ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
+ 
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+@@ -128,13 +129,8 @@
+         cfs.enableAutoCompaction();
+ 
+         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
+-<<<<<<<
+         Util.spinAssertEquals(true, () -> CompactionManager.instance.compactingCF.count(cfs) == 0, 5);
+-        cfs.forceBlockingFlush();
+-=======
+-        assertEquals(0, CompactionManager.instance.compactingCF.count(cfs));
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+->>>>>>>
++        cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+         Util.spinAssertEquals(true, () -> CompactionManager.instance.compactingCF.count(cfs) == 0, 5);
+         FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(cfs));
+@@ -152,7 +148,7 @@
+         {
+             execute("INSERT INTO %s (id, val) values (2, 'immortal')");
+         }
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        cfs.forceBlockingFlush(UNIT_TESTS);
+     }
+ 
+     private void createLowGCGraceTable(){
+@@ -199,7 +195,7 @@
+             {
+                 execute("insert into %s (k, c, v) values (?, ?, ?)", i, j, i*j);
+             }
+-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++            cfs.forceBlockingFlush(UNIT_TESTS);
+         }
+         cfs.getCompactionStrategyManager().mutateRepaired(cfs.getLiveSSTables(), System.currentTimeMillis(), null, false);
+         for (int i = 0; i < 5; i++)
+@@ -208,7 +204,7 @@
+             {
+                 execute("insert into %s (k, c, v) values (?, ?, ?)", i, j, i*j);
+             }
+-            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++            cfs.forceBlockingFlush(UNIT_TESTS);
+         }
+ 
+         assertTrue(cfs.getTracker().getCompacting().isEmpty());
+--- a/test/unit/org/apache/cassandra/schema/MigrationManagerTest.java
++++ b/test/unit/org/apache/cassandra/schema/MigrationManagerTest.java
+@@ -54,6 +54,7 @@
+ import static org.apache.cassandra.Util.throwAssert;
+ import static org.apache.cassandra.cql3.CQLTester.assertRows;
+ import static org.apache.cassandra.cql3.CQLTester.row;
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertNotNull;
+@@ -179,7 +180,7 @@
+         // flush to exercise more than just hitting the memtable
+         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
+         assertNotNull(cfs);
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+         // and make sure we get out what we put in
+         UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", ksName, tableName));
+@@ -202,7 +203,7 @@
+                                            "dropCf", "col" + i, "anyvalue");
+         ColumnFamilyStore store = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
+         assertNotNull(store);
+-        store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        store.forceBlockingFlush(UNIT_TESTS);
+         assertTrue(store.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().size() > 0);
+ 
+         MigrationManager.announceTableDrop(ks.name, cfm.name, false);
+@@ -251,15 +252,13 @@
+                                        "key0", "col0", "val0");
+         ColumnFamilyStore store = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
+         assertNotNull(store);
+-        store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        store.forceBlockingFlush(UNIT_TESTS);
+ 
+         UntypedResultSet rows = QueryProcessor.executeInternal("SELECT * FROM newkeyspace1.newstandard1");
+         assertRows(rows, row("key0", "col0", "val0"));
+     }
+ 
+     @Test
+-<<<<<<<
+-=======
+     public void dropKS() throws ConfigurationException
+     {
+         // sanity
+@@ -275,7 +274,7 @@
+                                            "dropKs", "col" + i, "anyvalue");
+         ColumnFamilyStore cfs = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
+         assertNotNull(cfs);
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        cfs.forceBlockingFlush(UNIT_TESTS);
+         assertTrue(!cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().isEmpty());
+ 
+         MigrationManager.announceKeyspaceDrop(ks.name);
+@@ -310,7 +309,6 @@
+     }
+ 
+     @Test
+->>>>>>>
+     public void dropKSUnflushed() throws ConfigurationException
+     {
+         // sanity
+@@ -357,7 +355,7 @@
+ 
+         ColumnFamilyStore cfs = Keyspace.open(newKs.name).getColumnFamilyStore(newCf.name);
+         assertNotNull(cfs);
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+         UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", EMPTY_KEYSPACE, tableName));
+         assertRows(rows, row("key0", "col0", "val0"));
+@@ -512,7 +510,7 @@
+                                                     TABLE1i),
+                                        "key0", "col0", 1L, 1L);
+ 
+-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
++        cfs.forceBlockingFlush(UNIT_TESTS);
+         ColumnFamilyStore indexCfs = cfs.indexManager.getIndexByName(indexName)
+                                                      .getBackingTable()
+                                                      .orElseThrow(throwAssert("Cannot access index cfs"));

@@ -1,0 +1,88 @@
+--- a/src/java/org/apache/cassandra/db/lifecycle/View.java
++++ b/src/java/org/apache/cassandra/db/lifecycle/View.java
+@@ -136,7 +136,6 @@
+             case NONCOMPACTING:
+                 return filter(sstables, (s) -> !compacting.contains(s));
+             case CANONICAL:
+-<<<<<<<
+                 // When early open is not in play, the LIVE and CANONICAL sets are the same.
+                 // However, when we do have early-open sstables, we will have some unfinished sources in the live set.
+                 // For these sources we need to extract the originals, in their non-moved-start versions, from the
+@@ -153,10 +152,7 @@
+                 // the live set when they are completely exhausted.
+ 
+                 // Add the compacting versions first because they will be the canonical versions of compaction sources.
+-                Set<SSTableReader> canonicalSSTables = new HashSet<>();
+-=======
+                 Set<SSTableReader> canonicalSSTables = new HashSet<>(sstables.size() + compacting.size());
+->>>>>>>
+                 for (SSTableReader sstable : compacting)
+                     if (sstable.openReason != SSTableReader.OpenReason.EARLY)
+                         canonicalSSTables.add(sstable);
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -46,11 +46,7 @@
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+-<<<<<<<
+-=======
+ import net.openhft.chronicle.core.util.ThrowingBiConsumer;
+-import org.apache.cassandra.OrderedJUnit4ClassRunner;
+->>>>>>>
+ import org.apache.cassandra.SchemaLoader;
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+@@ -487,7 +483,7 @@
+         overrideWithGarbage(sstable, key1, key2, (byte) 'z');
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2, byte junk) throws IOException
++    private static void overrideWithGarbage(SSTableReader sstable, ByteBuffer key1, ByteBuffer key2, byte junk) throws IOException
+     {
+         boolean compression = Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false"));
+         long startPosition, endPosition;
+@@ -522,12 +518,12 @@
+         overrideWithGarbage(sstable, startPosition, endPosition, (byte) 'z');
+     }
+ 
+-    private void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition, byte junk) throws IOException
++    private static void overrideWithGarbage(SSTableReader sstable, long startPosition, long endPosition, byte junk) throws IOException
+     {
+         overrideWithGarbage(sstable.getFilename(), startPosition, endPosition, junk);
+     }
+ 
+-    private void overrideWithGarbage(String path, long startPosition, long endPosition, byte junk) throws IOException
++    private static void overrideWithGarbage(String path, long startPosition, long endPosition, byte junk) throws IOException
+     {
+         try (RandomAccessFile file = new RandomAccessFile(path, "rw"))
+         {
+@@ -599,11 +595,7 @@
+         cfs.forceBlockingFlush();
+     }
+ 
+-<<<<<<<
+-    protected String[] fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
+-=======
+-    protected static void fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
+->>>>>>>
++    protected static String[] fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
+     {
+         SortedSet<String> tokenSorted = Sets.newTreeSet(Comparator.comparing(a -> cfs.getPartitioner()
+                                                                                      .decorateKey(ByteBufferUtil.bytes(a))));
+@@ -838,15 +830,9 @@
+             assertNotNull(rs);
+             assertEquals(0, rs.size());
+         }
+-<<<<<<<
+-        catch (IOError err)
+-        {
+-            assertTrue(err.getCause() instanceof CorruptSSTableException);
+-=======
+         finally
+         {
+             DatabaseDescriptor.setPartitionerUnsafe(oldPart);
+->>>>>>>
+         }
+     }
+ }

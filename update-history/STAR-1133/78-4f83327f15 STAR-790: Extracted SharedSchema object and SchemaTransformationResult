@@ -1,0 +1,47 @@
+--- a/src/java/org/apache/cassandra/schema/SchemaManager.java
++++ b/src/java/org/apache/cassandra/schema/SchemaManager.java
+@@ -41,11 +41,8 @@
+ import org.apache.cassandra.locator.LocalStrategy;
+ import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
+ import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+-<<<<<<<
+ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+-=======
+ import org.apache.cassandra.service.PendingRangeCalculatorService;
+->>>>>>>
+ import org.apache.cassandra.service.StorageService;
+ import org.cliffc.high_scale_lib.NonBlockingHashMap;
+ 
+@@ -81,7 +78,7 @@
+ 
+     /**
+      * Add entries to system_schema.* for the hardcoded system keyspaces
+-     * 
++     *
+      * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+      */
+     public synchronized void saveSystemKeyspace()
+@@ -516,7 +513,7 @@
+     /**
+      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
+      * will be converted into UUID which would act as content-based version of the schema.
+-     * 
++     *
+      * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+      */
+     public synchronized void updateVersion()
+@@ -581,14 +578,10 @@
+         updateVersionAndAnnounce();
+     }
+ 
+-<<<<<<<
+     /**
+      * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+      */
+-    public synchronized TransformationResult transform(SchemaTransformation transformation, boolean locally, long now) throws UnknownHostException
+-=======
+     public synchronized SchemaTransformationResult transform(SchemaTransformation transformation, boolean locally, long now) throws UnknownHostException
+->>>>>>>
+     {
+         KeyspacesDiff diff;
+         Keyspaces before = sharedKeyspaces;

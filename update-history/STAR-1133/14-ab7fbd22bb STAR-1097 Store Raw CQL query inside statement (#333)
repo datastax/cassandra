@@ -1,0 +1,143 @@
+--- a/src/java/org/apache/cassandra/cql3/QueryEvents.java
++++ b/src/java/org/apache/cassandra/cql3/QueryEvents.java
+@@ -111,12 +111,8 @@
+     {
+         try
+         {
+-<<<<<<<
+             String query = statement.getRawCQLStatement();
+-            final String possiblyObfuscatedQuery = listeners.size() > 0 ? possiblyObfuscateQuery(statement, query) : query;
+-=======
+             final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
+->>>>>>>
+             for (Listener listener : listeners)
+                 listener.executeSuccess(statement, maybeObfuscatedQuery, options, state, queryTime, response);
+         }
+@@ -246,11 +242,7 @@
+         }
+     }
+ 
+-<<<<<<<
+-    private String maybeObfuscatePassword(CQLStatement statement, String query)
+-=======
+-    private String possiblyObfuscateQuery(@Nullable CQLStatement statement, String query)
+->>>>>>>
++    private String maybeObfuscatePassword(@Nullable CQLStatement statement, String query)
+     {
+         // Statement might be null as side-effect of failed parsing, originates from QueryMessage#execute
+         if (statement == null)
+--- a/src/java/org/apache/cassandra/cql3/QueryHandler.java
++++ b/src/java/org/apache/cassandra/cql3/QueryHandler.java
+@@ -62,20 +62,15 @@
+ 
+         public final MD5Digest resultMetadataId;
+ 
+-<<<<<<<
+         /**
+          * Contains the CQL statement source if the statement has been "regularly" perpared via
+          * {@link QueryHandler#prepare(String, ClientState, Map)}.
+          * Other usages of this class may or may not contain the CQL statement source.
+          */
+-        public final String rawCQLStatement;
+         public final String keyspace;
+         public final boolean fullyQualified;
+ 
+-        public Prepared(CQLStatement statement, String rawCQLStatement, boolean fullyQualified, String keyspace)
+-=======
+-        public Prepared(CQLStatement statement)
+->>>>>>>
++        public Prepared(CQLStatement statement, boolean fullyQualified, String keyspace)
+         {
+             this.statement = statement;
+             this.resultMetadataId = ResultSet.ResultMetadata.fromPrepared(statement).getResultMetadataId();
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -418,10 +418,7 @@
+         CQLStatement statement = raw.prepare(clientState);
+         statement.validate(new QueryState(clientState));
+ 
+-        if (isInternal)
+-            return new Prepared(statement, "", fullyQualified, keyspace);
+-        else
+-            return new Prepared(statement, query, fullyQualified, keyspace);
++        return new Prepared(statement, fullyQualified, keyspace);
+     }
+ 
+     public static UntypedResultSet executeInternal(String query, Object... values)
+@@ -543,10 +540,6 @@
+         if (newPreparedStatementBehaviour || DatabaseDescriptor.getForceNewPreparedStatementBehaviour())
+             return true;
+ 
+-<<<<<<<
+-        CQLStatement statement = getStatement(queryString, clientState);
+-        Prepared prepared = new Prepared(statement);
+-=======
+         synchronized (this)
+         {
+             CassandraVersion minVersion = Gossiper.instance.getMinVersion(DatabaseDescriptor.getWriteRpcTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS);
+@@ -618,7 +611,6 @@
+ 
+         Prepared prepared = parseAndPrepare(queryString, clientState, false);
+         CQLStatement statement = prepared.statement;
+->>>>>>>
+ 
+         int boundTerms = statement.getBindVariables().size();
+         if (boundTerms > FBUtilities.MAX_UNSIGNED_SHORT)
+--- a/src/java/org/apache/cassandra/transport/messages/BatchMessage.java
++++ b/src/java/org/apache/cassandra/transport/messages/BatchMessage.java
+@@ -182,14 +182,9 @@
+                 QueryHandler.Prepared p;
+                 if (query instanceof String)
+                 {
+-<<<<<<<
+                     p = QueryProcessor.parseAndPrepare((String) query,
+                                                        state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()),
+                                                        false);
+-=======
+-                    statement = QueryProcessor.parseStatement((String)query, state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
+-                    p = new QueryHandler.Prepared(statement);
+->>>>>>>
+                 }
+                 else
+                 {
+diff --git a/src/java/org/apache/cassandra/cql3/QueryHandler.java b/src/java/org/apache/cassandra/cql3/QueryHandler.java
+index 742145b339..a2b5b5a215 100644
+--- a/src/java/org/apache/cassandra/cql3/QueryHandler.java
++++ b/src/java/org/apache/cassandra/cql3/QueryHandler.java
+@@ -67,7 +67,6 @@ public interface QueryHandler
+          * {@link QueryHandler#prepare(String, ClientState, Map)}.
+          * Other usages of this class may or may not contain the CQL statement source.
+          */
+-        public final String rawCQLStatement;
+         public final String keyspace;
+         public final boolean fullyQualified;
+ 
+diff --git a/src/java/org/apache/cassandra/cql3/QueryProcessor.java b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+index 07d4f7e6b9..94b0e76c7f 100644
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -418,10 +418,7 @@ public class QueryProcessor implements QueryHandler
+         CQLStatement statement = raw.prepare(clientState);
+         statement.validate(new QueryState(clientState));
+ 
+-        if (isInternal)
+-            return new Prepared(statement, "", fullyQualified, keyspace);
+-        else
+-            return new Prepared(statement, query, fullyQualified, keyspace);
++        return new Prepared(statement, fullyQualified, keyspace);
+     }
+ 
+     public static UntypedResultSet executeInternal(String query, Object... values)
+diff --git a/src/java/org/apache/cassandra/service/StorageService.java b/src/java/org/apache/cassandra/service/StorageService.java
+index 8ce802b96a..d6514f4932 100644
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -3572,7 +3572,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
+     {
+         List<Pair<String, String>> statements = new ArrayList<>();
+         for (Entry<MD5Digest, QueryHandler.Prepared> e : QueryProcessor.instance.getPreparedStatements().entrySet())
+-            statements.add(Pair.create(e.getKey().toString(), e.getValue().rawCQLStatement));
++            statements.add(Pair.create(e.getKey().toString(), e.getValue().statement.getRawCQLStatement()));
+         return statements;
+     }
+ 

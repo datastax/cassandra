@@ -1,0 +1,38 @@
+--- a/src/java/org/apache/cassandra/locator/AbstractReplicationStrategy.java
++++ b/src/java/org/apache/cassandra/locator/AbstractReplicationStrategy.java
+@@ -68,18 +68,12 @@
+         this.keyspaceName = keyspaceName;
+     }
+ 
+-<<<<<<<
+-    public EndpointsForRange getCachedReplicas(long ringVersion, Token t)
+-=======
+     public TokenMetadata getTokenMetadata()
+     {
+         return tokenMetadata;
+     }
+ 
+-    private final Map<Token, EndpointsForRange> cachedReplicas = new NonBlockingHashMap<>();
+-
+-    public EndpointsForRange getCachedReplicas(Token t)
+->>>>>>>
++    public EndpointsForRange getCachedReplicas(long ringVersion, Token t)
+     {
+         return replicas.get(ringVersion, t);
+     }
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -971,12 +971,8 @@
+         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+ 
+         long startTime = System.nanoTime();
+-<<<<<<<
+-        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
+-=======
+         String ks = mutations.iterator().next().getKeyspaceName();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(ks);
+->>>>>>>
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(ks);
+ 
+         try
+         {

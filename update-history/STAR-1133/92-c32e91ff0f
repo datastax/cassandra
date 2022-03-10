@@ -1,0 +1,445 @@
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -289,17 +289,13 @@
+     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException, CasWriteUnknownResultException
+     {
+         final long startTimeForMetrics = System.nanoTime();
+-<<<<<<<
+         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+-=======
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
+         TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+         QueryInfoTracker.LWTWriteTracker lwtTracker = queryTracker().onLWTWrite(state.getClientState(),
+                                                                                 metadata,
+                                                                                 key,
+                                                                                 consistencyForPaxos,
+                                                                                 consistencyForCommit);;
+->>>>>>>
+         try
+         {
+             consistencyForPaxos.validateForCas(keyspaceName, state);
+@@ -369,45 +365,29 @@
+         catch (CasWriteTimeoutException wte)
+         {
+             metrics.casWriteMetrics.timeouts.mark();
+-<<<<<<<
+             metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+             lwtTracker.onError(wte);
+->>>>>>>
+             throw new CasWriteTimeoutException(wte.writeType, wte.consistency, wte.received, wte.blockFor, wte.contentions);
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.casWriteMetrics.timeouts.mark();
+-<<<<<<<
+             metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+             lwtTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (WriteFailureException | ReadFailureException e)
+         {
+             metrics.casWriteMetrics.failures.mark();
+-<<<<<<<
+             metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyForPaxos).failures.mark();
+             lwtTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (UnavailableException e)
+         {
+             metrics.casWriteMetrics.unavailables.mark();
+-<<<<<<<
+             metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
+             lwtTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         finally
+@@ -840,15 +820,11 @@
+      * @param consistencyLevel the consistency level for the operation
+      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
+      */
+-<<<<<<<
+     public static void mutate(List<? extends IMutation> mutations,
+                               ConsistencyLevel consistencyLevel,
+                               long queryStartNanoTime,
+-                              CoordinatorClientRequestMetrics metrics,
++                              ClientRequestsMetrics metrics,
+                               ClientState state)
+-=======
+-    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, ClientRequestsMetrics metrics)
+->>>>>>>
+     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
+     {
+         Tracing.trace("Determining replicas for mutation");
+@@ -1139,12 +1115,8 @@
+                                         ConsistencyLevel consistencyLevel,
+                                         boolean requireQuorumForRemove,
+                                         long queryStartNanoTime,
+-<<<<<<<
+-                                        ClientRequestsMetrics metrics)
+-=======
+-                                        CoordinatorClientRequestMetrics metrics,
++                                        ClientRequestsMetrics metrics,
+                                         ClientState clientState)
+->>>>>>>
+     throws UnavailableException, OverloadedException, WriteTimeoutException
+     {
+         Tracing.trace("Determining replicas for atomic batch");
+@@ -1203,11 +1175,7 @@
+         catch (UnavailableException e)
+         {
+             metrics.writeMetrics.unavailables.mark();
+-<<<<<<<
+-            metrics.writeMetricsForLevel(consistency_level).unavailables.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+             Tracing.trace("Unavailable");
+             writeTracker.onError(e);
+             throw e;
+@@ -1215,11 +1183,7 @@
+         catch (WriteTimeoutException e)
+         {
+             metrics.writeMetrics.timeouts.mark();
+-<<<<<<<
+-            metrics.writeMetricsForLevel(consistency_level).timeouts.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyLevel).timeouts.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).timeouts.mark();
+             Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+             writeTracker.onError(e);
+             throw e;
+@@ -1227,11 +1191,7 @@
+         catch (WriteFailureException e)
+         {
+             metrics.writeMetrics.failures.mark();
+-<<<<<<<
+-            metrics.writeMetricsForLevel(consistency_level).failures.mark();
+-=======
+-            metrics.writeMetricsMap.get(consistencyLevel).failures.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).failures.mark();
+             Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+             writeTracker.onError(e);
+             throw e;
+@@ -1240,11 +1200,7 @@
+         {
+             long latency = System.nanoTime() - startTime;
+             metrics.writeMetrics.addNano(latency);
+-<<<<<<<
+-            metrics.writeMetricsForLevel(consistency_level).addNano(latency);
+-=======
+-            metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+         }
+     }
+@@ -1405,11 +1361,7 @@
+                                                                             WriteType writeType,
+                                                                             BatchlogCleanup cleanup,
+                                                                             long queryStartNanoTime,
+-<<<<<<<
+                                                                             ClientRequestsMetrics metrics)
+-=======
+-                                                                            CoordinatorClientRequestMetrics metrics)
+->>>>>>>
+     {
+         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, liveAndDown, ReplicaPlans.writeAll);
+@@ -1913,36 +1865,24 @@
+         {
+             metrics.readMetrics.unavailables.mark();
+             metrics.casReadMetrics.unavailables.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.readMetrics.timeouts.mark();
+             metrics.casReadMetrics.timeouts.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+             metrics.readMetrics.failures.mark();
+             metrics.casReadMetrics.failures.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         finally
+@@ -1980,34 +1920,22 @@
+         catch (UnavailableException e)
+         {
+             metrics.readMetrics.unavailables.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.readMetrics.timeouts.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+             metrics.readMetrics.failures.mark();
+-<<<<<<<
+             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+-=======
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+             readTracker.onError(e);
+->>>>>>>
+             throw e;
+         }
+         finally
+@@ -2408,15 +2336,9 @@
+      */
+     private static class ViewWriteMetricsWrapped extends BatchlogResponseHandler<IMutation>
+     {
+-<<<<<<<
+         ClientRequestsMetrics metrics;
+ 
+         public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, ClientRequestsMetrics metrics)
+-=======
+-        CoordinatorClientRequestMetrics metrics;
+-
+-        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
+->>>>>>>
+         {
+             super(writeHandler, i, cleanup, queryStartNanoTime);
+             this.metrics = metrics;
+--- a/src/java/org/apache/cassandra/service/reads/DataResolver.java
++++ b/src/java/org/apache/cassandra/service/reads/DataResolver.java
+@@ -61,11 +61,8 @@
+ {
+     private final boolean enforceStrictLiveness;
+     private final ReadRepair<E, P> readRepair;
+-<<<<<<<
+     private final boolean trackRepairedStatus;
+-=======
+     protected final QueryInfoTracker.ReadTracker readTracker;
+->>>>>>>
+ 
+     public DataResolver(ReadCommand command,
+                         ReplicaPlan.Shared<E, P> replicaPlan,
+@@ -73,25 +70,22 @@
+                         long queryStartNanoTime,
+                         QueryInfoTracker.ReadTracker readTracker)
+     {
+-        this(command, replicaPlan, readRepair, queryStartNanoTime, false);
++        this(command, replicaPlan, readRepair, queryStartNanoTime, false, readTracker);
+     }
+ 
+-    public DataResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, ReadRepair<E, P> readRepair, long queryStartNanoTime, boolean trackRepairedStatus)
++    public DataResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, ReadRepair<E, P> readRepair, long queryStartNanoTime, boolean trackRepairedStatus, QueryInfoTracker.ReadTracker readTracker)
+     {
+         super(command, replicaPlan, queryStartNanoTime);
+         this.enforceStrictLiveness = command.metadata().enforceStrictLiveness();
+         this.readRepair = readRepair;
+-<<<<<<<
+-        this.readTracker = readTracker;
+-=======
+         this.trackRepairedStatus = trackRepairedStatus;
++        this.readTracker = readTracker;
+     }
+ 
+     public PartitionIterator getData()
+     {
+         ReadResponse response = responses.get(0).payload;
+         return UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
+->>>>>>>
+     }
+ 
+     public boolean isDataPresent()
+--- a/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java
++++ b/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java
+@@ -36,12 +36,8 @@
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.locator.ReplicaPlan;
+ import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+-<<<<<<<
+ import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+-=======
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
+ import org.apache.cassandra.service.QueryInfoTracker;
+->>>>>>>
+ import org.apache.cassandra.tracing.Tracing;
+ import org.apache.cassandra.utils.AbstractIterator;
+ import org.apache.cassandra.utils.CloseableIterator;
+--- a/src/java/org/apache/cassandra/service/reads/repair/AbstractReadRepair.java
++++ b/src/java/org/apache/cassandra/service/reads/repair/AbstractReadRepair.java
+@@ -133,11 +133,7 @@
+         boolean trackRepairedStatus = DatabaseDescriptor.getRepairedDataTrackingForPartitionReadsEnabled();
+ 
+         // Do a full data read to resolve the correct response (and repair node that need be)
+-<<<<<<<
+-        DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, queryStartNanoTime, digestResolver.getReadTracker());
+-=======
+-        DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, queryStartNanoTime, trackRepairedStatus);
+->>>>>>>
++        DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, queryStartNanoTime, trackRepairedStatus, digestResolver.getReadTracker());
+         ReadCallback<E, P> readCallback = new ReadCallback<>(resolver, command, replicaPlan, queryStartNanoTime);
+ 
+         digestRepair = new DigestRepair<>(resolver, readCallback, resultConsumer);
+--- a/src/java/org/apache/cassandra/tracing/TraceStateImpl.java
++++ b/src/java/org/apache/cassandra/tracing/TraceStateImpl.java
+@@ -35,14 +35,9 @@
+ import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.exceptions.OverloadedException;
+ import org.apache.cassandra.locator.InetAddressAndPort;
+-<<<<<<<
++import org.apache.cassandra.service.ClientState;
+ import org.apache.cassandra.metrics.ClientRequestsMetrics;
+ import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+-=======
+-import org.apache.cassandra.service.ClientState;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
+->>>>>>>
+ import org.apache.cassandra.service.StorageProxy;
+ import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.WrappedRunnable;
+@@ -126,13 +121,8 @@
+     {
+         try
+         {
+-<<<<<<<
+             ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
+-            StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime(), metrics);
+-=======
+-            CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(mutation.getKeyspaceName());
+             StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime(), metrics, state);
+->>>>>>>
+         }
+         catch (OverloadedException e)
+         {
+--- a/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java
++++ b/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java
+@@ -40,11 +40,8 @@
+ 
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.locator.InetAddressAndPort;
+-<<<<<<<
+ import org.apache.cassandra.service.ClientState;
+-=======
+ import org.apache.cassandra.service.ClientWarn;
+->>>>>>>
+ import org.apache.cassandra.tracing.TraceState;
+ import org.apache.cassandra.tracing.TraceStateImpl;
+ import org.apache.cassandra.tracing.Tracing;
+@@ -137,11 +134,12 @@
+     }
+ 
+     public static void checkTracingIsPropagated(LocalAwareExecutorService executor, Runnable schedulingTask) {
++        ClientState clientState = ClientState.forInternalCalls();
+         ClientWarn.instance.captureWarnings();
+         Assertions.assertThat(ClientWarn.instance.getWarnings()).isNullOrEmpty();
+ 
+         ConcurrentLinkedQueue<String> q = new ConcurrentLinkedQueue<>();
+-        Tracing.instance.set(new TraceState(FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE)
++        Tracing.instance.set(new TraceState(clientState, FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE)
+         {
+             @Override
+             protected void traceImpl(String message)
+--- a/test/unit/org/apache/cassandra/net/MessageTest.java
++++ b/test/unit/org/apache/cassandra/net/MessageTest.java
+@@ -39,10 +39,7 @@
+ import org.apache.cassandra.tracing.Tracing;
+ import org.apache.cassandra.tracing.Tracing.TraceType;
+ import org.apache.cassandra.utils.FBUtilities;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.utils.FreeRunningClock;
+->>>>>>>
+ 
+ import static org.apache.cassandra.net.Message.serializer;
+ import static org.apache.cassandra.net.MessagingService.VERSION_3014;
+--- a/test/unit/org/apache/cassandra/service/reads/DataResolverTest.java
++++ b/test/unit/org/apache/cassandra/service/reads/DataResolverTest.java
+@@ -1254,11 +1254,7 @@
+ 
+             public TestableDataResolver(ReadCommand command, ReplicaPlan.SharedForRangeRead plan, ReadRepair readRepair, long queryStartNanoTime)
+             {
+-<<<<<<<
+-                super(command, plan, readRepair, queryStartNanoTime, noopReadTracker());
+-=======
+-                super(command, plan, readRepair, queryStartNanoTime, true);
+->>>>>>>
++                super(command, plan, readRepair, queryStartNanoTime, true, noopReadTracker());
+             }
+ 
+             protected RepairedDataVerifier getRepairedDataVerifier(ReadCommand command)
+--- a/test/unit/org/apache/cassandra/service/reads/range/RangeCommandIteratorTest.java
++++ b/test/unit/org/apache/cassandra/service/reads/range/RangeCommandIteratorTest.java
+@@ -40,14 +40,10 @@
+ import org.apache.cassandra.locator.ReplicaPlan;
+ import org.apache.cassandra.locator.ReplicaPlans;
+ import org.apache.cassandra.schema.KeyspaceParams;
+-import org.apache.cassandra.service.QueryInfoTracker;
+ import org.apache.cassandra.utils.CloseableIterator;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.apache.cassandra.service.QueryInfoTracker.*;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ 
+ public class RangeCommandIteratorTest
+diff --git a/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java b/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java
+index 8f7bdf6326..0f91e09a90 100644
+--- a/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java
++++ b/test/unit/org/apache/cassandra/concurrent/DebuggableThreadPoolExecutorTest.java
+@@ -134,11 +134,12 @@ public class DebuggableThreadPoolExecutorTest
+     }
+ 
+     public static void checkTracingIsPropagated(LocalAwareExecutorService executor, Runnable schedulingTask) {
++        ClientState clientState = ClientState.forInternalCalls();
+         ClientWarn.instance.captureWarnings();
+         Assertions.assertThat(ClientWarn.instance.getWarnings()).isNullOrEmpty();
+ 
+         ConcurrentLinkedQueue<String> q = new ConcurrentLinkedQueue<>();
+-        Tracing.instance.set(new TraceState(FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE)
++        Tracing.instance.set(new TraceState(clientState, FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE)
+         {
+             @Override
+             protected void traceImpl(String message)

@@ -1,0 +1,1202 @@
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -100,11 +100,8 @@
+ import org.apache.cassandra.locator.ReplicaPlans;
+ import org.apache.cassandra.locator.Replicas;
+ import org.apache.cassandra.metrics.CASClientRequestMetrics;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
+->>>>>>>
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ import org.apache.cassandra.metrics.ReadRepairMetrics;
+ import org.apache.cassandra.metrics.StorageMetrics;
+ import org.apache.cassandra.net.ForwardingInfo;
+@@ -134,13 +131,6 @@
+ 
+ import static java.util.concurrent.TimeUnit.MILLISECONDS;
+ import static java.util.concurrent.TimeUnit.NANOSECONDS;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casReadMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casWriteMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetricsForLevel;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.viewWriteMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetricsForLevel;
+ import static org.apache.cassandra.net.NoPayload.noPayload;
+ import static org.apache.cassandra.net.Verb.BATCH_STORE_REQ;
+ import static org.apache.cassandra.net.Verb.MUTATION_REQ;
+@@ -214,10 +204,6 @@
+                                   .execute(counterWriteTask(mutation, targets.withContact(selected), responseHandler, localDataCenter));
+         };
+ 
+-<<<<<<<
+-=======
+-
+->>>>>>>
+         ReadRepairMetrics.init();
+ 
+         if (disableSerialReadLinearizability)
+@@ -284,7 +270,7 @@
+     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException, CasWriteUnknownResultException
+     {
+         final long startTimeForMetrics = System.nanoTime();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+         try
+         {
+             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+@@ -315,13 +301,8 @@
+                 PartitionUpdate updates = request.makeUpdates(current, state);
+ 
+                 long size = updates.dataSize();
+-<<<<<<<
+-                casWriteMetrics.mutationSize.update(size);
+-                writeMetricsForLevel(consistencyForPaxos).mutationSize.update(size);
+-=======
+                 metrics.casWriteMetrics.mutationSize.update(size);
+-                metrics.writeMetricsMap.get(consistencyForPaxos).mutationSize.update(size);
+->>>>>>>
++                metrics.writeMetricsForLevel(consistencyForPaxos).mutationSize.update(size);
+ 
+                 // Apply triggers to cas updates. A consideration here is that
+                 // triggers emit Mutations, and so a given trigger implementation
+@@ -353,58 +334,33 @@
+         }
+         catch (CasWriteTimeoutException wte)
+         {
+-<<<<<<<
+-            casWriteMetrics.timeouts.mark();
+-            writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+-=======
+             metrics.casWriteMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+             throw new CasWriteTimeoutException(wte.writeType, wte.consistency, wte.received, wte.blockFor, wte.contentions);
+         }
+         catch (ReadTimeoutException e)
+         {
+-<<<<<<<
+-            casWriteMetrics.timeouts.mark();
+-            writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+-=======
+             metrics.casWriteMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+             throw e;
+         }
+         catch (WriteFailureException | ReadFailureException e)
+         {
+-<<<<<<<
+-            casWriteMetrics.failures.mark();
+-            writeMetricsForLevel(consistencyForPaxos).failures.mark();
+-=======
+             metrics.casWriteMetrics.failures.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).failures.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
+             throw e;
+         }
+         catch (UnavailableException e)
+         {
+-<<<<<<<
+-            casWriteMetrics.unavailables.mark();
+-            writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+-=======
+             metrics.casWriteMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+             throw e;
+         }
+         finally
+         {
+             final long latency = System.nanoTime() - startTimeForMetrics;
+-<<<<<<<
+-            casWriteMetrics.addNano(latency);
+-            writeMetricsForLevel(consistencyForPaxos).addNano(latency);
+-=======
+             metrics.casWriteMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistencyForPaxos).addNano(latency);
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyForPaxos).addNano(latency);
+         }
+     }
+ 
+@@ -830,7 +786,7 @@
+      * @param consistencyLevel the consistency level for the operation
+      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
+      */
+-    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
++    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, ClientRequestsMetrics metrics)
+     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
+     {
+         Tracing.trace("Determining replicas for mutation");
+@@ -872,26 +828,16 @@
+             {
+                 if (ex instanceof WriteFailureException)
+                 {
+-<<<<<<<
+                     metrics.writeMetrics.failures.mark();
+-                    metrics.writeMetricsMap.get(consistencyLevel).failures.mark();
+-=======
+-                    writeMetrics.failures.mark();
+-                    writeMetricsForLevel(consistencyLevel).failures.mark();
+->>>>>>>
++                    metrics.writeMetricsForLevel(consistencyLevel).failures.mark();
+                     WriteFailureException fe = (WriteFailureException)ex;
+                     Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                   fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
+                 }
+                 else
+                 {
+-<<<<<<<
+                     metrics.writeMetrics.timeouts.mark();
+-                    metrics.writeMetricsMap.get(consistencyLevel).timeouts.mark();
+-=======
+-                    writeMetrics.timeouts.mark();
+-                    writeMetricsForLevel(consistencyLevel).timeouts.mark();
+->>>>>>>
++                    metrics.writeMetricsForLevel(consistencyLevel).timeouts.mark();
+                     WriteTimeoutException te = (WriteTimeoutException)ex;
+                     Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
+                 }
+@@ -900,38 +846,23 @@
+         }
+         catch (UnavailableException e)
+         {
+-<<<<<<<
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
+-=======
+-            writeMetrics.unavailables.mark();
+-            writeMetricsForLevel(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+             Tracing.trace("Unavailable");
+             throw e;
+         }
+         catch (OverloadedException e)
+         {
+-<<<<<<<
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
+-=======
+-            writeMetrics.unavailables.mark();
+-            writeMetricsForLevel(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+             Tracing.trace("Overloaded");
+             throw e;
+         }
+         finally
+         {
+             long latency = System.nanoTime() - startTime;
+-<<<<<<<
+             metrics.writeMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
+-=======
+-            writeMetrics.addNano(latency);
+-            writeMetricsForLevel(consistencyLevel).addNano(latency);
+->>>>>>>
++            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+         }
+     }
+@@ -994,7 +925,7 @@
+         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+ 
+         long startTime = System.nanoTime();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
+ 
+         try
+         {
+@@ -1102,20 +1033,15 @@
+     {
+         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
+         String keyspaceName = mutations.iterator().next().getKeyspaceName();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+ 
+         boolean updatesView = Keyspace.open(mutations.iterator().next().getKeyspaceName())
+                               .viewManager
+                               .updatesAffectView(mutations, true);
+ 
+         long size = IMutation.dataSize(mutations);
+-<<<<<<<
+         metrics.writeMetrics.mutationSize.update(size);
+-        metrics.writeMetricsMap.get(consistencyLevel).mutationSize.update(size);
+-=======
+-        writeMetrics.mutationSize.update(size);
+-        writeMetricsForLevel(consistencyLevel).mutationSize.update(size);
+->>>>>>>
++        metrics.writeMetricsForLevel(consistencyLevel).mutationSize.update(size);
+ 
+         if (augmented != null)
+             mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime, metrics);
+@@ -1143,7 +1069,7 @@
+                                         ConsistencyLevel consistency_level,
+                                         boolean requireQuorumForRemove,
+                                         long queryStartNanoTime,
+-                                        CoordinatorClientRequestMetrics metrics)
++                                        ClientRequestsMetrics metrics)
+     throws UnavailableException, OverloadedException, WriteTimeoutException
+     {
+         Tracing.trace("Determining replicas for atomic batch");
+@@ -1197,50 +1123,30 @@
+         }
+         catch (UnavailableException e)
+         {
+-<<<<<<<
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistency_level).unavailables.mark();
+-=======
+-            writeMetrics.unavailables.mark();
+-            writeMetricsForLevel(consistency_level).unavailables.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistency_level).unavailables.mark();
+             Tracing.trace("Unavailable");
+             throw e;
+         }
+         catch (WriteTimeoutException e)
+         {
+-<<<<<<<
+             metrics.writeMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistency_level).timeouts.mark();
+-=======
+-            writeMetrics.timeouts.mark();
+-            writeMetricsForLevel(consistency_level).timeouts.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistency_level).timeouts.mark();
+             Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+             throw e;
+         }
+         catch (WriteFailureException e)
+         {
+-<<<<<<<
+             metrics.writeMetrics.failures.mark();
+-            metrics.writeMetricsMap.get(consistency_level).failures.mark();
+-=======
+-            writeMetrics.failures.mark();
+-            writeMetricsForLevel(consistency_level).failures.mark();
+->>>>>>>
++            metrics.writeMetricsForLevel(consistency_level).failures.mark();
+             Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+             throw e;
+         }
+         finally
+         {
+             long latency = System.nanoTime() - startTime;
+-<<<<<<<
+             metrics.writeMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistency_level).addNano(latency);
+-=======
+-            writeMetrics.addNano(latency);
+-            writeMetricsForLevel(consistency_level).addNano(latency);
+->>>>>>>
++            metrics.writeMetricsForLevel(consistency_level).addNano(latency);
+             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+         }
+     }
+@@ -1400,8 +1306,8 @@
+                                                                             AtomicLong baseComplete,
+                                                                             WriteType writeType,
+                                                                             BatchlogCleanup cleanup,
+-                                                                            long queryStartNanoTime, 
+-                                                                            CoordinatorClientRequestMetrics metrics)
++                                                                            long queryStartNanoTime,
++                                                                            ClientRequestsMetrics metrics)
+     {
+         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, liveAndDown, ReplicaPlans.writeAll);
+@@ -1805,16 +1711,11 @@
+     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
+     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
+     {
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.queries))
+         {
+-<<<<<<<
+             metrics.readMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+-=======
+-            readMetrics.unavailables.mark();
+-            readMetricsForLevel(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw new IsBootstrappingException();
+         }
+ 
+@@ -1830,7 +1731,7 @@
+         if (group.queries.size() > 1)
+             throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
+ 
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         long start = System.nanoTime();
+         SinglePartitionReadCommand command = group.queries.get(0);
+         TableMetadata metadata = command.metadata();
+@@ -1880,55 +1781,31 @@
+         }
+         catch (UnavailableException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.unavailables.mark();
+             metrics.casReadMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+-=======
+-            readMetrics.unavailables.mark();
+-            casReadMetrics.unavailables.mark();
+-            readMetricsForLevel(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.timeouts.mark();
+             metrics.casReadMetrics.timeouts.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+-=======
+-            readMetrics.timeouts.mark();
+-            casReadMetrics.timeouts.mark();
+-            readMetricsForLevel(consistencyLevel).timeouts.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.failures.mark();
+             metrics.casReadMetrics.failures.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+-=======
+-            readMetrics.failures.mark();
+-            casReadMetrics.failures.mark();
+-            readMetricsForLevel(consistencyLevel).failures.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+             throw e;
+         }
+         finally
+         {
+             long latency = System.nanoTime() - start;
+-<<<<<<<
+             metrics.readMetrics.addNano(latency);
+             metrics.casReadMetrics.addNano(latency);
+-            metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
+-=======
+-            readMetrics.addNano(latency);
+-            casReadMetrics.addNano(latency);
+-            readMetricsForLevel(consistencyLevel).addNano(latency);
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+         }
+ 
+@@ -1939,7 +1816,7 @@
+     private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+     throws UnavailableException, ReadFailureException, ReadTimeoutException
+     {
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         long start = System.nanoTime();
+         try
+         {
+@@ -1955,47 +1832,27 @@
+         }
+         catch (UnavailableException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
+-=======
+-            readMetrics.unavailables.mark();
+-            readMetricsForLevel(consistencyLevel).unavailables.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.timeouts.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
+-=======
+-            readMetrics.timeouts.mark();
+-            readMetricsForLevel(consistencyLevel).timeouts.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+-<<<<<<<
+             metrics.readMetrics.failures.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
+-=======
+-            readMetrics.failures.mark();
+-            readMetricsForLevel(consistencyLevel).failures.mark();
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+             throw e;
+         }
+         finally
+         {
+             long latency = System.nanoTime() - start;
+-<<<<<<<
+             metrics.readMetrics.addNano(latency);
+-            metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
+-=======
+-            readMetrics.addNano(latency);
+-            readMetricsForLevel(consistencyLevel).addNano(latency);
+->>>>>>>
++            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
+             for (ReadCommand command : group.queries)
+                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+@@ -2379,9 +2236,9 @@
+      */
+     private static class ViewWriteMetricsWrapped extends BatchlogResponseHandler<IMutation>
+     {
+-        CoordinatorClientRequestMetrics metrics;
+-        
+-        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
++        ClientRequestsMetrics metrics;
++
++        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, ClientRequestsMetrics metrics)
+         {
+             super(writeHandler, i, cleanup, queryStartNanoTime);
+             this.metrics = metrics;
+diff --git a/src/java/org/apache/cassandra/cql3/QueryProcessor.java b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+index b3e53ae3e9..fc22ce4e0c 100644
+--- a/src/java/org/apache/cassandra/cql3/QueryProcessor.java
++++ b/src/java/org/apache/cassandra/cql3/QueryProcessor.java
+@@ -38,7 +38,8 @@ import org.antlr.runtime.*;
+ import org.apache.cassandra.concurrent.ScheduledExecutors;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.metrics.ClientRequestMetrics;
+-import org.apache.cassandra.metrics.ClientRequestsMetricsHolder;
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ import org.apache.cassandra.schema.Schema;
+ import org.apache.cassandra.schema.SchemaChangeListener;
+ import org.apache.cassandra.schema.SchemaConstants;
+@@ -261,8 +262,9 @@ public class QueryProcessor implements QueryHandler
+ 
+     private ResultMessage processNodeLocalWrite(CQLStatement statement, QueryState queryState, QueryOptions options)
+     {
+-        ClientRequestMetrics  levelMetrics = ClientRequestsMetricsHolder.writeMetricsForLevel(ConsistencyLevel.NODE_LOCAL);
+-        ClientRequestMetrics globalMetrics = ClientRequestsMetricsHolder.writeMetrics;
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics((statement instanceof QualifiedStatement) ? ((QualifiedStatement) statement).keyspace() : null);
++        ClientRequestMetrics  levelMetrics = metrics.writeMetricsForLevel(ConsistencyLevel.NODE_LOCAL);
++        ClientRequestMetrics globalMetrics = metrics.writeMetrics;
+ 
+         long startTime = System.nanoTime();
+         try
+@@ -279,8 +281,9 @@ public class QueryProcessor implements QueryHandler
+ 
+     private ResultMessage processNodeLocalSelect(SelectStatement statement, QueryState queryState, QueryOptions options)
+     {
+-        ClientRequestMetrics  levelMetrics = ClientRequestsMetricsHolder.readMetricsForLevel(ConsistencyLevel.NODE_LOCAL);
+-        ClientRequestMetrics globalMetrics = ClientRequestsMetricsHolder.readMetrics;
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(statement.keyspace());
++        ClientRequestMetrics  levelMetrics = metrics.readMetricsForLevel(ConsistencyLevel.NODE_LOCAL);
++        ClientRequestMetrics globalMetrics = metrics.readMetrics;
+ 
+         if (StorageService.instance.isBootstrapMode() && !SchemaConstants.isLocalSystemKeyspace(statement.keyspace()))
+         {
+diff --git a/src/java/org/apache/cassandra/metrics/ClientRequestsMetrics.java b/src/java/org/apache/cassandra/metrics/ClientRequestsMetrics.java
+index 1d61546ec0..ba5799853f 100644
+--- a/src/java/org/apache/cassandra/metrics/ClientRequestsMetrics.java
++++ b/src/java/org/apache/cassandra/metrics/ClientRequestsMetrics.java
+@@ -22,7 +22,7 @@ import java.util.Map;
+ 
+ import org.apache.cassandra.db.ConsistencyLevel;
+ 
+-public final class ClientRequestsMetricsHolder
++public final class ClientRequestsMetrics
+ {
+     public final ClientRequestMetrics readMetrics;
+     public final ClientRangeRequestMetrics rangeMetrics;
+@@ -33,7 +33,7 @@ public final class ClientRequestsMetricsHolder
+     private final Map<ConsistencyLevel, ClientRequestMetrics> readMetricsMap;
+     private final Map<ConsistencyLevel, ClientWriteRequestMetrics> writeMetricsMap;
+ 
+-    public ClientRequestsMetricsHolder()
++    public ClientRequestsMetrics()
+     {
+         this("");
+     }
+@@ -42,7 +42,7 @@ public final class ClientRequestsMetricsHolder
+      * CassandraMetricsRegistry requires unique metrics name, otherwise it returns previous metrics.
+      * CNDB will create coordinator metrics with unique name prefix for each tenant
+      */
+-    public ClientRequestsMetricsHolder(String namePrefix)
++    public ClientRequestsMetrics(String namePrefix)
+     {
+         readMetrics = new ClientRequestMetrics("Read", namePrefix);
+         rangeMetrics = new ClientRangeRequestMetrics("RangeSlice", namePrefix);
+diff --git a/src/java/org/apache/cassandra/metrics/ClientRequestsMetricsProvider.java b/src/java/org/apache/cassandra/metrics/ClientRequestsMetricsProvider.java
+index 3a43c7b380..ac0b71d827 100644
+--- a/src/java/org/apache/cassandra/metrics/ClientRequestsMetricsProvider.java
++++ b/src/java/org/apache/cassandra/metrics/ClientRequestsMetricsProvider.java
+@@ -22,22 +22,22 @@ package org.apache.cassandra.metrics;
+ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY;
+ 
+ /**
+- * Provides access to the {@link CoordinatorClientRequestMetrics} instance used by this node
++ * Provides access to the {@link ClientRequestsMetrics} instance used by this node
+  * and provides per-tenant metrics in CNDB.
+  */
+-public interface CoordinatorClientRequestMetricsProvider
++public interface ClientRequestsMetricsProvider
+ {
+-    CoordinatorClientRequestMetricsProvider instance = CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString() == null ?
+-                                                       new DefaultCoordinatorMetricsProvider() :
+-                                                       make(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString());
++    ClientRequestsMetricsProvider instance = CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString() == null ?
++                                             new DefaultClientRequestsMetricsProvider() :
++                                             make(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString());
+ 
+-    CoordinatorClientRequestMetrics metrics(String keyspace);
++    ClientRequestsMetrics metrics(String keyspace);
+ 
+-    static CoordinatorClientRequestMetricsProvider make(String customImpl)
++    static ClientRequestsMetricsProvider make(String customImpl)
+     {
+         try
+         {
+-            return (CoordinatorClientRequestMetricsProvider) Class.forName(customImpl).newInstance();
++            return (ClientRequestsMetricsProvider) Class.forName(customImpl).newInstance();
+         }
+         catch (Throwable ex)
+         {
+@@ -45,12 +45,12 @@ public interface CoordinatorClientRequestMetricsProvider
+         }
+     }
+ 
+-    class DefaultCoordinatorMetricsProvider implements CoordinatorClientRequestMetricsProvider
++    class DefaultClientRequestsMetricsProvider implements ClientRequestsMetricsProvider
+     {
+-        private final CoordinatorClientRequestMetrics metrics = new CoordinatorClientRequestMetrics();
++        private final ClientRequestsMetrics metrics = new ClientRequestsMetrics("");
+ 
+         @Override
+-        public CoordinatorClientRequestMetrics metrics(String keyspace)
++        public ClientRequestsMetrics metrics(String keyspace)
+         {
+             return metrics;
+         }
+diff --git a/src/java/org/apache/cassandra/service/StorageProxy.java b/src/java/org/apache/cassandra/service/StorageProxy.java
+index 04dfdd5e24..8c2a4fe9be 100644
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -100,8 +100,8 @@ import org.apache.cassandra.locator.ReplicaPlan;
+ import org.apache.cassandra.locator.ReplicaPlans;
+ import org.apache.cassandra.locator.Replicas;
+ import org.apache.cassandra.metrics.CASClientRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ import org.apache.cassandra.metrics.ReadRepairMetrics;
+ import org.apache.cassandra.metrics.StorageMetrics;
+ import org.apache.cassandra.net.ForwardingInfo;
+@@ -270,7 +270,7 @@ public class StorageProxy implements StorageProxyMBean
+     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException, CasWriteUnknownResultException
+     {
+         final long startTimeForMetrics = System.nanoTime();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+         try
+         {
+             TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
+@@ -302,7 +302,7 @@ public class StorageProxy implements StorageProxyMBean
+ 
+                 long size = updates.dataSize();
+                 metrics.casWriteMetrics.mutationSize.update(size);
+-                metrics.writeMetricsMap.get(consistencyForPaxos).mutationSize.update(size);
++                metrics.writeMetricsForLevel(consistencyForPaxos).mutationSize.update(size);
+ 
+                 // Apply triggers to cas updates. A consideration here is that
+                 // triggers emit Mutations, and so a given trigger implementation
+@@ -335,32 +335,32 @@ public class StorageProxy implements StorageProxyMBean
+         catch (CasWriteTimeoutException wte)
+         {
+             metrics.casWriteMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
++            metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+             throw new CasWriteTimeoutException(wte.writeType, wte.consistency, wte.received, wte.blockFor, wte.contentions);
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.casWriteMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
++            metrics.writeMetricsForLevel(consistencyForPaxos).timeouts.mark();
+             throw e;
+         }
+         catch (WriteFailureException | ReadFailureException e)
+         {
+             metrics.casWriteMetrics.failures.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).failures.mark();
++            metrics.writeMetricsForLevel(consistencyForPaxos).failures.mark();
+             throw e;
+         }
+         catch (UnavailableException e)
+         {
+             metrics.casWriteMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
++            metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+             throw e;
+         }
+         finally
+         {
+             final long latency = System.nanoTime() - startTimeForMetrics;
+             metrics.casWriteMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistencyForPaxos).addNano(latency);
++            metrics.writeMetricsForLevel(consistencyForPaxos).addNano(latency);
+         }
+     }
+ 
+@@ -786,7 +786,7 @@ public class StorageProxy implements StorageProxyMBean
+      * @param consistencyLevel the consistency level for the operation
+      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
+      */
+-    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
++    public static void mutate(List<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime, ClientRequestsMetrics metrics)
+     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
+     {
+         Tracing.trace("Determining replicas for mutation");
+@@ -829,7 +829,7 @@ public class StorageProxy implements StorageProxyMBean
+                 if (ex instanceof WriteFailureException)
+                 {
+                     metrics.writeMetrics.failures.mark();
+-                    metrics.writeMetricsMap.get(consistencyLevel).failures.mark();
++                    metrics.writeMetricsForLevel(consistencyLevel).failures.mark();
+                     WriteFailureException fe = (WriteFailureException)ex;
+                     Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                   fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
+@@ -837,7 +837,7 @@ public class StorageProxy implements StorageProxyMBean
+                 else
+                 {
+                     metrics.writeMetrics.timeouts.mark();
+-                    metrics.writeMetricsMap.get(consistencyLevel).timeouts.mark();
++                    metrics.writeMetricsForLevel(consistencyLevel).timeouts.mark();
+                     WriteTimeoutException te = (WriteTimeoutException)ex;
+                     Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
+                 }
+@@ -847,14 +847,14 @@ public class StorageProxy implements StorageProxyMBean
+         catch (UnavailableException e)
+         {
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
++            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+             Tracing.trace("Unavailable");
+             throw e;
+         }
+         catch (OverloadedException e)
+         {
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistencyLevel).unavailables.mark();
++            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+             Tracing.trace("Overloaded");
+             throw e;
+         }
+@@ -862,7 +862,7 @@ public class StorageProxy implements StorageProxyMBean
+         {
+             long latency = System.nanoTime() - startTime;
+             metrics.writeMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistencyLevel).addNano(latency);
++            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+         }
+     }
+@@ -925,7 +925,7 @@ public class StorageProxy implements StorageProxyMBean
+         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+ 
+         long startTime = System.nanoTime();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutations.iterator().next().getKeyspaceName());
+ 
+         try
+         {
+@@ -1033,7 +1033,7 @@ public class StorageProxy implements StorageProxyMBean
+     {
+         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
+         String keyspaceName = mutations.iterator().next().getKeyspaceName();
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(keyspaceName);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+ 
+         boolean updatesView = Keyspace.open(mutations.iterator().next().getKeyspaceName())
+                               .viewManager
+@@ -1041,7 +1041,7 @@ public class StorageProxy implements StorageProxyMBean
+ 
+         long size = IMutation.dataSize(mutations);
+         metrics.writeMetrics.mutationSize.update(size);
+-        metrics.writeMetricsMap.get(consistencyLevel).mutationSize.update(size);
++        metrics.writeMetricsForLevel(consistencyLevel).mutationSize.update(size);
+ 
+         if (augmented != null)
+             mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime, metrics);
+@@ -1069,7 +1069,7 @@ public class StorageProxy implements StorageProxyMBean
+                                         ConsistencyLevel consistency_level,
+                                         boolean requireQuorumForRemove,
+                                         long queryStartNanoTime,
+-                                        CoordinatorClientRequestMetrics metrics)
++                                        ClientRequestsMetrics metrics)
+     throws UnavailableException, OverloadedException, WriteTimeoutException
+     {
+         Tracing.trace("Determining replicas for atomic batch");
+@@ -1124,21 +1124,21 @@ public class StorageProxy implements StorageProxyMBean
+         catch (UnavailableException e)
+         {
+             metrics.writeMetrics.unavailables.mark();
+-            metrics.writeMetricsMap.get(consistency_level).unavailables.mark();
++            metrics.writeMetricsForLevel(consistency_level).unavailables.mark();
+             Tracing.trace("Unavailable");
+             throw e;
+         }
+         catch (WriteTimeoutException e)
+         {
+             metrics.writeMetrics.timeouts.mark();
+-            metrics.writeMetricsMap.get(consistency_level).timeouts.mark();
++            metrics.writeMetricsForLevel(consistency_level).timeouts.mark();
+             Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+             throw e;
+         }
+         catch (WriteFailureException e)
+         {
+             metrics.writeMetrics.failures.mark();
+-            metrics.writeMetricsMap.get(consistency_level).failures.mark();
++            metrics.writeMetricsForLevel(consistency_level).failures.mark();
+             Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+             throw e;
+         }
+@@ -1146,7 +1146,7 @@ public class StorageProxy implements StorageProxyMBean
+         {
+             long latency = System.nanoTime() - startTime;
+             metrics.writeMetrics.addNano(latency);
+-            metrics.writeMetricsMap.get(consistency_level).addNano(latency);
++            metrics.writeMetricsForLevel(consistency_level).addNano(latency);
+             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+         }
+     }
+@@ -1307,7 +1307,7 @@ public class StorageProxy implements StorageProxyMBean
+                                                                             WriteType writeType,
+                                                                             BatchlogCleanup cleanup,
+                                                                             long queryStartNanoTime,
+-                                                                            CoordinatorClientRequestMetrics metrics)
++                                                                            ClientRequestsMetrics metrics)
+     {
+         Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, liveAndDown, ReplicaPlans.writeAll);
+@@ -1711,11 +1711,11 @@ public class StorageProxy implements StorageProxyMBean
+     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, QueryState queryState, long queryStartNanoTime)
+     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
+     {
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.queries))
+         {
+             metrics.readMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw new IsBootstrappingException();
+         }
+ 
+@@ -1731,7 +1731,7 @@ public class StorageProxy implements StorageProxyMBean
+         if (group.queries.size() > 1)
+             throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
+ 
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         long start = System.nanoTime();
+         SinglePartitionReadCommand command = group.queries.get(0);
+         TableMetadata metadata = command.metadata();
+@@ -1783,21 +1783,21 @@ public class StorageProxy implements StorageProxyMBean
+         {
+             metrics.readMetrics.unavailables.mark();
+             metrics.casReadMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.readMetrics.timeouts.mark();
+             metrics.casReadMetrics.timeouts.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
++            metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+             metrics.readMetrics.failures.mark();
+             metrics.casReadMetrics.failures.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
++            metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+             throw e;
+         }
+         finally
+@@ -1805,7 +1805,7 @@ public class StorageProxy implements StorageProxyMBean
+             long latency = System.nanoTime() - start;
+             metrics.readMetrics.addNano(latency);
+             metrics.casReadMetrics.addNano(latency);
+-            metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
++            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+         }
+ 
+@@ -1816,7 +1816,7 @@ public class StorageProxy implements StorageProxyMBean
+     private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+     throws UnavailableException, ReadFailureException, ReadTimeoutException
+     {
+-        CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(group.metadata().keyspace);
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+         long start = System.nanoTime();
+         try
+         {
+@@ -1833,26 +1833,26 @@ public class StorageProxy implements StorageProxyMBean
+         catch (UnavailableException e)
+         {
+             metrics.readMetrics.unavailables.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).unavailables.mark();
++            metrics.readMetricsForLevel(consistencyLevel).unavailables.mark();
+             throw e;
+         }
+         catch (ReadTimeoutException e)
+         {
+             metrics.readMetrics.timeouts.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).timeouts.mark();
++            metrics.readMetricsForLevel(consistencyLevel).timeouts.mark();
+             throw e;
+         }
+         catch (ReadFailureException e)
+         {
+             metrics.readMetrics.failures.mark();
+-            metrics.readMetricsMap.get(consistencyLevel).failures.mark();
++            metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+             throw e;
+         }
+         finally
+         {
+             long latency = System.nanoTime() - start;
+             metrics.readMetrics.addNano(latency);
+-            metrics.readMetricsMap.get(consistencyLevel).addNano(latency);
++            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
+             for (ReadCommand command : group.queries)
+                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+@@ -2236,9 +2236,9 @@ public class StorageProxy implements StorageProxyMBean
+      */
+     private static class ViewWriteMetricsWrapped extends BatchlogResponseHandler<IMutation>
+     {
+-        CoordinatorClientRequestMetrics metrics;
++        ClientRequestsMetrics metrics;
+ 
+-        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, CoordinatorClientRequestMetrics metrics)
++        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime, ClientRequestsMetrics metrics)
+         {
+             super(writeHandler, i, cleanup, queryStartNanoTime);
+             this.metrics = metrics;
+diff --git a/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java b/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java
+index d7103f54e0..a5898e6c78 100644
+--- a/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java
++++ b/src/java/org/apache/cassandra/service/reads/range/RangeCommandIterator.java
+@@ -36,7 +36,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
+ import org.apache.cassandra.index.Index;
+ import org.apache.cassandra.locator.ReplicaPlan;
+ import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ import org.apache.cassandra.tracing.Tracing;
+ import org.apache.cassandra.utils.AbstractIterator;
+ import org.apache.cassandra.utils.CloseableIterator;
+@@ -96,7 +96,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
+                          int totalRangeCount,
+                          long queryStartNanoTime)
+     {
+-        this.rangeMetrics = CoordinatorClientRequestMetricsProvider.instance.metrics(command.metadata().keyspace).rangeMetrics;
++        this.rangeMetrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace).rangeMetrics;
+         this.replicaPlans = replicaPlans;
+         this.command = command;
+         this.concurrencyFactor = concurrencyFactor;
+diff --git a/src/java/org/apache/cassandra/tracing/TraceStateImpl.java b/src/java/org/apache/cassandra/tracing/TraceStateImpl.java
+index 13ede6946d..839eeffab5 100644
+--- a/src/java/org/apache/cassandra/tracing/TraceStateImpl.java
++++ b/src/java/org/apache/cassandra/tracing/TraceStateImpl.java
+@@ -35,8 +35,8 @@ import org.apache.cassandra.db.ConsistencyLevel;
+ import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.exceptions.OverloadedException;
+ import org.apache.cassandra.locator.InetAddressAndPort;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ import org.apache.cassandra.service.StorageProxy;
+ import org.apache.cassandra.utils.JVMStabilityInspector;
+ import org.apache.cassandra.utils.WrappedRunnable;
+@@ -120,7 +120,7 @@ public class TraceStateImpl extends TraceState
+     {
+         try
+         {
+-            CoordinatorClientRequestMetrics metrics = CoordinatorClientRequestMetricsProvider.instance.metrics(mutation.getKeyspaceName());
++            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
+             StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime(), metrics);
+         }
+         catch (OverloadedException e)
+diff --git a/test/distributed/org/apache/cassandra/distributed/test/sai/ConcurrencyFactorTest.java b/test/distributed/org/apache/cassandra/distributed/test/sai/ConcurrencyFactorTest.java
+index fa50d57b04..606f50b110 100644
+--- a/test/distributed/org/apache/cassandra/distributed/test/sai/ConcurrencyFactorTest.java
++++ b/test/distributed/org/apache/cassandra/distributed/test/sai/ConcurrencyFactorTest.java
+@@ -29,7 +29,7 @@ import org.apache.cassandra.distributed.Cluster;
+ import org.apache.cassandra.distributed.api.ConsistencyLevel;
+ import org.apache.cassandra.distributed.test.TestBaseImpl;
+ import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+-import org.apache.cassandra.metrics.CoordinatorClientRequestMetricsProvider;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ 
+ import static junit.framework.TestCase.assertEquals;
+ import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+@@ -43,7 +43,7 @@ public class ConcurrencyFactorTest extends TestBaseImpl
+ 
+     private org.apache.cassandra.distributed.Cluster cluster;
+ 
+-    ClientRangeRequestMetrics rangeMetrics = CoordinatorClientRequestMetricsProvider.instance.metrics(KEYSPACE).rangeMetrics;
++    ClientRangeRequestMetrics rangeMetrics = ClientRequestsMetricsProvider.instance.metrics(KEYSPACE).rangeMetrics;
+ 
+     @Before
+     public void init() throws IOException
+diff --git a/test/unit/org/apache/cassandra/cql3/NodeLocalConsistencyTest.java b/test/unit/org/apache/cassandra/cql3/NodeLocalConsistencyTest.java
+index a9f3d267df..61b97b3643 100644
+--- a/test/unit/org/apache/cassandra/cql3/NodeLocalConsistencyTest.java
++++ b/test/unit/org/apache/cassandra/cql3/NodeLocalConsistencyTest.java
+@@ -21,12 +21,10 @@ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.config.CassandraRelevantProperties;
++import org.apache.cassandra.metrics.ClientRequestsMetrics;
++import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+ 
+ import static org.apache.cassandra.db.ConsistencyLevel.NODE_LOCAL;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetricsForLevel;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetrics;
+-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetricsForLevel;
+ import static org.junit.Assert.assertEquals;
+ 
+ public class NodeLocalConsistencyTest extends CQLTester
+@@ -40,15 +38,16 @@ public class NodeLocalConsistencyTest extends CQLTester
+     @Test
+     public void testModify()
+     {
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+         createTable("CREATE TABLE %s (key text, val int, PRIMARY KEY(key));");
+ 
+-        long beforeLevel  = writeMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long beforeGlobal = writeMetrics.latency.getCount();
++        long beforeLevel  = metrics.writeMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long beforeGlobal = metrics.writeMetrics.latency.getCount();
+ 
+         QueryProcessor.process(formatQuery("INSERT INTO %s (key, val) VALUES ('key', 0);"), NODE_LOCAL);
+ 
+-        long afterLevel  = writeMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long afterGlobal = writeMetrics.latency.getCount();
++        long afterLevel  = metrics.writeMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long afterGlobal = metrics.writeMetrics.latency.getCount();
+ 
+         assertEquals(1, afterLevel - beforeLevel);
+         assertEquals(1, afterGlobal - beforeGlobal);
+@@ -57,15 +56,16 @@ public class NodeLocalConsistencyTest extends CQLTester
+     @Test
+     public void testBatch()
+     {
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+         createTable("CREATE TABLE %s (key text, val int, PRIMARY KEY(key));");
+ 
+-        long beforeLevel  = writeMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long beforeGlobal = writeMetrics.latency.getCount();
++        long beforeLevel  = metrics.writeMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long beforeGlobal = metrics.writeMetrics.latency.getCount();
+ 
+         QueryProcessor.process(formatQuery("BEGIN BATCH INSERT INTO %s (key, val) VALUES ('key', 0); APPLY BATCH;"), NODE_LOCAL);
+ 
+-        long afterLevel  = writeMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long afterGlobal = writeMetrics.latency.getCount();
++        long afterLevel  = metrics.writeMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long afterGlobal = metrics.writeMetrics.latency.getCount();
+ 
+         assertEquals(1, afterLevel - beforeLevel);
+         assertEquals(1, afterGlobal - beforeGlobal);
+@@ -74,15 +74,16 @@ public class NodeLocalConsistencyTest extends CQLTester
+     @Test
+     public void testSelect()
+     {
++        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
+         createTable("CREATE TABLE %s (key text, val int, PRIMARY KEY(key));");
+ 
+-        long beforeLevel  = readMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long beforeGlobal = readMetrics.latency.getCount();
++        long beforeLevel  = metrics.readMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long beforeGlobal = metrics.readMetrics.latency.getCount();
+ 
+         QueryProcessor.process(formatQuery("SELECT * FROM %s;"), NODE_LOCAL);
+ 
+-        long afterLevel  = readMetricsForLevel(NODE_LOCAL).latency.getCount();
+-        long afterGlobal = readMetrics.latency.getCount();
++        long afterLevel  = metrics.readMetricsForLevel(NODE_LOCAL).latency.getCount();
++        long afterGlobal = metrics.readMetrics.latency.getCount();
+ 
+         assertEquals(1, afterLevel - beforeLevel);
+         assertEquals(1, afterGlobal - beforeGlobal);
+diff --git a/test/unit/org/apache/cassandra/metrics/ClientRequestsMetricsTest.java b/test/unit/org/apache/cassandra/metrics/ClientRequestsMetricsTest.java
+index 85238c4fc0..ec361bafaf 100644
+--- a/test/unit/org/apache/cassandra/metrics/ClientRequestsMetricsTest.java
++++ b/test/unit/org/apache/cassandra/metrics/ClientRequestsMetricsTest.java
+@@ -30,18 +30,18 @@ import org.apache.cassandra.db.ConsistencyLevel;
+ import static org.assertj.core.api.Assertions.assertThat;
+ import static org.junit.Assert.assertEquals;
+ 
+-public class ClientRequestsMetricsHolderTest
++public class ClientRequestsMetricsTest
+ {
+-    private static ClientRequestsMetricsHolder c1;
+-    private static ClientRequestsMetricsHolder c2;
++    private static ClientRequestsMetrics c1;
++    private static ClientRequestsMetrics c2;
+ 
+     @BeforeClass
+     public static void init()
+     {
+         DatabaseDescriptor.daemonInitialization();
+ 
+-        c1 = new ClientRequestsMetricsHolder("tenant1");
+-        c2 = new ClientRequestsMetricsHolder("tenant2");
++        c1 = new ClientRequestsMetrics("tenant1");
++        c2 = new ClientRequestsMetrics("tenant2");
+     }
+ 
+     @AfterClass
+@@ -51,7 +51,7 @@ public class ClientRequestsMetricsHolderTest
+         releaseAll(c2);
+     }
+ 
+-    protected static void releaseAll(ClientRequestsMetricsHolder ccrm)
++    protected static void releaseAll(ClientRequestsMetrics ccrm)
+     {
+         ccrm.readMetrics.release();
+         ccrm.rangeMetrics.release();
+@@ -61,8 +61,8 @@ public class ClientRequestsMetricsHolderTest
+         ccrm.viewWriteMetrics.release();
+         for (ConsistencyLevel level : ConsistencyLevel.values())
+         {
+-            ccrm.readMetricsMap.get(level).release();
+-            ccrm.writeMetricsMap.get(level).release();
++            ccrm.readMetricsForLevel(level).release();
++            ccrm.writeMetricsForLevel(level).release();
+         }
+     }
+ 
+@@ -72,8 +72,8 @@ public class ClientRequestsMetricsHolderTest
+         ClientRequestsMetricsProvider defaultMetricsProvider = ClientRequestsMetricsProvider.instance;
+         assertThat(defaultMetricsProvider).isInstanceOf(ClientRequestsMetricsProvider.DefaultClientRequestsMetricsProvider.class);
+ 
+-        ClientRequestsMetricsHolder defaultMetrics = defaultMetricsProvider.metrics("");
+-        assertThat(defaultMetrics).isInstanceOf(ClientRequestsMetricsHolder.class);
++        ClientRequestsMetrics defaultMetrics = defaultMetricsProvider.metrics("");
++        assertThat(defaultMetrics).isInstanceOf(ClientRequestsMetrics.class);
+     }
+ 
+     @Test
+@@ -166,14 +166,14 @@ public class ClientRequestsMetricsHolderTest
+         for (ConsistencyLevel level : ConsistencyLevel.values())
+         {
+             // update tenant1 view metrics, tenant2 metrics remain 0
+-            updateClientRequestMetrics(c1.readMetricsMap.get(level));
+-            verifyClientRequestMetrics(c1.readMetricsMap.get(level), 1);
+-            verifyClientRequestMetrics(c2.readMetricsMap.get(level), 0);
++            updateClientRequestMetrics(c1.readMetricsForLevel(level));
++            verifyClientRequestMetrics(c1.readMetricsForLevel(level), 1);
++            verifyClientRequestMetrics(c2.readMetricsForLevel(level), 0);
+ 
+             // update tenant2 view metrics, tenant1 metrics remain 1
+-            updateClientRequestMetrics(c2.readMetricsMap.get(level));
+-            verifyClientRequestMetrics(c1.readMetricsMap.get(level), 1);
+-            verifyClientRequestMetrics(c2.readMetricsMap.get(level), 1);
++            updateClientRequestMetrics(c2.readMetricsForLevel(level));
++            verifyClientRequestMetrics(c1.readMetricsForLevel(level), 1);
++            verifyClientRequestMetrics(c2.readMetricsForLevel(level), 1);
+         }
+     }
+ 
+@@ -183,14 +183,14 @@ public class ClientRequestsMetricsHolderTest
+         for (ConsistencyLevel level : ConsistencyLevel.values())
+         {
+             // update tenant1 view metrics, tenant2 metrics remain 0
+-            updateClientWriteRequestMetrics(c1.writeMetricsMap.get(level));
+-            verifyClientWriteRequestMetrics(c1.writeMetricsMap.get(level), 1);
+-            verifyClientWriteRequestMetrics(c2.writeMetricsMap.get(level), 0);
++            updateClientWriteRequestMetrics(c1.writeMetricsForLevel(level));
++            verifyClientWriteRequestMetrics(c1.writeMetricsForLevel(level), 1);
++            verifyClientWriteRequestMetrics(c2.writeMetricsForLevel(level), 0);
+ 
+             // update tenant2 view metrics, tenant1 metrics remain 1
+-            updateClientWriteRequestMetrics(c2.writeMetricsMap.get(level));
+-            verifyClientWriteRequestMetrics(c1.writeMetricsMap.get(level), 1);
+-            verifyClientWriteRequestMetrics(c2.writeMetricsMap.get(level), 1);
++            updateClientWriteRequestMetrics(c2.writeMetricsForLevel(level));
++            verifyClientWriteRequestMetrics(c1.writeMetricsForLevel(level), 1);
++            verifyClientWriteRequestMetrics(c2.writeMetricsForLevel(level), 1);
+         }
+     }
+ 
+diff --git a/test/unit/org/apache/cassandra/metrics/CustomCoordinatorMetricsTest.java b/test/unit/org/apache/cassandra/metrics/CustomCoordinatorMetricsTest.java
+index b0c5b86ab6..21f5204d69 100644
+--- a/test/unit/org/apache/cassandra/metrics/CustomCoordinatorMetricsTest.java
++++ b/test/unit/org/apache/cassandra/metrics/CustomCoordinatorMetricsTest.java
+@@ -30,8 +30,8 @@ public class CustomCoordinatorMetricsTest
+     @BeforeClass
+     public static void beforeClass()
+     {
+-        // Sets custom client provider class used in {@code CoordinatorClientRequestMetricsProvider#instance}
+-        CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.setString(CoordinatorClientRequestMetricsProvider.DefaultCoordinatorMetricsProvider.class.getName());
++        // Sets custom client provider class used in {@code ClientRequestsMetricsHolderProvider#instance}
++        CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.setString(ClientRequestsMetricsProvider.DefaultClientRequestsMetricsProvider.class.getName());
+     }
+ 
+     @AfterClass
+@@ -44,20 +44,20 @@ public class CustomCoordinatorMetricsTest
+     public void testStaticInstanceWithCustomProviderClassName()
+     {
+         // Custom client provider class name set in {@link beforeClass()}
+-        CoordinatorClientRequestMetricsProvider customClientRequestMetricsProvider = CoordinatorClientRequestMetricsProvider.instance;
+-        assertThat(customClientRequestMetricsProvider).isInstanceOf(CoordinatorClientRequestMetricsProvider.DefaultCoordinatorMetricsProvider.class);
+-        CoordinatorClientRequestMetrics metrics = customClientRequestMetricsProvider.metrics("");
++        ClientRequestsMetricsProvider customClientRequestMetricsProvider = ClientRequestsMetricsProvider.instance;
++        assertThat(customClientRequestMetricsProvider).isInstanceOf(ClientRequestsMetricsProvider.DefaultClientRequestsMetricsProvider.class);
++        ClientRequestsMetrics metrics = customClientRequestMetricsProvider.metrics("");
+     }
+ 
+     @Test
+     public void testMakeProviderWithClassThatExists()
+     {
+-        CoordinatorClientRequestMetricsProvider.make(CoordinatorClientRequestMetricsProvider.DefaultCoordinatorMetricsProvider.class.getName());
++        ClientRequestsMetricsProvider.make(ClientRequestsMetricsProvider.DefaultClientRequestsMetricsProvider.class.getName());
+     }
+ 
+     @Test(expected = IllegalStateException.class)
+     public void testMakeProviderWithClassThatDoesNotExist()
+     {
+-        CoordinatorClientRequestMetricsProvider.make("SomeOtherCLass");
++        ClientRequestsMetricsProvider.make("SomeOtherCLass");
+     }
+ }

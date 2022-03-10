@@ -1,0 +1,88 @@
+--- a/test/unit/org/apache/cassandra/Util.java
++++ b/test/unit/org/apache/cassandra/Util.java
+@@ -23,12 +23,9 @@
+ import java.lang.reflect.Field;
+ import java.net.UnknownHostException;
+ import java.nio.ByteBuffer;
+-<<<<<<<
+ import java.nio.file.*;
+ import java.nio.file.attribute.FileTime;
+-=======
+ import java.time.Duration;
+->>>>>>>
+ import java.util.*;
+ import java.util.concurrent.Callable;
+ import java.util.concurrent.Future;
+@@ -350,7 +347,7 @@
+             return getAllUnfiltered(command, controller);
+         }
+     }
+-    
++
+     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
+     {
+         List<ImmutableBTreePartition> results = new ArrayList<>();
+@@ -374,7 +371,7 @@
+             return getAll(command, controller);
+         }
+     }
+-    
++
+     public static List<FilteredPartition> getAll(ReadCommand command, ReadExecutionController controller)
+     {
+         List<FilteredPartition> results = new ArrayList<>();
+@@ -433,7 +430,7 @@
+             return getOnlyPartitionUnfiltered(cmd, controller);
+         }
+     }
+-    
++
+     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
+     {
+         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
+@@ -451,7 +448,7 @@
+     {
+         return getOnlyPartition(cmd, false);
+     }
+-    
++
+     public static FilteredPartition getOnlyPartition(ReadCommand cmd, boolean trackRepairedStatus)
+     {
+         try (ReadExecutionController executionController = cmd.executionController(trackRepairedStatus);
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -121,16 +121,12 @@
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SMALL_BLOOM_FILTER)
+                                                 .minIndexInterval(4)
+                                                 .maxIndexInterval(4)
+-<<<<<<<
+-                                                .bloomFilterFpChance(0.99));
+-
+-        // All tests in this class assume auto-compaction is disabled.
+-        CompactionManager.instance.disableAutoCompaction();
+-=======
+                                                 .bloomFilterFpChance(0.99),
+                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_NO_BLOOM_FILTER)
+                                                 .bloomFilterFpChance(1));
+->>>>>>>
++
++        // All tests in this class assume auto-compaction is disabled.
++        CompactionManager.instance.disableAutoCompaction();
+     }
+ 
+     @After
+@@ -903,14 +899,11 @@
+ 
+     private SSTableReader getNewSSTable(ColumnFamilyStore cfs)
+     {
+-<<<<<<<
+-=======
+         return getNewSSTable(cfs, 100, 2);
+     }
+ 
+     private SSTableReader getNewSSTable(ColumnFamilyStore cfs, int numKeys, int step)
+     {
+->>>>>>>
+         Set<SSTableReader> before = cfs.getLiveSSTables();
+         for (int j = 0; j < numKeys; j += step)
+         {

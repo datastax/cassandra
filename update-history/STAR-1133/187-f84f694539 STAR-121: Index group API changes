@@ -1,0 +1,184 @@
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -2265,14 +2265,6 @@
+      */
+     private void truncateBlocking(boolean noSnapshot)
+     {
+-        truncateBlocking(DatabaseDescriptor.isAutoSnapshot());
+-    }
+-
+-    /**
+-     * Truncate deletes the entire column family's data with no expensive tombstone creation
+-     */
+-    public void truncateBlocking(boolean snapshot)
+-    {
+         // We have two goals here:
+         // - truncate should delete everything written before truncate was invoked
+         // - but not delete anything that isn't part of the snapshot we create.
+@@ -2292,11 +2284,7 @@
+         final long truncatedAt;
+         final CommitLogPosition replayAfter;
+ 
+-<<<<<<<
+         if (!noSnapshot && (keyspace.getMetadata().params.durableWrites || DatabaseDescriptor.isAutoSnapshot()))
+-=======
+-        if (keyspace.getMetadata().params.durableWrites || snapshot)
+->>>>>>>
+         {
+             replayAfter = forceBlockingFlush();
+             viewManager.forceBlockingFlush();
+@@ -2334,13 +2322,8 @@
+                                                    "Stopping parent sessions {} due to truncation of tableId="+metadata.id);
+                 data.notifyTruncated(truncatedAt);
+ 
+-<<<<<<<
+-                if (snapshot)
+-                    snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
+-=======
+             if (!noSnapshot && DatabaseDescriptor.isAutoSnapshot())
+                 snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
+->>>>>>>
+ 
+                 discardSSTables(truncatedAt);
+ 
+--- a/src/java/org/apache/cassandra/db/PartitionRangeReadCommand.java
++++ b/src/java/org/apache/cassandra/db/PartitionRangeReadCommand.java
+@@ -40,10 +40,6 @@
+ import org.apache.cassandra.io.util.DataInputPlus;
+ import org.apache.cassandra.io.util.DataOutputPlus;
+ import org.apache.cassandra.metrics.TableMetrics;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.schema.IndexMetadata;
+->>>>>>>
+ import org.apache.cassandra.service.ClientState;
+ import org.apache.cassandra.service.StorageProxy;
+ import org.apache.cassandra.tracing.Tracing;
+--- a/src/java/org/apache/cassandra/db/ReadCommand.java
++++ b/src/java/org/apache/cassandra/db/ReadCommand.java
+@@ -210,73 +210,7 @@
+     }
+ 
+     /**
+-<<<<<<<
+-     * Activates repaired data tracking for this command.
+-     *
+-     * When active, a digest will be created from data read from repaired SSTables. The digests
+-     * from each replica can then be compared on the coordinator to detect any divergence in their
+-     * repaired datasets. In this context, an sstable is considered repaired if it is marked
+-     * repaired or has a pending repair session which has been committed.
+-     * In addition to the digest, a set of ids for any pending but as yet uncommitted repair sessions
+-     * is recorded and returned to the coordinator. This is to help reduce false positives caused
+-     * by compaction lagging which can leave sstables from committed sessions in the pending state
+-     * for a time.
+-     */
+-    public void trackRepairedStatus()
+-    {
+-        trackRepairedStatus = true;
+-    }
+-
+-    /**
+-     * Whether or not repaired status of any data read is being tracked or not
+-     *
+-     * @return Whether repaired status tracking is active for this command
+-     */
+-    public boolean isTrackingRepairedStatus()
+-    {
+-        return trackRepairedStatus;
+-    }
+-
+-    /**
+-     * Returns a digest of the repaired data read in the execution of this command.
+-     *
+-     * If either repaired status tracking is not active or the command has not yet been
+-     * executed, then this digest will be an empty buffer.
+-     * Otherwise, it will contain a digest* of the repaired data read, or empty buffer
+-     * if no repaired data was read.
+-     * @return digest of the repaired data read in the execution of the command
+-     */
+-    public ByteBuffer getRepairedDataDigest()
+-    {
+-        return repairedDataInfo.getDigest();
+-    }
+-
+-    /**
+-     * Returns a boolean indicating whether any relevant sstables were skipped during the read
+-     * that produced the repaired data digest.
+-     *
+-     * If true, then no pending repair sessions or partition deletes have influenced the extent
+-     * of the repaired sstables that went into generating the digest.
+-     * This indicates whether or not the digest can reliably be used to infer consistency
+-     * issues between the repaired sets across replicas.
+-     *
+-     * If either repaired status tracking is not active or the command has not yet been
+-     * executed, then this will always return true.
+-     *
+-     * @return boolean to indicate confidence in the dwhether or not the digest of the repaired data can be
+-     * reliably be used to infer inconsistency issues between the repaired sets across
+-     * replicas.
+-     */
+-    public boolean isRepairedDataDigestConclusive()
+-    {
+-        return repairedDataInfo.isConclusive();
+-    }
+-
+-    /**
+      * Index query plan chosen for this query. Can be null.
+-=======
+-     * Index (metadata) chosen for this query. Can be null.
+->>>>>>>
+      *
+      * @return index query plan chosen for this query
+      */
+@@ -685,7 +619,7 @@
+     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
+     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
+     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
+-    protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator, 
++    protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator,
+                                                                      ColumnFamilyStore cfs,
+                                                                      ReadExecutionController controller)
+     {
+@@ -792,7 +726,7 @@
+         {
+             this.repairedDataInfo = controller.getRepairedDataInfo();
+             this.isTrackingRepairedStatus = controller.isTrackingRepairedStatus();
+-            
++
+             if (isTrackingRepairedStatus)
+             {
+                 for (SSTableReader sstable : view.sstables)
+--- a/src/java/org/apache/cassandra/service/StorageProxy.java
++++ b/src/java/org/apache/cassandra/service/StorageProxy.java
+@@ -100,13 +100,6 @@
+ import org.apache.cassandra.locator.ReplicaPlans;
+ import org.apache.cassandra.locator.Replicas;
+ import org.apache.cassandra.metrics.CASClientRequestMetrics;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
+-import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+-import org.apache.cassandra.metrics.ClientRequestMetrics;
+-import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
+->>>>>>>
+ import org.apache.cassandra.metrics.ReadRepairMetrics;
+ import org.apache.cassandra.metrics.StorageMetrics;
+ import org.apache.cassandra.net.ForwardingInfo;
+@@ -175,17 +168,6 @@
+             return new AtomicInteger(0);
+         }
+     };
+-<<<<<<<
+-=======
+-    private static final ClientRequestMetrics readMetrics = new ClientRequestMetrics("Read");
+-    public static final ClientRangeRequestMetrics rangeMetrics = new ClientRangeRequestMetrics("RangeSlice");
+-    private static final ClientWriteRequestMetrics writeMetrics = new ClientWriteRequestMetrics("Write");
+-    private static final CASClientWriteRequestMetrics casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite");
+-    private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("CASRead");
+-    private static final ViewWriteMetrics viewWriteMetrics = new ViewWriteMetrics("ViewWrite");
+-    private static final Map<ConsistencyLevel, ClientRequestMetrics> readMetricsMap = new EnumMap<>(ConsistencyLevel.class);
+-    private static final Map<ConsistencyLevel, ClientWriteRequestMetrics> writeMetricsMap = new EnumMap<>(ConsistencyLevel.class);
+->>>>>>>
+ 
+     private static final String DISABLE_SERIAL_READ_LINEARIZABILITY_KEY = "cassandra.unsafe.disable-serial-reads-linearizability";
+     private static final boolean disableSerialReadLinearizability =

@@ -1,0 +1,469 @@
+--- a/src/java/org/apache/cassandra/db/compaction/Scrubber.java
++++ b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+@@ -279,13 +279,9 @@
+                         key = sstable.decorateKey(currentIndexKey);
+                         try
+                         {
+-<<<<<<<
+-                            dataFile.seek(rowStartFromIndex);
+-=======
+                             if (!cfs.metadata.getLocal().isIndex())
+                                 cfs.metadata.getLocal().partitionKeyType.validate(key.getKey());
+-                            dataFile.seek(dataStartFromIndex);
+->>>>>>>
++                            dataFile.seek(rowStartFromIndex);
+ 
+                             if (tryAppend(prevKey, key, writer))
+                                 prevKey = key;
+--- a/src/java/org/apache/cassandra/tools/StandaloneVerifier.java
++++ b/src/java/org/apache/cassandra/tools/StandaloneVerifier.java
+@@ -18,7 +18,6 @@
+  */
+ package org.apache.cassandra.tools;
+ 
+-<<<<<<<
+ import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.Collections;
+@@ -36,10 +35,7 @@
+ import org.apache.commons.cli.ParseException;
+ 
+ import org.apache.cassandra.config.DatabaseDescriptor;
+-=======
+ import org.apache.cassandra.io.sstable.format.SSTableFormat;
+-import org.apache.cassandra.schema.Schema;
+->>>>>>>
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Directories;
+ import org.apache.cassandra.db.Keyspace;
+--- a/test/unit/org/apache/cassandra/cache/AutoSavingCacheTest.java
++++ b/test/unit/org/apache/cassandra/cache/AutoSavingCacheTest.java
+@@ -38,11 +38,8 @@
+ import org.apache.cassandra.service.CacheService;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.hamcrest.Matchers.is;
+->>>>>>>
+ 
+ public class AutoSavingCacheTest
+ {
+--- a/test/unit/org/apache/cassandra/db/ScrubTest.java
++++ b/test/unit/org/apache/cassandra/db/ScrubTest.java
+@@ -88,18 +88,19 @@
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.schema.TableMetadataRef;
++import org.apache.cassandra.tools.StandaloneScrubber;
++import org.apache.cassandra.tools.ToolRunner;
++import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.apache.cassandra.utils.ByteBufferUtil;
++import org.assertj.core.api.Assertions;
+ 
+ import static org.apache.cassandra.SchemaLoader.counterCFMD;
+ import static org.apache.cassandra.SchemaLoader.createKeyspace;
+ import static org.apache.cassandra.SchemaLoader.getCompressionParameters;
+ import static org.apache.cassandra.SchemaLoader.loadSchema;
+ import static org.apache.cassandra.SchemaLoader.standardCFMD;
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.hamcrest.Matchers.is;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertNotNull;
+ import static org.junit.Assert.assertTrue;
+@@ -824,7 +825,6 @@
+         IPartitioner oldPart = DatabaseDescriptor.getPartitioner();
+         try
+         {
+-<<<<<<<
+             DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+             QueryProcessor.process(String.format("CREATE TABLE \"%s\".cf_with_duplicates_3_0 (a int, b int, c int, PRIMARY KEY (a, b))", ksName), ConsistencyLevel.ONE);
+ 
+@@ -845,22 +845,24 @@
+             {
+                 Files.copy(Paths.get(legacySSTableRoot.toString(), filename), cfs.getDirectories().getDirectoryForNewSSTables().toPath().resolve(filename));
+             }
+-=======
+-            Files.copy(Paths.get(legacySSTableRoot.toString(), filename), cfs.getDirectories().getDirectoryForNewSSTables().toPath().resolve(filename));
+-        }
+ 
+-        cfs.loadNewSSTables();
++            cfs.loadNewSSTables();
+ 
+-        cfs.scrub(true, true, false, false, false, 1);
++            cfs.scrub(true, true, false, false, false, 1);
+ 
+-        UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
+-        assertNotNull(rs);
+-        assertEquals(1, rs.size());
++            UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
++            assertNotNull(rs);
++            assertEquals(1, rs.size());
+ 
+-        QueryProcessor.executeInternal(String.format("DELETE FROM \"%s\".cf_with_duplicates_3_0 WHERE a=1 AND b =2", ksName));
+-        rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
+-        assertNotNull(rs);
+-        assertEquals(0, rs.size());
++            QueryProcessor.executeInternal(String.format("DELETE FROM \"%s\".cf_with_duplicates_3_0 WHERE a=1 AND b =2", ksName));
++            rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
++            assertNotNull(rs);
++            assertEquals(0, rs.size());
++        }
++        finally
++        {
++            DatabaseDescriptor.setPartitionerUnsafe(oldPart);
++        }
+     }
+ 
+     @Test
+@@ -902,30 +904,121 @@
+ 
+         assertEquals(1, cfs.getLiveSSTables().size());
+     }
+->>>>>>>
+ 
+-            cfs.loadNewSSTables();
++    @Test
++    public void testNoSkipScrubCorruptedCounterPartitionWithTool() throws IOException, WriteTimeoutException
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(COUNTER_CF);
++        int numPartitions = 1000;
+ 
+-            cfs.scrub(true, true, false, false, false, 1);
++        fillCounterCF(cfs, numPartitions);
++        assertOrderedAll(cfs, numPartitions);
++        assertEquals(1, cfs.getLiveSSTables().size());
++        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+ 
+-<<<<<<<
+-            UntypedResultSet rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
+-            assertNotNull(rs);
+-            assertEquals(1, rs.size());
+-=======
+         //use 0x00 instead of the usual 0x7A because if by any chance it's able to iterate over the corrupt
+         //section, then we get many out-of-order errors, which we don't want
+         overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"), (byte) 0x0);
+->>>>>>>
+ 
+-            QueryProcessor.executeInternal(String.format("DELETE FROM \"%s\".cf_with_duplicates_3_0 WHERE a=1 AND b =2", ksName));
+-            rs = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".cf_with_duplicates_3_0", ksName));
+-            assertNotNull(rs);
+-            assertEquals(0, rs.size());
++        // with skipCorrupted == false, the scrub is expected to fail
++        try
++        {
++            ToolRunner.invokeClass(StandaloneScrubber.class, ksName, COUNTER_CF);
++            fail("Expected a CorruptSSTableException to be thrown");
+         }
+-        finally
++        catch (IOError err)
+         {
+-            DatabaseDescriptor.setPartitionerUnsafe(oldPart);
++            assertTrue(err.getCause() instanceof CorruptSSTableException);
+         }
+     }
++    @Test
++    public void testNoCheckScrubMultiPartitionWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        // insert data and verify we get it back w/ range query
++        fillCF(cfs, 10);
++        assertOrderedAll(cfs, 10);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-n", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
++        Assertions.assertThat(tool.getStdout()).contains("10 partitions in new sstable and 0 empty");
++        tool.assertOnCleanExit();
++
++        // check data is still there
++        assertOrderedAll(cfs, 10);
++    }
++
++    @Test
++    public void testHeaderFixValidateOnlyWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        fillCF(cfs, 1);
++        assertOrderedAll(cfs, 1);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "validate_only", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Not continuing with scrub, since '--header-fix validate-only' was specified.");
++        tool.assertOnCleanExit();
++        assertOrderedAll(cfs, 1);
++    }
++
++    @Test
++    public void testHeaderFixValidateWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        fillCF(cfs, 1);
++        assertOrderedAll(cfs, 1);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "validate", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
++        Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
++        tool.assertOnCleanExit();
++        assertOrderedAll(cfs, 1);
++    }
++
++    @Test
++    public void testHeaderFixFixOnlyWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        fillCF(cfs, 1);
++        assertOrderedAll(cfs, 1);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "fix-only", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Not continuing with scrub, since '--header-fix fix-only' was specified.");
++        tool.assertOnCleanExit();
++        assertOrderedAll(cfs, 1);
++    }
++
++    @Test
++    public void testHeaderFixWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        fillCF(cfs, 1);
++        assertOrderedAll(cfs, 1);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "fix", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
++        Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
++        tool.assertOnCleanExit();
++        assertOrderedAll(cfs, 1);
++    }
++
++    @Test
++    public void testHeaderFixNoChecksWithTool()
++    {
++        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
++
++        fillCF(cfs, 1);
++        assertOrderedAll(cfs, 1);
++
++        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-e", "off", ksName, CF);
++        Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");
++        Assertions.assertThat(tool.getStdout()).contains("1 partitions in new sstable and 0 empty");
++        tool.assertOnCleanExit();
++        assertOrderedAll(cfs, 1);
++    }
+ }
+--- a/test/unit/org/apache/cassandra/db/VerifyTest.java
++++ b/test/unit/org/apache/cassandra/db/VerifyTest.java
+@@ -28,7 +28,6 @@
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.List;
+-import java.util.UUID;
+ import java.util.concurrent.ExecutionException;
+ import java.util.zip.CRC32;
+ import java.util.zip.CheckedInputStream;
+@@ -43,11 +42,7 @@
+ import org.apache.cassandra.batchlog.Batch;
+ import org.apache.cassandra.batchlog.BatchlogManager;
+ import org.apache.cassandra.cache.ChunkCache;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+->>>>>>>
+ import org.apache.cassandra.db.compaction.CompactionManager;
+ import org.apache.cassandra.db.compaction.Verifier;
+ import org.apache.cassandra.db.marshal.UUIDType;
+@@ -69,37 +64,16 @@
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.service.StorageService;
+ import org.apache.cassandra.utils.ByteBufferUtil;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.utils.UUIDGen;
+ 
+-import org.apache.commons.lang3.StringUtils;
+ import org.junit.Assume;
+-import org.junit.BeforeClass;
+-import org.junit.Test;
+-import org.junit.runner.RunWith;
+-
+-import java.io.*;
+-import java.net.UnknownHostException;
+-import java.nio.file.Files;
+-import java.util.ArrayList;
+-import java.util.Collections;
+-import java.util.List;
+-import java.util.UUID;
+-import java.util.concurrent.ExecutionException;
+-import java.util.zip.CRC32;
+-import java.util.zip.CheckedInputStream;
+->>>>>>>
+ 
+ import static org.apache.cassandra.SchemaLoader.counterCFMD;
+ import static org.apache.cassandra.SchemaLoader.createKeyspace;
+ import static org.apache.cassandra.SchemaLoader.loadSchema;
+ import static org.apache.cassandra.SchemaLoader.standardCFMD;
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.hamcrest.Matchers.is;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+@@ -107,7 +81,7 @@
+ 
+ /**
+  * Test for {@link Verifier}.
+- * 
++ *
+  * Note: the complete coverage is composed of:
+  * - {@link org.apache.cassandra.tools.StandaloneVerifierOnSSTablesTest}
+  * - {@link org.apache.cassandra.tools.StandaloneVerifierTest}
+--- a/test/unit/org/apache/cassandra/io/DiskSpaceMetricsTest.java
++++ b/test/unit/org/apache/cassandra/io/DiskSpaceMetricsTest.java
+@@ -42,11 +42,8 @@
+ import org.apache.cassandra.schema.TableId;
+ import org.apache.cassandra.utils.FBUtilities;
+ 
+-<<<<<<<
+-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.hamcrest.Matchers.is;
+->>>>>>>
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ 
+ public class DiskSpaceMetricsTest extends CQLTester
+ {
+--- a/test/unit/org/apache/cassandra/io/sstable/IndexSummaryRedistributionTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/IndexSummaryRedistributionTest.java
+@@ -41,11 +41,8 @@
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.schema.MigrationManager;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ 
+ public class IndexSummaryRedistributionTest
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -80,12 +80,9 @@
+ import org.apache.cassandra.utils.PageAware;
+ 
+ import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
+ import static org.hamcrest.Matchers.is;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertNotNull;
+@@ -273,12 +270,7 @@
+             partitioner = store.getPartitioner();
+ 
+             // insert a bunch of data and compact to a single sstable
+-<<<<<<<
+-            CompactionManager.instance.disableAutoCompaction();
+             for (int j = 0; j < 10000; j += 2)
+-=======
+-            for (int j = 0; j < 100; j += 2)
+->>>>>>>
+             {
+                 new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
+                 .clustering("0")
+@@ -425,13 +417,8 @@
+     @Test
+     public void testGetPositionsKeyCacheStats()
+     {
+-<<<<<<<
+         Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+-        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD2);
+-=======
+         ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD2);
+->>>>>>>
+         partitioner = store.getPartitioner();
+         CacheService.instance.keyCache.setCapacity(1000);
+ 
+@@ -641,14 +628,8 @@
+     @Test
+     public void testLoadingSummaryUsesCorrectPartitioner()
+     {
+-<<<<<<<
+         Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
+-
+-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+-        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_INDEXED);
+-=======
+         ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_INDEXED);
+->>>>>>>
+ 
+         new RowUpdateBuilder(store.metadata(), System.currentTimeMillis(), "k1")
+         .clustering("0")
+--- a/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
++++ b/test/unit/org/apache/cassandra/tools/StandaloneSplitterWithCQLTesterTest.java
+@@ -35,11 +35,8 @@
+ import org.apache.cassandra.tools.ToolRunner.ToolResult;
+ import org.assertj.core.api.Assertions;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-=======
+ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+->>>>>>>
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+ 
+@@ -131,28 +128,4 @@
+         origSstables = Arrays.asList(sstablesDir.listFiles());
+         System.setProperty(Util.ALLOW_TOOL_REINIT_FOR_TEST, "true"); // Necessary for testing
+     }
+-<<<<<<<
+-=======
+-
+-    private void restoreOrigSstables()
+-    {
+-        Arrays.stream(Objects.requireNonNull(sstablesDir.listFiles())).forEach(f -> {
+-            if (f.isFile())
+-                f.delete();
+-        });
+-        Arrays.stream(Objects.requireNonNull(sstablesBackupDir.listFiles())).forEach(f -> {
+-            if (f.isFile())
+-                try
+-                {
+-                    Files.copy(f, new File(sstablesDir.getAbsolutePath() + '/' + f.getName()));
+-                }
+-                catch(IOException e)
+-                {
+-                    throw new RuntimeException(e);
+-                }
+-        });
+-
+-        SSTableReader.resetTidying();
+-    }
+->>>>>>>
+ }
+diff --git a/test/unit/org/apache/cassandra/io/sstable/IndexSummaryManagerTest.java b/test/unit/org/apache/cassandra/io/sstable/IndexSummaryManagerTest.java
+index 20158e3f06..6c4eed9445 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/IndexSummaryManagerTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/IndexSummaryManagerTest.java
+@@ -23,6 +23,7 @@ import java.util.*;
+ import java.util.concurrent.*;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.Consumer;
++import java.util.stream.Collectors;
+ 
+ import com.google.common.base.Joiner;
+ import com.google.common.collect.Sets;

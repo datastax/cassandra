@@ -1,0 +1,70 @@
+--- a/src/java/org/apache/cassandra/utils/ObjectSizes.java
++++ b/src/java/org/apache/cassandra/utils/ObjectSizes.java
+@@ -37,11 +37,8 @@
+                                              .ignoreKnownSingletons();
+ 
+     private static final long BUFFER_EMPTY_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+-<<<<<<<
+     private static final long BYTE_ARRAY_EMPTY_SIZE = measure(new byte[0]);
+-=======
+     private static final long DIRECT_BUFFER_EMPTY_SIZE = measure(ByteBuffer.allocateDirect(0));
+->>>>>>>
+     private static final long STRING_EMPTY_SIZE = measure("");
+ 
+     /**
+@@ -137,7 +134,7 @@
+         return BUFFER_EMPTY_SIZE + sizeOfArray(capacity, 1);
+     }
+ 
+-    public static long sizeOfEmptyHeapByteBuffer()
++    public static long sizeOnHeapExcludingData(ByteBuffer buffer)
+     {
+         if (buffer.isDirect())
+             return DIRECT_BUFFER_EMPTY_SIZE;
+@@ -150,6 +147,11 @@
+         return BUFFER_EMPTY_SIZE + sizeOfArray(capacity, 1) - capacity;
+     }
+ 
++    public static long sizeOfEmptyHeapByteBuffer()
++    {
++        return BUFFER_EMPTY_SIZE;
++    }
++
+     public static long sizeOfEmptyByteArray()
+     {
+         return BYTE_ARRAY_EMPTY_SIZE;
+diff --git a/src/java/org/apache/cassandra/utils/ObjectSizes.java b/src/java/org/apache/cassandra/utils/ObjectSizes.java
+index 13d9046f17..a9dc72137c 100644
+--- a/src/java/org/apache/cassandra/utils/ObjectSizes.java
++++ b/src/java/org/apache/cassandra/utils/ObjectSizes.java
+@@ -37,8 +37,8 @@ public class ObjectSizes
+                                              .ignoreKnownSingletons();
+ 
+     private static final long BUFFER_EMPTY_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+-    private static final long DIRECT_BUFFER_EMPTY_SIZE = measure(ByteBuffer.allocateDirect(0));
+     private static final long BYTE_ARRAY_EMPTY_SIZE = measure(new byte[0]);
++    private static final long DIRECT_BUFFER_EMPTY_SIZE = measure(ByteBuffer.allocateDirect(0));
+     private static final long STRING_EMPTY_SIZE = measure("");
+ 
+     /**
+@@ -134,7 +134,7 @@ public class ObjectSizes
+         return BUFFER_EMPTY_SIZE + sizeOfArray(capacity, 1);
+     }
+ 
+-    public static long sizeOfEmptyHeapByteBuffer()
++    public static long sizeOnHeapExcludingData(ByteBuffer buffer)
+     {
+         if (buffer.isDirect())
+             return DIRECT_BUFFER_EMPTY_SIZE;
+@@ -147,6 +147,11 @@ public class ObjectSizes
+         return BUFFER_EMPTY_SIZE + sizeOfArray(capacity, 1) - capacity;
+     }
+ 
++    public static long sizeOfEmptyHeapByteBuffer()
++    {
++        return BUFFER_EMPTY_SIZE;
++    }
++
+     public static long sizeOfEmptyByteArray()
+     {
+         return BYTE_ARRAY_EMPTY_SIZE;

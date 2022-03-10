@@ -1,0 +1,27 @@
+--- a/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
++++ b/src/java/org/apache/cassandra/config/DatabaseDescriptor.java
+@@ -3408,7 +3408,6 @@
+         conf.consecutive_message_errors_threshold = value;
+     }
+ 
+-<<<<<<<
+     public static boolean getForceNewPreparedStatementBehaviour()
+     {
+         return conf.force_new_prepared_statement_behaviour;
+@@ -3421,7 +3420,8 @@
+             logger.info("Setting force_new_prepared_statement_behaviour to {}", value);
+             conf.force_new_prepared_statement_behaviour = value;
+         }
+-=======
++    }
++
+     public static int getSAISegmentWriteBufferSpace()
+     {
+         return conf.sai_options.segment_write_buffer_space_mb;
+@@ -3440,6 +3440,5 @@
+     public static void setSAIZeroCopyUsedThreshold(double threshold)
+     {
+         conf.sai_options.zerocopy_used_threshold = threshold;
+->>>>>>>
+     }
+ }

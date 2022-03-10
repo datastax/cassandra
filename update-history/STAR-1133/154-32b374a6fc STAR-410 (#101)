@@ -1,0 +1,317 @@
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
+@@ -29,12 +29,9 @@
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicLong;
+ 
+-<<<<<<<
+-import com.google.common.annotations.VisibleForTesting;
+-=======
+ import javax.annotation.Nullable;
+ 
+->>>>>>>
++import com.google.common.annotations.VisibleForTesting;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Sets;
+ import com.google.common.util.concurrent.RateLimiter;
+@@ -258,6 +255,7 @@
+         /**
+          * Create a new compaction operation.
+          * <p/>
++         *
+          * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
+          */
+         private CompactionOperation(CompactionController controller)
+@@ -364,7 +362,6 @@
+                 }
+             }
+ 
+-<<<<<<<
+             // point of no return
+             newSStables = writer.finish();
+ 
+@@ -402,23 +399,19 @@
+             Throwable err = Throwables.close((Throwable) null, obsCloseable, writer, compactionIterator, scanners, sstableRefs);
+ 
+             if (transaction.isOffline())
++                return;
++
++            if (completed)
+             {
+-                Refs.release(Refs.selfRefs(newSStables)); // this is harmless in case of exception, newSStables will be empty
+-            }
+-            else if (completed)
+-            {
+-                // This code used to execute only if the compaction was successful so we preserve the existing behavior
+                 updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress);
+ 
+                 if (logger.isDebugEnabled())
+-                {
+                     debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, progress);
+-                }
++
+                 if (logger.isTraceEnabled())
+-                {
+                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
+-                }
+-                cfs.getCompactionLogger().compaction(startTime, transaction.originals(),  System.currentTimeMillis(), newSStables);
++
++                cfs.getCompactionLogger().compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+ 
+                 // update the metrics
+                 cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
+@@ -427,6 +420,7 @@
+             Throwables.maybeFail(err);
+         }
+ 
++
+         //
+         // CompactionProgress
+         //
+@@ -457,8 +451,8 @@
+ 
+             /**
+              * @return the number of bytes read by the compaction iterator. For compressed or encrypted sstables,
+-             *         this is the number of bytes processed by the iterator after decompression, so this is the current
+-             *         position in the uncompressed sstable files.
++             * this is the number of bytes processed by the iterator after decompression, so this is the current
++             * position in the uncompressed sstable files.
+              */
+             @Override
+             public long completed()
+@@ -468,7 +462,7 @@
+ 
+             /**
+              * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
+-             *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
++             * this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
+              */
+             public long total()
+             {
+@@ -613,43 +607,6 @@
+                 // the previous code would return a NaN that would be logged as zero
+                 return 0;
+             }
+-=======
+-            if (transaction.isOffline())
+-                return;
+-
+-            // log a bunch of statistics about the result and save to system table compaction_history
+-            long  endsize = SSTableReader.getTotalBytes(newSStables);
+-
+-
+-            updateCompactionHistory(taskId,
+-            cfs.keyspace.getName(),
+-                cfs.getTableName(),
+-            mergedRowsHistogram,
+-            inputSizeBytes,
+-                endsize);
+-
+-            if (
+-
+-            logger.isDebugEnabled())
+-                                       {
+-                                       debugLogCompactionSummaryInfo(taskId,
+-                                       start,
+-                                       totalKeysWritten,
+-                                       inputSizeBytes,
+-                                       newSStables,
+-                                       mergedRowsHistogram,
+-                                       (int) totalSourceCQLRows ,
+-                                       endsize);
+-                                       }
+-            if (logger.isTraceEnabled())
+-            {
+-                traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, endsize);
+-            }
+-            cfs.getCompactionStrategyManager().compactionLogger.compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+-
+-            // update the metrics
+-            cfs.metric.compactionBytesWritten.inc(endsize);
+->>>>>>>
+         }
+     }
+ 
+--- a/src/java/org/apache/cassandra/db/compaction/writers/CompactionAwareWriter.java
++++ b/src/java/org/apache/cassandra/db/compaction/writers/CompactionAwareWriter.java
+@@ -234,14 +234,13 @@
+         return this;
+     }
+ 
+-<<<<<<<
+     protected long getExpectedWriteSize()
+     {
+         return cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+-=======
++    }
++
+     public long bytesWritten()
+     {
+         return sstableWriter.bytesWritten();
+->>>>>>>
+     }
+ }
+--- a/test/unit/org/apache/cassandra/db/compaction/CompactionTaskTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/CompactionTaskTest.java
+@@ -35,6 +35,7 @@
+ import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
++import org.apache.cassandra.db.lifecycle.Tracker;
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.apache.cassandra.schema.Schema;
+@@ -47,6 +48,7 @@
+ import org.mockito.ArgumentCaptor;
+ import org.mockito.Mockito;
+ 
++import static org.apache.cassandra.db.lifecycle.View.updateCompacting;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertNotNull;
+ import static org.mockito.ArgumentMatchers.any;
+@@ -205,7 +207,43 @@
+     }
+ 
+     @Test
+-<<<<<<<
++    public void testOfflineCompaction()
++    {
++        cfs.getCompactionStrategyManager().disable();
++        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
++        cfs.forceBlockingFlush(UNIT_TESTS);
++        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
++        cfs.forceBlockingFlush(UNIT_TESTS);
++        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (3, 3);");
++        cfs.forceBlockingFlush(UNIT_TESTS);
++        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (4, 4);");
++        cfs.forceBlockingFlush(UNIT_TESTS);
++
++        Set<SSTableReader> sstables = cfs.getLiveSSTables();
++        Assert.assertEquals(4, sstables.size());
++
++        Tracker tracker = Tracker.newDummyTracker();
++        tracker.addInitialSSTables(sstables);
++        tracker.apply(updateCompacting(Collections.emptySet(), sstables));
++        try (LifecycleTransaction txn = new LifecycleTransaction(tracker, OperationType.COMPACTION, sstables))
++        {
++            Assert.assertEquals(4, tracker.getView().liveSSTables().size());
++            CompactionTask task = new CompactionTask(cfs, txn, 1000, false);
++            task.execute(new ActiveOperations());
++
++            // Check that new SSTable was not released
++            Assert.assertEquals(1, tracker.getView().liveSSTables().size());
++            SSTableReader newSSTable = tracker.getView().liveSSTables().iterator().next();
++            Assert.assertNotNull(newSSTable.tryRef());
++        }
++        finally
++        {
++            // SSTables were compacted offline; CFS didn't notice that, so we have to remove them manually
++            cfs.getTracker().removeUnsafe(sstables);
++        }
++    }
++
++    @Test
+     public void testCompactionReporting()
+     {
+         cfs.getCompactionStrategyManager().disable();
+@@ -239,38 +277,5 @@
+         Set<SSTableReader> sstables = cfs.getLiveSSTables();
+         Assert.assertEquals(numSSTables, sstables.size());
+         return sstables;
+-=======
+-    public void testOfflineCompaction()
+-    {
+-        cfs.getCompactionStrategyManager().disable();
+-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
+-        cfs.forceBlockingFlush(UNIT_TESTS);
+-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
+-        cfs.forceBlockingFlush(UNIT_TESTS);
+-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (3, 3);");
+-        cfs.forceBlockingFlush(UNIT_TESTS);
+-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (4, 4);");
+-        cfs.forceBlockingFlush(UNIT_TESTS);
+-
+-        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+-        Assert.assertEquals(4, sstables.size());
+-
+-        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.COMPACTION, sstables))
+-        {
+-            Assert.assertEquals(4, txn.tracker.getView().liveSSTables().size());
+-            CompactionTask task = new CompactionTask(cfs, txn, 1000);
+-            task.execute(null);
+-
+-            // Check that new SSTable was not released
+-            Assert.assertEquals(1, txn.tracker.getView().liveSSTables().size());
+-            SSTableReader newSSTable = txn.tracker.getView().liveSSTables().iterator().next();
+-            Assert.assertNotNull(newSSTable.tryRef());
+-        }
+-        finally
+-        {
+-            // SSTables were compacted offline; CFS didn't notice that, so we have to remove them manually
+-            cfs.getTracker().removeUnsafe(sstables);
+-        }
+->>>>>>>
+     }
+ }
+--- a/test/unit/org/apache/cassandra/db/compaction/SizeTieredCompactionStrategyTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/SizeTieredCompactionStrategyTest.java
+@@ -43,13 +43,7 @@
+ import org.apache.cassandra.schema.KeyspaceParams;
+ import org.mockito.Mockito;
+ 
+-<<<<<<<
+-=======
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.getBuckets;
+-import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.mostInterestingBucket;
+-import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.trimToThresholdWithHotness;
+->>>>>>>
+ import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.validateOptions;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+--- a/test/unit/org/apache/cassandra/db/compaction/TimeWindowCompactionStrategyTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/TimeWindowCompactionStrategyTest.java
+@@ -28,24 +28,9 @@
+ import java.util.stream.Collectors;
+ 
+ import com.google.common.collect.Iterables;
+-
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+-<<<<<<<
+-import static java.util.concurrent.TimeUnit.HOURS;
+-import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getBucketAggregates;
+-=======
+-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+->>>>>>>
+-import static org.junit.Assert.assertEquals;
+-import static org.junit.Assert.assertFalse;
+-import static org.junit.Assert.assertNotNull;
+-import static org.junit.Assert.assertNull;
+-import static org.junit.Assert.assertTrue;
+-import static org.junit.Assert.assertFalse;
+-import static org.junit.Assert.fail;
+-
+ import org.apache.cassandra.SchemaLoader;
+ import org.apache.cassandra.Util;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+@@ -56,9 +41,18 @@
+ import org.apache.cassandra.io.sstable.format.SSTableReader;
+ import org.apache.cassandra.schema.KeyspaceParams;
+ 
++import static java.util.concurrent.TimeUnit.HOURS;
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
++import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getBucketAggregates;
+ import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getWindowBoundsInMillis;
+ import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.validateOptions;
+ import static org.apache.cassandra.utils.FBUtilities.nowInSeconds;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
+ 
+ public class TimeWindowCompactionStrategyTest extends SchemaLoader
+ {

@@ -1,0 +1,144 @@
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionTask.java
+@@ -134,7 +134,6 @@
+         return transaction.originals().size();
+     }
+ 
+-<<<<<<<
+     /*
+      *  Find the maximum size file in the list .
+      */
+@@ -153,11 +152,8 @@
+         return maxFile;
+     }
+ 
+-    private boolean reduceScopeForLimitedSpace(Set<SSTableReader> nonExpiredSSTables, long expectedSize)
+-=======
+     @VisibleForTesting
+     public boolean reduceScopeForLimitedSpace(Set<SSTableReader> nonExpiredSSTables, long expectedSize)
+->>>>>>>
+     {
+         if (partialCompactionsAcceptable() && transaction.originals().size() > 1)
+         {
+@@ -382,16 +378,7 @@
+ 
+             if (completed)
+             {
+-<<<<<<<
+-                Refs.release(Refs.selfRefs(newSStables)); // this is harmless in case of exception, newSStables will be empty
+-            }
+-            else if (completed)
+-            {
+-                // This code used to execute only if the compaction was successful so we preserve the existing behavior
+                 updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), progress);
+-=======
+-                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress);
+->>>>>>>
+                 CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTables.size());
+                 if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
+                     // this CompactionOperation only deleted fully expired SSTables without compacting anything
+@@ -401,17 +388,12 @@
+                     debugLogCompactionSummaryInfo(taskId, System.nanoTime() - startNanos, totalKeysWritten, newSStables, progress);
+                 if (logger.isTraceEnabled())
+                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
+-<<<<<<<
+ 
+-                strategy.getCompactionLogger().compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+-=======
+-                }
+                 if (strategy != null)
+                     strategy.getCompactionLogger().compaction(startTime,
+                                                               transaction.originals(),
+                                                               System.currentTimeMillis(),
+                                                               newSStables);
+->>>>>>>
+ 
+                 // update the metrics
+                 realm.metrics().incBytesCompacted(progress.adjustedInputDiskSize(),
+--- a/src/java/org/apache/cassandra/db/compaction/writers/CompactionAwareWriter.java
++++ b/src/java/org/apache/cassandra/db/compaction/writers/CompactionAwareWriter.java
+@@ -33,7 +33,6 @@
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.db.compaction.CompactionRealm;
+ import org.apache.cassandra.db.compaction.CompactionTask;
+-import org.apache.cassandra.db.compaction.OperationType;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+ import org.apache.cassandra.io.sstable.Descriptor;
+@@ -172,13 +171,7 @@
+         {
+             if (locationIndex < 0)
+             {
+-<<<<<<<
+-                Directories.DataDirectory defaultLocation = getWriteDirectory(nonExpiredSSTables,
+-                                                                              realm.getExpectedCompactedFileSize(nonExpiredSSTables,
+-                                                                                                                 OperationType.UNKNOWN));
+-=======
+                 Directories.DataDirectory defaultLocation = getWriteDirectory(nonExpiredSSTables, getExpectedWriteSize());
+->>>>>>>
+                 switchCompactionWriter(defaultLocation);
+                 locationIndex = 0;
+                 return true;
+@@ -289,7 +282,7 @@
+ 
+     protected long getExpectedWriteSize()
+     {
+-        return cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
++        return realm.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+     }
+ 
+     public long bytesWritten()
+--- a/test/unit/org/apache/cassandra/db/compaction/LeveledCompactionStrategyTest.java
++++ b/test/unit/org/apache/cassandra/db/compaction/LeveledCompactionStrategyTest.java
+@@ -33,13 +33,9 @@
+ import java.util.UUID;
+ import java.util.stream.Collectors;
+ 
+-<<<<<<<
+ import com.google.common.collect.Collections2;
+-import org.junit.Assert;
+-=======
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Sets;
+->>>>>>>
+ import org.junit.After;
+ import org.junit.Assert;
+ import org.junit.Before;
+diff --git a/src/java/org/apache/cassandra/db/compaction/LeveledCompactionTask.java b/src/java/org/apache/cassandra/db/compaction/LeveledCompactionTask.java
+index 7f166b1ac7..c38530f09f 100644
+--- a/src/java/org/apache/cassandra/db/compaction/LeveledCompactionTask.java
++++ b/src/java/org/apache/cassandra/db/compaction/LeveledCompactionTask.java
+@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
+ 
+ import javax.annotation.Nullable;
+ 
++import org.apache.cassandra.db.ColumnFamilyStore;
+ import org.apache.cassandra.db.Directories;
+ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
+ import org.apache.cassandra.db.compaction.writers.MajorLeveledCompactionWriter;
+diff --git a/src/java/org/apache/cassandra/db/compaction/Scrubber.java b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+index 9f388df27f..fbe4c2c662 100644
+--- a/src/java/org/apache/cassandra/db/compaction/Scrubber.java
++++ b/src/java/org/apache/cassandra/db/compaction/Scrubber.java
+@@ -204,8 +204,8 @@ public class Scrubber implements Closeable
+                 try
+                 {
+                     ByteBuffer raw = ByteBufferUtil.readWithShortLength(dataFile);
+-                    if (!cfs.metadata.getLocal().isIndex())
+-                        cfs.metadata.getLocal().partitionKeyType.validate(raw);
++                    if (!realm.metadataRef().getLocal().isIndex())
++                        realm.metadataRef().getLocal().partitionKeyType.validate(raw);
+                     key = sstable.decorateKey(raw);
+                 }
+                 catch (Throwable th)
+@@ -288,8 +288,8 @@ public class Scrubber implements Closeable
+                         key = sstable.decorateKey(currentIndexKey);
+                         try
+                         {
+-                            if (!cfs.metadata.getLocal().isIndex())
+-                                cfs.metadata.getLocal().partitionKeyType.validate(key.getKey());
++                            if (!realm.metadataRef().getLocal().isIndex())
++                                realm.metadataRef().getLocal().partitionKeyType.validate(key.getKey());
+                             dataFile.seek(rowStartFromIndex);
+ 
+                             if (tryAppend(prevKey, key, writer))

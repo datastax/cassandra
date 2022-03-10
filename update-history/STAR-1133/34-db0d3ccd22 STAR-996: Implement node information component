@@ -1,0 +1,115 @@
+--- a/src/java/org/apache/cassandra/gms/Gossiper.java
++++ b/src/java/org/apache/cassandra/gms/Gossiper.java
+@@ -35,7 +35,6 @@
+ import com.google.common.collect.ImmutableMap;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.ImmutableSet;
+-import com.google.common.collect.Iterables;
+ import com.google.common.collect.Sets;
+ import com.google.common.util.concurrent.ListenableFutureTask;
+ import com.google.common.util.concurrent.Uninterruptibles;
+@@ -54,7 +53,6 @@
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+-import io.netty.util.concurrent.FastThreadLocal;
+ import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
+ import org.apache.cassandra.concurrent.Stage;
+@@ -65,13 +63,8 @@
+ import org.apache.cassandra.net.Message;
+ import org.apache.cassandra.net.MessagingService;
+ import org.apache.cassandra.service.StorageService;
+-import org.apache.cassandra.utils.CassandraVersion;
+-import org.apache.cassandra.utils.ExecutorUtils;
+ import org.apache.cassandra.utils.FBUtilities;
+ import org.apache.cassandra.utils.JVMStabilityInspector;
+-import org.apache.cassandra.utils.MBeanWrapper;
+-import org.apache.cassandra.utils.NoSpamLogger;
+-import org.apache.cassandra.utils.Pair;
+ import org.apache.cassandra.utils.RecomputingSupplier;
+ 
+ import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIPER_QUARANTINE_DELAY;
+@@ -365,17 +358,17 @@
+         subscribers.add(new IEndpointStateChangeSubscriber()
+         {
+             public void onJoin(InetAddressAndPort endpoint, EndpointState state)
+-	    {
++            {
+                 maybeRecompute(state);
+             }
+ 
+             public void onAlive(InetAddressAndPort endpoint, EndpointState state)
+-	    {
++            {
+                 maybeRecompute(state);
+             }
+ 
+             private void maybeRecompute(EndpointState state)
+-	    {
++            {
+                 if (state.getApplicationState(ApplicationState.RELEASE_VERSION) != null)
+                     minVersionSupplier.recompute();
+             }
+@@ -2322,7 +2315,6 @@
+         ExecutorUtils.shutdownAndWait(timeout, unit, executor);
+     }
+ 
+-<<<<<<<
+     @Nullable
+     public CassandraVersion getMinVersion(long delay, TimeUnit timeUnit)
+     {
+@@ -2388,7 +2380,7 @@
+ 
+         return minVersion;
+     }
+-=======
++
+     private EndpointState putEndpointState(InetAddressAndPort endpoint, @Nonnull EndpointState state)
+     {
+         state.maybeSetUpdater(update -> Nodes.updateLocalOrPeer(endpoint, update, false));
+@@ -2424,5 +2416,4 @@
+         return removedState;
+     }
+ 
+->>>>>>>
+ }
+--- a/src/java/org/apache/cassandra/net/OutboundConnections.java
++++ b/src/java/org/apache/cassandra/net/OutboundConnections.java
+@@ -35,11 +35,8 @@
+ import org.apache.cassandra.config.Config;
+ import org.apache.cassandra.locator.InetAddressAndPort;
+ import org.apache.cassandra.metrics.InternodeOutboundMetrics;
+-<<<<<<<
+ import org.apache.cassandra.nodes.Nodes;
+-=======
+ import org.apache.cassandra.utils.NoSpamLogger;
+->>>>>>>
+ import org.apache.cassandra.utils.concurrent.SimpleCondition;
+ 
+ import static org.apache.cassandra.net.MessagingService.current_version;
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -2617,7 +2617,7 @@
+         {
+             return isReplacingSameAddress() &&
+                     Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null
+-                    && hostId.equals(Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress()));
++                    && Objects.equals(hostId, Nodes.localOrPeerInfoOpt(DatabaseDescriptor.getReplaceAddress()).map(NodeInfo::getHostId).orElse(null));
+         }
+         catch (RuntimeException ex)
+         {
+@@ -2686,13 +2686,8 @@
+         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
+         UUID hostId = Objects.requireNonNull(Nodes.localOrPeerInfo(endpoint)).getHostId();
+         InetAddressAndPort existing = getTokenMetadata().getEndpointForHostId(hostId);
+-<<<<<<<
+-        if (replacing && isReplacingSameAddress() && Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null
+-            && (Objects.equals(hostId, Nodes.localOrPeerInfoOpt(DatabaseDescriptor.getReplaceAddress()).map(NodeInfo::getHostId).orElse(null))))
+-=======
+         if (replacing && isReplacingSameHostAddressAndHostId(hostId))
+         {
+->>>>>>>
+             logger.warn("Not updating token metadata for {} because I am replacing it", endpoint);
+         }
+         else
