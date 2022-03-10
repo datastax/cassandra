@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +42,12 @@ public class Roles
     public static void init()
     {
         AuthCacheService.instance.register(cache);
+    }
+
+    @VisibleForTesting
+    public static void clearCache(RoleResource roleResource)
+    {
+        cache.invalidate(roleResource);
     }
 
     /**
