@@ -133,9 +133,10 @@ public interface IAuthorizer extends AuthCache.BulkLoader<Pair<AuthenticatedUser
      * not support it should be sure to throw UnsupportedOperationException.
      *
      * @param droppedResource The resource to revoke all permissions on.
+     * @return the roles that had permissions on {@code droppedResource}
      * @throws java.lang.UnsupportedOperationException
      */
-    void revokeAllOn(IResource droppedResource);
+    Set<RoleResource> revokeAllOn(IResource droppedResource);
 
     /**
      * Set of resources that should be made inaccessible to users and only accessible internally.
