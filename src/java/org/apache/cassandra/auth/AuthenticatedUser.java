@@ -19,10 +19,13 @@ package org.apache.cassandra.auth;
 
 import java.net.InetSocketAddress;
 import java.util.Set;
+
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Datacenters;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Returned from IAuthenticator#authenticate(), represents an authenticated user everywhere internally.
@@ -127,6 +130,19 @@ public class AuthenticatedUser
     {
         return permissionsCache.getPermissions(this, resource);
     }
+
+    @VisibleForTesting
+    public static void clearCache()
+    {
+        permissionsCache.invalidate();
+    }
+
+    @VisibleForTesting
+    public static void clearCache(RoleResource roleResource)
+    {
+        permissionsCache.invalidate(Pair.create(new AuthenticatedUser(roleResource.getRoleName()), roleResource));
+    }
+
 
     /**
      * Check whether this user has login privileges.
