@@ -184,6 +184,7 @@
       <option name="TEST_OBJECT" value="class" />
       <option name="VM_PARAMETERS" value="
                                           -Dcassandra.config=file://$PROJECT_DIR$/test/conf/cassandra.yaml
+                                          -Dcassandra.disable_tcactive_openssl=true 
                                           -Dcassandra.logdir=$PROJECT_DIR$/build/test/logs
                                           -Dcassandra.reads.thresholds.coordinator.defensive_checks_enabled=true
                                           -Dcassandra.ring_delay_ms=1000
