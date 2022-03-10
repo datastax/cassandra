@@ -299,7 +299,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         PathUtils.setDeletionListener(path -> {
             if (isDaemonSetupCompleted())
                 PathUtils.setDeletionListener(ignore -> {});
-            else
+            else if (logger.isTraceEnabled())
                 logger.trace("Deleting file during startup: {}", path);
         });
     }
