@@ -191,7 +191,7 @@ public enum CassandraRelevantProperties
     /**
      * To provide driver to different implementation of  truncate statement.
      */
-    TRUNCATE_STATEMENT_DRIVER("cassandra.truncate_statement_driver"),
+    TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
 
     /**
      * custom native library for os access

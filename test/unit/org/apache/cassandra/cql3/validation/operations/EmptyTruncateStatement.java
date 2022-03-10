@@ -33,7 +33,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 public class EmptyTruncateStatement extends TruncateStatement
 {
 
-    public static class TestTruncateStatementDriver implements TruncateStatement.TruncateStatementDriver
+    public static class TestTruncateStatementProvider implements TruncateStatementProvider
     {
         @Override
         public TruncateStatement createTruncateStatement(String queryString, QualifiedName name)

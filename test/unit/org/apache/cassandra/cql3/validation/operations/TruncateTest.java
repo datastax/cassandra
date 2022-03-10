@@ -25,8 +25,8 @@ import org.apache.cassandra.cql3.CQLTester;
 public class TruncateTest extends CQLTester
 {
     static {
-        System.setProperty("cassandra.truncate_statement_driver",
-                           EmptyTruncateStatement.TestTruncateStatementDriver.class.getName());
+        System.setProperty("cassandra.truncate_statement_provider",
+                           EmptyTruncateStatement.TestTruncateStatementProvider.class.getName());
     }
 
     public static boolean emptyTruncate = false;

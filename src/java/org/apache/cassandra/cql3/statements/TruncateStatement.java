@@ -40,7 +40,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.TRUNCATE_STATEMENT_DRIVER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TRUNCATE_STATEMENT_PROVIDER;
 
 public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeyspaceCqlStatement
 {
@@ -160,32 +160,32 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
         }
     }
 
-    private static TruncateStatementDriver getDriverFromProperty()
+    private static TruncateStatementProvider getDriverFromProperty()
     {
         try
         {
-            return (TruncateStatementDriver)FBUtilities.classForName(TRUNCATE_STATEMENT_DRIVER.getString(),
-                                     "Truncate statement driver")
-                       .getConstructor().newInstance();
+            return (TruncateStatementProvider)FBUtilities.classForName(TRUNCATE_STATEMENT_PROVIDER.getString(),
+                                                                       "Truncate statement driver")
+                                                         .getConstructor().newInstance();
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException |
                InvocationTargetException e)
         {
             throw new RuntimeException("Unable to find a truncate statement driver with name " +
-                                       TRUNCATE_STATEMENT_DRIVER.getString(), e);
+                                       TRUNCATE_STATEMENT_PROVIDER.getString(), e);
         }
     }
 
-    private static final TruncateStatementDriver driver = TRUNCATE_STATEMENT_DRIVER.isPresent() ?
-                                                          getDriverFromProperty() :
-                                                          new DefaultTruncateStatementDriver();
+    private static final TruncateStatementProvider driver = TRUNCATE_STATEMENT_PROVIDER.isPresent() ?
+                                                            getDriverFromProperty() :
+                                                            new DefaultTruncateStatementProvider();
 
-    public static interface TruncateStatementDriver
+    public static interface TruncateStatementProvider
     {
         public TruncateStatement createTruncateStatement(String rawCQLStatement, QualifiedName qual);
     }
 
-    public static final class DefaultTruncateStatementDriver implements  TruncateStatementDriver
+    public static final class DefaultTruncateStatementProvider implements TruncateStatementProvider
     {
         @Override
         public TruncateStatement createTruncateStatement(String rawCQLStatement, QualifiedName qual)
