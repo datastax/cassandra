@@ -80,6 +80,8 @@ public class EmptyValuesTest extends CQLTester
                 pb.redirectErrorStream(true);
                 if (CassandraRelevantProperties.CASSANDRA_CONFIG.isPresent())
                     pb.environment().put("JVM_OPTS", "-Dcassandra.config=" + CassandraRelevantProperties.CASSANDRA_CONFIG.getString());
+                String jvmOpts = pb.environment().getOrDefault("JVM_OPTS", "") + " -Dcassandra.disable_tcactive_openssl=true";
+                pb.environment().put("JVM_OPTS", jvmOpts);
                 Process process = pb.start();
                 exitValue = process.waitFor();
                 IOUtils.copy(process.getInputStream(), buf);
