@@ -26,6 +26,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
@@ -129,6 +130,7 @@ public class CassandraRoleManager implements IRoleManager
 
     private SelectStatement loadRoleStatement;
     private SelectStatement loadIdentityStatement;
+    private SelectStatement loadRoleMembersStatement;
 
     private final Set<Option> supportedOptions;
     private final Set<Option> alterableOptions;
@@ -148,6 +150,9 @@ public class CassandraRoleManager implements IRoleManager
     {
         loadRoleStatement();
         loadIdentityStatement();
+        loadRoleMembersStatement = (SelectStatement) prepare("SELECT member FROM %s.%s WHERE role = ?",
+                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                      AuthKeyspace.ROLE_MEMBERS);
         scheduleSetupTask(() -> {
             setupDefaultRole();
             return null;
@@ -345,6 +350,19 @@ public class CassandraRoleManager implements IRoleManager
                             true,
                             filter(),
                             this::getRole)
+               .collect(Collectors.toSet());
+    }
+
+    public Set<RoleResource> getMembersOf(RoleResource role)
+    {
+        // Get the membership list of the given role
+        QueryOptions options = QueryOptions.forInternalCalls(consistencyForRoleRead(role.getRoleName()),
+                                                             Collections.singletonList(ByteBufferUtil.bytes(role.getRoleName())));
+        ResultMessage.Rows rows = select(loadRoleMembersStatement, options);
+        UntypedResultSet resultSet = UntypedResultSet.create(rows.result);
+
+        return StreamSupport.stream(resultSet.spliterator(), false)
+               .map(row -> RoleResource.role(row.getString("member")))
                .collect(Collectors.toSet());
     }
 
