@@ -597,6 +597,10 @@ public enum CassandraRelevantProperties
     TOLERATE_SSTABLE_SIZE("cassandra.tolerate_sstable_size"),
     TRIGGERS_DIR("cassandra.triggers_dir"),
     TRUNCATE_BALLOT_METADATA("cassandra.truncate_ballot_metadata"),
+    /**
+     * To provide a provider to a different implementation of the truncate statement.
+     */
+    TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
     TYPE_UDT_CONFLICT_BEHAVIOR("cassandra.type.udt.conflict_behavior"),
     // See org.apache.cassandra.db.compaction.unified.Controller for the definition of the UCS parameters
     UCS_ADAPTIVE_COSTS_READ_MULTIPLIER("unified_compaction.costs_read_multiplier", "0.1"),
