@@ -156,29 +156,29 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
             QualifiedName qual = qualifiedName;
             if (!ks.equals(qual.getKeyspace()))
                 qual = new QualifiedName(ks, qual.getName());
-            return driver.createTruncateStatement(rawCQLStatement, qual);
+            return provider.createTruncateStatement(rawCQLStatement, qual);
         }
     }
 
-    private static TruncateStatementProvider getDriverFromProperty()
+    private static TruncateStatementProvider getProviderFromProperty()
     {
         try
         {
             return (TruncateStatementProvider)FBUtilities.classForName(TRUNCATE_STATEMENT_PROVIDER.getString(),
-                                                                       "Truncate statement driver")
+                                                                       "Truncate statement provider")
                                                          .getConstructor().newInstance();
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException |
                InvocationTargetException e)
         {
-            throw new RuntimeException("Unable to find a truncate statement driver with name " +
+            throw new RuntimeException("Unable to find a truncate statement provider with name " +
                                        TRUNCATE_STATEMENT_PROVIDER.getString(), e);
         }
     }
 
-    private static final TruncateStatementProvider driver = TRUNCATE_STATEMENT_PROVIDER.isPresent() ?
-                                                            getDriverFromProperty() :
-                                                            new DefaultTruncateStatementProvider();
+    private static final TruncateStatementProvider provider = TRUNCATE_STATEMENT_PROVIDER.isPresent() ?
+                                                              getProviderFromProperty() :
+                                                              new DefaultTruncateStatementProvider();
 
     public static interface TruncateStatementProvider
     {

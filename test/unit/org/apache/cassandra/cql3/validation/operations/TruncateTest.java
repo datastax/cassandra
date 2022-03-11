@@ -21,20 +21,25 @@ import org.junit.After;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.TruncateStatement;
+import org.apache.cassandra.service.QueryState;
+import org.mockito.Mockito;
 
 public class TruncateTest extends CQLTester
 {
     static {
         System.setProperty("cassandra.truncate_statement_provider",
-                           EmptyTruncateStatement.TestTruncateStatementProvider.class.getName());
+                           TestTruncateStatementProvider.class.getName());
     }
 
-    public static boolean emptyTruncate = false;
+    public static boolean testTruncateProvider = false;
 
     @After
     public void afterTest()
     {
-        emptyTruncate = false;
+        testTruncateProvider = false;
     }
 
     @Test
@@ -63,11 +68,26 @@ public class TruncateTest extends CQLTester
     @Test
     public void testRemoteTruncateStmt() throws Throwable
     {
-        emptyTruncate = true;
+        testTruncateProvider = true;
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY(a, b))");
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
 
         execute("TRUNCATE TABLE %s");
-        assertRowCount(execute("SELECT * FROM %s"), 1);
+        Mockito.verify(TestTruncateStatementProvider.mock)
+               .executeLocally(Mockito.any(QueryState.class), Mockito.any(QueryOptions.class));
+    }
+
+    public static class TestTruncateStatementProvider implements TruncateStatement.TruncateStatementProvider
+    {
+        public static TruncateStatement mock = Mockito.mock(TruncateStatement.class);
+
+        @Override
+        public TruncateStatement createTruncateStatement(String queryString, QualifiedName name)
+        {
+            if (TruncateTest.testTruncateProvider)
+                return mock;
+            else
+                return new TruncateStatement(queryString, name);
+        }
     }
 }
