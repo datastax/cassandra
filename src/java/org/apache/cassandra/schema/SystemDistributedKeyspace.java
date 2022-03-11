@@ -224,7 +224,7 @@ public final class SystemDistributedKeyspace
                                PartitionDenylistTable);
         }
         return KeyspaceMetadata.create(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
-                                       KeyspaceParams.simple(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())),
+                                       KeyspaceParams.systemDistributed(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())),
                                        tables);
     }
 
