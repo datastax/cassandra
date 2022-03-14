@@ -44,7 +44,7 @@ public final class ReadCoordinationMetrics
 
     public static void updateReplicaLatency(InetAddressAndPort address, long latency, TimeUnit timeUnit)
     {
-        if (latency == DatabaseDescriptor.getReadRpcTimeout(timeUnit))
+        if (latency >= DatabaseDescriptor.getReadRpcTimeout(timeUnit))
             return; // don't track timeouts
 
         Histogram histogram = replicaLatencies.get(address);
@@ -58,7 +58,7 @@ public final class ReadCoordinationMetrics
 
     private static Histogram createHistogram(InetAddressAndPort h)
     {
-        CassandraMetricsRegistry.MetricName metricName = DefaultNameFactory.createMetricName("ReadCoordination", "ReplicaLatency", h.address.getHostAddress().replace(':', '.'));
+        CassandraMetricsRegistry.MetricName metricName = DefaultNameFactory.createMetricName("ReadCoordination", "ReplicaLatency", h.getHostAddressAndPort().replace(':', '.'));
         return Metrics.histogram(metricName, false);
     }
     
