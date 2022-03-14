@@ -75,6 +75,7 @@ public class LongCompactionsTest
     {
         this.useCursors = useCursors;
     }
+    private ColumnFamilyStore cfs;
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -91,7 +92,7 @@ public class LongCompactionsTest
     public void cleanupFiles()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
+        cfs = keyspace.getColumnFamilyStore("Standard1");
         cfs.truncateBlocking();
     }
 
@@ -156,7 +157,7 @@ public class LongCompactionsTest
         try (LifecycleTransaction txn = store.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             assert txn != null : "Cannot markCompacting all sstables";
-            new CompactionTask(store, txn, gcBefore, false, CompactionTaskTest.mockStrategy(useCursors)).execute();
+            new CompactionTask(store, txn, gcBefore, false, CompactionTaskTest.mockStrategy(cfs, useCursors)).execute();
         }
         System.out.println(String.format("%s: sstables=%d rowsper=%d colsper=%d: %d ms",
                                          this.getClass().getName(),
