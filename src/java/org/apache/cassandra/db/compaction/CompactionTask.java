@@ -103,14 +103,6 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     /**
-     * Create a compaction task without a compaction strategy, currently only called by tests.
-     */
-    static AbstractCompactionTask forTesting(CompactionRealm realm, LifecycleTransaction txn, long gcBefore)
-    {
-        return new CompactionTask(realm, txn, gcBefore, false, null);
-    }
-
-    /**
      * Create a compaction task for deleted data collection.
      */
     public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, LifecycleTransaction txn, long gcBefore, CompactionParams.TombstoneOption tombstoneOption)
