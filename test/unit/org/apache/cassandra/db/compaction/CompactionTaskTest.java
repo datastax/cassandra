@@ -97,7 +97,7 @@ public class CompactionTaskTest
 
     public CompactionTaskTest(boolean useCursors)
     {
-        this.mockStrategy = mockStrategy(useCursors);
+        this.mockStrategy = mockStrategy(cfs, useCursors);
     }
 
     @BeforeClass
@@ -532,7 +532,7 @@ public class CompactionTaskTest
         return sstables;
     }
 
-    static CompactionStrategy mockStrategy(boolean useCursors)
+    static CompactionStrategy mockStrategy(ColumnFamilyStore cfs, boolean useCursors)
     {
         CompactionStrategy mock = Mockito.mock(CompactionStrategy.class);
         CompactionLogger logger = new CompactionLogger(cfs.metadata());
