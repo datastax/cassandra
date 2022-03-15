@@ -36,6 +36,8 @@ import static org.apache.cassandra.distributed.api.ConsistencyLevel.ONE;
 
 public class ReadCoordinationMetricsTest extends TestBaseImpl
 {
+    private static final int NUM_ROWS = 100;
+
     private static long countNonreplicaRequests(IInvokableInstance node)
     {
         return node.callOnInstance(() -> ReadCoordinationMetrics.nonreplicaRequests.getCount());
@@ -59,13 +61,13 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
         try (Cluster cluster = init(Cluster.create(2), 1))
         {
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))"));
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < NUM_ROWS; i++)
                 cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.tbl (pk, ck, v) VALUES (?,?,?)"), ALL, i, i, i);
 
             long nonReplicaRequests1 = countNonreplicaRequests(cluster.get(1));
             long nonReplicaRequests2 = countNonreplicaRequests(cluster.get(2));
 
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < NUM_ROWS; i++)
             {
                 // When the coordinator is not a candidate replica, which will be half the time due to RF=1,
                 // the non-replica count metric will be incremented.
@@ -75,7 +77,7 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
 
             nonReplicaRequests1 = countNonreplicaRequests(cluster.get(1)) - nonReplicaRequests1;
             nonReplicaRequests2 = countNonreplicaRequests(cluster.get(2)) - nonReplicaRequests2;
-            Assert.assertEquals(100, nonReplicaRequests1 + nonReplicaRequests2);
+            Assert.assertEquals(NUM_ROWS, nonReplicaRequests1 + nonReplicaRequests2);
         }
     }
 
@@ -95,7 +97,7 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
         try (Cluster cluster = init(Cluster.create(2), 2))
         {
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))"));
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < NUM_ROWS; i++)
                 cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.tbl (pk, ck, v) VALUES (?,?,?)"), ALL, i, i, i);
 
             long preferredOtherReplicas1 = countPreferredOtherReplicas(cluster.get(1));
@@ -109,7 +111,7 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
                 DistributedTestSnitch.sortByProximityAddressOverride = InetAddressAndPort.getByAddress(ks);
             }).accept(address2);
 
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < NUM_ROWS; i++)
             {
                 // Query using CL=1 so that the subset of "candidate" replcas selected for the "contacts" collection
                 // will have just one node; since the "candidate" list was sorted with respect to the non-coordinator
@@ -118,7 +120,7 @@ public class ReadCoordinationMetricsTest extends TestBaseImpl
             }
 
             preferredOtherReplicas1 = countPreferredOtherReplicas(cluster.get(1)) - preferredOtherReplicas1;
-            Assert.assertEquals(100, preferredOtherReplicas1);
+            Assert.assertEquals(NUM_ROWS, preferredOtherReplicas1);
         }
     }
 }
