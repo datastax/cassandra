@@ -40,7 +40,7 @@ public class DistributedTestSnitch extends AbstractNetworkTopologySnitch
     private static NetworkTopology mapping = null;
     private static final Map<InetAddressAndPort, InetSocketAddress> cache = new ConcurrentHashMap<>();
     private static final Map<InetSocketAddress, InetAddressAndPort> cacheInverse = new ConcurrentHashMap<>();
-    public static volatile InetAddressAndPort sortByProximityAddressOverride;
+    public static volatile InetAddressAndPort sortByProximityAddressOverride = null;
 
     public <C extends ReplicaCollection<? extends C>> C sortedByProximity(InetAddressAndPort address, C unsortedAddress)
     {
