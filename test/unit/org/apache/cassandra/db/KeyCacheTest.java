@@ -323,23 +323,20 @@ public class KeyCacheTest
         Util.compactAll(cfs, Integer.MAX_VALUE).get();
         boolean noEarlyOpen = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() < 0;
 
-        // after compaction cache should have entries for new SSTables,
-        // but since we have kept a reference to the old sstables,
-        // if we had 2 keys in cache previously it should become 4
-        assertKeyCacheSize(noEarlyOpen ? 2 : 4, KEYSPACE1, cf);
+        assertKeyCacheSize(2, KEYSPACE1, cf);
 
         refs.release();
 
         LifecycleTransaction.waitForDeletions();
 
         // after releasing the reference this should drop to 2
-        assertKeyCacheSize(2, KEYSPACE1, cf);
+        assertKeyCacheSize(0, KEYSPACE1, cf);
 
         // re-read same keys to verify that key cache didn't grow further
         Util.getAll(Util.cmd(cfs, "key1").build());
         Util.getAll(Util.cmd(cfs, "key2").build());
 
-        assertKeyCacheSize(noEarlyOpen ? 4 : 2, KEYSPACE1, cf);
+        assertKeyCacheSize(2, KEYSPACE1, cf);
     }
 
     @Test

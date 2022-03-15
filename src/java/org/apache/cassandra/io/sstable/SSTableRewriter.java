@@ -19,10 +19,13 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -33,6 +36,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -239,7 +243,17 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             if (lowerbound.compareTo(latest.last) >= 0)
             {
                 if (!transaction.isObsolete(latest))
+                {
+                    latest.runOnClose(() -> {
+                        Iterator<KeyCacheKey> it = CacheService.instance.keyCache.keyIterator();
+                        while (it.hasNext()) {
+                            KeyCacheKey k = it.next();
+                            if (Objects.equals(k.desc, sstable.descriptor))
+                                it.remove();
+                        }
+                    });
                     transaction.obsolete(latest);
+                }
 
                 continue;
             }
