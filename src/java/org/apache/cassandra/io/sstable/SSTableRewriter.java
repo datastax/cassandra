@@ -240,10 +240,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             if (lowerbound.compareTo(latest.last) >= 0)
             {
                 if (!transaction.isObsolete(latest))
-                {
-                    latest.runOnClose(() -> CacheService.instance.obsoleteSSTable(latest.descriptor));
                     transaction.obsolete(latest);
-                }
 
                 continue;
             }

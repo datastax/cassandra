@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +30,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Futures;
 
@@ -102,8 +101,6 @@ public class CacheService implements CacheServiceMBean
     public final AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache;
     public final AutoSavingCache<CounterCacheKey, ClockAndCount> counterCache;
 
-    private final LinkedBlockingQueue<Descriptor> obsoletedDescriptors = new LinkedBlockingQueue<>(Integer.MAX_VALUE);
-
     private CacheService()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
@@ -128,9 +125,12 @@ public class CacheService implements CacheServiceMBean
         kc = CaffeineCache.create(keyCacheInMemoryCapacity);
 
         AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer(), () -> {
-            Set<Descriptor> snapshot = new HashSet<>(obsoletedDescriptors.size());
-            obsoletedDescriptors.drainTo(snapshot);
-            return key -> !snapshot.contains(key.desc);
+            Set<Descriptor> liveDescriptors = Keyspace.allExisting()
+                                                      .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream()
+                                                                                   .flatMap(cfs -> cfs.getLiveSSTables().stream()
+                                                                                                      .map(SSTableReader::getDescriptor)))
+                                                      .collect(Collectors.toSet());
+            return key -> liveDescriptors.contains(key.desc);
         });
 
         int keyCacheKeysToSave = DatabaseDescriptor.getKeyCacheKeysToSave();
@@ -193,11 +193,6 @@ public class CacheService implements CacheServiceMBean
         cache.scheduleSaving(DatabaseDescriptor.getCounterCacheSavePeriod(), keysToSave);
 
         return cache;
-    }
-
-    public void obsoleteSSTable(Descriptor descriptor)
-    {
-        obsoletedDescriptors.offer(descriptor);
     }
 
     public int getRowCacheSavePeriodInSeconds()
