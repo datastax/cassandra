@@ -31,7 +31,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.AfterClass;
-import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -51,7 +50,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.RowIndexEntry;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -380,7 +378,6 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadTwoTablesTime() throws Exception
     {
-        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(60);
         String columnFamily1 = COLUMN_FAMILY8;
         String columnFamily2 = COLUMN_FAMILY_K2_1;
@@ -403,7 +400,6 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadCacheLoadTimeExceedingLimit() throws Exception
     {
-        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(2);
         int delayMillis = 1000;
         int numberOfRows = 100;
@@ -419,7 +415,8 @@ public class KeyCacheTest
         CacheService.KeyCacheSerializer keyCacheSerializerSpy = Mockito.spy(keyCacheSerializer);
         AutoSavingCache autoSavingCache = new AutoSavingCache(mock(ICache.class),
                                                               CacheService.CacheType.KEY_CACHE,
-                                                              keyCacheSerializerSpy);
+                                                              keyCacheSerializerSpy,
+                                                              null);
 
         doAnswer(new AnswersWithDelay(delayMillis, InvocationOnMock::callRealMethod)).when(keyCacheSerializerSpy)
                                                                                      .deserialize(any(DataInputPlus.class));
