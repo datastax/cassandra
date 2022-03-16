@@ -32,6 +32,7 @@ import java.nio.file.Path;
 
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -322,6 +323,12 @@ public class Directories
         return null;
     }
 
+    /**
+     * This method looks for the file name passed in and resolves it into a descriptor
+     * if the file exists.
+     *
+     * @return a descriptor for the file name passed in
+     */
     public Descriptor find(String filename)
     {
         for (File dir : dataPaths)
@@ -331,6 +338,20 @@ public class Directories
                 return Descriptor.fromFilename(file);
         }
         return null;
+    }
+
+    /**
+     * This method resolves the filename against the specified directory number, whether
+     * the file exists or not.
+     *
+     * @return a descriptor for the passed in filename
+     */
+    public Descriptor resolve(String filename, int dirNumber)
+    {
+        Preconditions.checkArgument(dirNumber < dataPaths.length, "Invalid dir number: " + dirNumber);
+        File dir = dataPaths[dirNumber];
+        File path = dir.resolve(filename);
+        return Descriptor.fromFilename(path);
     }
 
     /**
