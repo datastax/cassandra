@@ -318,7 +318,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 keyIterator = hotKeyIterator(keysToSave);
                 keysEstimate = keysToSave;
             }
-            this.keyFilter = keyFilterSupplier.get();
+            this.keyFilter = keyFilterSupplier != null ? keyFilterSupplier.get() : null;
 
             OperationType type;
             if (cacheType == CacheService.CacheType.KEY_CACHE)
@@ -374,23 +374,23 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 while (keyIterator.hasNext())
                 {
                     K key = keyIterator.next();
-                    if (keyFilter == null || keyFilter.test(key))
+                    ColumnFamilyStore cfs;
+                    if ((keyFilter == null || keyFilter.test(key)) && (cfs = SchemaManager.instance.getColumnFamilyStoreInstance(key.tableId)) != null)
                     {
-                        ColumnFamilyStore cfs = SchemaManager.instance.getColumnFamilyStoreInstance(key.tableId);
-                        if (cfs == null)
-                            continue; // the table or 2i has been dropped.
                         if (key.indexName != null)
                             cfs = cfs.indexManager.getIndexByName(key.indexName).getBackingTable().orElse(null);
 
                         cacheLoader.serialize(key, writer, cfs);
+
+                        keysWritten++;
+                        if (keysWritten >= keysEstimate)
+                            break;
                     }
                     else
                     {
+                        // remove stale entry from cache before saving basing on the existence of a table and provided filter
                         keyIterator.remove();
                     }
-                    keysWritten++;
-                    if (keysWritten >= keysEstimate)
-                        break;
                 }
             }
             catch (FileNotFoundException | NoSuchFileException e)
