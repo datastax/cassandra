@@ -93,6 +93,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.service.StorageService;
@@ -1021,6 +1022,32 @@ public abstract class CommitLogTest
         System.setProperty("cassandra.replayList", KEYSPACE2 + "." + STANDARD2);
         Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
         Assert.assertEquals(0, replayedKeyspaces.size());
+    }
+
+    @Test
+    public void testUnwriteableFlushRecoveryCustomExcludingFilter() throws ExecutionException, InterruptedException, IOException
+    {
+        prepareUnwriteableFlushRecovery();
+
+        // Test the custom filter, which excludes everything.
+        System.setProperty("cassandra.custom_replay_filter_class", NeverReplayFilter.class.getName());
+        Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
+        Assert.assertEquals(0, replayedKeyspaces.size());
+    }
+
+    public static class NeverReplayFilter extends CommitLogReplayer.ReplayFilter
+    {
+        @Override
+        public Iterable<PartitionUpdate> filter(Mutation mutation)
+        {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public boolean includes(TableMetadataRef tableMetadataRef)
+        {
+            return false;
+        }
     }
 
     public void testOutOfOrderFlushRecovery(BiConsumer<ColumnFamilyStore, Memtable> flushAction, boolean performCompaction)
