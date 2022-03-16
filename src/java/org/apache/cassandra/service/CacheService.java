@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClockAndCount;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.context.CounterContext;
@@ -133,7 +135,15 @@ public class CacheService implements CacheServiceMBean
         // where 48 = 40 bytes (average size of the key) + 8 bytes (size of value)
         ICache<KeyCacheKey, AbstractRowIndexEntry> kc;
         kc = CaffeineCache.create(keyCacheInMemoryCapacity);
-        AutoSavingCache<KeyCacheKey, AbstractRowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer());
+
+        AutoSavingCache<KeyCacheKey, AbstractRowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer(), () -> {
+            Set<Descriptor> liveDescriptors = Keyspace.allExisting()
+                                                      .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream()
+                                                                                   .flatMap(cfs -> cfs.getLiveSSTables().stream()
+                                                                                                      .map(SSTableReader::getDescriptor)))
+                                                      .collect(Collectors.toSet());
+            return key -> liveDescriptors.contains(key.desc);
+        });
 
         int keyCacheKeysToSave = DatabaseDescriptor.getKeyCacheKeysToSave();
 
@@ -165,7 +175,7 @@ public class CacheService implements CacheServiceMBean
 
         // cache object
         ICache<RowCacheKey, IRowCacheEntry> rc = cacheProvider.create();
-        AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache = new AutoSavingCache<>(rc, CacheType.ROW_CACHE, new RowCacheSerializer());
+        AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache = new AutoSavingCache<>(rc, CacheType.ROW_CACHE, new RowCacheSerializer(), null);
 
         int rowCacheKeysToSave = DatabaseDescriptor.getRowCacheKeysToSave();
 
@@ -183,7 +193,8 @@ public class CacheService implements CacheServiceMBean
         AutoSavingCache<CounterCacheKey, ClockAndCount> cache =
             new AutoSavingCache<>(CaffeineCache.create(capacity),
                                   CacheType.COUNTER_CACHE,
-                                  new CounterCacheSerializer());
+                                  new CounterCacheSerializer(),
+                                  null);
 
         int keysToSave = DatabaseDescriptor.getCounterCacheKeysToSave();
 
@@ -195,7 +206,6 @@ public class CacheService implements CacheServiceMBean
 
         return cache;
     }
-
 
     public int getRowCacheSavePeriodInSeconds()
     {
