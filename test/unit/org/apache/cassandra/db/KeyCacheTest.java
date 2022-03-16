@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -53,6 +54,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.awaitility.Awaitility;
 import org.hamcrest.Matchers;
 import org.mockito.Mockito;
 import org.mockito.internal.stubbing.answers.AnswersWithDelay;
@@ -321,7 +323,6 @@ public class KeyCacheTest
             throw new IllegalStateException();
 
         Util.compactAll(cfs, Integer.MAX_VALUE).get();
-        boolean noEarlyOpen = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() < 0;
 
         assertKeyCacheSize(2, KEYSPACE1, cf);
 
@@ -329,14 +330,17 @@ public class KeyCacheTest
 
         LifecycleTransaction.waitForDeletions();
 
-        // after releasing the reference this should drop to 2
-        assertKeyCacheSize(0, KEYSPACE1, cf);
+        assertKeyCacheSize(2, KEYSPACE1, cf);
 
         // re-read same keys to verify that key cache didn't grow further
         Util.getAll(Util.cmd(cfs, "key1").build());
         Util.getAll(Util.cmd(cfs, "key2").build());
 
-        assertKeyCacheSize(2, KEYSPACE1, cf);
+        assertKeyCacheSize(4, KEYSPACE1, cf);
+
+        CacheService.instance.keyCache.submitWrite(Integer.MAX_VALUE).get();
+
+        Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertKeyCacheSize(2, KEYSPACE1, cf));
     }
 
     @Test
@@ -399,7 +403,8 @@ public class KeyCacheTest
         CacheService.KeyCacheSerializer keyCacheSerializerSpy = Mockito.spy(keyCacheSerializer);
         AutoSavingCache autoSavingCache = new AutoSavingCache(mock(ICache.class),
                                                               CacheService.CacheType.KEY_CACHE,
-                                                              keyCacheSerializerSpy);
+                                                              keyCacheSerializerSpy,
+                                                              null);
 
         doAnswer(new AnswersWithDelay(delayMillis, answer -> keyCacheSerializer.deserialize(answer.getArgument(0),
                                                                                             answer.getArgument(1)) ))
