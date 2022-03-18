@@ -1157,8 +1157,7 @@ public abstract class CommitLogTest
         }
     }
 
-    @Test
-    public void testUnwriteableFlushRecovery() throws ExecutionException, InterruptedException, IOException
+    private void prepareUnwriteableFlushRecovery() throws ExecutionException, InterruptedException, IOException
     {
         CommitLog.instance.resetUnsafe(true);
 
@@ -1199,17 +1198,46 @@ public abstract class CommitLogTest
         }
 
         CommitLog.instance.sync(true);
+    }
+
+    @Test
+    public void testUnwriteableFlushRecoveryNoFilter() throws ExecutionException, InterruptedException, IOException
+    {
+        prepareUnwriteableFlushRecovery();
+
+        Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
+        Assert.assertEquals(1, replayedKeyspaces.size());
+        Map.Entry<Keyspace, Integer> firstKeyspace = replayedKeyspaces.entrySet().iterator().next();
+        Assert.assertEquals(KEYSPACE1, firstKeyspace.getKey().getName());
+        Assert.assertEquals(1, (long)firstKeyspace.getValue());
+    }
+
+    @Test
+    public void testUnwriteableFlushRecoveryIncludingFilter() throws ExecutionException, InterruptedException, IOException
+    {
+        prepareUnwriteableFlushRecovery();
+
         try (WithProperties properties = new WithProperties().set(COMMIT_LOG_REPLAY_LIST, KEYSPACE1 + '.' + STANDARD1))
         {
             // Currently we don't attempt to re-flush a memtable that failed, thus make sure data is replayed by commitlog.
             // If retries work subsequent flushes should clear up error and this should change to expect 0.
-            Map<Keyspace, Integer> partitionUpdates = CommitLog.instance.resetUnsafe(false);
-            Integer keyspacePartitionUpdates = partitionUpdates.entrySet().stream()
-                                                               .filter(e -> e.getKey().getName().equals(KEYSPACE1))
-                                                               .findFirst()
-                                                               .map(Map.Entry::getValue)
-                                                               .orElseThrow();
-            assertEquals(1, keyspacePartitionUpdates.intValue());
+            Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
+            Assert.assertEquals(1, replayedKeyspaces.size());
+            Map.Entry<Keyspace, Integer> firstKeyspace = replayedKeyspaces.entrySet().iterator().next();
+            Assert.assertEquals(KEYSPACE1, firstKeyspace.getKey().getName());
+            Assert.assertEquals(1, (long)firstKeyspace.getValue());
+        }
+    }
+
+    @Test
+    public void testUnwriteableFlushRecoveryNotmachingFilter() throws ExecutionException, InterruptedException, IOException
+    {
+        prepareUnwriteableFlushRecovery();
+
+        try (WithProperties properties = new WithProperties().set(COMMIT_LOG_REPLAY_LIST, KEYSPACE2 + '.' + STANDARD2))
+        {
+            Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
+            Assert.assertEquals(0, replayedKeyspaces.size());
         }
     }
 
