@@ -59,12 +59,12 @@ public interface CompactionSSTable
     /**
      * @return the position of the first partition in the sstable
      */
-    DecoratedKey getFirst();
+    PartitionPosition getFirst();
 
     /**
      * @return the position of the last partition in the sstable
      */
-    DecoratedKey getLast();
+    PartitionPosition getLast();
 
     /**
      * @return the bounds spanned by this sstable, from first to last keys.
