@@ -460,14 +460,19 @@ public class DatabaseDescriptor
     @VisibleForTesting
     public static Config loadConfig() throws ConfigurationException
     {
+        Config config;
         if (Config.getOverrideLoadConfig() != null)
-            return Config.getOverrideLoadConfig().get();
-
-        String loaderClass = CONFIG_LOADER.getString();
-        ConfigurationLoader loader = loaderClass == null
-                                     ? new YamlConfigurationLoader()
-                                     : FBUtilities.construct(loaderClass, "configuration loading", ConfigurationLoader.class);
-        Config config = loader.loadConfig();
+        {
+            config = Config.getOverrideLoadConfig().get();
+        }
+        else
+        {
+            String loaderClass = CONFIG_LOADER.getString();
+            ConfigurationLoader loader = loaderClass == null
+                                         ? new YamlConfigurationLoader()
+                                         : FBUtilities.construct(loaderClass, "configuration loading", ConfigurationLoader.class);
+            config = loader.loadConfig();
+        }
 
         if (!hasLoggedConfig)
         {
