@@ -210,7 +210,6 @@ public abstract class CommitLogTest
     public void afterTest()
     {
         System.clearProperty("cassandra.replayList");
-        System.clearProperty("cassandra.custom_replay_filter_class");
         testKiller.reset();
     }
 
