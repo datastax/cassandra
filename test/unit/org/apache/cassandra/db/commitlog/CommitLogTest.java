@@ -99,6 +99,7 @@ import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.CipherFactory;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.service.StorageService;
@@ -111,8 +112,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_IGNORE_REPLAY_ERRORS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMIT_LOG_REPLAY_LIST;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
@@ -244,6 +244,8 @@ public abstract class CommitLogTest
     {
         CommitLogSegmentReader.setAllowSkipSyncMarkerCrc(false);
         COMMIT_LOG_REPLAY_LIST.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
+        COMMIT_LOG_REPLAY_LIST.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
+        CUSTOM_REPLAY_FILTER_CLASS.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
         testKiller.reset();
     }
 
@@ -1238,6 +1240,36 @@ public abstract class CommitLogTest
         {
             Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
             Assert.assertEquals(0, replayedKeyspaces.size());
+        }
+    }
+
+    /**
+     * Test that Custom filter class is being called by the fact that the custom filter has 
+     * different behavior than default. It filters everything and nothing is replayed.
+     */
+    @Test
+    public void testUnwriteableFlushRecoveryCustomExcludingFilter() throws ExecutionException, InterruptedException, IOException
+    {
+        prepareUnwriteableFlushRecovery();
+
+        // Test the custom filter, which excludes everything.
+        CUSTOM_REPLAY_FILTER_CLASS.setString(NeverReplayFilter.class.getName());
+        Map<Keyspace, Integer> replayedKeyspaces = CommitLog.instance.resetUnsafe(false);
+        Assert.assertEquals(0, replayedKeyspaces.size());
+    }
+
+    public static class NeverReplayFilter extends CommitLogReplayer.ReplayFilter
+    {
+        @Override
+        public Iterable<PartitionUpdate> filter(Mutation mutation)
+        {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public boolean includes(TableMetadataRef tableMetadataRef)
+        {
+            return false;
         }
     }
 
