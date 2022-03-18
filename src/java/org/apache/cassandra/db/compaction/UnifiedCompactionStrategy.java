@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
@@ -621,8 +620,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private int shardsSpanned(CompactionPick pick)
     {
-        DecoratedKey min = pick.sstables.stream().map(CompactionSSTable::getFirst).min(Ordering.natural()).get();
-        DecoratedKey max = pick.sstables.stream().map(CompactionSSTable::getLast).max(Ordering.natural()).get();
+        PartitionPosition min = pick.sstables.stream().map(CompactionSSTable::getFirst).min(Ordering.natural()).get();
+        PartitionPosition max = pick.sstables.stream().map(CompactionSSTable::getLast).max(Ordering.natural()).get();
         return arenaSelector.shardFor(max) - arenaSelector.shardFor(min) + 1;
     }
 
