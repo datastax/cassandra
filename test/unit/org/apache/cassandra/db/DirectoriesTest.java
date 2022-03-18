@@ -67,11 +67,17 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Directories.DataDirectories;
 import org.apache.cassandra.db.Directories.DataDirectory;
@@ -88,11 +94,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.Indexes;
-import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.SchemaKeyspaceTables;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.apache.cassandra.service.snapshot.SnapshotManifest;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
@@ -411,6 +412,22 @@ public class DirectoriesTest
             assertEquals(manifest, loadedManifest);
         }
     }
+
+    @Test
+    public void testResolve() throws IOException
+    {
+        TableMetadata cfm = CFM.iterator().next();
+        Directories directories = new Directories(cfm, toDataDirectories(tempDataDir));
+
+        Descriptor resolved = directories.resolve("me-123-big-Data.db", 0);
+
+        assertEquals(cfm.keyspace, resolved.ksname);
+        assertEquals(cfm.name, resolved.cfname);
+        assertTrue(BigFormat.is(resolved.getFormat()));
+        assertEquals(BigFormat.getInstance().getVersion("me"), resolved.version);
+        assertEquals("123", resolved.id.toString());
+    }
+
 
     @Test
     public void testSecondaryIndexDirectories()
