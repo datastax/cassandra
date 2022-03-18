@@ -1654,7 +1654,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         sortedByFirst.sort(CompactionSSTable.firstKeyComparator);
 
         List<AbstractBounds<PartitionPosition>> bounds = new ArrayList<>();
-        DecoratedKey first = null, last = null;
+        PartitionPosition first = null, last = null;
         /*
         normalize the intervals covered by the sstables
         assume we have sstables like this (brackets representing first/last key in the sstable);
