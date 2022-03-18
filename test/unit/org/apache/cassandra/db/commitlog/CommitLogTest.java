@@ -1024,6 +1024,10 @@ public abstract class CommitLogTest
         Assert.assertEquals(0, replayedKeyspaces.size());
     }
 
+    /**
+     * Test that Custom filter class is being called by the fact that the custom filter has 
+     * different behavior than default. It filters everything and nothing is replayed.
+     */
     @Test
     public void testUnwriteableFlushRecoveryCustomExcludingFilter() throws ExecutionException, InterruptedException, IOException
     {
