@@ -30,6 +30,12 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Splitter;
+import com.google.common.net.HostAndPort;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.vdurmont.semver4j.Semver;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.api.Feature;
@@ -39,8 +45,12 @@ import org.apache.cassandra.distributed.upgrade.UpgradeTestBase;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.SimpleSeedProvider;
 
+import org.apache.commons.lang3.ObjectUtils;
+
 public class InstanceConfig implements IInstanceConfig
 {
+    private static final Logger logger = LoggerFactory.getLogger(InstanceConfig.class);
+
     public final int num;
     private final int jmxPort;
 
@@ -333,13 +343,28 @@ public class InstanceConfig implements IInstanceConfig
 
     public InstanceConfig forVersion(Semver version)
     {
+        ParameterizedClass seedProviderConfig = (ParameterizedClass) params.get("seed_provider");
+
         // Versions before 4.0 need to set 'seed_provider' without specifying the port
-        if (UpgradeTestBase.v40.compareTo(version) < 0)
+        // the extra comparison to strict version is due to a bug in Semver (see STAR-871)
+        if (version.isGreaterThanOrEqualTo(UpgradeTestBase.v40) || version.isGreaterThanOrEqualTo(UpgradeTestBase.v40.toStrict()) || seedProviderConfig == null)
             return this;
-        else
-            return new InstanceConfig(this)
-                            .set("seed_provider", new ParameterizedClass(SimpleSeedProvider.class.getName(),
-                                                                         Collections.singletonMap("seeds", "127.0.0.1")));
+
+        assert ObjectUtils.equals(seedProviderConfig.class_name, SimpleSeedProvider.class.getName());
+        String seedsStr = seedProviderConfig.parameters.get("seeds");
+        assert seedsStr != null;
+        seedsStr = Splitter.on(',')
+                           .omitEmptyStrings()
+                           .trimResults()
+                           .splitToList(seedsStr)
+                           .stream()
+                           .map(str -> HostAndPort.fromString(str).getHost())
+                           .collect(Collectors.joining(","));
+
+        seedProviderConfig = new ParameterizedClass(seedProviderConfig.class_name, Collections.singletonMap("seeds", seedsStr));
+
+        logger.warn("Stripping ports from seed addresses because the version {} is < {}, new seeds list is: {}", version, UpgradeTestBase.v40, seedsStr);
+        return new InstanceConfig(this).set("seed_provider", seedProviderConfig);
     }
 
     public String toString()
