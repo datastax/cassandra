@@ -199,7 +199,7 @@
                                           -Dlegacy-sstable-root=$PROJECT_DIR$/test/data/legacy-sstables
                                           -Dlogback.configurationFile=file://$PROJECT_DIR$/test/conf/logback-test.xml
                                           -Dmigration-sstable-root=$PROJECT_DIR$/test/data/migration-sstables
-                                          -XX:ActiveProcessorCount=2
+                                          -XX:ActiveProcessorCount=4
                                           -XX:HeapDumpPath=build/test
                                           -XX:MaxMetaspaceSize=1G
                                           -XX:SoftRefLRUPolicyMSPerMB=0
