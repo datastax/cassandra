@@ -64,10 +64,7 @@ import org.apache.cassandra.utils.concurrent.Future;
 import org.jctools.maps.NonBlockingHashMap;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_IGNORE_REPLAY_ERRORS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_MAX_OUTSTANDING_REPLAY_BYTES;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_MAX_OUTSTANDING_REPLAY_COUNT;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COMMIT_LOG_REPLAY_LIST;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 /**
  * Replays commit logs (reads commit logs and flushes new sstables).
@@ -397,7 +394,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 .get(); // iteration is per known-CF, there must be at least one.
     }
 
-    abstract static class ReplayFilter
+    public abstract static class ReplayFilter
     {
         public abstract Iterable<PartitionUpdate> filter(Mutation mutation);
 
@@ -412,8 +409,18 @@ public class CommitLogReplayer implements CommitLogReadHandler
         {
             String replayList = COMMIT_LOG_REPLAY_LIST.getString();
 
+            // If no replaylist is supplied an empty array of strings is used to replay everything.
             if (replayList == null)
+            {
+                String customReplayFilter = CUSTOM_REPLAY_FILTER_CLASS.getString();
+                if (customReplayFilter != null)
+                    return FBUtilities.construct(customReplayFilter, "custom_replay_filter");
                 return new AlwaysReplayFilter();
+            }
+            else
+            {
+                logger.info("Commit log replay list set by cassandra.replayList property to: {}", replayList);
+            }
 
             Multimap<String, String> toReplay = HashMultimap.create();
             for (String rawPair : replayList.split(","))

@@ -197,6 +197,7 @@ public enum CassandraRelevantProperties
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
+    CUSTOM_REPLAY_FILTER_CLASS("cassandra.custom_replay_filter_class"),
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
