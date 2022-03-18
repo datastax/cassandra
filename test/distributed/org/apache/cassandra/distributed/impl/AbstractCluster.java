@@ -47,6 +47,7 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
@@ -425,6 +426,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
         long token = tokenSupplier.token(nodeNum);
         NetworkTopology topology = buildNetworkTopology(provisionStrategy, nodeIdTopology);
         InstanceConfig config = InstanceConfig.generate(nodeNum, provisionStrategy, topology, root, Long.toString(token), datadirCount);
+        logger.info("Instance {} config: {}", nodeNum, config);
         config.set(Constants.KEY_DTEST_API_CLUSTER_ID, clusterId.toString());
         if (configUpdater != null)
             configUpdater.accept(config);
@@ -779,7 +781,13 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
 
         protected boolean isCompleted()
         {
-            return instances.stream().allMatch(i -> !i.config().has(Feature.GOSSIP) || i.liveMemberCount() == instances.size());
+            return instances.stream().allMatch(i -> {
+                if (!i.config().has(Feature.GOSSIP))
+                    return true;
+
+                logger.info("Instance {} reports {} live members count, required {}", i, i.liveMemberCount(), instances.size());
+                return i.liveMemberCount() == instances.size();
+            });
         }
 
         protected String getMonitorTimeoutMessage()
@@ -845,12 +853,17 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
     @Override
     public void close()
     {
+        List<InetSocketAddress> addresses = instances.stream().map(IInstance::broadcastAddress).collect(Collectors.toList());
         FBUtilities.waitOnFutures(instances.stream()
                                            .filter(i -> !i.isShutdown())
                                            .map(IInstance::shutdown)
                                            .collect(Collectors.toList()),
                                   1L, TimeUnit.MINUTES);
 
+        addresses.forEach(address -> {
+            if (Util.isListeningOn(address))
+                throw new AssertionError("Instance " + address + " is not closed");
+        });
         instances.clear();
         instanceMap.clear();
         PathUtils.setDeletionListener(ignore -> {});
