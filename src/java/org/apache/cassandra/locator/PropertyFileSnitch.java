@@ -193,10 +193,13 @@ public class PropertyFileSnitch extends AbstractNetworkTopologySnitch
         if (isUpdate && !livenessCheck(reloadedMap, reloadedDefaultDCRack))
             return false;
 
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<InetAddressAndPort, String[]> entry : reloadedMap.entrySet())
-            sb.append(entry.getKey()).append(':').append(Arrays.toString(entry.getValue())).append(", ");
-        logger.debug("Loaded network topology from property file: {}", StringUtils.removeEnd(sb.toString(), ", "));
+        if (logger.isDebugEnabled())
+        {
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<InetAddressAndPort, String[]> entry : reloadedMap.entrySet())
+                sb.append(entry.getKey()).append(':').append(Arrays.toString(entry.getValue())).append(", ");
+            logger.debug("Loaded network topology from property file: {}", StringUtils.removeEnd(sb.toString(), ", "));
+        }
 
         defaultDCRack = reloadedDefaultDCRack;
         endpointMap = reloadedMap;
