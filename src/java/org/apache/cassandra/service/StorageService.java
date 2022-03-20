@@ -3406,19 +3406,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Set<InetAddressAndPort> ret = new HashSet<>(allRingMembers.size());
         for (InetAddressAndPort ep : getTokenMetadata().getAllRingMembers())
         {
+            if (Gossiper.instance.isEnabled())
+            {
+                EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(ep);
+                if (epState == null)
+                    continue;
+
+                if (excludeDeadStates && Gossiper.instance.isDeadState(epState))
+                    continue;
+            }
+
             if (!IFailureDetector.instance.isAlive(ep))
                 continue;
 
-            if (excludeDeadStates && Gossiper.instance.isEnabled())
-            {
-                // Dead states are specific to Gossip, in CNDB we will never find dead states since we don't use Gossip,
-                // and the states will be null, so we can't run this code block.
-                // I also note that I struggle to understand how a node could be alive but have a dead state,
-                // so this extra check smells like a bug in Gossip to me.
-                EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(ep);
-                if (epState == null || Gossiper.instance.isDeadState(epState))
-                    continue;
-            }
             ret.add(ep);
         }
         return ret;
