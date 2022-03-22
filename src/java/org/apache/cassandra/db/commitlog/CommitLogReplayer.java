@@ -330,6 +330,11 @@ public class CommitLogReplayer implements CommitLogReadHandler
                                 newPUCollector = new Mutation.PartitionUpdateCollector(mutation.getKeyspaceName(), mutation.key());
                             newPUCollector.add(update);
                             replayedCount++;
+                            onReplayed(update);
+                        }
+                        else
+                        {
+                            onSkipped(update);
                         }
                     }
                     if (newPUCollector != null)
@@ -343,6 +348,16 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 }
             };
             return Stage.MUTATION.submit(runnable, serializedSize);
+        }
+
+        protected void onReplayed(PartitionUpdate update)
+        {
+            // Override for test purposes
+        }
+
+        protected void onSkipped(PartitionUpdate update)
+        {
+            // Override for test purposes
         }
     }
 
