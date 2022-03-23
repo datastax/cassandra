@@ -26,12 +26,7 @@ import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CqlBuilder;
-import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.IEndpointSnitch;
-import org.apache.cassandra.locator.LocalStrategy;
-import org.apache.cassandra.locator.NetworkTopologyStrategy;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.locator.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 
@@ -61,6 +56,11 @@ public final class ReplicationParams
     static ReplicationParams simple(String replicationFactor)
     {
         return new ReplicationParams(SimpleStrategy.class, ImmutableMap.of("replication_factor", replicationFactor));
+    }
+
+    static ReplicationParams everywhere()
+    {
+        return new ReplicationParams(EverywhereStrategy.class, ImmutableMap.of());
     }
 
     static ReplicationParams nts(Object... args)
