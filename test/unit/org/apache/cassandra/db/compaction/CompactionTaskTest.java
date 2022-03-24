@@ -279,7 +279,7 @@ public class CompactionTaskTest
 
         verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
         verify(compObserver, times(1)).onInProgress(compactionCaptor.capture());
-        verify(compObserver, times(1)).onCompleted(eq(txn.opId()));
+        verify(compObserver, times(1)).onCompleted(eq(txn.opId()), eq(true));
     }
 
 

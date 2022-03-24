@@ -655,7 +655,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         {
             Set<SSTableReader> compSSTables = pair.left;
             long totSSTablesLen = totUncompressedLength(compSSTables);
-            strategy.onCompleted(pair.right);
+            strategy.onCompleted(pair.right, true);
 
             numCompactions--;
             numCompactionsInProgress--;
