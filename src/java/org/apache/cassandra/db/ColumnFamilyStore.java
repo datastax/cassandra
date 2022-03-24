@@ -2566,14 +2566,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         synchronized (this)
         {
             logger.trace("Cancelling in-progress compactions for {}", metadata.name);
-            Iterable<ColumnFamilyStore> toInterruptFor = interruptIndexes
-                                                         ? concatWithIndexes()
-                                                         : Collections.singleton(this);
-
-            toInterruptFor = interruptViews
-                             ? Iterables.concat(toInterruptFor, viewManager.allViewsCfs())
-                             : toInterruptFor;
-
+            Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
             try (CompactionManager.CompactionPauser pause = CompactionManager.instance.pauseGlobalCompaction();
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
             {
