@@ -2968,9 +2968,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public Iterable<ColumnFamilyStore> concatWithIndexes()
     {
+        return concatWith(true, false);
+    }
+
+    public Iterable<ColumnFamilyStore> concatWith(boolean includeIndexes, boolean includeViews)
+    {
         // we return the main CFS first, which we rely on for simplicity in switchMemtable(), for getting the
         // latest commit log segment position
-        return Iterables.concat(Collections.singleton(this), indexManager.getAllIndexColumnFamilyStores());
+        if (!includeIndexes && !includeViews)
+            return Collections.singleton(this);
+        else if (includeIndexes && !includeViews)
+            return Iterables.concat(Collections.singleton(this), indexManager.getAllIndexColumnFamilyStores());
+        else if (!includeIndexes && includeViews)
+            return Iterables.concat(Collections.singleton(this), viewManager.allViewsCfs());
+        else
+            return Iterables.concat(Collections.singleton(this),
+                                    indexManager.getAllIndexColumnFamilyStores(),
+                                    viewManager.allViewsCfs());
     }
 
     public List<String> getBuiltIndexes()
