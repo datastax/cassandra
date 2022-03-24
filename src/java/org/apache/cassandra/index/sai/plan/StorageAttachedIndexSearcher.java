@@ -226,14 +226,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private @Nullable PrimaryKey nextKeyInRange()
         {
             PrimaryKey key = nextKey();
-            if (key == null)
-                return null;
 
-            boolean inKeyRange;
-            while (!(inKeyRange = currentKeyRange.contains(key.partitionKey())) || !controller.selects(key))
+            boolean inRange;
+            while (key != null && (!(inRange = currentKeyRange.contains(key.partitionKey())) || !controller.selects(key)))
             {
-                if (!currentKeyRange.right.isMinimum()
-                    && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
+                if (!currentKeyRange.right.isMinimum() && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
                 {
                     // currentKeyRange before the currentKey so need to move currentKeyRange forward
                     currentKeyRange = nextKeyRange();
@@ -242,14 +239,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 }
                 else
                 {
-                    // key either before the current range, or just not accepted by the controller, so let's move
-                    // the key forward
-                    if (!inKeyRange)
+                    // key either before the current range, or just not accepted by the controller,
+                    // so let's move the key forward
+                    if (!inRange)
                         skipTo(currentKeyRange.left.getToken());
 
                     key = nextKey();
-                    if (key == null)
-                        return null;
                 }
             }
             return key;
@@ -466,6 +461,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return controller.metadata();
         }
 
+        @Override
         public void close()
         {
             FileUtils.closeQuietly(operation);
