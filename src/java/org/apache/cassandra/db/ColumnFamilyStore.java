@@ -2488,9 +2488,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 ActiveRepairService.instance.abort((prs) -> prs.getTableIds().contains(metadata.id),
                                                    "Stopping parent sessions {} due to truncation of tableId="+metadata.id);
                 data.notifyTruncated(replayAfter, truncatedAt);
-
-            if (!noSnapshot && DatabaseDescriptor.isAutoSnapshot())
-                snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
+                
+                if (!noSnapshot && DatabaseDescriptor.isAutoSnapshot()) 
+                    snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
 
                 discardSSTables(truncatedAt);
 
