@@ -617,7 +617,7 @@ public abstract class AbstractCommitLogSegmentManager
      */
     CommitLogPosition getCurrentPosition()
     {
-        return allocatingFrom.getCurrentCommitLogPosition();
+        return allocatingFrom != null ? allocatingFrom.getCurrentCommitLogPosition() : CommitLogPosition.NONE;
     }
 
     /**
