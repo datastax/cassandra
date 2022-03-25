@@ -21,6 +21,7 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -128,6 +129,7 @@ public class KeyspaceTest extends CQLTester
     @Test
     public void testGetSliceBloomFilterFalsePositive() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (a text, b int, c int, PRIMARY KEY (a, b))");
 
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", "1", 1, 1);
@@ -392,6 +394,7 @@ public class KeyspaceTest extends CQLTester
     @Test
     public void testGetSliceFromLarge() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (a text, b int, c int, PRIMARY KEY (a, b))");
         final ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
@@ -417,6 +420,7 @@ public class KeyspaceTest extends CQLTester
     @Test
     public void testLimitSSTables() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (a text, b int, c int, PRIMARY KEY (a, b))");
         final ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();

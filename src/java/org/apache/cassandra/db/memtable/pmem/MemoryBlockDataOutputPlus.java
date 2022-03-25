@@ -60,11 +60,12 @@ public class MemoryBlockDataOutputPlus implements DataOutputPlus
         if (buffer.hasArray())
         {
             byte[] bufferArray = buffer.array();
-            block.copyFromArray(bufferArray, buffer.arrayOffset()+buffer.position(), position, buffer.remaining());
+            block.copyFromArray(bufferArray, buffer.arrayOffset() + buffer.position(), position, buffer.remaining());
             position += buffer.remaining();
         }
-        else {
-           throw new UnsupportedOperationException();
+        else
+        {
+            throw new UnsupportedOperationException();
         }
     }
 

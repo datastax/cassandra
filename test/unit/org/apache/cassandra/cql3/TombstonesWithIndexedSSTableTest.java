@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3;
 
 import java.util.Random;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -30,6 +32,11 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class TombstonesWithIndexedSSTableTest extends CQLTester
 {
+    @BeforeClass
+    public static void setUp() {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
+    }
+
     @Test
     public void testTombstoneBoundariesInIndexCached() throws Throwable
     {

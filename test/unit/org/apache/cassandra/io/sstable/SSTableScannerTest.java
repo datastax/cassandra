@@ -48,6 +48,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.junit.Assert.assertEquals;
@@ -62,6 +63,7 @@ public class SSTableScannerTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),

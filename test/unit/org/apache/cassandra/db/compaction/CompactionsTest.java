@@ -55,6 +55,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ValueAccessors;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -137,6 +138,7 @@ public class CompactionsTest
     @Test
     public void testSingleSSTableCompaction() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
         store.clearUnsafe();
@@ -174,6 +176,7 @@ public class CompactionsTest
     @Test
     public void testUncheckedTombstoneSizeTieredCompaction() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Map<String, String> compactionOptions = new HashMap<>();
         compactionOptions.put("tombstone_compaction_interval", "1");
         compactionOptions.put("unchecked_tombstone_compaction", "false");
@@ -257,6 +260,7 @@ public class CompactionsTest
     @Test
     public void testUserDefinedCompaction() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         final String cfname = "Standard3"; // use clean(no sstable) CF
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
@@ -314,6 +318,7 @@ public class CompactionsTest
     @Test
     public void testRangeTombstones()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard2");
         cfs.clearUnsafe();

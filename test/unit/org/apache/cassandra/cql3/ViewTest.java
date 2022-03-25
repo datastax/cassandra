@@ -26,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.junit.Assert;
 import org.junit.After;
 import org.junit.Before;
@@ -576,6 +577,7 @@ public class ViewTest extends CQLTester
     @Test
     public void testBuilderWidePartition() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (" +
                     "k int, " +
                     "c int, " +
@@ -602,6 +604,7 @@ public class ViewTest extends CQLTester
     @Test
     public void testRangeTombstone() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (" +
                     "k int, " +
                     "asciival ascii, " +
@@ -917,7 +920,7 @@ public class ViewTest extends CQLTester
     public void testIgnoreUpdate() throws Throwable
     {
         // regression test for CASSANDRA-10614
-
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (" +
                     "a int, " +
                     "b int, " +
@@ -1345,6 +1348,7 @@ public class ViewTest extends CQLTester
 
     private void testViewBuilderResume(int concurrentViewBuilders) throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (" +
                     "k int, " +
                     "c int, " +
@@ -1415,6 +1419,7 @@ public class ViewTest extends CQLTester
     @Test
     public void testClientWarningOnCreate() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
 
         ClientWarn.instance.captureWarnings();
@@ -1427,6 +1432,27 @@ public class ViewTest extends CQLTester
         Assert.assertNotNull(warnings);
         Assert.assertEquals(1, warnings.size());
         Assert.assertEquals(View.USAGE_WARNING, warnings.get(0));
+    }
+
+    /**
+     * Tests that a client warning is issued on materialized view creation.
+     */
+    @Test
+    public void testPmemClientWarningOnCreate() throws Throwable
+    {
+        org.junit.Assume.assumeTrue(DefaultMemtableFactory.INSTANCE.writesAreDurable());
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+
+        ClientWarn.instance.captureWarnings();
+        String viewName = keyspace() + ".warning_view";
+        execute("CREATE MATERIALIZED VIEW " + viewName +
+                " AS SELECT * FROM %s WHERE k IS NOT NULL AND v IS NOT NULL PRIMARY KEY (v, k)");
+        views.add(viewName);
+        List<String> warnings = ClientWarn.instance.getWarnings();
+        String expectedClientWarning = "Materialized views aren't supported for 'PersistentMemoryMemtable'";
+        Assert.assertNotNull(warnings);
+        Assert.assertEquals(1, warnings.size());
+        Assert.assertEquals(expectedClientWarning, warnings.get(0));
     }
 
     /**
@@ -1494,6 +1520,7 @@ public class ViewTest extends CQLTester
     })
     public void testTruncateWhileBuilding() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY(k, c))");
         execute("USE " + keyspace());
         executeNet("USE " + keyspace());

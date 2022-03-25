@@ -69,7 +69,9 @@ public class DecoratedKeyByteSourceTest
         {
             BufferDecoratedKey initialBuffer =
                     (BufferDecoratedKey) ByteOrderedPartitioner.instance.decorateKey(newRandomBytesBuffer());
-            byte[] keyBytes = DecoratedKey.keyFromByteComparable(initialBuffer, version, ByteOrderedPartitioner.instance);
+            ByteSource.Peekable src = initialBuffer.asPeekableBytes(version);
+            byte[] keyBytes = DecoratedKey.keyFromByteSource(src, version, ByteOrderedPartitioner.instance);
+            Assert.assertEquals(ByteSource.END_OF_STREAM, src.next());
             Assert.assertArrayEquals(initialBuffer.getKey().array(), keyBytes);
         }
     }

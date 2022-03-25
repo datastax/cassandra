@@ -32,6 +32,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.db.marshal.ValueAccessors;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.AsciiType;
@@ -476,6 +477,7 @@ public class RowCacheTest
     @Test
     public void testSSTablesPerReadHistogramWhenRowCache()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         CompactionManager.instance.disableAutoCompaction();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE_CACHED);

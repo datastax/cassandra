@@ -50,6 +50,7 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 @RunWith(Parameterized.class)
 public class RecoveryManagerFlushedTest
@@ -87,6 +88,7 @@ public class RecoveryManagerFlushedTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         SchemaLoader.prepareServer();
         StorageService.instance.getTokenMetadata().updateHostId(UUID.randomUUID(), FBUtilities.getBroadcastAddressAndPort());
 

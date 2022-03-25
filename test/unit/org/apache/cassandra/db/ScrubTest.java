@@ -36,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.commons.lang3.StringUtils;
 
 import org.junit.AfterClass;
@@ -174,6 +175,7 @@ public class ScrubTest
     @Test
     public void testScrubCorruptedCounterRow() throws IOException, WriteTimeoutException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // When compression is enabled, for testing corrupted chunks we need enough partitions to cover
         // at least 3 chunks of size COMPRESSION_CHUNK_LENGTH
         int numPartitions = 1000;
@@ -234,6 +236,7 @@ public class ScrubTest
     @Test
     public void testScrubCorruptedRowInSmallFile() throws IOException, WriteTimeoutException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // cannot test this with compression
         assumeTrue(!Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")));
 
@@ -276,6 +279,7 @@ public class ScrubTest
     @Test
     public void testScrubOneRowWithCorruptedKey() throws IOException, ExecutionException, InterruptedException, ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // cannot test this with compression
         assumeTrue(!Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")));
 
@@ -298,6 +302,7 @@ public class ScrubTest
     @Test
     public void testScrubCorruptedCounterRowNoEarlyOpen() throws IOException, WriteTimeoutException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         boolean oldDisabledVal = SSTableRewriter.disableEarlyOpeningForTests;
         try
         {
@@ -608,12 +613,14 @@ public class ScrubTest
     @Test /* CASSANDRA-5174 */
     public void testFailScrubKeysIndex() throws IOException, ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testScrubIndex(CF_INDEX1, COL_INDEX, false, false);
     }
 
     @Test /* CASSANDRA-5174 */
     public void testFailScrubCompositeIndex() throws IOException, ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testScrubIndex(CF_INDEX2, COL_INDEX, true, false);
     }
 
@@ -748,6 +755,7 @@ public class ScrubTest
     @Test
     public void testScrubOneRowWithTool()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         // insert data and verify we get it back w/ range query
@@ -766,6 +774,7 @@ public class ScrubTest
     @Test
     public void testSkipScrubCorruptedCounterRowWithTool() throws IOException, WriteTimeoutException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(COUNTER_CF);
         int numPartitions = 1000;
 
@@ -788,6 +797,7 @@ public class ScrubTest
     @Test
     public void testNoSkipScrubCorruptedCounterRowWithTool() throws IOException, WriteTimeoutException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(COUNTER_CF);
         int numPartitions = 1000;
 
@@ -812,6 +822,7 @@ public class ScrubTest
     @Test
     public void testNoCheckScrubMultiRowWithTool()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         // insert data and verify we get it back w/ range query
@@ -844,6 +855,7 @@ public class ScrubTest
     @Test
     public void testHeaderFixValidateWithTool()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         fillCF(cfs, 1);
@@ -873,6 +885,7 @@ public class ScrubTest
     @Test
     public void testHeaderFixWithTool()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         fillCF(cfs, 1);
@@ -888,6 +901,7 @@ public class ScrubTest
     @Test
     public void testHeaderFixNoChecksWithTool()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         fillCF(cfs, 1);

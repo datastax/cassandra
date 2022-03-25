@@ -58,16 +58,20 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.mock;
+import org.junit.BeforeClass;
 import static org.mockito.Mockito.when;
 
 public class SSTableRewriterTest extends SSTableWriterTestBase
 {
+
     @Test
     public void basicTest()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         truncate(cfs);
@@ -683,6 +687,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
     @Test
     public void testAllKeysReadable() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         truncate(cfs);

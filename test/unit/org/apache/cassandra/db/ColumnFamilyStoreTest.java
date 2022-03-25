@@ -33,6 +33,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -119,6 +120,7 @@ public class ColumnFamilyStoreTest
     @Test
     public void testGetColumnWithWrongBF()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
 
@@ -258,6 +260,7 @@ public class ColumnFamilyStoreTest
     @Test
     public void testBackupAfterFlush() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key1")).clustering("Column1").add("val", "asdf").build().applyUnsafe();
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
@@ -480,6 +483,7 @@ public class ColumnFamilyStoreTest
     @Test
     public void testScrubDataDirectories() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
 
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());

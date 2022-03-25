@@ -32,6 +32,7 @@ import com.codahale.metrics.MetricRegistryListener;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -136,6 +137,7 @@ public class ColumnFamilyMetricTest
     @Test
     public void testEstimatedColumnCountHistogramAndEstimatedRowSizeHistogram()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open("Keyspace1");
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
 

@@ -53,6 +53,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedSSTableContainer;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -115,6 +116,7 @@ public class CompactionStrategyManagerTest
     @Test
     public void testSSTablesAssignedToCorrectCompactionStrategy() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // Creates 100 SSTables with keys 0-99
         int numSSTables = 100;
         ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
@@ -337,6 +339,7 @@ public class CompactionStrategyManagerTest
     @Test
     public void groupSSTables() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         final int numDir = 4;
         ColumnFamilyStore cfs = createJBODMockCFS(numDir);
         Keyspace.open(cfs.keyspace.getName()).getColumnFamilyStore(cfs.name).disableAutoCompaction();

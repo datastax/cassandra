@@ -27,6 +27,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
 import org.apache.cassandra.utils.FBUtilities;
@@ -40,6 +41,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupInProgress()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -58,6 +60,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFinalized()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -77,6 +80,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void needsCleanupFailed()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -101,6 +105,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void estimateRemainingTasksInProgress()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -117,6 +122,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void estimateRemainingFinishedRepairTasks()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -135,6 +141,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTask()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -179,6 +186,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void getNextBackgroundTaskAllCleanup() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -197,6 +205,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void maximalTaskNeedsCleanup()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -222,6 +231,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void userDefinedTaskTest()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         UUID repairId = registerSession(cfs, true, true);
         SSTableReader sstable = makeSSTable(true);
@@ -237,6 +247,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void mixedPendingSessionsTest()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         UUID repairId = registerSession(cfs, true, true);
         UUID repairId2 = registerSession(cfs, true, true);
@@ -260,6 +271,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getScannersInvalidSSTable() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         SSTableReader sstable = makeSSTable(true);
         prm.getScanners(Collections.singleton(sstable), Collections.singleton(RANGE1));
@@ -272,6 +284,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test(expected = PendingRepairManager.IllegalSSTableArgumentException.class)
     public void getOrCreateInvalidSSTable() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         SSTableReader sstable = makeSSTable(true);
         prm.getOrCreate(sstable);
@@ -280,6 +293,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void sessionHasData()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
 
         UUID repairID = registerSession(cfs, true, true);
@@ -295,6 +309,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     @Test
     public void noEmptyCompactionTask()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
         SSTableReader sstable = makeSSTable(false);
         UUID id = UUID.randomUUID();

@@ -22,24 +22,29 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import com.intel.pmem.llpl.util.AutoCloseableIterator;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.memtable.pmem.PmemIndexBuilder;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Indexes;
 import com.intel.pmem.llpl.util.LongART;
 import com.intel.pmem.llpl.util.ConcurrentLongART;
 import com.intel.pmem.llpl.Transaction;
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.util.LongLinkedList;
-import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -56,7 +61,6 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -66,9 +70,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-public class PersistentMemoryMemtable
-extends AbstractMemtable
-//extends SkipListMemtable        // to test framework
+public class PersistentMemoryMemtable extends AbstractMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(PersistentMemoryMemtable.class);
     public static final TransactionalHeap heap;
@@ -77,10 +79,11 @@ extends AbstractMemtable
     private static final int CORES = FBUtilities.getAvailableProcessors();
     private final Owner owner;
     public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
-    private ConcurrentLongART memtableCart;
-
+    protected StatsCollector statsCollector = new StatsCollector();
     private static final Map<TableId, PmemTableInfo> tablesMetadataMap = new ConcurrentHashMap<>();
     private static int version;
+    private final TableId id;
+
     static
     {
         tablesMap = new ConcurrentHashMap<>();
@@ -104,7 +107,7 @@ extends AbstractMemtable
                TransactionalHeap.openHeap(path) :
                TransactionalHeap.createHeap(path, size);
         long rootHandle = heap.getRoot();
-        if(rootHandle == 0)
+        if (rootHandle == 0)
         {
             //Holds CART address for each table
             tablesLinkedList = new LongLinkedList(heap);
@@ -112,27 +115,23 @@ extends AbstractMemtable
         }
         else
         {
-            tablesLinkedList = LongLinkedList.fromHandle(heap,rootHandle);
-            if(tablesMap.size() == 0)
+            tablesLinkedList = LongLinkedList.fromHandle(heap, rootHandle);
+            if (tablesMap.size() == 0)
             {
                 reloadTablesMap(tablesLinkedList);
             }
         }
     }
 
-    private static void reloadTablesMap(LongLinkedList tablesLinkedList )
+    private static void reloadTablesMap(LongLinkedList tablesLinkedList)
     {
         Iterator<Long> tablesIterator = tablesLinkedList.iterator();
-        while(tablesIterator.hasNext())
+        while (tablesIterator.hasNext())
         {
             PmemTableInfo pmemTableInfo = PmemTableInfo.fromHandle(heap, tablesIterator.next());
-            ConcurrentLongART tableCart = ConcurrentLongART.fromHandle(heap,pmemTableInfo.getCartAddress());
-            tablesMap.putIfAbsent(pmemTableInfo.getTableID(), tableCart );
-
+            ConcurrentLongART tableCart = ConcurrentLongART.fromHandle(heap, pmemTableInfo.getCartAddress());
+            tablesMap.putIfAbsent(pmemTableInfo.getTableID(), tableCart);
             tablesMetadataMap.putIfAbsent(pmemTableInfo.getTableID(), pmemTableInfo);
-            TableMetadataRef metadataRef = Schema.instance.getTableMetadataRef(pmemTableInfo.getTableID());
-            if (metadataRef != null)
-            reloadTablesMetadataMap(metadataRef.get(), pmemTableInfo, heap);
         }
         logger.debug("Reloaded tables\n");
     }
@@ -140,92 +139,62 @@ extends AbstractMemtable
     //TODO: This seems to be needed by defaultMemoryFactory, check
     PersistentMemoryMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
-        this(metadataRef,owner);
+        this(metadataRef, owner);
     }
 
+    //ConcurrentLongART holds all memtable Partitions which is thread-safe
     public PersistentMemoryMemtable(TableMetadataRef metadaRef, Owner owner)
     {
         super(metadaRef);
         this.owner = owner;
-        if ((memtableCart = tablesMap.get(metadaRef.id)) == null)
-        {
-            this.version = 1;
-            this.memtableCart = new ConcurrentLongART(heap, CORES);
-            tablesMap.put(metadaRef.id, memtableCart);
-
-            SerializationHeader sHeader = new SerializationHeader(false,
-                                                                  metadaRef.get(),
-                                                                  metadaRef.get().regularAndStaticColumns(),
-                                                                  EncodingStats.NO_STATS);
-            Map<Integer, SerializationHeader> tableMetadataMap = new ConcurrentHashMap<>();
-            tableMetadataMap.putIfAbsent(version, sHeader);
-
-            PmemTableInfo pmemTableInfo = new PmemTableInfo(heap, memtableCart.handle(), metadaRef, tableMetadataMap);
-            tablesLinkedList.addFirst(pmemTableInfo.handle());
-            tablesMetadataMap.putIfAbsent(metadaRef.id, pmemTableInfo);
-        }
+        //Since Index TableMetadata will contain base table Id ,
+        //converting Index name to Index table ID is required, to persist into tablesLinkedList and tablesMap.
+        this.id = metadaRef.get().isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadaRef.get().indexName().get().getBytes())) : metadaRef.get().id;
+        if (metadaRef.get().isIndex())
+            processIndexTable(metadaRef);
         else
-        {
-            PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadaRef.id);
-            if (tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size() == 0)
-            {
-                reloadTablesMetadataMap(metadaRef.get(), previousTableinfo, heap);
-            }
-
-            int currentVersion = tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size();
-            int previousColumCount = previousTableinfo.getSerializationHeaderMap().get(currentVersion).columns().size();
-            if (metadaRef.get().regularAndStaticColumns().size() != previousColumCount)
-            {
-                int nextVersion = currentVersion + 1;
-                SerializationHeader alteredHeader = new SerializationHeader(false,
-                                                                            metadaRef.get(),
-                                                                            metadaRef.get().regularAndStaticColumns(),
-                                                                            EncodingStats.NO_STATS);
-                tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
-
-                TransactionalMemoryBlock tableMetadatablock = heap.memoryBlockFromHandle(previousTableinfo.metadataBlockHandle());
-                tableMetadatablock.free();
-                previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap(), heap);
-            }
-        }
+            processRegularTable(metadaRef);
     }
 
-// This function assumes it is being called from within an outer transaction
+    // This function assumes it is being called from within an outer transaction
     private long merge(Object update, long partitionHandle)
     {
-        PmemPartition pMemPartition = new PmemPartition(heap, ((PartitionUpdate)update).partitionKey(), metadata(),null);
+        PmemRowUpdater updater = (PmemRowUpdater) update;
+        PmemPartition pMemPartition = new PmemPartition(heap, updater.getUpdate().partitionKey(), metadata(), null, updater.getIndexer());
         try
         {
             if (partitionHandle == 0)
             {
-                pMemPartition.initialize((PartitionUpdate) update, heap);
+                pMemPartition.initialize(updater.getUpdate(), heap);
             }
             else
             {
-                pMemPartition.load(heap, partitionHandle);
-                pMemPartition.update((PartitionUpdate) update, heap);
+                pMemPartition.load(heap, partitionHandle, statsCollector.get());
+                pMemPartition.update(updater.getUpdate(), heap);
             }
             return (pMemPartition.getAddress());
         }
         catch (IOException e)
         {
-              throw new RuntimeException(e.getMessage()
-                                         + " Failed to update partition ", e);
+            throw new RuntimeException(e.getMessage()
+                                       + " Failed to update partition ", e);
         }
     }
 
     public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         long colUpdateTimeDelta = Long.MAX_VALUE;
-
         Transaction tx = Transaction.create(heap);
-        tx.run(()-> {
+        tx.run(() -> {
             ByteSource partitionByteSource = update.partitionKey().asComparableBytes(ByteComparable.Version.OSS41);
-            byte[] partitionKeyBytes= ByteSourceInverse.readBytes(partitionByteSource);
-            //ConcurrentAdaptiveRadixTree cart = tablesMap.get(update.metadata().id);
-            memtableCart.put(partitionKeyBytes, update, this::merge);
+            byte[] partitionKeyBytes = ByteSourceInverse.readBytes(partitionByteSource);
+            PmemRowUpdater updater = new PmemRowUpdater(update, indexer);
+            ConcurrentLongART memtableCart = tablesMap.get(id);
+            memtableCart.put(partitionKeyBytes, updater, this::merge);
         });
         long[] pair = new long[]{ update.dataSize(), colUpdateTimeDelta };
+        statsCollector.update(update.stats());
+        currentOperations.addAndGet(update.operationCount());
         return pair[1];
     }
 
@@ -240,11 +209,10 @@ extends AbstractMemtable
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
         AutoCloseableIterator<LongART.Entry> entryIterator;
-        //ConcurrentAdaptiveRadixTree cart = tablesMap.get(metadata.id);
-
+        ConcurrentLongART memtableCart = tablesMap.get(id);
         if (startIsMin)
         {
-            if(stopIsMin)
+            if (stopIsMin)
             {
                 entryIterator = memtableCart.getEntryIterator();
             }
@@ -252,16 +220,16 @@ extends AbstractMemtable
             {
                 ByteSource partitionByteSource = keyRange.right.asComparableBytes(ByteComparable.Version.OSS41);
                 byte[] partitionKeyBytesRight = ByteSourceInverse.readBytes(partitionByteSource);
-                entryIterator =  memtableCart.getHeadEntryIterator(partitionKeyBytesRight, includeStop);
+                entryIterator = memtableCart.getHeadEntryIterator(partitionKeyBytesRight, includeStop);
             }
         }
         else
         {
-            if(stopIsMin)
+            if (stopIsMin)
             {
                 ByteSource partitionByteSource = keyRange.left.asComparableBytes(ByteComparable.Version.OSS41);
                 byte[] partitionKeyBytesLeft = ByteSourceInverse.readBytes(partitionByteSource);
-                entryIterator = memtableCart.getTailEntryIterator(partitionKeyBytesLeft,includeStart);
+                entryIterator = memtableCart.getTailEntryIterator(partitionKeyBytesLeft, includeStart);
             }
             else
             {
@@ -279,19 +247,26 @@ extends AbstractMemtable
     {
         PmemPartition pMemPartition = null;
         ByteSource partitionByteSource = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
-        byte[] partitionKeyBytes= ByteSourceInverse.readBytes(partitionByteSource);
-        // ConcurrentAdaptiveRadixTree cart = tablesMap.get(metadata().id);
-        if(memtableCart.size() != 0)
+        byte[] partitionKeyBytes = ByteSourceInverse.readBytes(partitionByteSource);
+        ConcurrentLongART memtableCart = tablesMap.get(id);
+
+        if (memtableCart.size() != 0)
         {
+            //The cartIterator below is an autoCloseable resource that locks a portion of the ConcurrentLongART.
+            // The lock is expected to be held  for the duration of all operations on the current  partition and release afterwards.
+            // The cartIterator is then embedded in any row iterator created from this partition and will be closed as part of close action on said row iterator.
+            //TODO
+            //There is one known scenario where the cartIterator is not closed;
+            // on a conditional row update, specifically if there is no ClusteringIndexNamesFilter the returned row Iterator is not closed. This needs to be fixed.
             AutoCloseableIterator<LongART.Entry> cartIterator = memtableCart.getEntryIterator(partitionKeyBytes, true, partitionKeyBytes, true);
             long rowHandle;
             if (cartIterator.hasNext())
             {
                 rowHandle = cartIterator.next().getValue();
-                pMemPartition = new PmemPartition(heap, key, metadata(), cartIterator);
+                pMemPartition = new PmemPartition(heap, key, metadata(), cartIterator, UpdateTransaction.NO_OP);
                 try
                 {
-                    pMemPartition.load(heap, rowHandle);
+                    pMemPartition.load(heap, rowHandle, statsCollector.get());
                 }
                 catch (IllegalArgumentException e)
                 {
@@ -305,7 +280,7 @@ extends AbstractMemtable
 
     public long partitionCount()
     {
-      //  ConcurrentAdaptiveRadixTree cart = tablesMap.get(metadata().id);
+        ConcurrentLongART memtableCart = tablesMap.get(id);
         if (memtableCart == null)
             return 0;
         return memtableCart.size();
@@ -358,90 +333,96 @@ extends AbstractMemtable
         // We want to avoid all flushing.
         switch (reason)
         {
-        case STARTUP: // Called after reading and replaying the commit log.
-        case SHUTDOWN: // Called to flush data before shutdown.
-            return false;
-        case INTERNALLY_FORCED: // Called to ensure ordering and persistence of system table events.
-            return false;
-        case MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
-        case INDEX_TABLE_FLUSH: // Flush requested on index table because main table is flushing.
-        case STREAMS_RECEIVED: // Flush to save streamed data that was written to memtable.
-            return false;   // do not do anything
+            case STARTUP: // Called after reading and replaying the commit log.
+            case SHUTDOWN: // Called to flush data before shutdown.
+                return false;
+            case INTERNALLY_FORCED: // Called to ensure ordering and persistence of system table events.
+                return false;
+            case MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
+            case INDEX_TABLE_FLUSH: // Flush requested on index table because main table is flushing.
+            case STREAMS_RECEIVED: // Flush to save streamed data that was written to memtable.
+                return false;   // do not do anything
 
-        case INDEX_BUILD_COMPLETED:
-        case INDEX_REMOVED:
-            // Both of these are needed as safepoints for index management. Nothing to do.
-            return false;
+            case INDEX_BUILD_COMPLETED:
+            case INDEX_REMOVED:
+                // Both of these are needed as safepoints for index management. Nothing to do.
+                return false;
 
-        case VIEW_BUILD_STARTED:
-        case INDEX_BUILD_STARTED:
-            // TODO: Figure out secondary indexes and views.
-            return false;
+            case VIEW_BUILD_STARTED:
+                return false;
+            case INDEX_BUILD_STARTED:
+                if (!metadata().indexes.isEmpty())
+                {
+                    getInitializationTask(metadata());
+                }
+                return false;
 
-            case SCHEMA_CHANGE: //TODO: check this scenario
-            if (!(metadata().params.memtable.factory instanceof Factory))
-                return true;    // User has switched to a different memtable class. Flush and release all held data.
-            // Otherwise, assuming we can handle the change, don't switch.
-            // TODO: Handle
-            return false;
+            case SCHEMA_CHANGE:
+                if (!(metadata().params.memtable.factory instanceof Factory))
+                    return true;    // User has switched to a different memtable class. Flush and release all held data.
+                // Otherwise, assuming we can handle the change, don't switch.
+                // TODO: Handle
+                return false;
 
-        case STREAMING: // Called to flush data so it can be streamed. TODO: How dow we stream?
-        case REPAIR: // Called to flush data for repair. TODO: How do we repair?
-            // ColumnFamilyStore will create sstables of the affected ranges which will not be consulted on reads and
-            // will be deleted after streaming.
-            return false;
+            case STREAMING: // Called to flush data so it can be streamed. TODO: How dow we stream?
+            case REPAIR: // Called to flush data for repair. TODO: How do we repair?
+                // ColumnFamilyStore will create sstables of the affected ranges which will not be consulted on reads and
+                // will be deleted after streaming.
+                return false;
 
-        case SNAPSHOT:
-            // We don't flush for this. Returning false will trigger a performSnapshot call.
-            return false;
+            case SNAPSHOT:
+                // We don't flush for this. Returning false will trigger a performSnapshot call.
+                return false;
 
-        case DROP: // Called when a table is dropped. This memtable is no longer necessary.
-            deleteTable(true);
-            return false;
-        case TRUNCATE: // The data is being deleted, but the table remains.
-            // Returning true asks the ColumnFamilyStore to replace this memtable object without flushing.
-            // This will call setDiscarded() below to delete all held data.
-            deleteTable(false);
-            return false;
+            case DROP: // Called when a table is dropped. This memtable is no longer necessary.
+                return false;
+            case TRUNCATE: // The data is being deleted, but the table remains.
+                // Returning true asks the ColumnFamilyStore to replace this memtable object without flushing.
+                deleteTable(false);
+                return false;
 
-        case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
-                             // Also passed if we call owner.signalLimitReached()
-        case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
-            // Neither of the above should happen as we specify writesAreDurable and don't use an allocator/cleaner.
-            throw new AssertionError();
+            case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
+                // Also passed if we call owner.signalLimitReached()
+            case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
+                // Neither of the above should happen as we specify writesAreDurable and don't use an allocator/cleaner.
+                throw new AssertionError();
 
-        case USER_FORCED:
-        case UNIT_TESTS:
-            return false;
-        default:
-            throw new AssertionError();
+            case USER_FORCED:
+            case UNIT_TESTS:
+                return false;
+            default:
+                throw new AssertionError();
         }
     }
+
     /**
-     * Called when the table's metadata is updated. The memtable's metadata reference now points to the new version.
+     * Called when the table's metadata is updated. The memtable's metadata references to the new version.
      * This method is called only when, we configure memtable property at table level
      */
     public void metadataUpdated()
     {
         //Multiple threads are not supposed to be able to alter at the same time
-        PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadata().id);
-        int currentVersion = tablesMetadataMap.get(metadata.id).getSerializationHeaderMap().size();
-
-        int previousColumCount = previousTableinfo.getSerializationHeaderMap().get(currentVersion).columns().size();
-        if (metadata.get().regularAndStaticColumns().size() != previousColumCount)
+        if (!metadata.get().isIndex())
         {
-            int nextVersion = currentVersion + 1;
-            SerializationHeader alteredHeader = new SerializationHeader(false,
-                                                                        metadata.get(),
-                                                                        metadata.get().regularAndStaticColumns(),
-                                                                        EncodingStats.NO_STATS);
-            tablesMetadataMap.get(metadata.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
-            Transaction tx = Transaction.create(heap);
-            tx.run(() -> {
-                TransactionalMemoryBlock tableMetadatablock = heap.memoryBlockFromHandle(previousTableinfo.metadataBlockHandle());
-                tableMetadatablock.free();
-                previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadata.id).getSerializationHeaderMap(), heap);
-            });
+            PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadata().id);
+            int currentVersion = tablesMetadataMap.get(metadata.id).getSerializationHeaderMap().size();
+
+            int previousColumCount = previousTableinfo.getSerializationHeaderMap().get(currentVersion).columns().size();
+            if (metadata.get().regularAndStaticColumns().size() != previousColumCount)
+            {
+                int nextVersion = currentVersion + 1;
+                SerializationHeader alteredHeader = new SerializationHeader(false,
+                                                                            metadata.get(),
+                                                                            metadata.get().regularAndStaticColumns(),
+                                                                            EncodingStats.NO_STATS);
+                tablesMetadataMap.get(metadata.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
+                Transaction tx = Transaction.create(heap);
+                tx.run(() -> {
+                    TransactionalMemoryBlock tableMetadatablock = heap.memoryBlockFromHandle(previousTableinfo.metadataBlockHandle());
+                    tableMetadatablock.free();
+                    previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadata.id).getSerializationHeaderMap(), heap);
+                });
+            }
         }
     }
 
@@ -457,40 +438,102 @@ extends AbstractMemtable
         // A setDiscarded call will follow.
     }
 
+    /**
+     * Deletes rows from PmemRowMap and cleans up memory.
+     *
+     * @param artHandle is a handle to load saved PmemPartition.
+     */
+    private void freeRowMemoryBlock(Long artHandle)
+    {
+        PmemPartition pmemPartition = new PmemPartition(heap, metadata(), UpdateTransaction.NO_OP);
+        pmemPartition.load(heap, artHandle, statsCollector.get());
+        PmemRowMap rm = PmemRowMap.loadFromAddress(heap, pmemPartition.getRowMapAddress(), metadata(), pmemPartition.partitionLevelDeletion(), UpdateTransaction.NO_OP);
+        rm.delete();
+    }
+
+    /**
+     * Truncates/drops the table from Pmem and releases memory.
+     *
+     * @param dropTable when true then drop a table, else truncate a table
+     */
     private void deleteTable(boolean dropTable)
     {
-       // ConcurrentAdaptiveRadixTree cart = tablesMap.get(metadata().id);
-        memtableCart.clear((Long artHandle)->{
-            PmemPartition pmemPartition = new PmemPartition(heap, metadata());
-            pmemPartition.load(heap, artHandle);
-            PmemRowMap rm = PmemRowMap.loadFromAddress(heap,pmemPartition.getRowMapAddress(), metadata(), pmemPartition.partitionLevelDeletion());
-            //PmemRowMap rm = PmemRowMap.loadFromAddress(pmemPartition.getRowMapAddress());
-            rm.delete();
+        ConcurrentLongART memtableCart = tablesMap.get(id);
+        memtableCart.clear((Long artHandle) -> {
+            freeRowMemoryBlock(artHandle);
         });
-        if(dropTable)
+        memtableCart.free();
+        Iterator<Long> tablesIterator = tablesLinkedList.iterator();
+        int i = 0;
+        while (tablesIterator.hasNext())
         {
-            memtableCart.free();
-            Iterator<Long> tablesIterator = tablesLinkedList.iterator();
-            int i = 0;
-            while (tablesIterator.hasNext())
+            PmemTableInfo pmemTableInfo = PmemTableInfo.fromHandle(heap, tablesIterator.next());
+            if (pmemTableInfo.getTableID().equals(id))
             {
-                PmemTableInfo pmemTableInfo = PmemTableInfo.fromHandle(heap, tablesIterator.next());
-                if (pmemTableInfo.getTableID().equals(metadata.id))
+                tablesLinkedList.remove(i);
+                if (!dropTable)
+                {   //truncate base table
+                    memtableCart = new ConcurrentLongART(heap, CORES);
+                    pmemTableInfo.updateCartAddress(memtableCart.handle());
+                    tablesLinkedList.add(i, pmemTableInfo.handle());
+                    tablesMap.put(id, memtableCart);
+                    //truncate index tables
+                    if (!metadata.get().indexes.isEmpty())
+                    {
+                        Indexes tableIndexes = metadata().indexes;
+                        for (IndexMetadata indexTable : tableIndexes)
+                            truncateIndex(indexTable);
+                    }
+                }
+                else
                 {
-                    tablesLinkedList.remove(i);
+                    tablesMap.remove(id);
+                    tablesMetadataMap.remove(id);
+                }
+                break;
+            }
+            i++;
+        }
+    }
+
+    /**
+     * Truncates index table.
+     */
+    private void truncateIndex(IndexMetadata indexMetadata)
+    {
+        TableId indexId = TableId.fromUUID(indexMetadata.id);
+        ConcurrentLongART memtableCartForIndex = tablesMap.get(indexId);
+        if (memtableCartForIndex != null)
+        {
+            memtableCartForIndex.clear((Long artHandle) -> {
+                freeRowMemoryBlock(artHandle);
+            });
+            memtableCartForIndex.free();
+            Iterator<Long> tablesIteratorForIndex = tablesLinkedList.iterator();
+            int j = 0;
+            while (tablesIteratorForIndex.hasNext())
+            {
+                PmemTableInfo pmemIndexTableInfo = PmemTableInfo.fromHandle(heap, tablesIteratorForIndex.next());
+                if (pmemIndexTableInfo.getTableID().equals(indexId))
+                {
+                    tablesLinkedList.remove(j);
+                    memtableCartForIndex = new ConcurrentLongART(heap, CORES);
+                    pmemIndexTableInfo.updateCartAddress(memtableCartForIndex.handle());
+                    tablesLinkedList.add(j, pmemIndexTableInfo.handle());
+                    tablesMap.put(indexId, memtableCartForIndex);
                     break;
                 }
-                i++;
+                j++;
             }
-            tablesMap.remove(metadata.id);
         }
+        else
+            logger.info("Cannot truncate non existing Index Table");
     }
 
     public void discard()
     {
-        // TODO: Implement. This should delete all memtable data from pmem.
-        //super.discard();
-
+        //Deletes all memtable data from pmem.
+        deleteTable(true);
     }
 
     @Override
@@ -519,8 +562,7 @@ extends AbstractMemtable
 
     public boolean isClean()
     {
-        return true;
-       //return partitionCount() == 0;
+        return partitionCount() == 0;
     }
 
     public boolean mayContainDataBefore(CommitLogPosition position)
@@ -594,12 +636,141 @@ extends AbstractMemtable
 
     public static void reloadTablesMetadataMap(TableMetadata metadata, PmemTableInfo pmemTableInfo, TransactionalHeap heap)
     {
-            Map<Integer, SerializationHeader> tableMetadataMap = pmemTableInfo.deserializeHeader(metadata, heap);
-            tablesMetadataMap.get(pmemTableInfo.getTableID()).getSerializationHeaderMap().putAll(tableMetadataMap);
+        Map<Integer, SerializationHeader> tableMetadataMap = pmemTableInfo.deserializeHeader(metadata, heap);
+        tablesMetadataMap.get(pmemTableInfo.getTableID()).getSerializationHeaderMap().putAll(tableMetadataMap);
     }
 
     public static Map<TableId, PmemTableInfo> getTablesMetadataMap()
     {
         return tablesMetadataMap;
+    }
+
+
+    /**
+     * @param metadata
+     * @return ConcurrentLongART based on TableId
+     */
+    public static ConcurrentLongART getMemtableCart(TableMetadata metadata)
+    {
+        return tablesMap.get(metadata.id);
+    }
+
+    private void processIndexTable(TableMetadataRef metadaRef)
+    {
+        ConcurrentLongART memtableCart = tablesMap.get(id);
+        if (memtableCart == null)
+            addToTablesMap(metadaRef, id);
+    }
+
+    private void addToTablesMap(TableMetadataRef metadaRef, TableId id)
+    {
+        version = 1;
+        ConcurrentLongART memtableCart = new ConcurrentLongART(heap, CORES);
+        tablesMap.put(id, memtableCart);
+
+        SerializationHeader sHeader = new SerializationHeader(false,
+                                                              metadaRef.get(),
+                                                              metadaRef.get().regularAndStaticColumns(),
+                                                              EncodingStats.NO_STATS);
+        Map<Integer, SerializationHeader> tableMetadataMap = new ConcurrentHashMap<>();
+        tableMetadataMap.putIfAbsent(version, sHeader);
+
+        PmemTableInfo pmemTableInfo = new PmemTableInfo(heap, memtableCart.handle(), id, tableMetadataMap);
+        tablesLinkedList.addFirst(pmemTableInfo.handle());
+        tablesMetadataMap.putIfAbsent(id, pmemTableInfo);
+    }
+
+    private void processRegularTable(TableMetadataRef metadaRef)
+    {
+        ConcurrentLongART memtableCart = tablesMap.get(metadaRef.id);
+        if (memtableCart == null)
+            addToTablesMap(metadaRef, metadaRef.id);
+        else
+        {
+            PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadaRef.id);
+            if (tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size() == 0)
+                reloadTablesMetadataMap(metadaRef.get(), previousTableinfo, heap);
+
+            int currentVersion = tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size();
+            int previousColumCount = previousTableinfo.getSerializationHeaderMap().get(currentVersion).columns().size();
+            if (metadaRef.get().regularAndStaticColumns().size() != previousColumCount)
+            {
+                int nextVersion = currentVersion + 1;
+                SerializationHeader alteredHeader = new SerializationHeader(false,
+                                                                            metadaRef.get(),
+                                                                            metadaRef.get().regularAndStaticColumns(),
+                                                                            EncodingStats.NO_STATS);
+                tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
+
+                TransactionalMemoryBlock tableMetadatablock = heap.memoryBlockFromHandle(previousTableinfo.metadataBlockHandle());
+                tableMetadatablock.free();
+                previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap(), heap);
+            }
+        }
+    }
+
+    //This class will provide PartitionUpdate and  UpdateTransaction object
+    public class PmemRowUpdater
+    {
+        private final PartitionUpdate update;
+        private final UpdateTransaction indexer;
+
+        PmemRowUpdater(PartitionUpdate update, UpdateTransaction indexer)
+        {
+            this.update = update;
+            this.indexer = indexer;
+        }
+
+        public PartitionUpdate getUpdate()
+        {
+            return update;
+        }
+
+        public UpdateTransaction getIndexer()
+        {
+            return indexer;
+        }
+    }
+
+    //Intializes task to build index on Exsisting data.
+    private void getInitializationTask(TableMetadata metadata)
+    {
+        ColumnFamilyStore baseCfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.id);
+        Indexes tableIndexes = metadata().indexes;
+        for (IndexMetadata tableIndex : tableIndexes)
+        {
+            if (!(isBuilt(baseCfs, tableIndex.name) || baseCfs.isEmpty()))
+            {
+                Index index = baseCfs.indexManager.getIndexByName(tableIndex.name);
+                PmemIndexBuilder.buildBlocking(baseCfs, tableIndex, Collections.singleton(index), owner.getCurrentMemtable());
+            }
+        }
+    }
+
+    // Returns true if the given index is built else  returns false
+    private boolean isBuilt(ColumnFamilyStore baseCfs, String indexName)
+    {
+        return SystemKeyspace.isIndexBuilt(baseCfs.keyspace.getName(), indexName);
+    }
+
+    private static class StatsCollector
+    {
+        private final AtomicReference<EncodingStats> stats = new AtomicReference<>(EncodingStats.NO_STATS);
+
+        public void update(EncodingStats newStats)
+        {
+            while (true)
+            {
+                EncodingStats current = stats.get();
+                EncodingStats updated = current.mergeWith(newStats);
+                if (stats.compareAndSet(current, updated))
+                    return;
+            }
+        }
+
+        public EncodingStats get()
+        {
+            return stats.get();
+        }
     }
 }

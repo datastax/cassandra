@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget.Type;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
@@ -51,6 +52,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private final List<IndexTarget.Raw> rawIndexTargets;
     private final IndexAttributes attrs;
     private final boolean ifNotExists;
+    private TableMetadata table;
 
     public CreateIndexStatement(String keyspaceName,
                                 String tableName,
@@ -78,7 +80,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (null == keyspace)
             throw ire("Keyspace '%s' doesn't exist", keyspaceName);
 
-        TableMetadata table = keyspace.getTableOrViewNullable(tableName);
+        table = keyspace.getTableOrViewNullable(tableName);
         if (null == table)
             throw ire("Table '%s' doesn't exist", tableName);
 
@@ -144,6 +146,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        if (table != null && attrs.isCustom && table.params.memtable.factory instanceof PersistentMemoryMemtable.Factory)
+            return ImmutableSet.of("CUSTOM indexes aren't supported for 'PersistentMemoryMemtable'");
+
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
             return ImmutableSet.of(SASIIndex.USAGE_WARNING);
 

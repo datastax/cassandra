@@ -32,6 +32,7 @@ import org.junit.Assert;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.ClientWarn;
 
@@ -90,6 +91,7 @@ public class SASICQLTest extends CQLTester
     @Test
     public void testClientWarningOnCreate()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
 
         ClientWarn.instance.captureWarnings();
@@ -99,6 +101,25 @@ public class SASICQLTest extends CQLTester
         Assert.assertNotNull(warnings);
         Assert.assertEquals(1, warnings.size());
         Assert.assertEquals(SASIIndex.USAGE_WARNING, warnings.get(0));
+    }
+
+    /**
+     * Tests that a client warning is issued on Custom index creation.
+     */
+    @Test
+    public void testPmemClientWarningOnCreate()
+    {
+        org.junit.Assume.assumeTrue(DefaultMemtableFactory.INSTANCE.writesAreDurable());
+        String expectedClientWarning = "CUSTOM indexes aren't supported for 'PersistentMemoryMemtable'";
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+
+        ClientWarn.instance.captureWarnings();
+        createIndex("CREATE CUSTOM INDEX ON %s (v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        List<String> warnings = ClientWarn.instance.getWarnings();
+
+        Assert.assertNotNull(warnings);
+        Assert.assertEquals(1, warnings.size());
+        Assert.assertEquals(expectedClientWarning, warnings.get(0));
     }
 
     /**

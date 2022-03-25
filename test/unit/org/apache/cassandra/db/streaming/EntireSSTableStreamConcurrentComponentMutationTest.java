@@ -52,6 +52,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -141,12 +142,14 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
     @AfterClass
     public static void cleanup()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         service.shutdown();
     }
 
     @Before
     public void init()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         sstable = store.getLiveSSTables().iterator().next();
         descriptor = sstable.descriptor;
     }
@@ -154,6 +157,9 @@ public class EntireSSTableStreamConcurrentComponentMutationTest
     @After
     public void reset() throws IOException
     {
+        if(DefaultMemtableFactory.INSTANCE.writesAreDurable()) {
+            return;
+        }
         latch = new CountDownLatch(1);
         // reset repair info to avoid test interfering each other
         descriptor.getMetadataSerializer().mutateRepairMetadata(descriptor, 0, ActiveRepairService.NO_PENDING_REPAIR, false);

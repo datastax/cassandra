@@ -40,6 +40,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
 import org.apache.cassandra.db.streaming.ComponentManifest;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
@@ -77,6 +78,7 @@ public class EntireSSTableStreamingCorrectFilesCountTest
     @BeforeClass
     public static void defineSchemaAndPrepareSSTable()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),

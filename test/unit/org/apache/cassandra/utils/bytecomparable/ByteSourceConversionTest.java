@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -282,21 +283,54 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
         testCombinationSampling(rand, this::assertClusteringPairConvertsSame);
     }
 
+    @Test
+    public void testNullsInClustering()
+    {
+        ByteBuffer[][] inputs = new ByteBuffer[][]
+                                {
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                                  null},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {decomposeAndRandomPad(UTF8Type.instance, ""),
+                                                  null},
+                                new ByteBuffer[] {null,
+                                                  decomposeAndRandomPad(Int32Type.instance, 0)},
+                                new ByteBuffer[] {null,
+                                                  decomposeAndRandomPad(Int32Type.instance, null)},
+                                new ByteBuffer[] {null,
+                                                  null}
+                                };
+        for (ByteBuffer[] input : inputs)
+        {
+            assertClusteringPairConvertsSame(ByteBufferAccessor.instance, UTF8Type.instance, Int32Type.instance, input[0], input[1], (t, v) -> v);
+        }
+    }
+
     void assertClusteringPairConvertsSame(AbstractType t1, AbstractType t2, Object o1, Object o2)
     {
         for (ValueAccessor<?> accessor : ValueAccessors.ACCESSORS)
-            assertClusteringPairConvertsSame(accessor, t1, t2, o1, o2);
+            assertClusteringPairConvertsSame(accessor, t1, t2, o1, o2, AbstractType::decompose);
     }
 
-    <V> void assertClusteringPairConvertsSame(ValueAccessor<V> accessor, AbstractType t1, AbstractType t2, Object o1, Object o2)
+    <T, V> void assertClusteringPairConvertsSame(ValueAccessor<V> accessor,
+                                                 AbstractType t1, AbstractType t2,
+                                                 T o1, T o2,
+                                                 BiFunction<AbstractType, T, ByteBuffer> decompose)
     {
         boolean checkEquals = t1 != DecimalType.instance && t2 != DecimalType.instance;
         for (ClusteringPrefix.Kind k1 : ClusteringPrefix.Kind.values())
             {
                 ClusteringComparator comp = new ClusteringComparator(t1, t2);
                 V[] b = accessor.createArray(2);
-                b[0] = accessor.valueOf(t1.decompose(o1));
-                b[1] = accessor.valueOf(t2.decompose(o2));
+                b[0] = accessor.valueOf(decompose.apply(t1, o1));
+                b[1] = accessor.valueOf(decompose.apply(t2, o2));
                 ClusteringPrefix<V> c = ByteSourceComparisonTest.makeBound(accessor.factory(), k1, b);
                 final ByteComparable bsc = comp.asByteComparable(c);
                 logger.info("Clustering {} bytesource {}", c.clusteringString(comp.subtypes()), bsc.byteComparableAsString(VERSION));

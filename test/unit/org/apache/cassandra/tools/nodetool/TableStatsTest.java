@@ -31,6 +31,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.tools.ToolRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -160,6 +161,7 @@ public class TableStatsTest extends CQLTester
     @Test
     public void testHumanReadableArg()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Arrays.asList("-H", "--human-readable").forEach(arg -> {
             ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("tablestats", arg);
             tool.assertOnCleanExit();

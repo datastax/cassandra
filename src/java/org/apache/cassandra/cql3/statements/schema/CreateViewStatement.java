@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.selection.Selectable;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -64,6 +65,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
     private final TableAttributes attrs;
 
     private final boolean ifNotExists;
+    private TableMetadata table;
 
     public CreateViewStatement(String keyspaceName,
                                String tableName,
@@ -112,7 +114,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
         if (keyspace.createReplicationStrategy().hasTransientReplicas())
             throw new InvalidRequestException("Materialized views are not supported on transiently replicated keyspaces");
 
-        TableMetadata table = keyspace.tables.getNullable(tableName);
+        table = keyspace.tables.getNullable(tableName);
         if (null == table)
             throw ire("Base table '%s' doesn't exist", tableName);
 
@@ -337,6 +339,9 @@ public final class CreateViewStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        if (table != null && table.params.memtable.factory instanceof PersistentMemoryMemtable.Factory)
+            return ImmutableSet.of("Materialized views aren't supported for 'PersistentMemoryMemtable'");
+
         return ImmutableSet.of(View.USAGE_WARNING);
     }
 

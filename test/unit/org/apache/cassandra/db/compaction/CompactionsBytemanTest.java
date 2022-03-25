@@ -24,12 +24,14 @@ import java.util.Collections;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -50,6 +52,7 @@ public class CompactionsBytemanTest extends CQLTester
     Create 5 SSTables. After compaction, there should be 2 left - 1 as the 9 SStables which were merged,
     and the other the SSTable that was 'too large' and failed the hasAvailableDiskSpace check
      */
+
     @Test
     @BMRules(rules = { @BMRule(name = "One SSTable too big for remaining disk space test",
     targetClass = "Directories",
@@ -58,6 +61,7 @@ public class CompactionsBytemanTest extends CQLTester
     action = "flag(\"done\"); return false;") } )
     public void testSSTableNotEnoughDiskSpaceForCompactionGetsDropped() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createLowGCGraceTable();
         final ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         for (int i = 0; i < 5; i++)
@@ -82,6 +86,7 @@ public class CompactionsBytemanTest extends CQLTester
     action = "return false;") } )
     public void testExpiredSSTablesStillGetDroppedWithNoDiskSpace() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createLowGCGraceTable();
         final ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         createPossiblyExpiredSSTable(cfs, true);
@@ -105,6 +110,7 @@ public class CompactionsBytemanTest extends CQLTester
     action = "return false;") } )
     public void testRuntimeExceptionWhenNoDiskSpaceForCompaction() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createLowGCGraceTable();
         final ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         createPossiblyExpiredSSTable(cfs, false);
@@ -115,11 +121,11 @@ public class CompactionsBytemanTest extends CQLTester
 
     @Test
     @BMRule(name = "Delay background compaction task future check",
-            targetClass = "CompactionManager",
-            targetMethod = "submitBackground",
-            targetLocation = "AT INVOKE java.util.concurrent.Future.isCancelled",
-            condition = "!$cfs.keyspace.getName().contains(\"system\")",
-            action = "Thread.sleep(1000)")
+    targetClass = "CompactionManager",
+    targetMethod = "submitBackground",
+    targetLocation = "AT INVOKE java.util.concurrent.Future.isCancelled",
+    condition = "!$cfs.keyspace.getName().contains(\"system\")",
+    action = "Thread.sleep(1000)")
     public void testCompactingCFCounting() throws Throwable
     {
         createTable("CREATE TABLE %s (k INT, c INT, v INT, PRIMARY KEY (k, c))");
@@ -160,6 +166,7 @@ public class CompactionsBytemanTest extends CQLTester
     action = "$ci.stop()")
     public void testStopUserDefinedCompactionRepaired() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testStopCompactionRepaired((cfs) -> {
             Collection<Descriptor> files = cfs.getLiveSSTables().stream().map(s -> s.descriptor).collect(Collectors.toList());
             FBUtilities.waitOnFuture(CompactionManager.instance.submitUserDefined(cfs, files, CompactionManager.NO_GC));
@@ -183,6 +190,7 @@ public class CompactionsBytemanTest extends CQLTester
 
     public void testStopCompactionRepaired(Consumer<ColumnFamilyStore> compactionRunner) throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String table = createTable("CREATE TABLE %s (k INT, c INT, v INT, PRIMARY KEY (k, c))");
         ColumnFamilyStore cfs = Keyspace.open(CQLTester.KEYSPACE).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();

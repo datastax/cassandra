@@ -29,6 +29,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.junit.Assert;
 
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
@@ -103,6 +104,7 @@ public class ViewSchemaTest extends CQLTester
     @Test
     public void testCaseSensitivity() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering\" int, \"theValue\" int, PRIMARY KEY (\"theKey\", \"theClustering\"))");
 
         execute("USE " + keyspace());
@@ -265,6 +267,7 @@ public class ViewSchemaTest extends CQLTester
     @Test
     public void testAllTypes() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String myType = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
 
         createTable("CREATE TABLE %s (" +

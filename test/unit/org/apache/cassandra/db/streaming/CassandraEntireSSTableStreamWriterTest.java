@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Queue;
 import java.util.UUID;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -79,6 +80,7 @@ public class CassandraEntireSSTableStreamWriterTest
     @BeforeClass
     public static void defineSchemaAndPrepareSSTable()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),

@@ -35,8 +35,10 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 import static org.junit.Assert.assertEquals;
+import org.junit.BeforeClass;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableMetadataTest
@@ -58,6 +60,7 @@ public class SSTableMetadataTest
     @BeforeClass
     public static void defineSchema()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),

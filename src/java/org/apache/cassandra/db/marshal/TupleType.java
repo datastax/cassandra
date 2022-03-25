@@ -204,28 +204,65 @@ public class TupleType extends AbstractType<ByteBuffer>
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
+        switch (version)
+        {
+            case LEGACY:
+                return asComparableBytesLegacy(accessor, data);
+            case OSS41:
+                return asComparableBytesNew(accessor, data, version);
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    public <V> ByteSource asComparableBytesLegacy(ValueAccessor<V> accessor, V data)
+    {
         if (accessor.isEmpty(data))
             return null;
 
         V[] bufs = split(accessor, data);  // this may be shorter than types.size -- other srcs remain null in that case
         ByteSource[] srcs = new ByteSource[types.size()];
         for (int i = 0; i < bufs.length; ++i)
-            srcs[i] = bufs[i] != null ? types.get(i).asComparableBytes(accessor, bufs[i], version) : null;
+            srcs[i] = bufs[i] != null ? types.get(i).asComparableBytes(accessor, bufs[i], ByteComparable.Version.LEGACY) : null;
+
         // We always have a fixed number of sources, with the trailing ones possibly being nulls.
         // This can only result in a prefix if the last type in the tuple allows prefixes. Since that type is required
         // to be weakly prefix-free, so is the tuple.
         return ByteSource.withTerminator(ByteSource.END_OF_STREAM, srcs);
     }
 
+    public <V> ByteSource asComparableBytesNew(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
+        if (accessor.isEmpty(data))
+            return null;
+
+        V[] bufs = split(accessor, data);
+        int lengthWithoutTrailingNulls = 0;
+        for (int i = 0; i < bufs.length; ++i)
+            if (bufs[i] != null)
+                lengthWithoutTrailingNulls = i + 1;
+
+        ByteSource[] srcs = new ByteSource[lengthWithoutTrailingNulls];
+        for (int i = 0; i < lengthWithoutTrailingNulls; ++i)
+            srcs[i] = bufs[i] != null ? types.get(i).asComparableBytes(accessor, bufs[i], version) : null;
+
+        // Because we stop early when there are trailing nulls, there needs to be an explicit terminator to make the
+        // type prefix-free.
+        return ByteSource.withTerminator(ByteSource.TERMINATOR, srcs);
+    }
+
     @Override
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
     {
+        assert version == ByteComparable.Version.OSS41; // Reverse translation is not supported for the legacy version.
         if (comparableBytes == null)
             return accessor.empty();
 
         V[] componentBuffers = accessor.createArray(types.size());
         for (int i = 0; i < types.size(); ++i)
         {
+            if (comparableBytes.peek() == ByteSource.TERMINATOR)
+                break;  // the rest of the fields remain null
             AbstractType<?> componentType = types.get(i);
             ByteSource.Peekable component = ByteSourceInverse.nextComponentSource(comparableBytes);
             if (component != null)
@@ -233,6 +270,9 @@ public class TupleType extends AbstractType<ByteBuffer>
             else
                 componentBuffers[i] = null;
         }
+        // consume terminator
+        int terminator = comparableBytes.next();
+        assert terminator == ByteSource.TERMINATOR;
         return buildValue(accessor, componentBuffers);
     }
 

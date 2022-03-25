@@ -39,6 +39,7 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -58,6 +59,7 @@ public class ImportTest extends CQLTester
     @Test
     public void basicImportByMovingTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         File backupDir = prepareBasicImporting();
         // copy is false - so importing will be done by moving
         importSSTables(SSTableImporter.Options.options(backupDir.toString()).copyData(false).build(), 10);
@@ -68,6 +70,7 @@ public class ImportTest extends CQLTester
     @Test
     public void basicImportByCopyingTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         File backupDir = prepareBasicImporting();
         // copy is true - so importing will be done by copying
         importSSTables(SSTableImporter.Options.options(backupDir.toString()).copyData(true).build(), 10);
@@ -106,6 +109,7 @@ public class ImportTest extends CQLTester
     @Test
     public void basicImportMultiDirTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -137,6 +141,7 @@ public class ImportTest extends CQLTester
     @Deprecated
     public void refreshTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -152,6 +157,7 @@ public class ImportTest extends CQLTester
     @Test
     public void importResetLevelTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -189,6 +195,7 @@ public class ImportTest extends CQLTester
     @Test
     public void importClearRepairedTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -265,6 +272,7 @@ public class ImportTest extends CQLTester
     @Test
     public void testGetCorrectDirectory() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
         metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddressAndPort());
         createTable("create table %s (id int primary key, d int)");
@@ -374,30 +382,35 @@ public class ImportTest extends CQLTester
     @Test
     public void testImportCorrupt() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptHelper(true, false);
     }
 
     @Test
     public void testImportCorruptWithCopying() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptHelper(true, true);
     }
 
     @Test
     public void testImportCorruptWithoutValidation() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptHelper(false, false);
     }
 
     @Test
     public void testImportCorruptWithoutValidationWithCopying() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptHelper(false, true);
     }
 
     @Test
     public void testImportOutOfRange() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 1000; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -443,6 +456,7 @@ public class ImportTest extends CQLTester
     @Test
     public void testImportOutOfRangeExtendedVerify() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 1000; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -479,6 +493,7 @@ public class ImportTest extends CQLTester
     @Test
     public void testImportInvalidateCache() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int) WITH caching = { 'keys': 'NONE', 'rows_per_partition': 'ALL' }");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -547,6 +562,7 @@ public class ImportTest extends CQLTester
     @Test
     public void testImportCacheEnabledWithoutSrcDir() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int) WITH caching = { 'keys': 'NONE', 'rows_per_partition': 'ALL' }");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -564,6 +580,7 @@ public class ImportTest extends CQLTester
     @Test
     public void testRefreshCorrupt() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int) WITH caching = { 'keys': 'NONE', 'rows_per_partition': 'ALL' }");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);
@@ -628,6 +645,7 @@ public class ImportTest extends CQLTester
     @Test
     public void importBadDirectoryTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, d int)");
         for (int i = 0; i < 10; i++)
             execute("insert into %s (id, d) values (?, ?)", i, i);

@@ -24,6 +24,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 public class GroupCommitLogTest extends CommitLogTest
 {
@@ -35,6 +36,7 @@ public class GroupCommitLogTest extends CommitLogTest
     @BeforeClass
     public static void setCommitLogModeDetails()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setCommitLogSync(Config.CommitLogSync.group);
         DatabaseDescriptor.setCommitLogSyncGroupWindow(1);

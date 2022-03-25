@@ -46,6 +46,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -192,6 +193,7 @@ public class MigrationManagerTest
     @Test
     public void dropCf() throws ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // sanity
         final KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(KEYSPACE1);
         assertNotNull(ks);
@@ -263,6 +265,7 @@ public class MigrationManagerTest
     @Test
     public void dropKS() throws ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // sanity
         final KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(KEYSPACE1);
         assertNotNull(ks);
@@ -500,6 +503,7 @@ public class MigrationManagerTest
     @Test
     public void testDropIndex() throws ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // persist keyspace definition in the system keyspace
         SchemaKeyspace.makeCreateKeyspaceMutation(Schema.instance.getKeyspaceMetadata(KEYSPACE6), FBUtilities.timestampMicros()).build().applyUnsafe();
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE6).getColumnFamilyStore(TABLE1i);

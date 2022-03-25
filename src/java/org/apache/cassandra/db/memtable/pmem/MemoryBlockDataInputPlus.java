@@ -33,9 +33,9 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
 
     public MemoryBlockDataInputPlus(TransactionalMemoryBlock block, TransactionalHeap heap)
     {
-       this.block = block;
-       this.heap = heap;
-       this.position = 0;
+        this.block = block;
+        this.heap = heap;
+        this.position = 0;
     }
 
     public long position()
@@ -51,7 +51,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public void readFully(byte[] b) throws IOException
     {
-        if(b.length > 0)
+        if (b.length > 0)
         {
             block.copyToArray(position, b, 0, b.length);
             position += b.length;
@@ -61,7 +61,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public void readFully(byte[] b, int off, int len) throws IOException
     {
-        block.copyToArray(position,b,off,len);
+        block.copyToArray(position, b, off, len);
         position += len;
     }
 
@@ -115,7 +115,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public char readChar() throws IOException
     {
-        char retVal = (char)(block.getByte(position));
+        char retVal = (char) (block.getByte(position));
         position += Byte.BYTES;
         return retVal;
     }
@@ -163,7 +163,7 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     {
         int utflen = readShort();
         byte[] bytes = new byte[utflen];
-        block.copyToArray(position,bytes,0,utflen);
+        block.copyToArray(position, bytes, 0, utflen);
         position += utflen;
         return new String(bytes, StandardCharsets.UTF_8);
     }

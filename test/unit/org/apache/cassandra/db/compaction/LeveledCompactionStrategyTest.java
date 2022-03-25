@@ -49,6 +49,7 @@ import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -117,6 +118,7 @@ public class LeveledCompactionStrategyTest
      */
     @Test
     public void testGrouperLevels() throws Exception{
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 KB value, make it easy to have multiple files
 
         //Need entropy to prevent compression so size is predictable with compression enabled/disabled
@@ -173,6 +175,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testValidationMultipleSSTablePerLevel() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         byte [] b = new byte[100 * 1024];
         new Random().nextBytes(b);
         ByteBuffer value = ByteBuffer.wrap(b); // 100 KB value, make it easy to have multiple files
@@ -250,6 +253,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testCompactionProgress() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // make sure we have SSTables in L1
         byte [] b = new byte[100 * 1024];
         new Random().nextBytes(b);
@@ -325,6 +329,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testNewRepairedSSTable() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         byte [] b = new byte[100 * 1024];
         new Random().nextBytes(b);
         ByteBuffer value = ByteBuffer.wrap(b); // 100 KB value, make it easy to have multiple files
@@ -391,6 +396,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testTokenRangeCompaction() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // Remove any existing data so we can start out clean with predictable number of sstables
         cfs.truncateBlocking();
 
@@ -514,6 +520,7 @@ public class LeveledCompactionStrategyTest
     @Test
     public void testCompactionCandidateOrdering() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // add some data
         byte [] b = new byte[100 * 1024];
         new Random().nextBytes(b);
