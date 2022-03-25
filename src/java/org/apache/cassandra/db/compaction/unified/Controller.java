@@ -17,6 +17,7 @@
 package org.apache.cassandra.db.compaction.unified;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,13 +29,16 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
@@ -158,7 +162,6 @@ public abstract class Controller
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean l0ShardsEnabled;
 
-    protected final CompactionAggregatePrioritizer prioritizer;
     @Nullable protected volatile CostsCalculator calculator;
     @Nullable private volatile Metrics metrics;
 
@@ -173,8 +176,7 @@ public abstract class Controller
                int maxSSTablesToCompact,
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
-               boolean l0ShardsEnabled,
-               CompactionAggregatePrioritizer prioritizer)
+               boolean l0ShardsEnabled)
     {
         this.clock = clock;
         this.env = env;
@@ -214,7 +216,6 @@ public abstract class Controller
         }
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
         this.l0ShardsEnabled = l0ShardsEnabled;
-        this.prioritizer = prioritizer;
     }
 
     @VisibleForTesting
@@ -253,14 +254,6 @@ public abstract class Controller
     public boolean areL0ShardsEnabled()
     {
         return l0ShardsEnabled;
-    }
-
-    /**
-     * @return compaction aggregate prioritizer for current strategy
-     */
-    public CompactionAggregatePrioritizer aggregatePrioritizer()
-    {
-        return prioritizer;
     }
 
     /**
@@ -587,7 +580,6 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 l0ShardsEnabled,
-                                                CompactionAggregatePrioritizer.instance,
                                                 options)
                : StaticController.fromOptions(env,
                                               survivalFactors,
@@ -600,7 +592,6 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               l0ShardsEnabled,
-                                              CompactionAggregatePrioritizer.instance,
                                               options);
     }
 
@@ -798,15 +789,12 @@ public abstract class Controller
 
     public double maxThroughput()
     {
-        final int compactionThroughputMbPerSec = DatabaseDescriptor.getCompactionThroughputMebibytesPerSecAsInt();
-        if (compactionThroughputMbPerSec <= 0)
-            return Double.MAX_VALUE;
-        return compactionThroughputMbPerSec * 1024.0 * 1024.0;
+        return env.maxThroughput();
     }
 
     public int maxConcurrentCompactions()
     {
-        return DatabaseDescriptor.getConcurrentCompactors();
+        return env.maxConcurrentCompactions();
     }
 
     public long maxCompactionSpaceBytes()
@@ -829,6 +817,16 @@ public abstract class Controller
     public Random random()
     {
         return ThreadLocalRandom.current();
+    }
+
+    public List<CompactionAggregate.UnifiedAggregate> maybeSort(List<CompactionAggregate.UnifiedAggregate> pending)
+    {
+        return env.maybeSort(pending);
+    }
+
+    public IntArrayList maybeRandomize(IntArrayList aggregateIndexes)
+    {
+        return env.maybeRandomize(aggregateIndexes, random());
     }
 
     static final class Metrics
