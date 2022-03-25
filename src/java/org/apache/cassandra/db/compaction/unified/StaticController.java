@@ -54,8 +54,7 @@ public class StaticController extends Controller
                             int maxSSTablesToCompact,
                             long expiredSSTableCheckFrequency,
                             boolean ignoreOverlapsInExpirationCheck,
-                            boolean l0ShardsEnabled,
-                            CompactionAggregatePrioritizer prioritizer)
+                            boolean l0ShardsEnabled)
     {
         super(MonotonicClock.Global.preciseTime,
               env,
@@ -68,8 +67,7 @@ public class StaticController extends Controller
               maxSSTablesToCompact,
               expiredSSTableCheckFrequency,
               ignoreOverlapsInExpirationCheck,
-              l0ShardsEnabled,
-              prioritizer);
+              l0ShardsEnabled);
         this.scalingParameters = scalingParameters;
     }
 
@@ -84,7 +82,6 @@ public class StaticController extends Controller
                                   long expiredSSTableCheckFrequency,
                                   boolean ignoreOverlapsInExpirationCheck,
                                   boolean l0ShardsEnabled,
-                                  CompactionAggregatePrioritizer prioritizer,
                                   Map<String, String> options)
     {
         int[] Ws = parseScalingParameters(options.getOrDefault(STATIC_SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
@@ -99,8 +96,7 @@ public class StaticController extends Controller
                                     maxSSTablesToCompact,
                                     expiredSSTableCheckFrequency,
                                     ignoreOverlapsInExpirationCheck,
-                                    l0ShardsEnabled,
-                                    prioritizer);
+                                    l0ShardsEnabled);
     }
 
     @VisibleForTesting
