@@ -112,6 +112,7 @@ public class RemoveWithoutDroppingTest
         String ks = "test_remove_without_dropping";
         String tab = "test_table";
         testRemoveKeyspace(ks, tab, false);
+
     }
 
     @Test
