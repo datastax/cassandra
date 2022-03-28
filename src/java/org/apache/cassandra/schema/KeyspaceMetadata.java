@@ -43,9 +43,8 @@ import org.apache.cassandra.schema.Types.TypesDiff;
 import org.apache.cassandra.schema.Views.ViewsDiff;
 import org.apache.cassandra.service.StorageService;
 
-import static java.lang.String.format;
-
 import static com.google.common.collect.Iterables.any;
+import static java.lang.String.format;
 
 /**
  * An immutable representation of keyspace metadata (name, params, tables, types, and functions).

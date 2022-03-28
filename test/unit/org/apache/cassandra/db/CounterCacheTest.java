@@ -33,16 +33,16 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.CacheService;
 
+import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-
-import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 public class CounterCacheTest
 {

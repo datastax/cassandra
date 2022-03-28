@@ -678,7 +678,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 {
                     // Even though we don't use MessagingService, access the static SocketFactory
                     // instance here so that we start the static event loop state
-//                    -- not sure what that means?  SocketFactory.instance.getClass();
+                    //  -- not sure what that means?  SocketFactory.instance.getClass();
                     registerMockMessaging(cluster);
                 }
                 registerInboundFilter(cluster);
